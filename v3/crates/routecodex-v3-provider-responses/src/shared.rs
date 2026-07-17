@@ -4,9 +4,10 @@ use crate::{
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use reqwest::header::HeaderMap;
-use sse_transport_core::{
-    build_sse_transport_in_01_raw_chunk, build_sse_transport_out_04_from_sse_transport_in_03,
-    SseIncrementalDecoder, SseTransportError, SseTransportLimits,
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseIncrementalDecoder,
+    SseTransportError, SseTransportLimits,
 };
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -97,12 +98,12 @@ pub(crate) fn validated_sse_stream(
             match next {
                 Some(Ok(chunk)) => match state
                     .decoder
-                    .push(build_sse_transport_in_01_raw_chunk(&chunk))
+                    .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
                 {
                     Ok(frames) => {
                         for frame in frames {
                             state.ready.push_back(
-                                build_sse_transport_out_04_from_sse_transport_in_03(&frame)
+                                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame)
                                     .into_bytes(),
                             );
                         }

@@ -1,7 +1,7 @@
 use axum::body::{to_bytes, Body};
 use axum::extract::{
     ws::{Message, WebSocket, WebSocketUpgrade},
-    Request, State,
+    ConnectInfo, Request, State,
 };
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Response, StatusCode};
 use axum::routing::{get, post};
@@ -13,7 +13,9 @@ use routecodex_v3_config::{
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
 };
-use routecodex_v3_error::{project_v3_http_boundary_error, V3HttpBoundaryErrorKind};
+use routecodex_v3_error::{
+    project_v3_http_boundary_error, V3HttpBoundaryErrorKind, V3_ERROR_CHAIN_NODE_IDS,
+};
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
@@ -25,28 +27,33 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
-    project_v3_responses_relay_runtime_failure, register_responses_direct_hooks,
-    V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
-    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesRelayClientBody, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayRuntimeInput,
-    V3ResponsesRelayRuntimeOutput,
+    project_v3_responses_relay_runtime_failure, project_v3_virtual_router_status,
+    register_responses_direct_hooks, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
+    V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
+    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3RuntimeObservability,
+    V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
-use serde_json::{json, Map, Value};
-use sse_transport_core::{
-    build_sse_transport_in_01_raw_chunk, build_sse_transport_in_02_from_fields,
-    build_sse_transport_in_03_from_sse_transport_in_02,
-    build_sse_transport_out_04_from_sse_transport_in_03, SseField, SseIncrementalDecoder,
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
+    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
     SseTransportLimits,
 };
+use serde_json::{json, Map, Value};
+use std::env;
 use std::fmt;
+use std::fs;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
@@ -59,8 +66,258 @@ struct V3ListenerState {
     manifest: Arc<V3Config05ManifestPublished>,
     debug: V3DebugRuntime,
     console_enabled: bool,
+    request_counter: Arc<Mutex<V3RequestIdCounter>>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct V3RequestCounterState {
+    total_count: u64,
+    window_count: u64,
+    window_key: String,
+    updated_at: String,
+}
+
+#[derive(Debug)]
+struct V3RequestIdCounter {
+    state_file: PathBuf,
+    state: V3RequestCounterState,
+    loaded: bool,
+}
+
+impl V3RequestIdCounter {
+    fn new() -> Self {
+        Self {
+            state_file: resolve_v3_request_id_counter_file(),
+            state: V3RequestCounterState::default(),
+            loaded: false,
+        }
+    }
+
+    fn next_request_id(
+        &mut self,
+        entry: &str,
+        provider: &str,
+        model: &str,
+    ) -> Result<String, String> {
+        let clock = v3_request_id_clock_now()?;
+        self.ensure_loaded(&clock)?;
+        if self.state.window_key != clock.local_date_key {
+            self.state.window_key = clock.local_date_key.clone();
+            self.state.window_count = 0;
+        }
+        self.state.total_count = self
+            .state
+            .total_count
+            .checked_add(1)
+            .ok_or_else(|| "V3 request id total counter overflowed".to_string())?;
+        self.state.window_count = self
+            .state
+            .window_count
+            .checked_add(1)
+            .ok_or_else(|| "V3 request id daily counter overflowed".to_string())?;
+        self.state.updated_at = clock.utc_iso.clone();
+        self.persist()?;
+        Ok(format!(
+            "{entry}-{provider}-{model}-{}-{}-{}",
+            clock.local_timestamp, self.state.total_count, self.state.window_count
+        ))
+    }
+
+    fn ensure_loaded(&mut self, clock: &V3RequestIdClock) -> Result<(), String> {
+        if self.loaded {
+            return Ok(());
+        }
+        if !self.state_file.exists() {
+            self.state = V3RequestCounterState {
+                total_count: 0,
+                window_count: 0,
+                window_key: clock.local_date_key.clone(),
+                updated_at: clock.utc_iso.clone(),
+            };
+            self.loaded = true;
+            return Ok(());
+        }
+        let bytes = fs::read(&self.state_file).map_err(|error| {
+            format!(
+                "failed to read V3 request id counter {}: {error}",
+                self.state_file.display()
+            )
+        })?;
+        let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
+            format!(
+                "failed to parse V3 request id counter {}: {error}",
+                self.state_file.display()
+            )
+        })?;
+        let version = value.get("version").and_then(Value::as_u64).unwrap_or(0);
+        if version != 1 {
+            return Err(format!(
+                "unsupported V3 request id counter version {version} in {}",
+                self.state_file.display()
+            ));
+        }
+        let total_count = value
+            .get("totalCount")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                format!(
+                    "V3 request id counter {} is missing totalCount",
+                    self.state_file.display()
+                )
+            })?;
+        let window_count = value
+            .get("windowCount")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                format!(
+                    "V3 request id counter {} is missing windowCount",
+                    self.state_file.display()
+                )
+            })?;
+        let window_key = value
+            .get("windowKey")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "V3 request id counter {} is missing windowKey",
+                    self.state_file.display()
+                )
+            })?
+            .to_string();
+        let updated_at = value
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        self.state = V3RequestCounterState {
+            total_count,
+            window_count,
+            window_key,
+            updated_at,
+        };
+        self.loaded = true;
+        Ok(())
+    }
+
+    fn persist(&self) -> Result<(), String> {
+        if let Some(parent) = self.state_file.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "failed to create V3 request id counter directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        let body = json!({
+            "version": 1,
+            "totalCount": self.state.total_count,
+            "windowCount": self.state.window_count,
+            "windowKey": self.state.window_key,
+            "updatedAt": self.state.updated_at,
+        });
+        let tmp = self
+            .state_file
+            .with_extension(format!("json.tmp.{}", std::process::id()));
+        let encoded = serde_json::to_vec_pretty(&body)
+            .map_err(|error| format!("failed to serialize V3 request id counter: {error}"))?;
+        fs::write(&tmp, encoded).map_err(|error| {
+            format!(
+                "failed to write V3 request id counter temp file {}: {error}",
+                tmp.display()
+            )
+        })?;
+        fs::rename(&tmp, &self.state_file).map_err(|error| {
+            format!(
+                "failed to publish V3 request id counter {}: {error}",
+                self.state_file.display()
+            )
+        })
+    }
+}
+
+#[derive(Debug)]
+struct V3RequestIdClock {
+    local_timestamp: String,
+    local_date_key: String,
+    utc_iso: String,
+}
+
+fn resolve_v3_request_id_counter_file() -> PathBuf {
+    if let Some(path) = non_empty_env_path("ROUTECODEX_REQUEST_ID_COUNTER_FILE")
+        .or_else(|| non_empty_env_path("RCC_REQUEST_ID_COUNTER_FILE"))
+    {
+        return path;
+    }
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    home.join(".rcc")
+        .join("state")
+        .join("request-id-counter.json")
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn v3_request_id_clock_now() -> Result<V3RequestIdClock, String> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("V3 request id clock moved backwards: {error}"))?;
+    let epoch_ms = duration.as_millis();
+    let seconds = (epoch_ms / 1000) as libc::time_t;
+    let millis = (epoch_ms % 1000) as u32;
+    let local = format_v3_tm(seconds, true)?;
+    let utc = format_v3_tm(seconds, false)?;
+    Ok(V3RequestIdClock {
+        local_timestamp: format!(
+            "{:04}{:02}{:02}T{:02}{:02}{:02}{:03}",
+            local.year, local.month, local.day, local.hour, local.minute, local.second, millis
+        ),
+        local_date_key: format!("{:04}{:02}{:02}", local.year, local.month, local.day),
+        utc_iso: format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+            utc.year, utc.month, utc.day, utc.hour, utc.minute, utc.second, millis
+        ),
+    })
+}
+
+#[derive(Debug)]
+struct V3RequestIdTm {
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+}
+
+fn format_v3_tm(seconds: libc::time_t, local: bool) -> Result<V3RequestIdTm, String> {
+    let mut raw = std::mem::MaybeUninit::<libc::tm>::uninit();
+    let result = unsafe {
+        if local {
+            libc::localtime_r(&seconds, raw.as_mut_ptr())
+        } else {
+            libc::gmtime_r(&seconds, raw.as_mut_ptr())
+        }
+    };
+    if result.is_null() {
+        return Err("failed to format V3 request id timestamp".to_string());
+    }
+    let tm = unsafe { raw.assume_init() };
+    Ok(V3RequestIdTm {
+        year: tm.tm_year + 1900,
+        month: tm.tm_mon + 1,
+        day: tm.tm_mday,
+        hour: tm.tm_hour,
+        minute: tm.tm_min,
+        second: tm.tm_sec,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,10 +395,13 @@ impl V3ServerAggregateHandle {
 pub async fn spawn_v3_server_aggregate(
     manifest: V3Config05ManifestPublished,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    let console_enabled = manifest.debug.log_console;
+    let mut debug_manifest = manifest.debug.clone();
+    debug_manifest.log_console = false;
     let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =
-        build_v3_debug_runtime_from_manifest(&manifest.debug).map_err(std::io::Error::other)?;
+        build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
     let responses_relay_local_continuation =
         Arc::new(V3ResponsesRelayLocalContinuationState::default());
@@ -163,23 +423,30 @@ pub async fn spawn_v3_server_aggregate(
             manifest_version: preflight.manifest_version,
             manifest: manifest.clone(),
             debug: debug.clone(),
-            console_enabled: manifest.debug.log_console,
+            console_enabled,
+            request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
             responses_direct_continuation: responses_direct_continuation.clone(),
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
-            let _ = axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.await;
-                })
-                .await;
+            let _ = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
         });
         listeners.push(V3ListenerHandle {
             server_id,
             addr,
             shutdown: Some(shutdown_tx),
         });
+    }
+    if console_enabled {
+        emit_v3_startup_console_line(&listeners);
     }
     for listener in &listeners {
         let scope = debug
@@ -227,6 +494,14 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
         .route("/_routecodex/debug/logs", get(debug_logs))
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
         .route("/_routecodex/debug/dry-run", post(debug_dry_run))
+        .route(
+            "/_routecodex/diagnostics/virtual-router",
+            get(virtual_router_status),
+        )
+        .route(
+            "/_routecodex/diagnostics/virtual-router/status",
+            get(virtual_router_status),
+        )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
         .with_state(Arc::new(state))
@@ -247,6 +522,34 @@ async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<
     json_response(200, build_v3_models_catalog(&state.manifest))
 }
 
+async fn virtual_router_status(
+    State(state): State<Arc<V3ListenerState>>,
+    ConnectInfo(remote): ConnectInfo<SocketAddr>,
+) -> Response<Body> {
+    if !remote.ip().is_loopback() {
+        return json_response(
+            403,
+            json!({"error":{"message":"forbidden","code":"forbidden"}}),
+        );
+    }
+    match project_v3_virtual_router_status(&state.manifest, &state.server.id) {
+        Ok(virtual_router) => json_response(
+            200,
+            json!({
+                "ok": true,
+                "serverId": state.server.id,
+                "localPort": state.server.port,
+                "routingPolicyGroup": state.server.routing_group,
+                "virtualRouter": virtual_router
+            }),
+        ),
+        Err(message) => json_response(
+            500,
+            json!({"error":{"message":message,"code":"virtual_router_diagnostics_failed"}}),
+        ),
+    }
+}
+
 async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
@@ -254,16 +557,26 @@ async fn pending_endpoint(
     let request_headers = request.headers().clone();
     let method = request.method().as_str().to_string();
     let path = request.uri().path().to_string();
+    let started_at = Instant::now();
     let Some(binding) = state
         .manifest
         .hub_v1
         .as_ref()
         .and_then(|hub| hub.entry_protocol_binding_for_endpoint(&path))
     else {
-        return error_output_response(project_http_input_error(
-            V3HttpBoundaryErrorKind::EndpointNotEnabled,
-            format!("endpoint path {path} has no entry protocol binding"),
-        ));
+        let request_id = match allocate_v3_console_request_id(&state, &path, None) {
+            Ok(request_id) => request_id,
+            Err(response) => return *response,
+        };
+        return error_output_response_for_server(
+            &state.server,
+            &path,
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                format!("endpoint path {path} has no entry protocol binding"),
+            ),
+        );
     };
     let entry_protocol = binding.entry_protocol.clone();
     let execution_mode = binding.execution_mode;
@@ -274,19 +587,66 @@ async fn pending_endpoint(
         .iter()
         .any(|declared| declared == &entry_protocol)
     {
-        return error_output_response(project_http_input_error(
-            V3HttpBoundaryErrorKind::EndpointNotEnabled,
-            format!(
-                "endpoint protocol {entry_protocol} is not enabled on server {}",
-                state.server.id
+        let request_id = match allocate_v3_console_request_id(&state, &path, None) {
+            Ok(request_id) => request_id,
+            Err(response) => return *response,
+        };
+        return error_output_response_for_server(
+            &state.server,
+            &path,
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                format!(
+                    "endpoint protocol {entry_protocol} is not enabled on server {}",
+                    state.server.id
+                ),
             ),
-        ));
+        );
     }
     let payload = match read_json_payload(request).await {
         Ok(payload) => payload,
-        Err(projected) => return error_output_response(projected),
+        Err(projected) => {
+            let request_id = match allocate_v3_console_request_id(&state, &path, None) {
+                Ok(request_id) => request_id,
+                Err(response) => return *response,
+            };
+            let execution_id = state.debug.next_execution_id(&state.server.id);
+            let trace_scope =
+                match state
+                    .debug
+                    .start_trace(&state.server.id, &request_id, &execution_id)
+                {
+                    Ok(scope) => scope,
+                    Err(error) => {
+                        return foundation_output_response(project_v3_debug_failure(
+                            "V3Server03HttpRequestRaw",
+                            error,
+                        ))
+                    }
+                };
+            let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+            if let Some(response) = record_and_emit_v3_error_projection(
+                &state,
+                &trace_scope,
+                &path,
+                &request_id,
+                frame.status,
+                &frame.error_chain,
+                match &frame.body {
+                    V3Server16Body::Json(value) => Some(value),
+                    V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                },
+            ) {
+                return response;
+            }
+            return responses_direct_output_response(frame);
+        }
     };
-    let request_id = state.debug.next_request_id(&state.server.id);
+    let request_id = match allocate_v3_console_request_id(&state, &path, Some(&payload)) {
+        Ok(request_id) => request_id,
+        Err(response) => return *response,
+    };
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let trace_scope = match state
         .debug
@@ -327,8 +687,8 @@ async fn pending_endpoint(
                 fixture_id: request_id.clone(),
                 server_id: state.server.id.clone(),
                 method,
-                path,
-                request_payload: payload,
+                path: path.clone(),
+                request_payload: payload.clone(),
                 response_payload: json!({
                     "id": format!("dry_run_{request_id}"),
                     "object": "response",
@@ -340,6 +700,22 @@ async fn pending_endpoint(
             &state.debug,
         )
         .await;
+        let observability = build_v3_foundation_console_observability(&state, &output);
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &path,
+            &request_id,
+            &request_headers,
+            &payload,
+        );
+        emit_v3_observability_console_lines(
+            &console_context,
+            output.status,
+            &output.node_trace,
+            &observability,
+            started_at,
+            true,
+        );
         return foundation_output_response(output);
     }
     if is_provider_request_dry_run(&request_headers)
@@ -350,11 +726,27 @@ async fn pending_endpoint(
             &state.manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
-                payload,
+                request_id: request_id.clone(),
+                payload: payload.clone(),
             },
         )
         .await;
+        let observability = build_v3_foundation_console_observability(&state, &output);
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &path,
+            &request_id,
+            &request_headers,
+            &payload,
+        );
+        emit_v3_observability_console_lines(
+            &console_context,
+            output.status,
+            &output.node_trace,
+            &observability,
+            started_at,
+            true,
+        );
         return foundation_output_response(output);
     }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
@@ -456,10 +848,12 @@ async fn pending_endpoint(
         ) {
             Ok(scope) => scope,
             Err(message) => {
-                return error_output_response(project_http_input_error(
-                    V3HttpBoundaryErrorKind::MalformedJson,
-                    message,
-                ))
+                return error_output_response_for_server(
+                    &state.server,
+                    &path,
+                    &request_id,
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                )
             }
         };
         let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -474,6 +868,7 @@ async fn pending_endpoint(
                 ))
             }
         };
+        let console_payload = payload.clone();
         let output =
             match execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation(
                 &state.manifest,
@@ -504,7 +899,38 @@ async fn pending_endpoint(
                 return response;
             }
         }
-        return responses_relay_output_response(output);
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &path,
+            &request_id,
+            &request_headers,
+            &console_payload,
+        );
+        let stream_console_finalizer = match (
+            output.stream_observation.clone(),
+            output.observability.clone(),
+        ) {
+            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                context: console_context.clone(),
+                status: output.status,
+                node_trace: output.node_trace.clone(),
+                observability,
+                stream_observation,
+                started_at,
+            }),
+            _ => None,
+        };
+        if let Some(observability) = output.observability.as_ref() {
+            emit_v3_observability_console_lines(
+                &console_context,
+                output.status,
+                &output.node_trace,
+                observability,
+                started_at,
+                output.stream_observation.is_none(),
+            );
+        }
+        return responses_relay_output_response(output, stream_console_finalizer);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         let frame = execute_responses_direct_server_frame(
@@ -522,12 +948,17 @@ async fn pending_endpoint(
     } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
         let pending_not_implemented = execution_mode.as_str();
         let Some(pending_owner) = pending_owner_symbol else {
-            return error_output_response(project_http_input_error(
-                V3HttpBoundaryErrorKind::EndpointNotEnabled,
-                format!(
-                    "entry protocol {entry_protocol} pending binding lacks explicit pending owner"
+            return error_output_response_for_server(
+                &state.server,
+                &path,
+                &request_id,
+                project_http_input_error(
+                    V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                    format!(
+                        "entry protocol {entry_protocol} pending binding lacks explicit pending owner"
+                    ),
                 ),
-            ));
+            );
         };
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
@@ -547,13 +978,18 @@ async fn pending_endpoint(
             &pending_owner,
         )
     } else {
-        error_output_response(project_http_input_error(
-            V3HttpBoundaryErrorKind::EndpointNotEnabled,
-            format!(
-                "entry protocol {entry_protocol} is bound to unsupported execution mode {}",
-                execution_mode.as_str()
+        error_output_response_for_server(
+            &state.server,
+            &path,
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                format!(
+                    "entry protocol {entry_protocol} is bound to unsupported execution mode {}",
+                    execution_mode.as_str()
+                ),
             ),
-        ))
+        )
     }
 }
 
@@ -564,22 +1000,115 @@ fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
 }
 
+fn allocate_v3_console_request_id(
+    state: &Arc<V3ListenerState>,
+    endpoint: &str,
+    payload: Option<&Value>,
+) -> Result<String, Box<Response<Body>>> {
+    next_v3_console_request_id(state, endpoint, payload).map_err(|message| {
+        let output = project_v3_debug_failure(
+            "V3RequestIdCounter01Allocated",
+            V3DebugError::MalformedFixture(message),
+        );
+        emit_v3_error_console_line(
+            &state.server,
+            endpoint,
+            "request-id-unavailable",
+            output.status,
+            &output.error_chain,
+            Some(&output.body),
+        );
+        Box::new(foundation_output_response(output))
+    })
+}
+
+fn next_v3_console_request_id(
+    state: &V3ListenerState,
+    endpoint: &str,
+    payload: Option<&Value>,
+) -> Result<String, String> {
+    let entry = format_v3_request_id_entry(endpoint);
+    let provider = "router";
+    let model = format_v3_request_id_token(
+        payload
+            .and_then(|value| value.get("model"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+    );
+    state
+        .request_counter
+        .lock()
+        .map_err(|_| "V3 request id counter lock is poisoned".to_string())?
+        .next_request_id(&entry, provider, &model)
+}
+
+fn format_v3_request_id_entry(endpoint: &str) -> String {
+    let raw = endpoint.to_ascii_lowercase();
+    if raw.contains("/v1/responses") {
+        "openai-responses".to_string()
+    } else if raw.contains("/v1/messages") || raw.contains("/anthropic") {
+        "anthropic-messages".to_string()
+    } else {
+        "openai-chat".to_string()
+    }
+}
+
+fn format_v3_request_id_token(value: &str) -> String {
+    let mut token: String = value
+        .trim()
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')
+        })
+        .collect();
+    if token
+        .chars()
+        .next()
+        .is_some_and(|character| !character.is_ascii_alphabetic())
+    {
+        token.remove(0);
+    }
+    if token.is_empty() {
+        "unknown".to_string()
+    } else {
+        token
+    }
+}
+
 async fn responses_websocket_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     headers: HeaderMap,
     ws: Option<WebSocketUpgrade>,
 ) -> Response<Body> {
     let Some(ws) = ws else {
-        return error_output_response(project_http_input_error(
-            V3HttpBoundaryErrorKind::WebSocketUpgradeRequired,
-            "WebSocket upgrade is required for GET /v1/responses",
-        ));
+        let request_id = match allocate_v3_console_request_id(&state, "/v1/responses", None) {
+            Ok(request_id) => request_id,
+            Err(response) => return *response,
+        };
+        return error_output_response_for_server(
+            &state.server,
+            "/v1/responses",
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::WebSocketUpgradeRequired,
+                "WebSocket upgrade is required for GET /v1/responses",
+            ),
+        );
     };
     if !has_responses_websocket_beta(&headers) {
-        return error_output_response(project_http_input_error(
-            V3HttpBoundaryErrorKind::WebSocketBetaRequired,
-            "OpenAI-Beta: responses_websockets=2026-02-06 is required for /v1/responses WebSocket",
-        ));
+        let request_id = match allocate_v3_console_request_id(&state, "/v1/responses", None) {
+            Ok(request_id) => request_id,
+            Err(response) => return *response,
+        };
+        return error_output_response_for_server(
+            &state.server,
+            "/v1/responses",
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::WebSocketBetaRequired,
+                "OpenAI-Beta: responses_websockets=2026-02-06 is required for /v1/responses WebSocket",
+            ),
+        );
     }
     ws.on_upgrade(move |socket| responses_websocket_session(state, headers, socket))
 }
@@ -629,7 +1158,18 @@ async fn handle_responses_websocket_message(
             return Err(());
         }
     };
-    let request_id = state.debug.next_request_id(&state.server.id);
+    let request_id = match next_v3_console_request_id(state, "/v1/responses", Some(&payload)) {
+        Ok(request_id) => request_id,
+        Err(message) => {
+            let body = json!({"error":{"type":"runtime_error","message":message}});
+            let _ = socket
+                .send(Message::Text(
+                    json!({"type":"error","error":body["error"].clone()}).to_string(),
+                ))
+                .await;
+            return Err(());
+        }
+    };
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let frame = execute_responses_direct_server_frame(
         state,
@@ -752,7 +1292,7 @@ async fn send_responses_websocket_sse_stream(
                 .await;
             }
         };
-        let frames = match decoder.push(build_sse_transport_in_01_raw_chunk(&chunk)) {
+        let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {
             Ok(frames) => frames,
             Err(error) => {
                 return send_responses_websocket_error(
@@ -1054,7 +1594,7 @@ fn emit_v3_request_start_console_line(
     let stream = payload.get("stream").and_then(Value::as_bool) == Some(true);
     let accepts_sse = request_accepts_sse(headers) || stream;
     let raw_input_items = response_input_item_count(payload.get("input"));
-    println!(
+    let line = format!(
         "[{}] ▶ [{}] {} request {} started (stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none)",
         state.server.port,
         endpoint,
@@ -1065,6 +1605,458 @@ fn emit_v3_request_start_console_line(
         raw_input_items,
         raw_input_items
     );
+    let color_key = resolve_v3_log_session_color_key(headers, payload, request_id);
+    println!(
+        "{}",
+        colorize_v3_request_console_line(&line, color_key.as_deref())
+    );
+}
+
+#[derive(Clone)]
+struct V3ConsoleEmissionContext {
+    state: Arc<V3ListenerState>,
+    endpoint: String,
+    request_id: String,
+    headers: HeaderMap,
+    payload: Value,
+}
+
+fn build_v3_console_emission_context(
+    state: &Arc<V3ListenerState>,
+    endpoint: &str,
+    request_id: &str,
+    headers: &HeaderMap,
+    payload: &Value,
+) -> V3ConsoleEmissionContext {
+    V3ConsoleEmissionContext {
+        state: Arc::clone(state),
+        endpoint: endpoint.to_string(),
+        request_id: request_id.to_string(),
+        headers: headers.clone(),
+        payload: payload.clone(),
+    }
+}
+
+fn emit_v3_request_route_console_line(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+) {
+    if !context.state.console_enabled {
+        return;
+    }
+    let route = observability
+        .routing_group_id
+        .as_deref()
+        .unwrap_or(&context.state.server.routing_group);
+    let pool = observability.pool_id.as_deref().unwrap_or("-");
+    let provider = observability.provider_id.as_deref().unwrap_or("-");
+    let provider_key = observability.provider_key.as_deref().unwrap_or(provider);
+    let model = format_v3_console_model_pair(observability);
+    let provider_type = observability.provider_type.as_deref().unwrap_or("-");
+    let attempts = observability.attempts.unwrap_or(1);
+    let target_path = if observability.target_path.is_empty() {
+        "-".to_string()
+    } else {
+        observability.target_path.join(">")
+    };
+    let unavailable = if observability.unavailable_candidates.is_empty() {
+        "-".to_string()
+    } else {
+        observability.unavailable_candidates.join("|")
+    };
+    let line = format!(
+        "[{}] 🎯 [{}] {} request {} route={} pool={} provider={} providerKey={} model={} type={} attempts={} unavailable={} path={} transport={}",
+        context.state.server.port,
+        context.endpoint,
+        console_timestamp_hhmmss(),
+        context.request_id,
+        route,
+        pool,
+        provider,
+        provider_key,
+        model,
+        provider_type,
+        attempts,
+        unavailable,
+        target_path,
+        observability.transport
+    );
+    let color_key =
+        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    println!(
+        "{}",
+        colorize_v3_request_console_line(&line, color_key.as_deref())
+    );
+}
+
+fn emit_v3_request_complete_console_line(
+    context: &V3ConsoleEmissionContext,
+    status: u16,
+    node_trace: &[&'static str],
+    observability: &V3RuntimeObservability,
+    elapsed: std::time::Duration,
+) {
+    if !context.state.console_enabled {
+        return;
+    }
+    let response_status = observability
+        .response_status
+        .as_deref()
+        .unwrap_or("completed");
+    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+    let line = format!(
+        "[{}] ✅ [{}] {} request {} completed (status={}{} responseStatus={} elapsedMs={:.1} nodes={} transport={})",
+        context.state.server.port,
+        context.endpoint,
+        console_timestamp_hhmmss(),
+        context.request_id,
+        status,
+        format_v3_console_upstream_status_suffix(status, observability.provider_status),
+        response_status,
+        elapsed_ms,
+        node_trace.len(),
+        observability.transport
+    );
+    let color_key =
+        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    println!(
+        "{}",
+        colorize_v3_request_console_line(&line, color_key.as_deref())
+    );
+}
+
+fn emit_v3_usage_console_line(
+    context: &V3ConsoleEmissionContext,
+    node_trace: &[&'static str],
+    observability: &V3RuntimeObservability,
+    elapsed: std::time::Duration,
+) {
+    if !context.state.console_enabled {
+        return;
+    }
+    let route = observability
+        .routing_group_id
+        .as_deref()
+        .unwrap_or(&context.state.server.routing_group);
+    let provider = observability.provider_id.as_deref().unwrap_or("-");
+    let model = format_v3_console_model_pair(observability);
+    let usage = format_v3_console_usage_summary(observability.usage.as_ref());
+    let counts = v3_console_pipeline_counts(node_trace);
+    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+    let line = format!(
+        "[{}] [usage] req={} endpoint={} route={} provider={} model={} usage={} time=t:{:.1}ms pipeline=nodes:{} req:{} resp:{} provider:{} error:{}",
+        context.state.server.port,
+        context.request_id,
+        context.endpoint,
+        route,
+        provider,
+        model,
+        usage,
+        elapsed_ms,
+        node_trace.len(),
+        counts.request,
+        counts.response,
+        counts.provider,
+        counts.error
+    );
+    let color_key =
+        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    println!(
+        "{}",
+        colorize_v3_request_console_line(&line, color_key.as_deref())
+    );
+}
+
+fn emit_v3_observability_console_lines(
+    context: &V3ConsoleEmissionContext,
+    status: u16,
+    node_trace: &[&'static str],
+    observability: &V3RuntimeObservability,
+    started_at: Instant,
+    include_usage: bool,
+) {
+    emit_v3_request_route_console_line(context, observability);
+    if include_usage {
+        let elapsed = started_at.elapsed();
+        emit_v3_request_complete_console_line(context, status, node_trace, observability, elapsed);
+        emit_v3_usage_console_line(context, node_trace, observability, elapsed);
+    }
+}
+
+fn format_v3_console_upstream_status_suffix(
+    response_status: u16,
+    provider_status: Option<u16>,
+) -> String {
+    match provider_status {
+        Some(upstream_status) if upstream_status != response_status => {
+            format!(" upstreamStatus={upstream_status}")
+        }
+        _ => String::new(),
+    }
+}
+
+struct V3SseConsoleFinalizer {
+    context: V3ConsoleEmissionContext,
+    status: u16,
+    node_trace: Vec<&'static str>,
+    observability: V3RuntimeObservability,
+    stream_observation: V3RuntimeStreamObservation,
+    started_at: Instant,
+}
+
+const V3_SSE_CLIENT_DISCONNECTED_MESSAGE: &str =
+    "client disconnected before provider SSE stream completed";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum V3SseConsoleStreamTerminal {
+    Completed,
+    Failed(String),
+    Dropped,
+}
+
+impl V3SseConsoleFinalizer {
+    fn complete(mut self) {
+        match self.stream_observation.snapshot() {
+            Ok(snapshot) => {
+                if snapshot.response_status.is_some() {
+                    self.observability.response_status = snapshot.response_status;
+                }
+                if snapshot.usage.is_some() {
+                    self.observability.usage = snapshot.usage;
+                }
+                let elapsed = self.started_at.elapsed();
+                emit_v3_request_complete_console_line(
+                    &self.context,
+                    self.status,
+                    &self.node_trace,
+                    &self.observability,
+                    elapsed,
+                );
+                emit_v3_usage_console_line(
+                    &self.context,
+                    &self.node_trace,
+                    &self.observability,
+                    elapsed,
+                );
+            }
+            Err(error) => self.provider_stream_failed(&error),
+        }
+    }
+
+    fn provider_stream_failed(self, error: &str) {
+        self.fail(502, "provider_response_sse_stream", error);
+    }
+
+    fn client_disconnected(self) {
+        self.fail(499, "client_disconnect", V3_SSE_CLIENT_DISCONNECTED_MESSAGE);
+    }
+
+    fn fail(self, status: u16, code: &str, message: &str) {
+        let body = json!({
+            "error": {
+                "code": code,
+                "message": message
+            }
+        });
+        emit_v3_error_console_line_with_port(
+            &self.context.state.server.port.to_string(),
+            &self.context.endpoint,
+            &self.context.request_id,
+            status,
+            &V3_ERROR_CHAIN_NODE_IDS,
+            Some(&body),
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct V3ConsolePipelineCounts {
+    request: usize,
+    response: usize,
+    provider: usize,
+    error: usize,
+}
+
+fn v3_console_pipeline_counts(node_trace: &[&'static str]) -> V3ConsolePipelineCounts {
+    let mut counts = V3ConsolePipelineCounts {
+        request: 0,
+        response: 0,
+        provider: 0,
+        error: 0,
+    };
+    for node in node_trace {
+        if node.contains("Req") || node.contains("Request") {
+            counts.request += 1;
+        }
+        if node.contains("Resp") || node.contains("Response") {
+            counts.response += 1;
+        }
+        if node.contains("Provider") || node.contains("Transport") {
+            counts.provider += 1;
+        }
+        if node.contains("Error") {
+            counts.error += 1;
+        }
+    }
+    counts
+}
+
+fn format_v3_console_model_pair(observability: &V3RuntimeObservability) -> String {
+    match (
+        observability.model_id.as_deref(),
+        observability.wire_model.as_deref(),
+    ) {
+        (Some(model), Some(wire)) if model != wire => format!("{model}->{wire}"),
+        (Some(model), _) => model.to_string(),
+        (_, Some(wire)) => wire.to_string(),
+        _ => "-".to_string(),
+    }
+}
+
+fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> String {
+    let Some(usage) = usage else {
+        return "unreported".to_string();
+    };
+    let input_tokens = usage.input_tokens;
+    let input = input_tokens
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unreported".to_string());
+    let output = usage
+        .output_tokens
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unreported".to_string());
+    let total = usage
+        .total_tokens
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unreported".to_string());
+    let cache = match (usage.cached_tokens, input_tokens) {
+        (Some(cached), Some(input)) if input > 0 => {
+            format!(
+                "{cached}/{input}({:.1}%)",
+                (cached as f64 / input as f64) * 100.0
+            )
+        }
+        (Some(cached), _) => cached.to_string(),
+        (None, _) => "0".to_string(),
+    };
+    format!("in:{input} out:{output} cache={cache} total={total}")
+}
+
+fn build_v3_foundation_console_observability(
+    state: &V3ListenerState,
+    output: &V3FoundationRuntimeOutput,
+) -> V3RuntimeObservability {
+    let provider_request = output
+        .body
+        .get("providerRequest")
+        .or_else(|| output.body.pointer("/dry_run/provider_request"))
+        .unwrap_or(&Value::Null);
+    let provider_id = provider_request
+        .get("providerId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let model_id = provider_request
+        .pointer("/body/model")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let transport = provider_request
+        .get("streamIntent")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("json")
+        .to_string();
+    let response_status = output
+        .body
+        .pointer("/dry_run/response_payload/status")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            output
+                .body
+                .get("status")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+    let usage = output
+        .body
+        .pointer("/dry_run/response_payload")
+        .and_then(extract_v3_console_usage_summary);
+    V3RuntimeObservability {
+        entry_protocol: "responses".to_string(),
+        execution_mode: "direct".to_string(),
+        transport,
+        routing_group_id: Some(state.server.routing_group.clone()),
+        pool_id: Some("dry_run".to_string()),
+        provider_key: provider_id
+            .as_ref()
+            .map(|provider| match model_id.as_deref() {
+                Some(model) => format!("{provider}:dry-run:{model}"),
+                None => provider.clone(),
+            }),
+        provider_type: Some("responses".to_string()),
+        provider_id,
+        auth_alias: Some("dry-run".to_string()),
+        model_id: model_id.clone(),
+        wire_model: model_id,
+        provider_status: Some(output.status),
+        response_status,
+        attempts: Some(1),
+        unavailable_candidates: Vec::new(),
+        target_path: vec!["dry_run:provider_request".to_string()],
+        usage,
+    }
+}
+
+fn extract_v3_console_usage_summary(value: &Value) -> Option<V3RuntimeUsageSummary> {
+    let usage = value.get("usage")?;
+    let summary = V3RuntimeUsageSummary {
+        input_tokens: read_v3_console_usage_u64(usage, &["input_tokens"])
+            .or_else(|| read_v3_console_usage_u64(usage, &["prompt_tokens"])),
+        output_tokens: read_v3_console_usage_u64(usage, &["output_tokens"])
+            .or_else(|| read_v3_console_usage_u64(usage, &["completion_tokens"])),
+        total_tokens: read_v3_console_usage_u64(usage, &["total_tokens"]),
+        cached_tokens: read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_tokens"])
+            .or_else(|| {
+                read_v3_console_usage_u64(usage, &["input_tokens_details", "cached_read_tokens"])
+            })
+            .or_else(|| {
+                read_v3_console_usage_u64(usage, &["input_tokens_details", "cache_read_tokens"])
+            })
+            .or_else(|| {
+                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"])
+            })
+            .or_else(|| {
+                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"])
+            })
+            .or_else(|| {
+                read_v3_console_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"])
+            })
+            .or_else(|| read_v3_console_usage_u64(usage, &["cache_read_input_tokens"])),
+    };
+    if summary.input_tokens.is_some()
+        || summary.output_tokens.is_some()
+        || summary.total_tokens.is_some()
+        || summary.cached_tokens.is_some()
+    {
+        Some(summary)
+    } else {
+        None
+    }
+}
+
+fn read_v3_console_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_u64().or_else(|| {
+        current
+            .as_i64()
+            .and_then(|number| u64::try_from(number).ok())
+    })
 }
 
 fn emit_v3_frame_error_console_line(
@@ -1097,6 +2089,24 @@ fn emit_v3_error_console_line(
     error_chain: &[&'static str],
     body: Option<&Value>,
 ) {
+    emit_v3_error_console_line_with_port(
+        &server.port.to_string(),
+        endpoint,
+        request_id,
+        status,
+        error_chain,
+        body,
+    );
+}
+
+fn emit_v3_error_console_line_with_port(
+    port_label: &str,
+    endpoint: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) {
     let error_code = body
         .and_then(|value| value.pointer("/error/code").and_then(Value::as_str))
         .or_else(|| body.and_then(|value| value.pointer("/error/type").and_then(Value::as_str)))
@@ -1108,22 +2118,345 @@ fn emit_v3_error_console_line(
         .last()
         .copied()
         .unwrap_or("V3Error06ClientProjected");
-    eprintln!(
-        "[{}] ❌ [{}] {} request {} failed (status={} code={} errorNode={} errorChain={}) {}",
-        server.port,
+    let error_number = compact_v3_error_number(error_chain);
+    let line = format!(
+        "[{}] ❌ [{}] {} request {} failed (status={} error={} subcode={} node={}) {}",
+        port_label,
         endpoint,
         console_timestamp_hhmmss(),
         request_id,
         status,
+        error_number,
         error_code,
         error_node,
-        if error_chain.is_empty() {
-            "none".to_string()
-        } else {
-            error_chain.join(",")
-        },
         message
     );
+    eprintln!("{}", colorize_v3_error_console_line(&line));
+}
+
+fn compact_v3_error_number(error_chain: &[&'static str]) -> String {
+    let node = error_chain
+        .last()
+        .copied()
+        .unwrap_or("V3Error06ClientProjected");
+    let digits = node
+        .chars()
+        .skip_while(|character| !character.is_ascii_digit())
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        "V3E00".to_string()
+    } else {
+        format!("V3E{digits}")
+    }
+}
+
+fn emit_v3_startup_console_line(listeners: &[V3ListenerHandle]) {
+    let addresses = listeners
+        .iter()
+        .map(|listener| listener.addr.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("[RouteCodexV3] Server started on {addresses}");
+}
+
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_WHITE: &str = "\x1b[97m";
+const ANSI_ERROR_RED: &str = "\x1b[31m";
+
+fn is_v3_console_color_enabled() -> bool {
+    let routecodex_force = std::env::var("ROUTECODEX_FORCE_LOG_COLOR")
+        .ok()
+        .or_else(|| std::env::var("RCC_FORCE_LOG_COLOR").ok())
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if matches!(routecodex_force.as_str(), "1" | "true" | "yes" | "on") {
+        return true;
+    }
+    if matches!(routecodex_force.as_str(), "0" | "false" | "no" | "off") {
+        return false;
+    }
+    let force_color = std::env::var("FORCE_COLOR").unwrap_or_default();
+    if force_color.trim() == "0" {
+        return false;
+    }
+    true
+}
+
+fn colorize_v3_request_console_line(line: &str, color_key: Option<&str>) -> String {
+    if !is_v3_console_color_enabled() {
+        return line.to_string();
+    }
+    let color = color_key
+        .and_then(resolve_v3_session_color)
+        .unwrap_or_else(|| "\x1b[36m".to_string());
+    format!(
+        "{}{}{}",
+        color,
+        highlight_v3_console_key_values(line, &color),
+        ANSI_RESET
+    )
+}
+
+fn colorize_v3_error_console_line(line: &str) -> String {
+    if !is_v3_console_color_enabled() {
+        return line.to_string();
+    }
+    format!(
+        "{}{}{}",
+        ANSI_ERROR_RED,
+        highlight_v3_console_key_values(line, ANSI_ERROR_RED),
+        ANSI_RESET
+    )
+}
+
+fn highlight_v3_console_key_values(line: &str, base_color: &str) -> String {
+    let mut output = String::with_capacity(line.len());
+    let mut remaining = line;
+    while let Some(index) = remaining.find('=') {
+        let (before_equal, after_equal) = remaining.split_at(index);
+        let key_start = before_equal
+            .rfind(|character: char| {
+                !(character.is_ascii_alphanumeric() || character == '_' || character == '.')
+            })
+            .map(|position| position + 1)
+            .unwrap_or(0);
+        let key = &before_equal[key_start..];
+        if key.is_empty() || !is_v3_console_highlight_key(key) {
+            output.push_str(&remaining[..index + 1]);
+            remaining = &after_equal[1..];
+            continue;
+        }
+        let value = &after_equal[1..];
+        let value_end = value.find([' ', ',', ')', ']']).unwrap_or(value.len());
+        output.push_str(&before_equal[..key_start]);
+        output.push_str(ANSI_WHITE);
+        output.push_str(key);
+        output.push('=');
+        output.push_str(&value[..value_end]);
+        output.push_str(ANSI_RESET);
+        output.push_str(base_color);
+        remaining = &value[value_end..];
+    }
+    output.push_str(remaining);
+    output
+}
+
+fn is_v3_console_highlight_key(key: &str) -> bool {
+    matches!(
+        key,
+        "stream"
+            | "acceptsSse"
+            | "timeoutMs"
+            | "rawInputItems"
+            | "preparedInputItems"
+            | "plannedEntryMode"
+            | "resumeFullInputItems"
+            | "resumeDeltaInputItems"
+            | "status"
+            | "code"
+            | "error"
+            | "subcode"
+            | "node"
+            | "errorNode"
+            | "errorChain"
+            | "model"
+            | "wire"
+            | "type"
+            | "provider"
+            | "providerKey"
+            | "providerStatus"
+            | "responseStatus"
+            | "route"
+            | "routeName"
+            | "pool"
+            | "path"
+            | "attempts"
+            | "unavailable"
+            | "transport"
+            | "elapsedMs"
+            | "nodes"
+            | "endpoint"
+            | "req"
+            | "usage"
+            | "time"
+            | "pipeline"
+            | "target"
+            | "upstreamStatus"
+            | "upstreamCode"
+    )
+}
+
+fn resolve_v3_log_session_color_key(
+    headers: &HeaderMap,
+    payload: &Value,
+    request_id: &str,
+) -> Option<String> {
+    let turn_metadata = parse_codex_turn_metadata(headers).ok().flatten();
+    let explicit_session = first_header_text(
+        headers,
+        &[
+            "session-id",
+            "session_id",
+            "x-session-id",
+            "x-routecodex-session-id",
+            "x-rcc-session-id",
+        ],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
+    .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS));
+    if explicit_session.is_some() {
+        return explicit_session;
+    }
+    let explicit_conversation = first_header_text(
+        headers,
+        &[
+            "thread-id",
+            "thread_id",
+            "conversation-id",
+            "conversation_id",
+            "x-conversation-id",
+            "x-routecodex-conversation-id",
+        ],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
+    .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
+    if explicit_conversation.is_some() {
+        return explicit_conversation;
+    }
+    let client_type = infer_v3_log_client_type(headers);
+    let tmux_scope = first_header_text(
+        headers,
+        &[
+            "x-routecodex-client-tmux-session-id",
+            "x-rcc-client-tmux-session-id",
+            "x-routecodex-tmux-session-id",
+            "x-rcc-tmux-session-id",
+            "x-tmux-session-id",
+        ],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_TMUX_PATHS));
+    let workdir = first_header_text(
+        headers,
+        &["x-routecodex-workdir", "x-rcc-workdir", "x-workdir"],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_WORKDIR_PATHS))
+    .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS));
+    let mut parts = Vec::new();
+    for value in [client_type, tmux_scope, workdir] {
+        if let Some(part) = value.and_then(|candidate| normalize_v3_log_session_part(&candidate)) {
+            parts.push(part);
+        }
+    }
+    if parts.is_empty() {
+        normalize_v3_log_session_part(request_id).map(|part| format!("rcc-session:request:{part}"))
+    } else {
+        Some(format!("rcc-session:{}", parts.join(":")))
+    }
+}
+
+fn infer_v3_log_client_type(headers: &HeaderMap) -> Option<String> {
+    let user_agent = header_text(headers, "user-agent")
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let originator = header_text(headers, "originator")
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if user_agent.contains("codex") || originator.contains("codex") {
+        Some("codex".to_string())
+    } else if user_agent.contains("claude") || originator.contains("claude") {
+        Some("claude".to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_v3_log_session_part(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn resolve_v3_session_color(session_id: &str) -> Option<String> {
+    if session_id.trim().is_empty() {
+        return None;
+    }
+    let hash = hash_v3_session_log_color_token(session_id.trim());
+    let mut hue = (hash % 3600) as f64 / 10.0;
+    if !(18.0..342.0).contains(&hue) {
+        hue = (hue + 47.0) % 360.0;
+    }
+    let saturation = 0.62 + (((hash >> 12) & 0xff) as f64 / 255.0) * 0.24;
+    let lightness = 0.50 + (((hash >> 20) & 0xff) as f64 / 255.0) * 0.16;
+    let (red, green, blue) = hsl_to_rgb(hue, saturation, lightness);
+    Some(format!("\x1b[38;2;{};{};{}m", red, green, blue))
+}
+
+fn hash_v3_session_log_color_token(value: &str) -> u32 {
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in value.bytes() {
+        hash ^= byte as u32;
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    hash ^= hash >> 16;
+    hash = hash.wrapping_mul(0x7feb352d);
+    hash ^= hash >> 15;
+    hash = hash.wrapping_mul(0x846ca68b);
+    hash ^= hash >> 16;
+    hash
+}
+
+fn hsl_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (u8, u8, u8) {
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let hue_prime = hue / 60.0;
+    let x = chroma * (1.0 - ((hue_prime % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = if hue_prime < 1.0 {
+        (chroma, x, 0.0)
+    } else if hue_prime < 2.0 {
+        (x, chroma, 0.0)
+    } else if hue_prime < 3.0 {
+        (0.0, chroma, x)
+    } else if hue_prime < 4.0 {
+        (0.0, x, chroma)
+    } else if hue_prime < 5.0 {
+        (x, 0.0, chroma)
+    } else {
+        (chroma, 0.0, x)
+    };
+    let m = lightness - chroma / 2.0;
+    let to_channel = |value: f64| -> u8 { ((value + m).clamp(0.0, 1.0) * 255.0).round() as u8 };
+    (to_channel(r1), to_channel(g1), to_channel(b1))
 }
 
 fn console_timestamp_hhmmss() -> String {
@@ -1180,8 +2513,12 @@ fn build_responses_direct_continuation_scope(
     )?
     .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
-    let (session_id, conversation_id) =
-        resolve_transparent_continuation_scope(session_id, conversation_id, payload, request_id)?;
+    let (session_id, conversation_id) = resolve_transparent_continuation_scope(
+        session_id,
+        conversation_id,
+        payload_needs_direct_continuation_scope(payload),
+        request_id,
+    )?;
     Ok(V3ResponsesDirectContinuationScope::responses(
         endpoint,
         session_id,
@@ -1214,8 +2551,12 @@ fn build_responses_relay_local_continuation_scope(
     )?
     .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
-    let (session_id, conversation_id) =
-        resolve_transparent_continuation_scope(session_id, conversation_id, payload, request_id)?;
+    let (session_id, conversation_id) = resolve_transparent_continuation_scope(
+        session_id,
+        conversation_id,
+        payload_needs_relay_local_continuation_scope(payload),
+        request_id,
+    )?;
     Ok(V3ResponsesRelayLocalContinuationScope::responses(
         endpoint,
         session_id,
@@ -1228,12 +2569,12 @@ fn build_responses_relay_local_continuation_scope(
 fn resolve_transparent_continuation_scope(
     session_id: Option<String>,
     conversation_id: Option<String>,
-    payload: &Value,
+    requires_client_scope: bool,
     request_id: &str,
 ) -> Result<(String, String), String> {
     match (session_id, conversation_id) {
         (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
-        (None, None) if !payload_needs_continuation_scope(payload) => {
+        (None, None) if !requires_client_scope => {
             let request_scope = format!("request:{request_id}");
             Ok((request_scope.clone(), request_scope))
         }
@@ -1244,13 +2585,13 @@ fn resolve_transparent_continuation_scope(
     }
 }
 
-fn payload_needs_continuation_scope(payload: &Value) -> bool {
+fn payload_needs_direct_continuation_scope(payload: &Value) -> bool {
     payload.get("previous_response_id").is_some()
-        || payload
-            .get("tools")
-            .and_then(Value::as_array)
-            .is_some_and(|tools| !tools.is_empty())
         || payload_input_has_function_call_output(payload.get("input"))
+}
+
+fn payload_needs_relay_local_continuation_scope(payload: &Value) -> bool {
+    payload_input_has_unpaired_function_call_output(payload.get("input"))
 }
 
 fn payload_input_has_function_call_output(input: Option<&Value>) -> bool {
@@ -1265,6 +2606,58 @@ fn payload_input_has_function_call_output(input: Option<&Value>) -> bool {
     }
 }
 
+fn payload_input_has_unpaired_function_call_output(input: Option<&Value>) -> bool {
+    let Some(input) = input else {
+        return false;
+    };
+    let Some(items) = input.as_array() else {
+        return input
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|item_type| {
+                matches!(
+                    item_type,
+                    "function_call_output" | "custom_tool_call_output" | "tool_call_output"
+                )
+            });
+    };
+    let paired_call_ids: Vec<&str> = items
+        .iter()
+        .filter_map(|item| {
+            let item_type = item.get("type").and_then(Value::as_str)?;
+            if !matches!(
+                item_type,
+                "function_call" | "custom_tool_call" | "tool_call"
+            ) {
+                return None;
+            }
+            item.get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
+        .collect();
+    items.iter().any(|item| {
+        let Some(item_type) = item.get("type").and_then(Value::as_str) else {
+            return false;
+        };
+        if !matches!(
+            item_type,
+            "function_call_output" | "custom_tool_call_output" | "tool_call_output"
+        ) {
+            return false;
+        }
+        let Some(call_id) = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return false;
+        };
+        !paired_call_ids.iter().any(|paired| paired == &call_id)
+    })
+}
+
 const TURN_METADATA_SESSION_PATHS: &[&[&str]] = &[&["session_id"], &["sessionId"], &["session-id"]];
 
 const TURN_METADATA_CONVERSATION_PATHS: &[&[&str]] = &[
@@ -1274,6 +2667,32 @@ const TURN_METADATA_CONVERSATION_PATHS: &[&[&str]] = &[
     &["conversation_id"],
     &["conversationId"],
     &["conversation-id"],
+];
+
+const TURN_METADATA_TMUX_PATHS: &[&[&str]] = &[
+    &["clientTmuxSessionId"],
+    &["client_tmux_session_id"],
+    &["rccSessionClientTmuxSessionId"],
+    &["rcc_session_client_tmux_session_id"],
+    &["tmux_session"],
+    &["tmuxSession"],
+    &["tmuxSessionId"],
+    &["tmux_session_id"],
+    &["scope", "clientTmuxSessionId"],
+    &["scope", "client_tmux_session_id"],
+    &["scope", "rccSessionClientTmuxSessionId"],
+    &["scope", "rcc_session_client_tmux_session_id"],
+    &["scope", "tmux_session"],
+    &["scope", "tmuxSession"],
+    &["scope", "tmuxSessionId"],
+    &["scope", "tmux_session_id"],
+];
+
+const TURN_METADATA_WORKDIR_PATHS: &[&[&str]] = &[
+    &["workdir"],
+    &["cwd"],
+    &["workingDirectory"],
+    &["working_directory"],
 ];
 
 const BODY_SESSION_PATHS: &[&[&str]] = &[
@@ -1288,6 +2707,17 @@ const BODY_SESSION_PATHS: &[&[&str]] = &[
     &["metadata", "client_metadata", "sessionId"],
     &["metadata", "clientMetadata", "session_id"],
     &["metadata", "clientMetadata", "sessionId"],
+];
+
+const BODY_WORKDIR_PATHS: &[&[&str]] = &[
+    &["workdir"],
+    &["cwd"],
+    &["workingDirectory"],
+    &["working_directory"],
+    &["metadata", "workdir"],
+    &["metadata", "cwd"],
+    &["metadata", "workingDirectory"],
+    &["metadata", "working_directory"],
 ];
 
 const BODY_CONVERSATION_PATHS: &[&[&str]] = &[
@@ -1444,7 +2874,10 @@ pub async fn execute_v3_responses_relay_request(
     execute_v3_responses_relay_runtime_with_default_transport(manifest, input).await
 }
 
-fn responses_relay_output_response(output: V3ResponsesRelayRuntimeOutput) -> Response<Body> {
+fn responses_relay_output_response(
+    output: V3ResponsesRelayRuntimeOutput,
+    stream_console_finalizer: Option<V3SseConsoleFinalizer>,
+) -> Response<Body> {
     let content_type = match &output.client_body {
         V3ResponsesRelayClientBody::Json(_) => "application/json",
         V3ResponsesRelayClientBody::Sse(_) => "text/event-stream",
@@ -1457,7 +2890,9 @@ fn responses_relay_output_response(output: V3ResponsesRelayRuntimeOutput) -> Res
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = match output.client_body {
-        V3ResponsesRelayClientBody::Sse(client_stream) => Body::from_stream(client_stream),
+        V3ResponsesRelayClientBody::Sse(client_stream) => Body::from_stream(
+            wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
+        ),
         V3ResponsesRelayClientBody::Json(client_response) => Body::from(
             serde_json::to_vec(&client_response).expect("typed V3 Responses Relay projection"),
         ),
@@ -1465,6 +2900,78 @@ fn responses_relay_output_response(output: V3ResponsesRelayRuntimeOutput) -> Res
     builder
         .body(body)
         .expect("typed V3 Responses Relay response")
+}
+
+fn wrap_v3_relay_sse_console_stream(
+    stream: V3ResponsesRelayClientStream,
+    finalizer: Option<V3SseConsoleFinalizer>,
+) -> V3ResponsesRelayClientStream {
+    match finalizer {
+        Some(finalizer) => {
+            wrap_v3_relay_sse_closeout_stream(stream, move |terminal| match terminal {
+                V3SseConsoleStreamTerminal::Completed => finalizer.complete(),
+                V3SseConsoleStreamTerminal::Failed(error) => {
+                    finalizer.provider_stream_failed(&error)
+                }
+                V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
+            })
+        }
+        None => stream,
+    }
+}
+
+struct V3SseConsoleCloseoutStream {
+    stream: V3ResponsesRelayClientStream,
+    closeout: Option<Box<dyn FnOnce(V3SseConsoleStreamTerminal) + Send>>,
+}
+
+impl V3SseConsoleCloseoutStream {
+    fn emit_terminal(&mut self, terminal: V3SseConsoleStreamTerminal) {
+        if let Some(closeout) = self.closeout.take() {
+            closeout(terminal);
+        }
+    }
+}
+
+impl Unpin for V3SseConsoleCloseoutStream {}
+
+impl futures_util::Stream for V3SseConsoleCloseoutStream {
+    type Item = Result<Vec<u8>, String>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.as_mut().get_mut();
+        match this.stream.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
+            Poll::Ready(Some(Err(error))) => {
+                this.emit_terminal(V3SseConsoleStreamTerminal::Failed(error.clone()));
+                Poll::Ready(Some(Err(error)))
+            }
+            Poll::Ready(None) => {
+                this.emit_terminal(V3SseConsoleStreamTerminal::Completed);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for V3SseConsoleCloseoutStream {
+    fn drop(&mut self) {
+        self.emit_terminal(V3SseConsoleStreamTerminal::Dropped);
+    }
+}
+
+fn wrap_v3_relay_sse_closeout_stream(
+    stream: V3ResponsesRelayClientStream,
+    closeout: impl FnOnce(V3SseConsoleStreamTerminal) + Send + 'static,
+) -> V3ResponsesRelayClientStream {
+    Box::pin(V3SseConsoleCloseoutStream {
+        stream,
+        closeout: Some(Box::new(closeout)),
+    })
 }
 
 fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> Response<Body> {
@@ -1571,7 +3078,7 @@ fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>,
             "typed V3 Anthropic Relay SSE event is missing event or data",
         ));
     };
-    let decoded = build_sse_transport_in_02_from_fields(vec![
+    let decoded = build_v3_sse_transport_in_02_from_fields(vec![
         SseField::Named {
             name: "event".to_string(),
             value: name.to_string(),
@@ -1582,9 +3089,9 @@ fn anthropic_relay_sse_event_chunk(event: &serde_json::Value) -> Result<Vec<u8>,
         },
     ])
     .map_err(|error| io::Error::other(error.to_string()))?;
-    let validated = build_sse_transport_in_03_from_sse_transport_in_02(decoded)
+    let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
         .map_err(|error| io::Error::other(error.to_string()))?;
-    Ok(build_sse_transport_out_04_from_sse_transport_in_03(&validated).into_bytes())
+    Ok(build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes())
 }
 
 async fn debug_status(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -1620,7 +3127,14 @@ async fn debug_dry_run(
 ) -> Response<Body> {
     let payload = match read_json_payload(request).await {
         Ok(payload) => payload,
-        Err(projected) => return error_output_response(projected),
+        Err(projected) => {
+            return error_output_response_for_server(
+                &state.server,
+                "/_routecodex/debug/dry-run",
+                "pre-request",
+                projected,
+            )
+        }
     };
     let fixture_id = match required_dry_run_string(&payload, "fixture_id") {
         Ok(value) => value,
@@ -2065,18 +3579,44 @@ async fn read_json_payload(
     })
 }
 
-async fn method_not_allowed() -> Response<Body> {
-    error_output_response(project_http_input_error(
-        V3HttpBoundaryErrorKind::MethodNotAllowed,
-        "HTTP method is not allowed for this endpoint",
-    ))
+async fn method_not_allowed(
+    State(state): State<Arc<V3ListenerState>>,
+    request: Request,
+) -> Response<Body> {
+    let path = request.uri().path().to_string();
+    let request_id = match allocate_v3_console_request_id(&state, &path, None) {
+        Ok(request_id) => request_id,
+        Err(response) => return *response,
+    };
+    error_output_response_for_server(
+        &state.server,
+        &path,
+        &request_id,
+        project_http_input_error(
+            V3HttpBoundaryErrorKind::MethodNotAllowed,
+            "HTTP method is not allowed for this endpoint",
+        ),
+    )
 }
 
-async fn path_not_found() -> Response<Body> {
-    error_output_response(project_http_input_error(
-        V3HttpBoundaryErrorKind::PathNotFound,
-        "HTTP path is not registered",
-    ))
+async fn path_not_found(
+    State(state): State<Arc<V3ListenerState>>,
+    request: Request,
+) -> Response<Body> {
+    let path = request.uri().path().to_string();
+    let request_id = match allocate_v3_console_request_id(&state, &path, None) {
+        Ok(request_id) => request_id,
+        Err(response) => return *response,
+    };
+    error_output_response_for_server(
+        &state.server,
+        &path,
+        &request_id,
+        project_http_input_error(
+            V3HttpBoundaryErrorKind::PathNotFound,
+            "HTTP path is not registered",
+        ),
+    )
 }
 
 fn project_http_input_error(
@@ -2086,10 +3626,15 @@ fn project_http_input_error(
     project_v3_http_boundary_error(kind, message)
 }
 
-fn error_output_response(
+fn error_output_response_for_server(
+    server: &V3ServerManifest,
+    endpoint: &str,
+    request_id: &str,
     projected: routecodex_v3_error::V3Error06ClientProjected,
 ) -> Response<Body> {
-    responses_direct_output_response(build_v3_server_16_http_frame_from_v3_error_06(projected))
+    let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+    emit_v3_frame_error_console_line(server, endpoint, request_id, &frame);
+    responses_direct_output_response(frame)
 }
 
 fn json_response(status: u16, body: serde_json::Value) -> Response<Body> {
@@ -2100,4 +3645,121 @@ fn json_response(status: u16, body: serde_json::Value) -> Response<Body> {
             serde_json::to_vec(&body).expect("JSON projection"),
         ))
         .expect("fixed response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_summary_prints_cache_hit_rate() {
+        let summary = V3RuntimeUsageSummary {
+            input_tokens: Some(59_842),
+            output_tokens: Some(822),
+            total_tokens: Some(60_664),
+            cached_tokens: Some(41_984),
+        };
+        assert_eq!(
+            format_v3_console_usage_summary(Some(&summary)),
+            "in:59842 out:822 cache=41984/59842(70.2%) total=60664"
+        );
+    }
+
+    #[test]
+    fn usage_summary_extracts_cached_read_hit_tokens() {
+        let summary = extract_v3_console_usage_summary(&json!({
+            "usage": {
+                "input_tokens": 59_842,
+                "input_tokens_details": {
+                    "cached_read_tokens": 41_984,
+                    "cached_write_tokens": 7
+                },
+                "output_tokens": 822,
+                "total_tokens": 60_664
+            }
+        }))
+        .expect("usage summary");
+        assert_eq!(summary.cached_tokens, Some(41_984));
+        assert_eq!(
+            format_v3_console_usage_summary(Some(&summary)),
+            "in:59842 out:822 cache=41984/59842(70.2%) total=60664"
+        );
+    }
+
+    #[test]
+    fn request_id_tokens_are_stable_and_path_safe() {
+        assert_eq!(
+            format_v3_request_id_entry("/v1/responses"),
+            "openai-responses"
+        );
+        assert_eq!(format_v3_request_id_token("GPT-5.5 / SOL:β"), "GPT-5.5SOL");
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_emits_complete_once_on_terminal_end() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let mut stream = wrap_v3_relay_sse_closeout_stream(
+            Box::pin(futures_util::stream::iter(vec![Ok(
+                b"data: ok\n\n".to_vec()
+            )])),
+            move |terminal| recorded.lock().unwrap().push(terminal),
+        );
+
+        assert_eq!(
+            stream.next().await.unwrap().unwrap(),
+            b"data: ok\n\n".to_vec()
+        );
+        assert!(stream.next().await.is_none());
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Completed]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_emits_failure_once_on_provider_stream_error() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let mut stream = wrap_v3_relay_sse_closeout_stream(
+            Box::pin(futures_util::stream::iter(vec![Err(
+                "provider boom".to_string()
+            )])),
+            move |terminal| recorded.lock().unwrap().push(terminal),
+        );
+
+        assert_eq!(stream.next().await.unwrap().unwrap_err(), "provider boom");
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Failed(
+                "provider boom".to_string()
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_emits_drop_when_client_disconnects_before_terminal() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let provider = futures_util::stream::iter(vec![Ok(b"data: first\n\n".to_vec())])
+            .chain(futures_util::stream::pending::<Result<Vec<u8>, String>>());
+        let mut stream = wrap_v3_relay_sse_closeout_stream(Box::pin(provider), move |terminal| {
+            recorded.lock().unwrap().push(terminal)
+        });
+
+        assert_eq!(
+            stream.next().await.unwrap().unwrap(),
+            b"data: first\n\n".to_vec()
+        );
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Dropped]
+        );
+    }
 }

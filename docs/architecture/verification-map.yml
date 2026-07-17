@@ -4387,7 +4387,7 @@ verification:
     smoke:
       - cargo test -p sse-transport-core --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml
       - cargo test -p router-hotpath-napi hub_resp_inbound_sse_stream_sniffer --manifest-path sharedmodule/llmswitch-core/rust-core/Cargo.toml
-      - cargo test -p routecodex-v3-provider-responses --manifest-path v3/Cargo.toml
+      - npm run test:v3-sse-transport-adapter
       - npm run verify:sse-transport-core-shared
       - npm run verify:sse-architecture-boundary
       - npm run verify:resource-operation-map
@@ -4400,6 +4400,31 @@ verification:
       - "Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry, CRLF/LF, unknown fields, long streams, opaque `[DONE]`, and normal close."
       - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and absence of synthetic terminal success."
       - "V3 controlled-upstream Server blackbox and V2 installed-surface replay are required before runtime closure; current source-only gates cannot claim live completion."
+
+  - feature_id: v3.sse_transport_core_independent
+    change_risk: high
+    unit:
+      - v3/crates/routecodex-v3-sse/src/lib.rs
+    contract:
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+    integration:
+      - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+      - v3/crates/routecodex-v3-runtime/src/shared.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    smoke:
+      - npm run test:v3-sse-transport-core
+      - npm run test:v3-sse-transport-adapter
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - cargo test --workspace --manifest-path v3/Cargo.toml
+    notes:
+      - "Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry, CRLF/LF, unknown fields, opaque `[DONE]`, and normal close inside the V3 workspace."
+      - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and no synthetic terminal success."
+      - "V3 crates must import `routecodex-v3-sse`, not `sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core`."
 
   - feature_id: v3.v2_config_toml_compat_5555
     change_risk: high

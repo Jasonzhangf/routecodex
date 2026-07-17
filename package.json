@@ -437,7 +437,8 @@
     "verify:metadata-center-dualwrite-api": "node scripts/architecture/verify-metadata-center-dualwrite-api.mjs",
     "verify:architecture-metadata-center-write-boundaries": "node scripts/architecture/verify-architecture-metadata-center-write-boundaries.mjs",
     "verify:vr-route-availability-default-floor": "node scripts/architecture/verify-vr-route-availability-default-floor.mjs",
-    "verify:route-metadata-preselected-route-owner": "node scripts/architecture/verify-route-metadata-preselected-route-owner.mjs"
+    "verify:route-metadata-preselected-route-owner": "node scripts/architecture/verify-route-metadata-preselected-route-owner.mjs",
+    "test:v3-sse-transport-core": "CARGO_NET_OFFLINE=true cargo test -p routecodex-v3-sse --manifest-path v3/Cargo.toml -- --nocapture"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

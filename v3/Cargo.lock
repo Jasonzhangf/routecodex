@@ -1036,9 +1036,9 @@ dependencies = [
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-error",
+ "routecodex-v3-sse",
  "serde",
  "serde_json",
- "sse-transport-core",
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
@@ -1055,11 +1055,11 @@ dependencies = [
  "routecodex-v3-debug",
  "routecodex-v3-error",
  "routecodex-v3-provider-responses",
+ "routecodex-v3-sse",
  "routecodex-v3-target",
  "routecodex-v3-virtual-router",
  "serde",
  "serde_json",
- "sse-transport-core",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -1070,15 +1070,23 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "libc",
  "reqwest",
  "routecodex-v3-config",
  "routecodex-v3-debug",
  "routecodex-v3-error",
  "routecodex-v3-runtime",
+ "routecodex-v3-sse",
  "serde_json",
- "sse-transport-core",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "routecodex-v3-sse"
+version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1298,13 +1306,6 @@ checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "sse-transport-core"
-version = "0.1.0"
-dependencies = [
- "thiserror 1.0.69",
 ]
 
 [[package]]

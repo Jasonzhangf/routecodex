@@ -8979,6 +8979,63 @@ owners:
       - "`[DONE]` and event names are opaque data to transport; terminal, continuation, tool, reasoning, routing, and provider semantics are forbidden."
       - "V3 Server streaming projection remains blocked by the active remote-continuation integration claim while that path materializes the complete SSE body; the shared-core gate remains red until the semantic owner exposes a streaming-safe contract."
 
+  - feature_id: v3.sse_transport_core_independent
+    status: active
+    summary: "V3 owns an in-workspace protocol-neutral SSE transport module and does not depend on the V2 llmswitch-core SSE crate at runtime"
+    owner_kind: rust_ssot
+    owner_scope: "V3-only incremental SSE byte framing, UTF-8/frame validation, canonical frame encoding, limits, and typed transport failures; never owns protocol or business event semantics"
+    owner_module: v3/crates/routecodex-v3-sse
+    resource_bindings:
+      writes:
+        - sse.transport_raw_chunk@SseTransportIn01RawChunk
+        - sse.transport_decoded_frame@SseTransportIn02DecodedFrame
+        - sse.transport_validated_frame_stream@SseTransportIn03ValidatedFrameStream
+        - sse.transport_encoded_chunk@SseTransportOut04EncodedChunk
+      reads: []
+      forbidden:
+        - continuation.scope_state@ChatProcRespContinuation07CanonicalSaved
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+        - response.hub_semantic@HubRespChatProcess03Governed
+    canonical_types:
+      - V3SseTransportIn01RawChunk
+      - V3SseTransportIn02DecodedFrame
+      - V3SseTransportIn03ValidatedFrameStream
+      - V3SseTransportOut04EncodedChunk
+      - SseTransportError
+    canonical_builders:
+      - build_v3_sse_transport_in_01_raw_chunk
+      - build_v3_sse_transport_in_02_from_fields
+      - build_v3_sse_transport_in_03_from_v3_sse_transport_in_02
+      - build_v3_sse_transport_out_04_from_v3_sse_transport_in_03
+      - build_v3_sse_transport_out_04_keepalive_comment
+    allowed_paths:
+      - v3/crates/routecodex-v3-sse
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-server
+      - docs/architecture/function-map.yml
+      - docs/architecture/verification-map.yml
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
+      - src/server/handlers
+      - src/modules/llmswitch
+    required_tests:
+      - v3/crates/routecodex-v3-sse/src/lib.rs
+      - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+      - v3/crates/routecodex-v3-runtime/src/shared.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    required_gates:
+      - npm run test:v3-sse-transport-core
+      - npm run test:v3-sse-transport-adapter
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-clippy
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "This is a V3 workspace copy of the protocol-neutral SSE transport core so V3 can build and run independently from the V2 llmswitch-core crate tree."
+      - "Protocol semantics, tool governance, continuation, stopless, and provider-specific event projection remain outside this transport module."
+
   - feature_id: v3.v2_config_toml_compat_5555
     status: active
     summary: "V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract"

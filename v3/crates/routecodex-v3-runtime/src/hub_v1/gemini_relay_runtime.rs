@@ -303,7 +303,7 @@ fn project_json_response(
 
 struct V3GeminiSseState {
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
-    decoder: sse_transport_core::SseIncrementalDecoder,
+    decoder: routecodex_v3_sse::SseIncrementalDecoder,
     pending: VecDeque<Result<Vec<u8>, String>>,
     terminal: bool,
     done: bool,
@@ -315,8 +315,8 @@ fn project_sse_stream(
     use futures_util::StreamExt;
     let state = V3GeminiSseState {
         provider,
-        decoder: sse_transport_core::SseIncrementalDecoder::new(
-            sse_transport_core::SseTransportLimits::default(),
+        decoder: routecodex_v3_sse::SseIncrementalDecoder::new(
+            routecodex_v3_sse::SseTransportLimits::default(),
         ),
         pending: VecDeque::new(),
         terminal: false,
@@ -345,7 +345,7 @@ fn project_sse_stream(
                 let result = chunk
                     .map_err(|error| error.to_string())
                     .and_then(|chunk| {
-                        let raw = sse_transport_core::build_sse_transport_in_01_raw_chunk(&chunk);
+                        let raw = routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(&chunk);
                         state.decoder.push(raw).map_err(|error| error.to_string())
                     })
                     .and_then(|frames| enqueue_sse_client_chunks(&mut state, frames));
@@ -360,12 +360,12 @@ fn project_sse_stream(
 
 fn enqueue_sse_client_chunks(
     state: &mut V3GeminiSseState,
-    frames: Vec<sse_transport_core::SseTransportIn03ValidatedFrameStream>,
+    frames: Vec<routecodex_v3_sse::SseTransportIn03ValidatedFrameStream>,
 ) -> Result<(), String> {
     for frame in frames {
         let mut data = None;
         for field in frame.frame().fields() {
-            if let sse_transport_core::SseField::Named { name, value } = field {
+            if let routecodex_v3_sse::SseField::Named { name, value } = field {
                 if name == "data" {
                     data = Some(value.clone());
                 }

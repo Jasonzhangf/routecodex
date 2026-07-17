@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 use routecodex_v3_provider_responses::{
@@ -63,7 +64,13 @@ impl ResponsesTransport for JsonThenSseTransport {
                 serde_json::to_vec(&json!({
                     "id":"resp_closeout_json",
                     "status":"completed",
-                    "output":[{"type":"output_text","text":"json ok"}]
+                    "output":[{"type":"output_text","text":"json ok"}],
+                    "usage":{
+                        "input_tokens":11,
+                        "input_tokens_details":{"cached_tokens":3},
+                        "output_tokens":5,
+                        "total_tokens":16
+                    }
                 }))
                 .unwrap(),
             ));
@@ -73,7 +80,7 @@ impl ResponsesTransport for JsonThenSseTransport {
             Ok(b"ok\"}\n\n".to_vec()),
             Ok(b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_closeout_sse\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
             Ok(b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\\\"closeout\\\"}\"}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"response\":{\"id\":\"resp_closeout_sse\",\"status\":\"completed\"}}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_closeout_sse\",\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":7,\"total_tokens\":20}}}\n\n".to_vec()),
         ]);
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
@@ -179,6 +186,57 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         .iter()
         .any(|node| *node == direct_policy_node));
     assert!(!json_output.node_trace.contains(&"V3TargetLocalReselected"));
+    let json_observability = json_output
+        .observability
+        .as_ref()
+        .expect("Responses Relay JSON output must carry console observability");
+    assert_eq!(
+        json_observability.routing_group_id.as_deref(),
+        Some("controlled")
+    );
+    assert_eq!(json_observability.pool_id.as_deref(), Some("default"));
+    assert_eq!(
+        json_observability.provider_id.as_deref(),
+        Some("controlled")
+    );
+    assert_eq!(
+        json_observability.provider_key.as_deref(),
+        Some("controlled:controlled:responses-wire-model")
+    );
+    assert_eq!(
+        json_observability.model_id.as_deref(),
+        Some("responses-wire-model")
+    );
+    assert_eq!(
+        json_observability.wire_model.as_deref(),
+        Some("responses-wire-model")
+    );
+    assert_eq!(json_observability.provider_status, Some(200));
+    assert_eq!(
+        json_observability.response_status.as_deref(),
+        Some("completed")
+    );
+    assert_eq!(
+        json_observability
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.input_tokens),
+        Some(11)
+    );
+    assert_eq!(
+        json_observability
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.output_tokens),
+        Some(5)
+    );
+    assert_eq!(
+        json_observability
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.cached_tokens),
+        Some(3)
+    );
     match json_output.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["id"], "resp_closeout_json");
@@ -204,10 +262,67 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     .unwrap();
     assert_eq!(sse_output.status, 200);
     assert_eq!(sse_output.node_trace, EXPECTED_RELAY_TRACE);
+    let sse_observability = sse_output
+        .observability
+        .as_ref()
+        .expect("Responses Relay SSE output must carry console observability");
+    assert_eq!(sse_observability.transport, "sse");
+    assert_eq!(
+        sse_observability.response_status.as_deref(),
+        Some("streaming")
+    );
+    assert_eq!(sse_observability.provider_status, Some(200));
+    let stream_observation = sse_output
+        .stream_observation
+        .clone()
+        .expect("Responses Relay SSE output must expose stream observability");
     match sse_output.client_body {
-        V3ResponsesRelayClientBody::Sse(_) => {}
+        V3ResponsesRelayClientBody::Sse(mut stream) => {
+            let mut forwarded = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                forwarded.extend(chunk.expect("controlled SSE chunk must pass through unchanged"));
+            }
+            assert!(String::from_utf8(forwarded)
+                .unwrap()
+                .contains("\"input_tokens\":13"));
+        }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
     }
+    let stream_snapshot = stream_observation
+        .snapshot()
+        .expect("SSE usage observation state must stay readable");
+    assert_eq!(
+        stream_snapshot.response_status.as_deref(),
+        Some("completed")
+    );
+    assert_eq!(
+        stream_snapshot
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.input_tokens),
+        Some(13)
+    );
+    assert_eq!(
+        stream_snapshot
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.output_tokens),
+        Some(7)
+    );
+    assert_eq!(
+        stream_snapshot
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.cached_tokens),
+        Some(4)
+    );
+    assert_eq!(
+        stream_snapshot
+            .usage
+            .as_ref()
+            .and_then(|usage| usage.total_tokens),
+        Some(20)
+    );
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);

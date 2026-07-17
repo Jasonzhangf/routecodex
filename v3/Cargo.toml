@@ -5,6 +5,7 @@ members = [
   "crates/routecodex-v3-error",
   "crates/routecodex-v3-virtual-router",
   "crates/routecodex-v3-target",
+  "crates/routecodex-v3-sse",
   "crates/routecodex-v3-provider-responses",
   "crates/routecodex-v3-runtime",
   "crates/routecodex-v3-server",

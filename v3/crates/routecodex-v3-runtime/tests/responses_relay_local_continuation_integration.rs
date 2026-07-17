@@ -164,6 +164,110 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
 }
 
 #[tokio::test]
+async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback() {
+    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch";
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "id":"resp_apply_patch_1",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_apply_patch_freeform",
+                    "name":"apply_patch",
+                    "arguments": serde_json::to_string(&json!({"patch": patch})).unwrap()
+                }]
+            }),
+            json!({
+                "id":"resp_apply_patch_2",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"retry received"}]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-apply-patch",
+        "conversation-apply-patch",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-apply-patch-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Patch a file"}],
+                "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        20_000,
+    )
+    .await
+    .unwrap();
+    match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            assert_eq!(body["output"][0]["type"], "custom_tool_call");
+            assert_eq!(body["output"][0]["name"], "apply_patch");
+            assert_eq!(body["output"][0]["call_id"], "call_apply_patch_freeform");
+            assert_eq!(body["output"][0]["input"], patch);
+            assert!(body["output"][0].get("arguments").is_none());
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first turn must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-apply-patch-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"custom_tool_call_output",
+                    "call_id":"call_apply_patch_freeform",
+                    "output":"apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        21_000,
+    )
+    .await
+    .unwrap();
+    match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second turn must be JSON"),
+    }
+    assert!(state.is_empty().unwrap());
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(captures[1]["input"][0]["type"], "custom_tool_call");
+    assert_eq!(captures[1]["input"][0]["name"], "apply_patch");
+    assert_eq!(captures[1]["input"][0]["input"], patch);
+    assert_eq!(captures[1]["input"][1]["type"], "custom_tool_call_output");
+    let feedback = captures[1]["input"][1]["output"].as_str().unwrap();
+    assert!(feedback.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
+    assert!(feedback.contains("Retry with apply_patch only"));
+    assert!(!feedback.contains("/tmp/codex-patch-test"));
+}
+
+#[tokio::test]
 async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context() {
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
@@ -231,6 +335,68 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
     assert!(error.to_string().contains("not found"));
     assert_eq!(transport.captures.lock().unwrap().len(), 1);
     assert_eq!(state.len().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn full_history_paired_tool_output_does_not_require_local_restore() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_full_history_2",
+            "status":"completed",
+            "output":[{"type":"output_text","text":"full history ok"}]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "request:req-full-history",
+        "request:req-full-history",
+        5555,
+        "controlled",
+    );
+
+    let response = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-full-history".into(),
+            payload: json!({
+                "model":"client-responses",
+                "previous_response_id":"1a3e546c-0a32-4667-933c-03f88aafc05c",
+                "input":[
+                    {"role":"user","content":"Lookup alpha"},
+                    {
+                        "type":"function_call",
+                        "call_id":"call_full_history",
+                        "name":"lookup",
+                        "arguments":"{\"q\":\"alpha\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_full_history",
+                        "output":"alpha"
+                    }
+                ],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        20_000,
+    )
+    .await
+    .unwrap();
+    match response.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("full-history replay must be JSON"),
+    }
+    assert!(state.is_empty().unwrap());
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(captures[0]["input"][1]["call_id"], "call_full_history");
+    assert_eq!(captures[0]["input"][2]["call_id"], "call_full_history");
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {

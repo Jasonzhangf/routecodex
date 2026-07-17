@@ -1058,12 +1058,20 @@ fn build_anthropic_messages_body(
     if let Some(stream) = source.get("stream").cloned() {
         out.insert("stream".to_string(), stream);
     }
-    out.insert(
-        "messages".to_string(),
-        build_anthropic_messages(source.get("input")),
-    );
+    let messages = build_anthropic_messages(source.get("input"));
+    if messages.as_array().is_none_or(Vec::is_empty) {
+        return Err(provider_protocol_error(
+            request_id,
+            provider_id,
+            "Anthropic Messages request requires at least one message",
+        ));
+    }
+    out.insert("messages".to_string(), messages);
     if let Some(tools) = build_anthropic_tools(source.get("tools")) {
         out.insert("tools".to_string(), tools);
+    }
+    if let Some(tool_choice) = build_anthropic_tool_choice(source.get("tool_choice")) {
+        out.insert("tool_choice".to_string(), tool_choice);
     }
     Ok(Value::Object(out))
 }
@@ -1097,25 +1105,47 @@ fn anthropic_message_from_responses_item(item: &Value) -> Option<Value> {
                 "content": anthropic_content_parts(object.get("content"))
             }))
         }
-        Some("function_call") => Some(json!({
+        Some("function_call" | "custom_tool_call" | "tool_call") => Some(json!({
             "role": "assistant",
             "content": [{
                 "type": "tool_use",
                 "id": object.get("call_id").or_else(|| object.get("id")).and_then(Value::as_str).unwrap_or("call_0"),
                 "name": object.get("name").and_then(Value::as_str).unwrap_or("tool"),
-                "input": parse_json_string_or_clone(object.get("arguments")).unwrap_or_else(|| json!({}))
+                "input": anthropic_tool_use_input(object)
             }]
         })),
-        Some("function_call_output") => Some(json!({
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": object.get("call_id").and_then(Value::as_str).unwrap_or("call_0"),
-                "content": object.get("output").cloned().unwrap_or_else(|| Value::String(String::new()))
-            }]
-        })),
+        Some("function_call_output" | "custom_tool_call_output" | "tool_call_output") => {
+            Some(json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": object.get("call_id").and_then(Value::as_str).unwrap_or("call_0"),
+                    "content": object.get("output").cloned().unwrap_or_else(|| Value::String(String::new()))
+                }]
+            }))
+        }
+        None if object.get("role").is_some() || object.get("content").is_some() => {
+            let role = object.get("role").and_then(Value::as_str).unwrap_or("user");
+            Some(json!({
+                "role": if role == "assistant" { "assistant" } else { "user" },
+                "content": anthropic_content_parts(object.get("content"))
+            }))
+        }
         _ => None,
     }
+}
+
+fn anthropic_tool_use_input(object: &Map<String, Value>) -> Value {
+    if let Some(arguments) = parse_json_string_or_clone(object.get("arguments")) {
+        return arguments;
+    }
+    if let Some(input) = parse_json_string_or_clone(object.get("input")) {
+        return match input {
+            Value::String(text) => json!({"input": text}),
+            other => other,
+        };
+    }
+    json!({})
 }
 
 fn anthropic_content_parts(content: Option<&Value>) -> Value {
@@ -1151,6 +1181,11 @@ fn build_anthropic_tools(tools: Option<&Value>) -> Option<Value> {
                 "description": tool.get("description").and_then(Value::as_str).unwrap_or(""),
                 "input_schema": tool.get("parameters").or_else(|| tool.get("input_schema")).cloned().unwrap_or_else(|| json!({"type":"object"}))
             })),
+            Some("custom") => Some(json!({
+                "name": tool.get("name").and_then(Value::as_str).unwrap_or("tool"),
+                "description": tool.get("description").and_then(Value::as_str).unwrap_or(""),
+                "input_schema": anthropic_custom_tool_input_schema(tool)
+            })),
             Some("web_search_preview") => Some(json!({
                 "type": "web_search_20250305",
                 "name": "web_search",
@@ -1164,6 +1199,50 @@ fn build_anthropic_tools(tools: Option<&Value>) -> Option<Value> {
         None
     } else {
         Some(Value::Array(converted))
+    }
+}
+
+fn anthropic_custom_tool_input_schema(tool: &Value) -> Value {
+    tool.get("parameters")
+        .or_else(|| tool.get("input_schema"))
+        .cloned()
+        .unwrap_or_else(|| {
+            json!({
+                "type":"object",
+                "properties":{"patch":{
+                    "type":"string",
+                    "description":"Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
+                }},
+                "required":["patch"],
+                "additionalProperties":false
+            })
+        })
+}
+
+fn build_anthropic_tool_choice(tool_choice: Option<&Value>) -> Option<Value> {
+    let tool_choice = tool_choice?;
+    match tool_choice {
+        Value::String(name) if !name.trim().is_empty() => {
+            Some(json!({"type":"tool","name":name.trim()}))
+        }
+        Value::Object(object) => {
+            let choice_type = object.get("type").and_then(Value::as_str)?;
+            match choice_type {
+                "auto" | "any" | "none" => Some(json!({"type":choice_type})),
+                "custom" => object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .map(|name| json!({"type":"custom","name":name.trim()})),
+                "function" | "tool" => object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .map(|name| json!({"type":"tool","name":name.trim()})),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 
@@ -1288,7 +1367,18 @@ struct AnthropicSseProjectionState {
     model: String,
     output_text: String,
     text_started: bool,
+    active_tool_blocks: BTreeMap<u64, AnthropicSseToolBlock>,
+    completed_tool_items: Vec<Value>,
+    stop_reason: Option<String>,
+    usage: Option<Value>,
     finished: bool,
+}
+
+struct AnthropicSseToolBlock {
+    call_id: String,
+    name: String,
+    initial_input: Value,
+    partial_json: String,
 }
 
 fn project_anthropic_sse_to_responses(
@@ -1305,6 +1395,10 @@ fn project_anthropic_sse_to_responses(
         model: String::new(),
         output_text: String::new(),
         text_started: false,
+        active_tool_blocks: BTreeMap::new(),
+        completed_tool_items: Vec::new(),
+        stop_reason: None,
+        usage: None,
         finished: false,
     };
     Box::pin(stream::unfold(state, |mut state| async move {
@@ -1366,25 +1460,7 @@ fn project_anthropic_sse_event(
                 }),
             )?);
         }
-        Some("content_block_start") => {
-            if event
-                .get("content_block")
-                .and_then(|block| block.get("type"))
-                .and_then(Value::as_str)
-                == Some("text")
-                && !state.text_started
-            {
-                state.text_started = true;
-                state.ready.push_back(sse_json_frame(
-                    "response.output_item.added",
-                    json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant","content":[]}}),
-                )?);
-                state.ready.push_back(sse_json_frame(
-                    "response.content_part.added",
-                    json!({"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}),
-                )?);
-            }
-        }
+        Some("content_block_start") => project_anthropic_sse_content_block_start(state, event)?,
         Some("content_block_delta") => {
             if let Some(text) = event
                 .get("delta")
@@ -1397,24 +1473,65 @@ fn project_anthropic_sse_event(
                     json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":text}),
                 )?);
             }
+            if event
+                .get("delta")
+                .and_then(|delta| delta.get("type"))
+                .and_then(Value::as_str)
+                == Some("input_json_delta")
+            {
+                let index = event.get("index").and_then(Value::as_u64).unwrap_or(0);
+                if let Some(block) = state.active_tool_blocks.get_mut(&index) {
+                    if let Some(partial_json) = event
+                        .get("delta")
+                        .and_then(|delta| delta.get("partial_json"))
+                        .and_then(Value::as_str)
+                    {
+                        block.partial_json.push_str(partial_json);
+                    }
+                }
+            }
+        }
+        Some("content_block_stop") => {
+            let index = event.get("index").and_then(Value::as_u64).unwrap_or(0);
+            if let Some(block) = state.active_tool_blocks.remove(&index) {
+                let item = anthropic_sse_tool_block_to_responses_item(block);
+                state.completed_tool_items.push(item.clone());
+                state.ready.push_back(sse_json_frame(
+                    "response.output_item.done",
+                    json!({"type":"response.output_item.done","output_index":index,"item":item}),
+                )?);
+            }
         }
         Some("message_stop") => {
-            state.ready.push_back(sse_json_frame(
-                "response.output_text.done",
-                json!({"type":"response.output_text.done","output_index":0,"content_index":0,"text":state.output_text}),
-            )?);
+            if state.text_started {
+                state.ready.push_back(sse_json_frame(
+                    "response.output_text.done",
+                    json!({"type":"response.output_text.done","output_index":0,"content_index":0,"text":state.output_text}),
+                )?);
+            }
+            let status = anthropic_sse_response_status(state);
             state.ready.push_back(sse_json_frame(
                 "response.completed",
-                json!({"type":"response.completed","response":base_stream_response(state, "completed")}),
+                json!({"type":"response.completed","response":base_stream_response(state, status)}),
             )?);
             state.ready.push_back(sse_json_frame(
                 "response.done",
-                json!({"type":"response.done","response":base_stream_response(state, "completed")}),
+                json!({"type":"response.done","response":base_stream_response(state, status)}),
             )?);
             state.ready.push_back(b"data: [DONE]\n\n".to_vec());
             state.finished = true;
         }
-        Some("ping" | "content_block_stop" | "message_delta") => {}
+        Some("message_delta") => {
+            state.stop_reason = event
+                .get("delta")
+                .and_then(|delta| delta.get("stop_reason"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if let Some(usage) = project_anthropic_usage_optional(event.get("usage")) {
+                state.usage = Some(usage);
+            }
+        }
+        Some("ping") => {}
         Some("error") => {
             return Err(provider_protocol_error(
                 &state.request_id,
@@ -1433,19 +1550,158 @@ fn project_anthropic_sse_event(
     Ok(())
 }
 
-fn base_stream_response(state: &AnthropicSseProjectionState, status: &str) -> Value {
+fn project_anthropic_sse_content_block_start(
+    state: &mut AnthropicSseProjectionState,
+    event: &Value,
+) -> Result<(), V3ProviderError> {
+    let block = event.get("content_block").unwrap_or(&Value::Null);
+    match block.get("type").and_then(Value::as_str) {
+        Some("text") if !state.text_started => {
+            state.text_started = true;
+            state.ready.push_back(sse_json_frame(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant","content":[]}}),
+            )?);
+            state.ready.push_back(sse_json_frame(
+                "response.content_part.added",
+                json!({"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}),
+            )?);
+        }
+        Some("tool_use") => {
+            let index = event.get("index").and_then(Value::as_u64).unwrap_or(0);
+            let call_id = block
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("call_0")
+                .to_string();
+            let name = block
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("tool")
+                .to_string();
+            state.active_tool_blocks.insert(
+                index,
+                AnthropicSseToolBlock {
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    initial_input: block.get("input").cloned().unwrap_or_else(|| json!({})),
+                    partial_json: String::new(),
+                },
+            );
+            state.ready.push_back(sse_json_frame(
+                "response.output_item.added",
+                if name == "apply_patch" {
+                    json!({
+                        "type":"response.output_item.added",
+                        "output_index":index,
+                        "item":{"type":"custom_tool_call","call_id":call_id,"name":name,"input":""}
+                    })
+                } else {
+                    json!({
+                        "type":"response.output_item.added",
+                        "output_index":index,
+                        "item":{"type":"function_call","call_id":call_id,"name":name,"arguments":""}
+                    })
+                },
+            )?);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn anthropic_sse_tool_block_to_responses_item(block: AnthropicSseToolBlock) -> Value {
+    let arguments = if block.partial_json.is_empty() {
+        serde_json::to_string(&block.initial_input).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        block.partial_json
+    };
+    if block.name == "apply_patch" {
+        return json!({
+            "type":"custom_tool_call",
+            "call_id":block.call_id,
+            "name":block.name,
+            "input":anthropic_apply_patch_freeform_input_from_arguments(&arguments)
+        });
+    }
     json!({
+        "type":"function_call",
+        "call_id":block.call_id,
+        "name":block.name,
+        "arguments":arguments
+    })
+}
+
+fn anthropic_apply_patch_freeform_input_from_arguments(arguments: &str) -> String {
+    serde_json::from_str::<Value>(arguments)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("patch")
+                .or_else(|| value.get("input"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| arguments.to_string())
+}
+
+fn anthropic_sse_response_status(state: &AnthropicSseProjectionState) -> &'static str {
+    if !state.completed_tool_items.is_empty()
+        || state.stop_reason.as_deref() == Some("tool_use")
+        || !state.active_tool_blocks.is_empty()
+    {
+        "requires_action"
+    } else {
+        "completed"
+    }
+}
+
+fn base_stream_response(state: &AnthropicSseProjectionState, status: &str) -> Value {
+    let mut output = Vec::new();
+    if state.text_started || !state.output_text.is_empty() {
+        output.push(json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type":"output_text","text":state.output_text}]
+        }));
+    }
+    output.extend(state.completed_tool_items.iter().cloned());
+    let mut response = json!({
         "id": state.response_id,
         "object": "response",
         "status": status,
         "model": state.model,
-        "output": [{
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type":"output_text","text":state.output_text}]
-        }],
+        "output": output,
         "output_text": state.output_text
-    })
+    });
+    if let Some(usage) = &state.usage {
+        response["usage"] = usage.clone();
+    }
+    response
+}
+
+fn project_anthropic_usage_optional(usage: Option<&Value>) -> Option<Value> {
+    let usage = usage?;
+    let input = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cached = usage
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Some(json!({
+        "input_tokens": input,
+        "input_tokens_details": {"cached_tokens": cached},
+        "output_tokens": output,
+        "total_tokens": input + output
+    }))
 }
 
 fn parse_sse_data_json(
@@ -1879,4 +2135,145 @@ async fn resolve_secret(
         });
     }
     Ok(secret)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wire::{
+        build_v3_provider_12_responses_wire_payload, V3ProviderAuthSecretHandle,
+        V3ResponsesProviderTarget,
+    };
+    use routecodex_v3_config::V3ResponsesTransportKind;
+    use serde_json::json;
+
+    fn minimax_anthropic_target() -> V3ResponsesProviderTarget {
+        V3ResponsesProviderTarget {
+            provider_id: "minimax".into(),
+            provider_type: "anthropic".into(),
+            base_url: "https://api.minimaxi.com/anthropic/v1".into(),
+            canonical_model_id: "MiniMax-M3".into(),
+            wire_model: "MiniMax-M3".into(),
+            auth: V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::Environment("MINIMAX_KEY".into()),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+        }
+    }
+
+    #[test]
+    fn anthropic_messages_body_preserves_responses_role_items_and_custom_tools() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-responses",
+            minimax_anthropic_target(),
+            json!({
+                "model":"gpt-5.5",
+                "input":[{
+                    "role":"user",
+                    "content":"Call apply_patch exactly once"
+                }],
+                "tools":[{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "description":"Use apply_patch with a raw patch payload",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
+                }],
+                "tool_choice":{"type":"custom","name":"apply_patch"},
+                "stream":true
+            }),
+        )
+        .unwrap();
+        let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+        assert_eq!(request.provider_id(), "minimax");
+        assert_eq!(request.body()["model"], "MiniMax-M3");
+        assert_eq!(
+            request.body()["messages"],
+            json!([{
+                "role":"user",
+                "content":[{"type":"text","text":"Call apply_patch exactly once"}]
+            }])
+        );
+        assert_eq!(request.body()["tools"][0]["name"], "apply_patch");
+        assert_eq!(
+            request.body()["tools"][0]["input_schema"],
+            json!({
+                "type":"object",
+                "properties":{"patch":{
+                    "type":"string",
+                    "description":"Raw apply_patch text. Send canonical *** Begin Patch / *** End Patch grammar as a single string. Put workspace-relative paths inside patch headers such as *** Add File: tmp/example.txt or *** Update File: src/main.ts. For temporary tests, use tmp/... inside the workspace, not /tmp/.... Do not use absolute paths."
+                }},
+                "required":["patch"],
+                "additionalProperties":false
+            })
+        );
+        assert_eq!(
+            request.body()["tool_choice"],
+            json!({"type":"custom","name":"apply_patch"})
+        );
+    }
+
+    #[test]
+    fn anthropic_messages_body_rejects_empty_messages_before_provider_send() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-empty",
+            minimax_anthropic_target(),
+            json!({
+                "model":"gpt-5.5",
+                "input":[],
+                "stream":true
+            }),
+        )
+        .unwrap();
+
+        let error = build_v3_transport_13_responses_request_from_v3_provider_12(wire)
+            .expect_err("empty Anthropic messages must fail before provider transport");
+        assert!(
+            error
+                .to_string()
+                .contains("Anthropic Messages request requires at least one message"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_sse_tool_use_projects_responses_function_call_item() {
+        let patch = "*** Begin Patch\n*** Add File: tmp/a.txt\n+hello\n*** End Patch";
+        let source = stream::iter([
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_tool\",\"model\":\"MiniMax-M3\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"I'll call it.\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_patch_1\",\"name\":\"apply_patch\",\"input\":{}}}\n\n".to_vec()),
+            Ok(format!(
+                "event: content_block_delta\ndata: {}\n\n",
+                serde_json::to_string(&json!({
+                    "type":"content_block_delta",
+                    "index":1,
+                    "delta":{
+                        "type":"input_json_delta",
+                        "partial_json": serde_json::to_string(&json!({"patch":patch})).unwrap()
+                    }
+                })).unwrap()
+            ).into_bytes()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"input_tokens\":7,\"output_tokens\":5,\"cache_read_input_tokens\":3}}\n\n".to_vec()),
+            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+        ]);
+        let mut projected =
+            project_anthropic_sse_to_responses(Box::pin(source), "req".into(), "minimax".into());
+        let mut text = String::new();
+        while let Some(chunk) = projected.next().await {
+            text.push_str(&String::from_utf8(chunk.unwrap()).unwrap());
+        }
+        assert!(text.contains("event: response.output_item.done"));
+        assert!(text.contains("\"type\":\"custom_tool_call\""));
+        assert!(text.contains("\"call_id\":\"call_patch_1\""));
+        assert!(text.contains("\"name\":\"apply_patch\""));
+        assert!(!text.contains("\"arguments\""));
+        assert!(text.contains("*** Begin Patch"));
+        assert!(text.contains("\"status\":\"requires_action\""));
+        assert!(text.contains("\"cached_tokens\":3"));
+    }
 }

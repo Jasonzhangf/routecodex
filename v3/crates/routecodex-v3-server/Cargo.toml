@@ -8,12 +8,13 @@ publish.workspace = true
 [dependencies]
 axum = { workspace = true, features = ["ws"] }
 futures-util.workspace = true
+libc.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
 routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
 serde_json.workspace = true
-sse-transport-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core" }
+routecodex-v3-sse = { path = "../routecodex-v3-sse" }
 tokio.workspace = true
 
 [dev-dependencies]

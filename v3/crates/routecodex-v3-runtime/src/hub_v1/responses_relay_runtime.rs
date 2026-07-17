@@ -15,6 +15,9 @@ use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
     V3ProviderResponseBody, V3ResponsesProviderTarget,
 };
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+};
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
@@ -43,6 +46,89 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub client_body: V3ResponsesRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
+    pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3RuntimeUsageSummary {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3RuntimeObservability {
+    pub entry_protocol: String,
+    pub execution_mode: String,
+    pub transport: String,
+    pub routing_group_id: Option<String>,
+    pub pool_id: Option<String>,
+    pub provider_id: Option<String>,
+    pub auth_alias: Option<String>,
+    pub provider_key: Option<String>,
+    pub provider_type: Option<String>,
+    pub model_id: Option<String>,
+    pub wire_model: Option<String>,
+    pub provider_status: Option<u16>,
+    pub response_status: Option<String>,
+    pub attempts: Option<usize>,
+    pub unavailable_candidates: Vec<String>,
+    pub target_path: Vec<String>,
+    pub usage: Option<V3RuntimeUsageSummary>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct V3RuntimeStreamObservation {
+    inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3RuntimeStreamObservationSnapshot {
+    pub response_status: Option<String>,
+    pub usage: Option<V3RuntimeUsageSummary>,
+}
+
+impl V3RuntimeStreamObservation {
+    pub fn snapshot(&self) -> Result<V3RuntimeStreamObservationSnapshot, String> {
+        self.inner
+            .lock()
+            .map(|snapshot| snapshot.clone())
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
+    }
+
+    fn record_event(&self, event: &Value) -> Result<(), String> {
+        let semantic = event.get("response").unwrap_or(event);
+        let response_status = semantic
+            .get("status")
+            .and_then(Value::as_str)
+            .filter(|status| !status.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                event
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .filter(|status| !status.trim().is_empty())
+                    .map(str::to_string)
+            });
+        let usage = extract_v3_runtime_usage_summary(semantic)
+            .or_else(|| extract_v3_runtime_usage_summary(event));
+        if response_status.is_none() && usage.is_none() {
+            return Ok(());
+        }
+        let mut snapshot = self
+            .inner
+            .lock()
+            .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
+        if response_status.is_some() {
+            snapshot.response_status = response_status;
+        }
+        if usage.is_some() {
+            snapshot.usage = usage;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +214,8 @@ impl std::fmt::Debug for V3ResponsesRelayRuntimeOutput {
             )
             .field("node_trace", &self.node_trace)
             .field("error_chain", &self.error_chain)
+            .field("observability", &self.observability)
+            .field("stream_observation", &self.stream_observation)
             .finish()
     }
 }
@@ -307,11 +395,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         &input.server_id,
         &req05.previous.previous.previous.previous.payload.0,
     )?;
+    let selected_observability =
+        build_v3_relay_observability_from_selected(&selected, transport_intent);
     let selected_target_provider_id = selected.candidate.provider_id.clone();
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
         req05,
         V3HubTargetResolution::Routed,
-        selected.candidate,
+        selected.candidate.clone(),
     );
     trace.push("V3HubReqTarget06Resolved");
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
@@ -347,6 +437,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 &response.body,
                 &selected_target_provider_id,
                 trace,
+                Some(selected_observability),
             ));
         }
         Err(error) => {
@@ -354,33 +445,57 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 error,
                 &selected_target_provider_id,
                 trace,
+                Some(selected_observability),
             ));
         }
     };
+    let provider_status = provider_raw.status();
+    let provider_id = provider_raw.provider_id().to_string();
     match provider_raw.into_body() {
         V3ProviderResponseBody::Json(bytes) => {
             let provider_value: Value = serde_json::from_slice(&bytes)?;
-            let action = run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+            let (action, finalized_provider_value) =
+                run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
             commit_or_release_responses_local_continuation(
                 local.as_ref(),
                 &requested_local_ids,
-                &provider_value,
+                &finalized_provider_value,
                 action,
             )?;
+            let mut observability = selected_observability;
+            observability.provider_status = Some(provider_status);
+            observability.provider_id = Some(provider_id);
+            observability.transport = "json".to_string();
+            observability.response_status =
+                read_v3_runtime_response_status(&finalized_provider_value);
+            observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
             Ok(V3ResponsesRelayRuntimeOutput {
                 status: 200,
-                client_body: V3ResponsesRelayClientBody::Json(provider_value),
+                client_body: V3ResponsesRelayClientBody::Json(finalized_provider_value),
                 node_trace: trace,
                 error_chain: None,
+                observability: Some(observability),
+                stream_observation: None,
             })
         }
         V3ProviderResponseBody::Sse(stream) => {
             push_streaming_response_trace(&mut trace);
+            let mut observability = selected_observability;
+            observability.provider_status = Some(provider_status);
+            observability.provider_id = Some(provider_id);
+            observability.transport = "sse".to_string();
+            observability.response_status = Some("streaming".to_string());
+            let stream_observation = V3RuntimeStreamObservation::default();
             Ok(V3ResponsesRelayRuntimeOutput {
                 status: 200,
-                client_body: V3ResponsesRelayClientBody::Sse(project_sse_stream(stream)),
+                client_body: V3ResponsesRelayClientBody::Sse(project_sse_stream(
+                    stream,
+                    stream_observation.clone(),
+                )),
                 node_trace: trace,
                 error_chain: None,
+                observability: Some(observability),
+                stream_observation: Some(stream_observation),
             })
         }
     }
@@ -389,6 +504,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
 fn find_responses_tool_output_ids(
     payload: &Value,
 ) -> Result<Vec<String>, V3ResponsesRelayRuntimeError> {
+    let paired_call_ids = payload_input_paired_call_ids(payload);
     let mut ids = Vec::new();
     for item in payload
         .get("input")
@@ -409,11 +525,37 @@ fn find_responses_tool_output_ids(
             .ok_or_else(|| V3LocalContinuationError::Codec {
                 message: "Responses tool output requires call_id".to_string(),
             })?;
+        if paired_call_ids.iter().any(|paired| paired == id) {
+            continue;
+        }
         if !ids.iter().any(|existing| existing == id) {
             ids.push(id.to_owned());
         }
     }
     Ok(ids)
+}
+
+fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
+    payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let item_type = item.get("type").and_then(Value::as_str)?;
+            if !matches!(
+                item_type,
+                "function_call" | "custom_tool_call" | "tool_call"
+            ) {
+                return None;
+            }
+            item.get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 fn commit_or_release_responses_local_continuation(
@@ -570,6 +712,7 @@ pub fn project_v3_responses_relay_runtime_failure(
         json!({"error":{"type":"runtime_error","message":error.to_string()}}),
         "none",
         Vec::new(),
+        None,
     )
 }
 
@@ -577,7 +720,7 @@ fn run_json_response_hooks(
     provider_value: &Value,
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
-) -> Result<V3HubContinuationCommit, V3ResponsesRelayRuntimeError> {
+) -> Result<(V3HubContinuationCommit, Value), V3ResponsesRelayRuntimeError> {
     let resp01 = build_v3_provider_resp_inbound_01_raw(
         provider_value.clone(),
         V3HubEntryProtocol::Responses,
@@ -595,12 +738,13 @@ fn run_json_response_hooks(
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     let action = resp04.action();
+    let finalized_payload = resp04.finalized_payload().clone();
     trace.push("V3HubRespContinuation04Committed");
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(action)
+    Ok((action, finalized_payload))
 }
 
 fn push_streaming_response_trace(trace: &mut Vec<&'static str>) {
@@ -612,11 +756,179 @@ fn push_streaming_response_trace(trace: &mut Vec<&'static str>) {
     trace.push("V3ServerRespOutbound06ClientFrame");
 }
 
+fn build_v3_relay_observability_from_selected(
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    transport_intent: V3HubTransportIntent,
+) -> V3RuntimeObservability {
+    V3RuntimeObservability {
+        entry_protocol: "responses".to_string(),
+        execution_mode: "relay".to_string(),
+        transport: v3_transport_intent_label(transport_intent).to_string(),
+        routing_group_id: Some(selected.route.routing_group_id.clone()),
+        pool_id: Some(selected.route.pool_id.clone()),
+        provider_id: Some(selected.candidate.provider_id.clone()),
+        auth_alias: Some(selected.candidate.auth_alias.clone()),
+        provider_key: Some(format!(
+            "{}:{}:{}",
+            selected.candidate.provider_id,
+            selected.candidate.auth_alias,
+            selected.candidate.model_id
+        )),
+        provider_type: Some(selected.candidate.provider_type.clone()),
+        model_id: Some(selected.candidate.model_id.clone()),
+        wire_model: Some(selected.candidate.wire_model.clone()),
+        provider_status: None,
+        response_status: None,
+        attempts: Some(selected.attempts),
+        unavailable_candidates: selected.unavailable_candidates.clone(),
+        target_path: selected.candidate.path.clone(),
+        usage: None,
+    }
+}
+
+fn v3_transport_intent_label(intent: V3HubTransportIntent) -> &'static str {
+    match intent {
+        V3HubTransportIntent::Json => "json",
+        V3HubTransportIntent::Sse => "sse",
+    }
+}
+
+fn read_v3_runtime_response_status(value: &Value) -> Option<String> {
+    value
+        .get("status")
+        .and_then(Value::as_str)
+        .filter(|status| !status.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3RuntimeUsageSummary> {
+    let usage = value.get("usage")?;
+    let summary = V3RuntimeUsageSummary {
+        input_tokens: read_v3_usage_u64(usage, &["input_tokens"])
+            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens"])),
+        output_tokens: read_v3_usage_u64(usage, &["output_tokens"])
+            .or_else(|| read_v3_usage_u64(usage, &["completion_tokens"])),
+        total_tokens: read_v3_usage_u64(usage, &["total_tokens"]),
+        cached_tokens: read_v3_usage_u64(usage, &["input_tokens_details", "cached_tokens"])
+            .or_else(|| read_v3_usage_u64(usage, &["input_tokens_details", "cached_read_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["input_tokens_details", "cache_read_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cached_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cached_read_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens_details", "cache_read_tokens"]))
+            .or_else(|| read_v3_usage_u64(usage, &["cache_read_input_tokens"])),
+    };
+    if summary.input_tokens.is_some()
+        || summary.output_tokens.is_some()
+        || summary.total_tokens.is_some()
+        || summary.cached_tokens.is_some()
+    {
+        Some(summary)
+    } else {
+        None
+    }
+}
+
+fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_u64().or_else(|| {
+        current
+            .as_i64()
+            .and_then(|number| u64::try_from(number).ok())
+    })
+}
+
 fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: V3RuntimeStreamObservation,
 ) -> V3ResponsesRelayClientStream {
-    use futures_util::StreamExt;
-    Box::pin(provider.map(|chunk| chunk.map_err(|error| error.to_string())))
+    use futures_util::{stream, StreamExt};
+
+    struct V3ObservedSseState {
+        provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+        decoder: SseIncrementalDecoder,
+        observation: V3RuntimeStreamObservation,
+        done: bool,
+    }
+
+    Box::pin(stream::unfold(
+        V3ObservedSseState {
+            provider,
+            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+            observation,
+            done: false,
+        },
+        |mut state| async move {
+            if state.done {
+                return None;
+            }
+            match state.provider.next().await {
+                Some(Ok(chunk)) => {
+                    let result = observe_v3_runtime_sse_chunk(
+                        &chunk,
+                        &mut state.decoder,
+                        &state.observation,
+                    )
+                    .map(|()| chunk);
+                    if result.is_err() {
+                        state.done = true;
+                    }
+                    Some((result, state))
+                }
+                Some(Err(error)) => {
+                    state.done = true;
+                    Some((Err(error.to_string()), state))
+                }
+                None => {
+                    state.done = true;
+                    match std::mem::replace(
+                        &mut state.decoder,
+                        SseIncrementalDecoder::new(SseTransportLimits::default()),
+                    )
+                    .finish()
+                    {
+                        Ok(()) => None,
+                        Err(error) => Some((Err(error.to_string()), state)),
+                    }
+                }
+            }
+        },
+    ))
+}
+
+fn observe_v3_runtime_sse_chunk(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    observation: &V3RuntimeStreamObservation,
+) -> Result<(), String> {
+    let frames = decoder
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(|error| error.to_string())?;
+    for frame in frames {
+        let mut data = String::new();
+        for field in frame.frame().fields() {
+            let SseField::Named { name, value } = field else {
+                continue;
+            };
+            if name != "data" {
+                continue;
+            }
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value);
+        }
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        let event: Value = serde_json::from_str(data)
+            .map_err(|error| format!("V3 Responses Relay SSE event is malformed: {error}"))?;
+        observation.record_event(&event)?;
+    }
+    Ok(())
 }
 
 fn resolve_target(
@@ -710,6 +1022,7 @@ fn provider_error_output(
     body: &[u8],
     provider_id: &str,
     trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
@@ -719,13 +1032,14 @@ fn provider_error_output(
     );
     let body = serde_json::from_slice::<Value>(body)
         .unwrap_or_else(|_| json!({"error":{"type":"provider_error","message":"provider error"}}));
-    error_output(source, status, body, provider_id, trace)
+    error_output(source, status, body, provider_id, trace, observability)
 }
 
 fn provider_runtime_error_output(
     error: V3ProviderError,
     provider_id: &str,
     trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
@@ -739,6 +1053,7 @@ fn provider_runtime_error_output(
         json!({"error":{"type":"provider_error","message":error.to_string()}}),
         provider_id,
         trace,
+        observability,
     )
 }
 
@@ -748,6 +1063,7 @@ fn error_output(
     client_response: Value,
     provider_id: &str,
     mut trace: Vec<&'static str>,
+    mut observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     let classified = build_v3_error_02_classified_from_v3_error_01(source);
     let local = build_v3_error_03_target_local_action_from_v3_error_02(
@@ -761,10 +1077,46 @@ fn error_output(
     let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
     let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    if let Some(observability) = observability.as_mut() {
+        observability.response_status = Some("error".to_string());
+        if observability.provider_status.is_none() {
+            observability.provider_status = Some(status);
+        }
+        if observability.provider_id.is_none() && provider_id != "none" {
+            observability.provider_id = Some(provider_id.to_string());
+        }
+    }
     V3ResponsesRelayRuntimeOutput {
         status,
         client_body: V3ResponsesRelayClientBody::Json(client_response),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
+        observability,
+        stream_observation: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn usage_summary_counts_cache_reads_but_not_cache_writes() {
+        let summary = extract_v3_runtime_usage_summary(&json!({
+            "usage": {
+                "input_tokens": 59_842,
+                "input_tokens_details": {
+                    "cached_read_tokens": 41_984,
+                    "cached_write_tokens": 7,
+                    "cache_write_tokens": 11
+                },
+                "output_tokens": 822,
+                "total_tokens": 60_664
+            }
+        }))
+        .expect("usage summary");
+        assert_eq!(summary.input_tokens, Some(59_842));
+        assert_eq!(summary.cached_tokens, Some(41_984));
     }
 }

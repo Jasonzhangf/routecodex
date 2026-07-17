@@ -3631,6 +3631,19 @@
 - The F1 missing owners are registered in V3 function map: `v3.config_interpreter_contract`, `v3.debug_error_foundation`, `v3.foundation_p0_p2`, `v3.responses_direct_mvp_architecture`, `v3.responses_provider_runtime`, and `v3.virtual_router_target_interpreter`; `v3.config_interpreter_contract` also has its verification-map row.
 - Red fixtures lock the regression: missing chain owner, missing edge owner, and missing verification owner all fail in `npm run test:v3-resource-relation-edge-lock-red-fixtures`. This closes only F1; F2/F3/F4 stay independent.
 
+# 2026-07-17: V3 foreground monitor and Responses Relay full-history continuation truth
+
+- `rccv3 start` foreground stdout is a human operator monitor, while structured startup/request node events remain debug/log truth. Installed startup must print one minimal `[RouteCodexV3] Server started on <address>` line without lifecycle status JSON or raw node JSON; `/v1/responses` prints the old-production request shape with ANSI session color and highlighted key/value fields, and projected failures print red `❌` with ErrorErr chain identifiers.
+- Console color is display-only. It may be derived from transparent client headers/body/turn metadata or a request-local display key, but must never create a protocol-visible session/header, continuation scope, or provider/client payload field.
+- Responses Relay local continuation restore applies only to orphan tool outputs. If the current full-history `input` already contains a tool call and matching output with the same `call_id`, that pair is complete transcript truth and must not query the local continuation store.
+- Live installed 5555 evidence after the correction: minimal foreground startup line; colored request and error monitor lines; `/health` and `/v1/models` success; real provider single-turn JSON success; body-only `client_metadata` two-turn tool replay success without invented headers; no-session paired full-history replay HTTP 200/completed; V2 5520/4444/10000 stayed healthy concurrently.
+
+# 2026-07-17: `/v1/models` capability catalog uses explicit route-surface authority
+
+- For `server.models_capability_contract`, installed/live `/v1/models` must derive visible bare Codex model capabilities from compiled Virtual Router runtime status when it exists. Source-config projection is only for construction/test contexts without runtime status; it must not recover empty/malformed/conflicting runtime status.
+- The regression test must include a conflict case: source config advertises a different model, compiled runtime status advertises the actual route-surface models, and `/v1/models` exposes only runtime-status models.
+- Verified closeout: global install `0.90.3937`, one aggregate restart via install script, health ok on 4444/5520/10000, live 5520 `/v1/models` returned only `gpt-5.5` and `gpt-5.6-sol`; `gpt-5.5` had no `use_responses_lite`, `gpt-5.6-sol` retained `use_responses_lite=true`, and terra/luna were absent. Current 5520 VR status still includes `gpt-5.6-sol` in coding/thinking, so exposing `gpt-5.6-sol` is config truth, not model-catalog leakage.
+
 # 2026-07-17: V3 stopless hook belongs to servertool Chat Process skeleton
 
 - V3 normalization/projection nodes (`ReqInbound`, `RespInbound`, `ReqOutbound`, `RespOutbound`) must remain logic-free for tool governance and hook payload processing. The gate `verify:v3-normalization-payload-logic-boundary` plus red fixtures locks tool governance, schema judgment, tool-result rewrite, servertool/stopless hook logic, continuation restore/save semantics, and payload repair out of these boundary nodes.
@@ -3644,3 +3657,11 @@
 - Chat Process must select protocol governance from typed entry-protocol truth, not by guessing from payload keys such as `messages` or `contents`; otherwise unrelated protocols can be governed accidentally.
 - `ProviderReqCompat06ProviderCompat` and `ProviderRespCompat02ProviderCompat` are currently `binding_pending` skeleton contracts. Compat may apply provider-family micro-adjustments, but must not remap the whole protocol, re-run tool governance, select route/model, inject side-channel state, or fallback/silently repair.
 - Regression truth: `verify:v3-normalization-payload-logic-boundary` rejects OpenAI Chat request/response and Gemini request identity governance inside normalization, rejects tool governance in either compat node, and explicitly permits Anthropic protocol mapping.
+
+# 2026-07-17: V3 owns an independent SSE transport crate and Anthropic provider SSE projection
+
+- V3 SSE framing/lifecycle transport truth is `v3/crates/routecodex-v3-sse`; V3 provider/runtime/server crates must depend on `routecodex-v3-sse`, not the V2 `sharedmodule/llmswitch-core/.../sse-transport-core`. The crate is transport-only: incremental decode/encode, limits, backpressure/lifecycle terminal state; it must not own tool governance, continuation, stopless, routing, or provider selection.
+- Responses -> Anthropic Messages provider compat must preserve role/content input items even when they omit `type`, and must fail before provider send if the resulting `messages` array is empty. For Anthropic streaming, `content_block_start` with `tool_use` plus `input_json_delta` is provider protocol truth and must be projected to Responses tool items instead of being dropped as non-text.
+- `apply_patch` streamed through Anthropic provider compat is client-visible as Responses `custom_tool_call` with raw `input`; do not leak the patch through `function_call.arguments`. A tool-use stop projects `requires_action`.
+- Verified installed/live baseline: RouteCodex `0.90.3937`; 5555 normal SSE completed; apply_patch provider dry-run produced `MiniMax-M3` with one message; online freeform apply_patch replay exited 0 with exact raw patch and no arguments leak. Source baseline: V3 SSE 7 tests, provider-responses 28 tests, V3 fmt/clippy, function-map/mainline/Relay-closeout gates all pass.
+- Known separate lifecycle gap: `routecodex restart --port 5555` can report no managed server while V3 health/models and its listener remain live. Do not bypass this with broad/manual process killing; fix the managed lifecycle owner separately.

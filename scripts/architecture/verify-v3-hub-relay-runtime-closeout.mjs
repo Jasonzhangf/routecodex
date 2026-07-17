@@ -178,7 +178,9 @@ for (const phrase of [
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
   'execute_v3_responses_relay_dry_run_runtime',
-  'return responses_relay_output_response(output);',
+  'return responses_relay_output_response(output, stream_console_finalizer);',
+  'wrap_v3_relay_sse_console_stream',
+  'V3SseConsoleCloseoutStream',
 ]) requireText(server, serverPath, phrase);
 for (const phrase of [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',

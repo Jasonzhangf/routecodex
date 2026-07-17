@@ -6,8 +6,8 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream,
 };
-use sse_transport_core::{
-    build_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportError,
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportError,
     SseTransportLimits,
 };
 use std::collections::BTreeMap;
@@ -214,7 +214,7 @@ fn observe_sse_remote_continuation_chunk(
     observation_state: &V3SseRemoteContinuationObservationState,
 ) -> Result<(), V3Error01SourceRaised> {
     let frames = decoder
-        .push(build_sse_transport_in_01_raw_chunk(chunk))
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(sse_transport_source)?;
     for frame in frames {
         if let Some(response_id) =
@@ -233,7 +233,7 @@ fn observe_sse_remote_continuation_bytes(
     let mut pending_response_id = None;
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let frames = decoder
-        .push(build_sse_transport_in_01_raw_chunk(body))
+        .push(build_v3_sse_transport_in_01_raw_chunk(body))
         .map_err(sse_transport_source)?;
     for frame in frames {
         if let Some(response_id) = observe_sse_frame_remote_continuation(

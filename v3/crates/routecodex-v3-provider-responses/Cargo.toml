@@ -14,7 +14,7 @@ routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
 serde.workspace = true
 serde_json.workspace = true
-sse-transport-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core" }
+routecodex-v3-sse = { path = "../routecodex-v3-sse" }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true

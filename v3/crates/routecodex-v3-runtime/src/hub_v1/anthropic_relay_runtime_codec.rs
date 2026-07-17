@@ -1,9 +1,9 @@
 use super::V3AnthropicCodecError;
 use futures_util::StreamExt;
-use serde_json::{json, Map, Value};
-use sse_transport_core::{
-    build_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
 };
+use serde_json::{json, Map, Value};
 
 pub fn encode_v3_anthropic_request_as_responses_semantic(
     input: Value,
@@ -183,7 +183,7 @@ pub async fn project_v3_responses_sse_as_anthropic_events(
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| error.to_string())?;
         let frames = decoder
-            .push(build_sse_transport_in_01_raw_chunk(&chunk))
+            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
             .map_err(|error| error.to_string())?;
         for frame in frames {
             let (event, data) = response_sse_fields(frame.frame().fields())?;
