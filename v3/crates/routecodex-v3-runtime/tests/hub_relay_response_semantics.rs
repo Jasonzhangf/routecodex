@@ -114,6 +114,14 @@ fn stopless_response_hook_projects_cli_before_continuation_commit() {
         .as_str()
         .unwrap()
         .contains("routecodex hook run reasoningStop"));
+    assert!(payload["output"][0]["arguments"]
+        .as_str()
+        .unwrap()
+        .contains("--input-json '{}'"));
+    assert!(!payload["output"][0]["arguments"]
+        .as_str()
+        .unwrap()
+        .contains("status-control"));
 }
 
 #[test]
@@ -196,6 +204,51 @@ fn stopless_response_hook_requires_stop_finish_reason() {
     assert_eq!(
         resp04.finalized_payload()["output"][0]["text"],
         "ordinary completed text without stop schema"
+    );
+}
+
+#[test]
+fn stopless_response_hook_stopreason_two_does_not_require_finish_reason() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_continue_without_finish",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{
+                        "type":"output_text",
+                        "text":"```json\n{\"stopreason\":2,\"reason\":\"第一轮还没做完\",\"next_step\":\"等待 stop_message_auto 工具结果后继续第二轮验证\"}\n```"
+                    }]
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["output"][0]["call_id"], "call_stopless_reasoning");
+    let arguments = payload["output"][0]["arguments"].as_str().unwrap();
+    assert!(arguments.contains("routecodex hook run reasoningStop"));
+    assert!(
+        arguments
+            .contains("\\\"next_step\\\":\\\"等待 stop_message_auto 工具结果后继续第二轮验证\\\""),
+        "stopreason=2 next_step must reach the CLI status/control input: {arguments}"
+    );
+    assert!(
+        !arguments.contains("--input-json '{}'"),
+        "stopreason=2 must not be downgraded to missing-schema CLI input: {arguments}"
     );
 }
 

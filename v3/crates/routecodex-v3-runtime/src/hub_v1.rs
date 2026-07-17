@@ -1026,7 +1026,7 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
     action: V3HubContinuationCommit,
 ) -> Result<(), V3LocalContinuationError> {
     for context_id in restored_context_ids {
-        store.release(context_id);
+        store.release_in_scope(&scope, context_id);
     }
     if action != V3HubContinuationCommit::LocalContext {
         return Ok(());
@@ -1058,7 +1058,10 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
             message: "Resp04 local context has no tool call id".to_string(),
         });
     }
-    if let Some(duplicate) = context_ids.iter().find(|id| store.contains(id)) {
+    if let Some(duplicate) = context_ids
+        .iter()
+        .find(|id| store.contains_in_scope(&scope, id))
+    {
         return Err(V3LocalContinuationError::AlreadyCommitted {
             context_id: duplicate.clone(),
         });

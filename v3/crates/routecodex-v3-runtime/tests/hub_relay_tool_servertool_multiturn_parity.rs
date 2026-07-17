@@ -296,10 +296,16 @@ fn apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output
             })),
             &lookup,
             &V3HubServertoolRequestProfile::disabled(),
-        )
+    )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
-    let output = outcome.payload()["input"][0]["output"].as_str().unwrap();
+    let output = outcome.payload()["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["call_id"] == "call_apply_patch_freeform" && item.get("output").is_some())
+        .and_then(|item| item["output"].as_str())
+        .unwrap();
     assert!(output.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
     assert!(output.contains("Retry with apply_patch only"));
     assert!(output.contains("workspace-relative"));
@@ -338,8 +344,12 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
-    assert!(outcome.payload()["input"][0]["output"]
-        .as_str()
+    assert!(outcome.payload()["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["call_id"] == "call_apply_patch_legacy" && item.get("output").is_some())
+        .and_then(|item| item["output"].as_str())
         .unwrap()
         .starts_with("APPLY_PATCH_ERROR:"));
 }

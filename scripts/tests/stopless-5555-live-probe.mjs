@@ -22,9 +22,9 @@ function buildFirstBody(model) {
   const firstTurnText = [
     `这是停止检查在线验证。probeTag=${probeTag}`,
     '禁止调用工具，禁止解释。',
-    '如果当前没有任何 function_call_output 工具结果，就只输出 stop schema JSON：stopreason=2，reason="第一轮还没做完"，next_step="等待 stop_message_auto 工具结果后继续第二轮验证"。',
-    '如果你看到最新 function_call_output 的 output 文本里包含 "\\"repeatCount\\":1"，就只输出 stop schema JSON：stopreason=2，reason="第二轮还没做完"，next_step="基于第二轮工具结果继续最终核对"。',
-    '如果你看到最新 function_call_output 的 output 文本里包含 "\\"repeatCount\\":2"，就输出 stop schema JSON：stopreason=0，reason="已完成两轮停止检查恢复验证"，has_evidence=1，evidence="5555 live submit_tool_outputs"，issue_cause="无"，excluded_factors="已排除一轮即停回归"，diagnostic_order="首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出"，done_steps="完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop"，next_step=""，next_suggested_path=""，learned="summary must be markdown"。'
+    '如果当前没有任何 function_call_output 工具结果，就只输出 stop schema JSON：stopreason=2，current_goal="验证 V3 stopless 连续两轮恢复"，reason="第一轮还没做完"，next_step="继续第二轮 stopless 验证：只输出 stop schema JSON，stopreason=2，current_goal=\\"验证 V3 stopless 连续两轮恢复\\"，reason=\\"第二轮还没做完\\"，next_step=\\"继续最终核对：只输出 stop schema JSON，stopreason=0，current_goal=验证 V3 stopless 连续两轮恢复，reason=已完成两轮停止检查恢复验证，has_evidence=1，evidence=5555 live submit_tool_outputs，issue_cause=无，excluded_factors=已排除一轮即停回归，diagnostic_order=首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出，done_steps=完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop，next_step=，next_suggested_path=，learned=summary must be markdown\\""。',
+    '如果你收到的用户指令以"继续第二轮 stopless 验证"开头，就严格按其中要求只输出 stopreason=2 的 schema。',
+    '如果你收到的用户指令以"继续最终核对"开头，就严格按其中要求只输出 stopreason=0 的 schema。'
   ].join('\n');
 
   if (probeMode === 'continuation') {
@@ -108,11 +108,19 @@ async function requestJson(url, body, extraHeaders = {}) {
 }
 
 function extractRequiredActionToolCalls(responseBody) {
-  const toolCalls = responseBody?.required_action?.submit_tool_outputs?.tool_calls;
-  if (!Array.isArray(toolCalls)) {
-    return [];
+  const toolCalls = [];
+  const requiredActionCalls = responseBody?.required_action?.submit_tool_outputs?.tool_calls;
+  if (Array.isArray(requiredActionCalls)) {
+    toolCalls.push(...requiredActionCalls.filter((item) => item && typeof item === 'object'));
   }
-  return toolCalls.filter((item) => item && typeof item === 'object');
+  const outputCalls = responseBody?.output;
+  if (Array.isArray(outputCalls)) {
+    toolCalls.push(...outputCalls.filter((item) => (
+      item && typeof item === 'object'
+      && ['function_call', 'custom_tool_call', 'tool_call'].includes(item.type)
+    )));
+  }
+  return toolCalls;
 }
 
 function extractExecCommand(responseBody) {
@@ -129,7 +137,7 @@ function extractExecCommand(responseBody) {
   }
   const parsed = parseExecCommandArguments(rawArgs);
   return {
-    toolCallId: call.tool_call_id || call.id || null,
+    toolCallId: call.tool_call_id || call.call_id || call.id || null,
     command: typeof parsed?.cmd === 'string' ? parsed.cmd : null
   };
 }
@@ -186,7 +194,7 @@ function extractReasoningStop(responseBody) {
   }
   const rawArgs = call?.function?.arguments ?? call?.arguments;
   return {
-    toolCallId: call.tool_call_id || call.id || null,
+    toolCallId: call.tool_call_id || call.call_id || call.id || null,
     arguments: typeof rawArgs === 'string' ? rawArgs : null
   };
 }
@@ -297,7 +305,7 @@ function isStopMessageAutoCommand(command) {
   );
 }
 
-async function runResumeRound(responseId, toolCallId, command) {
+async function runResumeRound(model, responseId, toolCallId, command) {
   const cliRun = spawnSync('sh', ['-c', command], {
     encoding: 'utf8',
     maxBuffer: 4 * 1024 * 1024,
@@ -321,14 +329,27 @@ async function runResumeRound(responseId, toolCallId, command) {
   }
   const cliOutput = (cliRun.stdout ?? '').trim();
   const response = await requestJson(
-    `${baseUrl}/v1/responses/${encodeURIComponent(responseId)}/submit_tool_outputs`,
+    `${baseUrl}/v1/responses`,
     {
-      tool_outputs: [
+      model,
+      stream: false,
+      previous_response_id: responseId,
+      metadata: {
+        sessionId,
+        conversationId: sessionId
+      },
+      input: [
         {
-          tool_call_id: toolCallId,
+          type: 'function_call_output',
+          call_id: toolCallId,
           output: cliOutput
         }
       ]
+    },
+    {
+      ...(routeHint ? { 'x-route-hint': routeHint } : {}),
+      'x-session-id': sessionId,
+      'x-conversation-id': sessionId
     }
   );
   return {
@@ -406,7 +427,7 @@ async function main() {
         if (!currentResponseId || !currentToolCallId || !currentCommand) {
           break;
         }
-        const resume = await runResumeRound(currentResponseId, currentToolCallId, currentCommand);
+        const resume = await runResumeRound(model, currentResponseId, currentToolCallId, currentCommand);
         report.resumeChain.push({
           round,
           cliOutput: resume.cliOutput,
@@ -421,9 +442,21 @@ async function main() {
         }
       }
 
-      report.finalStatus = report.resumeChain.at(-1)?.responseStatus || summary.responseStatus || 'unknown';
+      const firstResume = report.resumeChain[0];
+      const finalResume = report.resumeChain.at(-1);
+      const completedTwoRoundLoop = report.resumeChain.length === 2
+        && firstResume?.hasExecCommand === true
+        && firstResume?.isStopMessageAutoExecCommand === true
+        && finalResume?.responseStatus === 'completed'
+        && !finalResume?.errorCode;
+      report.finalStatus = completedTwoRoundLoop
+        ? 'completed'
+        : 'invalid_stopless_continuation_loop';
       await fs.writeFile(outputPath, JSON.stringify(report, null, 2));
       console.log(JSON.stringify(report, null, 2));
+      if (!completedTwoRoundLoop) {
+        process.exitCode = 3;
+      }
       return;
     }
   }

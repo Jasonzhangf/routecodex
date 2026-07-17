@@ -505,7 +505,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     } else {
         V3HubTransportIntent::Json
     };
-    let requested_local_ids = find_responses_tool_output_ids(&input.payload)?;
+    let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -521,43 +521,44 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         server_routing_group(manifest, &input.server_id)?,
         &input.request_id,
     );
-    let lookup =
-        if let (Some(local), Some(context_id)) = (local.as_ref(), requested_local_ids.first()) {
-            if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
-                return Err(V3ResponsesRelayRuntimeError::LocalContinuationScopeMismatch);
-            }
-            let request = V3LocalContinuationReq04RestoreRequest::local(
-                context_id,
-                local.scope.local_key(),
-                local.now_epoch_ms,
-            );
-            let store = local.state.lock_store()?;
-            let context = store
-                .restore_at_req04(&request)?
-                .canonical_context()
-                .clone();
-            for additional_id in requested_local_ids.iter().skip(1) {
-                let additional = store
-                    .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
-                        additional_id,
-                        local.scope.local_key(),
-                        local.now_epoch_ms,
-                    ))?
-                    .canonical_context();
-                if additional != &context {
-                    return Err(V3LocalContinuationError::Codec {
-                        message: "tool outputs reference different local continuation contexts"
-                            .to_string(),
-                    }
-                    .into());
+    let lookup = if let (Some(local), Some(context_id)) =
+        (local.as_ref(), local_tool_output_ids.restore_ids.first())
+    {
+        if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
+            return Err(V3ResponsesRelayRuntimeError::LocalContinuationScopeMismatch);
+        }
+        let request = V3LocalContinuationReq04RestoreRequest::local(
+            context_id,
+            local.scope.local_key(),
+            local.now_epoch_ms,
+        );
+        let store = local.state.lock_store()?;
+        let context = store
+            .restore_at_req04(&request)?
+            .canonical_context()
+            .clone();
+        for additional_id in local_tool_output_ids.restore_ids.iter().skip(1) {
+            let additional = store
+                .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
+                    additional_id,
+                    local.scope.local_key(),
+                    local.now_epoch_ms,
+                ))?
+                .canonical_context();
+            if additional != &context {
+                return Err(V3LocalContinuationError::Codec {
+                    message: "tool outputs reference different local continuation contexts"
+                        .to_string(),
                 }
+                .into());
             }
-            drop(store);
-            V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
-                .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
-        } else {
-            V3HubContinuationLookup::new(None, base_hub_scope)
-        };
+        }
+        drop(store);
+        V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
+            .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
+    } else {
+        V3HubContinuationLookup::new(None, base_hub_scope)
+    };
     let request_hook_profile = responses_relay_request_hook_profile();
     let request_outcome = compile_v3_hub_relay_request_hooks().run_from_normalized(
         req02,
@@ -705,7 +706,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
-                    &requested_local_ids,
+                    &local_tool_output_ids.consumed_ids,
                     &finalized_provider_value,
                     action,
                 )?;
@@ -717,7 +718,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
-                        .or_else(|| read_v3_runtime_finish_reason(&provider_value));
+                        .or_else(|| read_v3_runtime_finish_reason(&provider_value))
+                        .or_else(|| infer_v3_runtime_finish_reason(action));
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
@@ -736,7 +738,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
-                    &requested_local_ids,
+                    &local_tool_output_ids.consumed_ids,
                     &finalized_provider_value,
                     action,
                 )?;
@@ -760,7 +762,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                                 .snapshot()
                                 .ok()
                                 .and_then(|snapshot| snapshot.finish_reason)
-                        });
+                        })
+                        .or_else(|| infer_v3_runtime_finish_reason(action));
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value)
                     .or_else(|| extract_v3_runtime_usage_summary(&provider_value))
                     .or_else(|| {
@@ -784,11 +787,17 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     }
 }
 
+#[derive(Debug, Default)]
+struct V3ResponsesRelayToolOutputIds {
+    restore_ids: Vec<String>,
+    consumed_ids: Vec<String>,
+}
+
 fn find_responses_tool_output_ids(
     payload: &Value,
-) -> Result<Vec<String>, V3ResponsesRelayRuntimeError> {
+) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
     let paired_call_ids = payload_input_paired_call_ids(payload);
-    let mut ids = Vec::new();
+    let mut ids = V3ResponsesRelayToolOutputIds::default();
     for item in payload
         .get("input")
         .and_then(Value::as_array)
@@ -803,16 +812,20 @@ fn find_responses_tool_output_ids(
         }
         let id = item
             .get("call_id")
+            .or_else(|| item.get("tool_call_id"))
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| V3LocalContinuationError::Codec {
                 message: "Responses tool output requires call_id".to_string(),
             })?;
+        if !ids.consumed_ids.iter().any(|existing| existing == id) {
+            ids.consumed_ids.push(id.to_owned());
+        }
         if paired_call_ids.iter().any(|paired| paired == id) {
             continue;
         }
-        if !ids.iter().any(|existing| existing == id) {
-            ids.push(id.to_owned());
+        if !ids.restore_ids.iter().any(|existing| existing == id) {
+            ids.restore_ids.push(id.to_owned());
         }
     }
     Ok(ids)
@@ -1201,6 +1214,13 @@ fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_runtime_string_path(value, &["response", "stopReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["choices", "0", "finish_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["candidates", "0", "finishReason"]))
+}
+
+fn infer_v3_runtime_finish_reason(action: V3HubContinuationCommit) -> Option<String> {
+    match action {
+        V3HubContinuationCommit::LocalContext => Some("tool_calls".to_string()),
+        V3HubContinuationCommit::None | V3HubContinuationCommit::RemoteBinding => None,
+    }
 }
 
 fn read_v3_runtime_string_path(value: &Value, path: &[&str]) -> Option<String> {

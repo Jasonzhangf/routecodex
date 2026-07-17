@@ -278,6 +278,26 @@
 - finishReason 是观测与 hook 输入，不是 MetadataCenter 控制补丁。若 console 没打印，先在 provider response / SSE terminal event / runtime observability 里保留并读取该字段；不要在 SSE writer、server handler 或 outbound projection 里猜 stopless。
 - Relay SSE 若需要 stopless，合法路径是 provider raw SSE 在 runtime response owner 内 materialize 成 Hub response semantic，再进入 Resp03 hook、Resp04 continuation commit、Resp05/06 client frame。禁止把 stopless schema 判断、CLI projection、continuation save/restore 放进 V3 SSE crate、server closeout wrapper 或 handler。
 - 请求侧顺序必须是 continuation/local context restore+merge -> stopless CLI result parse/rewrite -> tool output governance。disabled stopless profile 仍可保留已恢复的 function_call + current tool output；它只是不解析/改写 stopless CLI。
+
+## 2026-07-17 V3 stopless continuation closeout
+
+- 固定的 stopless `call_id` 不能作为全局 store key。`V3LocalContinuationStore` 必须使用
+  `(entry/session/conversation/port/routing-group scope, context_id)` 复合键；不同 scope
+  下的同名 call id 必须可以同时存在，跨 scope restore 必须显式失败。
+- Resp04 commit 前必须释放本轮请求已经消费的 `function_call_output` context。`restore_ids`
+  只表示当前 input 缺少配对 call、需要从本地 continuation restore；`consumed_ids` 表示
+  本轮所有已消费 output，二者不能混用。完整历史中已经带有配对 call 的 output 不应再次
+  restore，但仍必须在 Resp04 commit 前释放旧 context。
+- stopless CLI 投影必须使用可执行的空 JSON 参数：
+  `routecodex hook run reasoningStop --input-json '{}'`。`status-control` 不是合法的
+  JSON 输入，不得写进 provider-visible function-call arguments。
+- `stopreason=2` 是已解析到的非终态 schema，不等同 missing schema；响应 hook 必须把该
+  schema 作为 CLI status/control 输入传给 `reasoningStop`，让 CLI 返回 schema 中的
+  `next_step`。如果把它降级成 `{}`，下一轮只会拿到泛化 `继续。`，容易一轮静默停止。
+- stopless CLI 结果优先读取 `continuationPrompt`，再读取 `next_step`，并转为普通 user
+  prompt；不得把 CLI 控制结果重新伪装成 provider-visible built-in tool。
+- provider 没有 finish reason 时，只能在 Resp04 已确认 `LocalContext` 后把观测字段推导为
+  `tool_calls`；推导只用于 observability，不得反向驱动 stopless/schema 判定。
 - 必跑回归：Responses Relay local continuation JSON/SSE runtime integration、response stopless `requires_stop_finish_reason`、request stopless order/disabled profile、servertool multiturn parity stopless、relay response red fixtures，以及 global install + managed 5555 live probe。
 
 4. 已验证后必须升级

@@ -527,7 +527,7 @@ fn commit_or_release_local_continuation(
     };
     let mut store = local.state.lock_store()?;
     for context_id in restored_context_ids {
-        store.release(context_id);
+        store.release_in_scope(&local.scope.local_key(), context_id);
     }
     if action != V3HubContinuationCommit::LocalContext {
         return Ok(());
@@ -560,7 +560,10 @@ fn commit_or_release_local_continuation(
         }
         .into());
     }
-    if let Some(duplicate) = context_ids.iter().find(|id| store.contains(id)) {
+    if let Some(duplicate) = context_ids
+        .iter()
+        .find(|id| store.contains_in_scope(&local.scope.local_key(), id))
+    {
         return Err(V3LocalContinuationError::AlreadyCommitted {
             context_id: duplicate.clone(),
         }

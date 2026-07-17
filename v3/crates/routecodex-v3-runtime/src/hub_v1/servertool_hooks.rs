@@ -27,15 +27,20 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
     if status != "completed" {
         return Ok(input);
     }
-    if !response_has_stopless_stop_trigger(input.provider_payload().as_ref()) {
-        return Ok(input);
-    }
     let Some(text) = first_output_text(object.get("output")) else {
         return Ok(input);
     };
-    if stop_schema_is_terminal(text) {
-        return Ok(input);
-    }
+    let cli_input = match classify_stopless_schema(text) {
+        V3StoplessSchemaDecision::Terminal => return Ok(input),
+        V3StoplessSchemaDecision::Continue => stopless_cli_input_from_schema(text),
+        V3StoplessSchemaDecision::Missing => {
+            if !response_has_stopless_stop_trigger(input.provider_payload().as_ref()) {
+                return Ok(input);
+            }
+            None
+        }
+    };
+    let command = build_stopless_cli_command(cli_input.as_ref());
     let projected = json!({
         "id": object.get("id").cloned().unwrap_or_else(|| json!("resp_stopless_projected")),
         "status": "requires_action",
@@ -43,7 +48,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
             "type": "function_call",
             "call_id": STOPLESS_CALL_ID,
             "name": "exec_command",
-            "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json status-control\"}"
+            "arguments": json!({"cmd": command}).to_string()
         }]
     });
     *input.provider_payload_mut() = Arc::new(projected);
@@ -140,12 +145,96 @@ fn response_string_path(value: &Value, path: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn stop_schema_is_terminal(text: &str) -> bool {
-    text.contains("\"stopreason\"")
-        && (text.contains("\"stopreason\":0")
-            || text.contains("\"stopreason\": 0")
-            || text.contains("\"stopreason\":1")
-            || text.contains("\"stopreason\": 1"))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3StoplessSchemaDecision {
+    Missing,
+    Continue,
+    Terminal,
+}
+
+fn classify_stopless_schema(text: &str) -> V3StoplessSchemaDecision {
+    let Some(stopreason) = read_stopless_stopreason(text) else {
+        return V3StoplessSchemaDecision::Missing;
+    };
+    match stopreason {
+        0 | 1 => V3StoplessSchemaDecision::Terminal,
+        _ => V3StoplessSchemaDecision::Continue,
+    }
+}
+
+fn read_stopless_stopreason(text: &str) -> Option<i64> {
+    read_stopless_stopreason_from_json(text)
+        .or_else(|| {
+            read_stopless_json_object(text)
+                .as_ref()
+                .and_then(read_stopless_stopreason_from_value)
+        })
+        .or_else(|| read_stopless_stopreason_by_scan(text))
+}
+
+fn read_stopless_stopreason_from_json(text: &str) -> Option<i64> {
+    let parsed: Value = serde_json::from_str(text.trim()).ok()?;
+    read_stopless_stopreason_from_value(&parsed)
+}
+
+fn read_stopless_stopreason_from_value(parsed: &Value) -> Option<i64> {
+    parsed.get("stopreason").and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_str()?.trim().parse().ok())
+    })
+}
+
+fn stopless_cli_input_from_schema(text: &str) -> Option<Value> {
+    read_stopless_json_object(text).filter(|value| value.get("stopreason").is_some())
+}
+
+fn read_stopless_json_object(text: &str) -> Option<Value> {
+    let trimmed = text.trim();
+    if let Ok(Value::Object(object)) = serde_json::from_str::<Value>(trimmed) {
+        return Some(Value::Object(object));
+    }
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    match serde_json::from_str::<Value>(&text[start..=end]).ok()? {
+        Value::Object(object) => Some(Value::Object(object)),
+        _ => None,
+    }
+}
+
+fn build_stopless_cli_command(cli_input: Option<&Value>) -> String {
+    let input_json = cli_input
+        .map(Value::to_string)
+        .unwrap_or_else(|| "{}".to_string());
+    format!(
+        "routecodex hook run reasoningStop --input-json {}",
+        shell_quote_for_stopless_cli(&input_json)
+    )
+}
+
+fn shell_quote_for_stopless_cli(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn read_stopless_stopreason_by_scan(text: &str) -> Option<i64> {
+    let key_index = text.find("\"stopreason\"")?;
+    let tail = &text[key_index + "\"stopreason\"".len()..];
+    let colon_index = tail.find(':')?;
+    let mut value = tail[colon_index + 1..].trim_start();
+    if let Some(rest) = value.strip_prefix('"') {
+        value = rest.trim_start();
+    }
+    let digits: String = value
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '-')
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 fn is_stopless_cli_output(item: &Value) -> bool {
@@ -176,6 +265,7 @@ fn parse_stopless_next_step(
     })?;
     Ok(parsed
         .get("next_step")
+        .or_else(|| parsed.get("continuationPrompt"))
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(STOPLESS_DEFAULT_PROMPT)

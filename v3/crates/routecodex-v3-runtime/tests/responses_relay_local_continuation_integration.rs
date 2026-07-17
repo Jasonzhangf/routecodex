@@ -22,6 +22,10 @@ struct StoplessSseTransport {
     captures: Mutex<Vec<Value>>,
 }
 
+struct ApplyPatchSseTransport {
+    captures: Mutex<Vec<Value>>,
+}
+
 #[async_trait]
 impl ResponsesTransport for SequentialJsonTransport {
     async fn send(
@@ -53,6 +57,63 @@ impl ResponsesTransport for StoplessSseTransport {
         let stream = futures_util::stream::iter([
             Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"streamed stopless without schema\"}\n\n".to_vec()),
             Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stopless_sse\",\"object\":\"response\",\"status\":\"completed\",\"finish_reason\":\"stop\",\"output\":[]}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for ApplyPatchSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.captures.lock().unwrap().push(request.body().clone());
+        let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch";
+        let arguments = serde_json::to_string(&json!({"patch": patch})).unwrap();
+        let added = json!({
+            "type":"response.output_item.added",
+            "output_index":0,
+            "item":{
+                "type":"function_call",
+                "call_id":"call_apply_patch_sse",
+                "name":"apply_patch",
+                "arguments":""
+            }
+        });
+        let arguments_done = json!({
+            "type":"response.function_call_arguments.done",
+            "output_index":0,
+            "call_id":"call_apply_patch_sse",
+            "arguments":arguments
+        });
+        let completed = json!({
+            "type":"response.completed",
+            "response":{
+                "id":"resp_apply_patch_sse",
+                "object":"response",
+                "status":"completed",
+                "finish_reason":"tool_calls",
+                "output":[]
+            }
+        });
+        let stream = futures_util::stream::iter([
+            Ok(format!("event: response.output_item.added\ndata: {added}\n\n").into_bytes()),
+            Ok(
+                format!("event: response.function_call_arguments.done\ndata: {arguments_done}\n\n")
+                    .into_bytes(),
+            ),
+            Ok(format!("event: response.completed\ndata: {completed}\n\n").into_bytes()),
             Ok(b"data: [DONE]\n\n".to_vec()),
         ]);
         Ok(V3ProviderResp14Raw::from_sse(
@@ -186,6 +247,177 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
 }
 
 #[tokio::test]
+async fn json_stopless_repeat_releases_consumed_context_before_next_projection() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "id":"resp_stopless_repeat_1",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"round one\",\"next_step\":\"continue round two\"}"}]
+                }]
+            }),
+            json!({
+                "id":"resp_stopless_repeat_2",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"round two\",\"next_step\":\"continue round three\"}"}]
+                }]
+            }),
+            json!({
+                "id":"resp_stopless_repeat_3",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"{\"stopreason\":0,\"reason\":\"done\"}"}]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-repeat",
+        "conversation-stopless-repeat",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-repeat-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Trigger repeat stopless"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        40_000,
+    )
+    .await
+    .unwrap();
+    let first_observability = first
+        .observability
+        .as_ref()
+        .expect("first repeated stopless turn must expose observability");
+    assert_eq!(
+        first_observability.finish_reason.as_deref(),
+        Some("tool_calls")
+    );
+    match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            assert_eq!(body["output"][0]["call_id"], "call_stopless_reasoning");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless repeat turn must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-repeat-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"{\"next_step\":\"continue round two\"}"
+                    }
+                ],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        41_000,
+    )
+    .await
+    .unwrap();
+    let second_observability = second
+        .observability
+        .as_ref()
+        .expect("second repeated stopless turn must expose observability");
+    assert_eq!(
+        second_observability.finish_reason.as_deref(),
+        Some("tool_calls")
+    );
+    match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            assert_eq!(body["output"][0]["call_id"], "call_stopless_reasoning");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second stopless repeat turn must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+
+    let third = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-repeat-3".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"next_step\":\"continue round three\"}"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        42_000,
+    )
+    .await
+    .unwrap();
+    match third.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("third stopless repeat turn must be JSON"),
+    }
+    assert!(state.is_empty().unwrap());
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 3);
+    assert_eq!(
+        captures[1]["input"],
+        json!([{"role":"user","content":"continue round two"}])
+    );
+    for capture in captures.iter().skip(1) {
+        let provider_wire = serde_json::to_string(capture).unwrap();
+        assert!(provider_wire.contains("stopreason"));
+        for forbidden in [
+            "call_stopless_reasoning",
+            "function_call_output",
+            "routecodex hook run reasoningStop",
+        ] {
+            assert!(
+                !provider_wire.contains(forbidden),
+                "provider payload leaked stopless artifact: {forbidden}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context() {
     let transport = StoplessSseTransport {
         captures: Mutex::new(Vec::new()),
@@ -249,6 +481,66 @@ async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context
     let snapshot = stream_observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("requires_action"));
     assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+}
+
+#[tokio::test]
+async fn sse_runtime_projects_apply_patch_at_resp03_before_client_frame_and_commit() {
+    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch";
+    let transport = ApplyPatchSseTransport {
+        captures: Mutex::new(Vec::new()),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-apply-patch-sse",
+        "conversation-apply-patch-sse",
+        5555,
+        "controlled",
+    );
+
+    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-apply-patch-sse-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"Patch a file over SSE",
+                "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}],
+                "stream":true
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        33_000,
+    )
+    .await
+    .unwrap();
+
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("SSE apply_patch turn must expose observability");
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    assert_eq!(observability.finish_reason.as_deref(), Some("tool_calls"));
+    match output.client_body {
+        V3ResponsesRelayClientBody::Sse(mut stream) => {
+            let mut forwarded = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                forwarded.extend(chunk.expect("projected apply_patch SSE chunk"));
+            }
+            let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("\"type\":\"custom_tool_call\""));
+            assert!(text.contains("\"name\":\"apply_patch\""));
+            assert!(text.contains("\"call_id\":\"call_apply_patch_sse\""));
+            assert!(text.contains(&serde_json::to_string(patch).unwrap()));
+            assert!(!text.contains("\"arguments\""));
+            assert!(text.contains("[DONE]"));
+        }
+        V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
 }
 
 #[tokio::test]

@@ -209,7 +209,22 @@ pub enum V3LocalContinuationError {
 
 #[derive(Debug, Default)]
 pub struct V3LocalContinuationStore {
-    records: BTreeMap<String, V3LocalContinuationImmutableRecord>,
+    records: BTreeMap<V3LocalContinuationStoreKey, V3LocalContinuationImmutableRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct V3LocalContinuationStoreKey {
+    scope: V3LocalContinuationScopeKey,
+    context_id: String,
+}
+
+impl V3LocalContinuationStoreKey {
+    fn new(scope: V3LocalContinuationScopeKey, context_id: impl Into<String>) -> Self {
+        Self {
+            scope,
+            context_id: context_id.into(),
+        }
+    }
 }
 
 impl V3LocalContinuationStore {
@@ -227,7 +242,8 @@ impl V3LocalContinuationStore {
                 context_id: input.context_id,
             });
         }
-        if self.records.contains_key(&input.context_id) {
+        let key = V3LocalContinuationStoreKey::new(input.scope.clone(), input.context_id.clone());
+        if self.records.contains_key(&key) {
             return Err(V3LocalContinuationError::AlreadyCommitted {
                 context_id: input.context_id,
             });
@@ -240,7 +256,7 @@ impl V3LocalContinuationStore {
             expires_at_epoch_ms: input.expires_at_epoch_ms,
             saved_at_boundary: V3LocalContinuationSaveBoundary::Resp04,
         };
-        self.records.insert(record.context_id.clone(), record);
+        self.records.insert(key, record);
         Ok(V3LocalContinuationResp04CommitResult::Stored)
     }
 
@@ -251,11 +267,25 @@ impl V3LocalContinuationStore {
         if request.owner != V3LocalContinuationRestoreOwner::RouteCodexLocal {
             return Err(V3LocalContinuationError::CrossOwner);
         }
-        let record = self.records.get(&request.context_id).ok_or_else(|| {
-            V3LocalContinuationError::NotFound {
-                context_id: request.context_id.clone(),
+        let key =
+            V3LocalContinuationStoreKey::new(request.scope.clone(), request.context_id.clone());
+        let record = match self.records.get(&key) {
+            Some(record) => record,
+            None if self
+                .records
+                .values()
+                .any(|record| record.context_id == request.context_id) =>
+            {
+                return Err(V3LocalContinuationError::ScopeMismatch {
+                    context_id: request.context_id.clone(),
+                });
             }
-        })?;
+            None => {
+                return Err(V3LocalContinuationError::NotFound {
+                    context_id: request.context_id.clone(),
+                });
+            }
+        };
         if record.scope != request.scope {
             return Err(V3LocalContinuationError::ScopeMismatch {
                 context_id: request.context_id.clone(),
@@ -270,11 +300,43 @@ impl V3LocalContinuationStore {
     }
 
     pub fn release(&mut self, context_id: &str) -> bool {
-        self.records.remove(context_id).is_some()
+        let keys = self
+            .records
+            .keys()
+            .filter(|key| key.context_id == context_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        let removed = !keys.is_empty();
+        for key in keys {
+            self.records.remove(&key);
+        }
+        removed
+    }
+
+    pub fn release_in_scope(
+        &mut self,
+        scope: &V3LocalContinuationScopeKey,
+        context_id: &str,
+    ) -> bool {
+        self.records
+            .remove(&V3LocalContinuationStoreKey::new(
+                scope.clone(),
+                context_id.to_string(),
+            ))
+            .is_some()
     }
 
     pub fn contains(&self, context_id: &str) -> bool {
-        self.records.contains_key(context_id)
+        self.records
+            .keys()
+            .any(|key| key.context_id.as_str() == context_id)
+    }
+
+    pub fn contains_in_scope(&self, scope: &V3LocalContinuationScopeKey, context_id: &str) -> bool {
+        self.records.contains_key(&V3LocalContinuationStoreKey::new(
+            scope.clone(),
+            context_id.to_string(),
+        ))
     }
 
     pub fn len(&self) -> usize {

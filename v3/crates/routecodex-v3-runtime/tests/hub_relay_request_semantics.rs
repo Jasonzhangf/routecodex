@@ -522,6 +522,43 @@ fn stopless_request_hook_missing_next_step_uses_default_prompt() {
 }
 
 #[test]
+fn stopless_request_hook_accepts_cli_continuation_prompt() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_continuation_prompt"), scope())
+        .with_local_context(
+            "rcc_stopless_continuation_prompt",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"continuationPrompt\":\"继续。\"}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(
+        governed.payload()["input"],
+        json!([{"role":"user","content":"继续。"}])
+    );
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
 fn stopless_request_hook_output_string_is_required() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_bad_output"), scope())

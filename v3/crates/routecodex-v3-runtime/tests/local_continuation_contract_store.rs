@@ -208,6 +208,72 @@ fn duplicate_resp04_commit_cannot_overwrite_immutable_context() {
 }
 
 #[test]
+fn same_context_id_in_distinct_scope_does_not_collide() {
+    let mut store = V3LocalContinuationStore::default();
+    store
+        .commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
+            "call_stopless_reasoning",
+            scope(),
+            context(),
+            V3LocalContinuationTerminalOutcome::NonTerminal,
+            1_000,
+            9_000,
+        ))
+        .unwrap();
+    let second_scope = V3LocalContinuationScopeKey::responses(
+        "/v1/responses",
+        "session-other",
+        "conversation-other",
+        5555,
+        "relay-priority",
+    );
+    store
+        .commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
+            "call_stopless_reasoning",
+            second_scope.clone(),
+            json!({"response":{"id":"rcc_local_2","output":[]}}),
+            V3LocalContinuationTerminalOutcome::NonTerminal,
+            2_000,
+            10_000,
+        ))
+        .unwrap();
+
+    assert_eq!(store.len(), 2);
+    assert_eq!(
+        store
+            .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
+                "call_stopless_reasoning",
+                scope(),
+                3_000
+            ))
+            .unwrap()
+            .canonical_context(),
+        &context()
+    );
+    assert_eq!(
+        store
+            .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
+                "call_stopless_reasoning",
+                second_scope,
+                3_000
+            ))
+            .unwrap()
+            .canonical_context(),
+        &json!({"response":{"id":"rcc_local_2","output":[]}})
+    );
+    assert!(store.release_in_scope(&scope(), "call_stopless_reasoning"));
+    assert_eq!(store.len(), 1);
+    assert!(matches!(
+        store.restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
+            "call_stopless_reasoning",
+            scope(),
+            3_000
+        )),
+        Err(V3LocalContinuationError::ScopeMismatch { .. })
+    ));
+}
+
+#[test]
 fn remote_owner_cannot_restore_local_context() {
     let mut store = V3LocalContinuationStore::default();
     store

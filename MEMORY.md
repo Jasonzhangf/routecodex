@@ -3692,3 +3692,11 @@
 - The current profile is explicit `compat:passthrough`; this closes the runtime/map/hook landing point only. It does not claim V2 provider-specific profile loader parity or migration of the old 7 compat JSON profiles.
 - Compat boundary: provider-family micro-adjustments may live here later, but tool governance, apply_patch/servertool/stopless lifecycle, tool identity pairing, route/model selection, fallback, silent repair, and MetadataCenter/side-channel injection must remain outside these compat nodes.
 - Verified source baseline: V3 static hook/resource/normalization/module/architecture/function-map/mainline gates, V3 fmt/clippy, controlled Relay runtime integration tests, continuation/config/managed lifecycle tests, build:v3-cli, and red fixtures passed. No global install, restart, or live 5555 replay is claimed for this source slice.
+# 2026-07-17: V3 stopless continuation closeout
+
+- The reported `local continuation is already committed: call_stopless_reasoning` was a local Resp04 store collision, not an SSE projection failure. A fixed stopless call id must be keyed by the full continuation scope; local continuation records now use `(scope, context_id)`.
+- Resp04 releases every consumed tool-output context before committing the finalized stopless continuation. Only unpaired current outputs are restored; paired full-history outputs are not restored a second time.
+- The stopless CLI projection is executable with `routecodex hook run reasoningStop --input-json '{}'`; `continuationPrompt` is parsed as the next ordinary user prompt.
+- For `stopreason=2`, the response hook must pass the parsed stop schema as CLI status/control input instead of downgrading to `{}`; otherwise the next provider turn receives a generic `继续。` prompt and can one-round stop silently.
+- Finish reason inference is observability-only: when the provider omits a finish reason, finalized `LocalContext` may display `tool_calls`, but the inferred value cannot trigger hook/schema decisions.
+- Verified focused tests (8 response, 8 request, 8 Responses continuation, 11 store, 15 servertool parity), V3 architecture/red gates, global install, managed V3 5555 restart, and live three-state probe. Live result was `requires_action -> requires_action -> completed` with no duplicate commit or provider/client error.
