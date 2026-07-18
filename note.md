@@ -31473,3 +31473,8 @@ Pure Rust NAPI candidates:
 - Live 请求证据：真实 `POST http://127.0.0.1:5520/v1/responses model=asxs.gpt-5.5` marker `RCC_ASXS_KEY_AUDIT_LIVE_20260718T060525Z` 返回 HTTP 200/status completed/text `OK`。active log `/Volumes/extension/.rcc/logs/server-4444.log` 行 331328-331332 显示 `direct -> asxs[crsa].gpt-5.5`，usage `in:4408 out:17 total=4425 finish_reason=stop`。
 - Direct key matrix：使用同一 URL/header/UA 直接打 `https://api.asxs.top/v1/responses` 时，`CRS_OAI_KEY1` 返回 HTTP 200/completed/OK；`TEMP_ASXS_KEY` 与 `OPENAI_API_KEY` 返回 HTTP 401 `invalid_api_key`。只记录 env 名与指纹，不记录 secret 值。
 - 修正结论：asxs 当前 live 正常；前一轮 direct upstream 401/403/503 不能作为 asxs availability 真相，至少缺少 live auth-key 等价证明，且 401 明确符合 wrong-key probe。RouteCodex reasoning-effort no-loss/request-shape 修复仍有效，但不能把当前 asxs 说成仍坏。
+
+## 2026-07-18 15:20 +0800 V3 stopless alias normalization live replay
+- 这轮 5555 的 stopless 复核证明：response-side hook 继续强制把模型原文里的 legacy / invented alias 归一成 V2 真语义，`triggerHint` 只保留 `non_terminal_schema` / `invalid_schema` / `no_schema`，不会把 `schema_continue` 泄漏到下一轮 CLI 投影。
+- 定点 Rust gate：`cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics stopless_response_hook_ -- --nocapture` 14/14 PASS。
+- Live gate：`STOPLESS_BASE_URL=http://127.0.0.1:5555 STOPLESS_MODELS=gpt-5.5 STOPLESS_ROUTE_HINT=search STOPLESS_ATTEMPTS=3 STOPLESS_OUTPUT=/tmp/stopless-5555-live-probe.json node scripts/tests/stopless-5555-live-probe.mjs` 在当前 5555 上完成 `requires_action -> requires_action -> completed`，最终投影 CLI 命令携带 `triggerHint":"non_terminal_schema"`，`finalStatus=completed`。
