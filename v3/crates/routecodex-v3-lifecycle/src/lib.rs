@@ -225,6 +225,20 @@ impl V3ManagedLifecycle {
                 "managed instance has no enabled listeners".to_string(),
             ));
         }
+        if self.force_console && manifest.debug.log_file.is_none() {
+            if let Some(port) = listeners.first().map(|listener| listener.port) {
+                if let Some(home) = std::env::var_os("HOME") {
+                    manifest.debug.log_file = Some(
+                        PathBuf::from(home)
+                            .join(".rcc")
+                            .join("logs")
+                            .join(format!("server-{port}.log"))
+                            .display()
+                            .to_string(),
+                    );
+                }
+            }
+        }
         Ok((
             V3ManagedInstanceDeclaration {
                 schema_version: SCHEMA_VERSION,

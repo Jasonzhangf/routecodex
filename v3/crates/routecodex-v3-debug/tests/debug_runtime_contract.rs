@@ -160,6 +160,36 @@ fn file_sink_writes_redacted_json_and_sink_open_failure_is_explicit() {
 }
 
 #[test]
+fn file_sink_creates_parent_dirs_and_appends_human_console_lines() {
+    let path =
+        std::env::temp_dir().join(format!("routecodex-v3-debug-parent-{}", std::process::id()));
+    let file = path.join("nested").join("debug.jsonl");
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: Some(file.display().to_string()),
+        snapshots_enabled: false,
+        dry_run_enabled: false,
+        raw_request_retention: 0,
+        raw_response_retention: 0,
+        event_retention: 4,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    runtime
+        .append_human_console_line("[5555] ▶ [/v1/responses] request req-1 started")
+        .unwrap();
+    let redacted = runtime.redact_payload_for_side_channel(serde_json::json!({
+        "input": "visible",
+        "authorization": "Bearer side-channel-secret"
+    }));
+    assert_eq!(redacted["input"], "visible");
+    assert_eq!(redacted["authorization"], "[REDACTED]");
+    let written = fs::read_to_string(&file).unwrap();
+    assert!(written.contains("request req-1 started"));
+    fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
 fn retention_and_concurrent_event_order_are_bounded_and_unique() {
     let runtime = Arc::new(
         V3DebugRuntime::new(V3DebugRuntimeConfig {

@@ -10,7 +10,7 @@ use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc};
+use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
     sync::{mpsc, oneshot, Mutex},
     time::{timeout, Duration},
@@ -26,6 +26,76 @@ use tokio_tungstenite::{
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+struct TestHomeGuard {
+    previous: Option<OsString>,
+    path: PathBuf,
+}
+
+impl TestHomeGuard {
+    fn new(label: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "routecodex-v3-server-{label}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &path);
+        Self { previous, path }
+    }
+
+    fn codex_samples_root(&self, port: u16) -> PathBuf {
+        self.path
+            .join(".rcc")
+            .join("codex-samples")
+            .join("openai-responses")
+            .join("ports")
+            .join(port.to_string())
+    }
+}
+
+impl Drop for TestHomeGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            std::env::set_var("HOME", previous);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn assert_single_responses_sample_pair(
+    samples_root: &std::path::Path,
+    request_marker: &str,
+    response_marker: &str,
+) {
+    let entries = fs::read_dir(samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "one dry-run request should create one canonical sample directory under {samples_root:?}"
+    );
+    let sample_dir = entries[0].path();
+    let request = fs::read_to_string(sample_dir.join("request.json")).unwrap();
+    let response = fs::read_to_string(sample_dir.join("response.json")).unwrap();
+    assert!(
+        request.contains(request_marker),
+        "request sample must preserve entry payload marker, got {request}"
+    );
+    assert!(
+        response.contains(response_marker),
+        "response sample must preserve exit payload marker, got {response}"
+    );
+    assert!(
+        !request.contains("secret-key") && !response.contains("secret-key"),
+        "canonical samples must use debug redaction policy for secrets"
+    );
+}
 
 const HUB_V1_TEST_DECLARATION: &str = r#"
 [pipelines.hub_v1]
@@ -2588,6 +2658,7 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
 #[tokio::test]
 async fn p6_provider_request_dry_run_header_returns_final_request_without_upstream_send() {
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("direct-dry-run-blackbox");
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
     let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
@@ -2607,6 +2678,18 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
         .unwrap();
     let status = response.status();
     let response_body = response.text().await.unwrap();
+    let debug_status: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/status",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
     let provider_hit = timeout(Duration::from_millis(100), captures.recv())
         .await
         .is_ok();
@@ -2616,6 +2699,13 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
 
     assert_eq!(status, 200, "unexpected response body: {response_body}");
     let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(debug_status["debug"]["raw_request_count"], 1);
+    assert_eq!(debug_status["debug"]["raw_response_count"], 1);
+    assert_single_responses_sample_pair(
+        &samples_root,
+        "dry-run no upstream send",
+        "routecodex.pipeline_dry_run",
+    );
     assert_eq!(body["object"], "routecodex.pipeline_dry_run");
     assert_eq!(body["kind"], "provider_request");
     assert_eq!(body["dryRun"], true);
@@ -2649,6 +2739,7 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
 async fn responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send(
 ) {
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("relay-dry-run-blackbox");
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
     let handle = spawn_v3_server_aggregate(responses_relay_manifest(
@@ -2672,6 +2763,18 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
         .unwrap();
     let status = response.status();
     let response_body = response.text().await.unwrap();
+    let debug_status: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/status",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
     let provider_hit = timeout(Duration::from_millis(100), captures.recv())
         .await
         .is_ok();
@@ -2681,6 +2784,13 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
 
     assert_eq!(status, 200, "unexpected response body: {response_body}");
     let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(debug_status["debug"]["raw_request_count"], 1);
+    assert_eq!(debug_status["debug"]["raw_response_count"], 1);
+    assert_single_responses_sample_pair(
+        &samples_root,
+        "relay dry-run no upstream send",
+        "routecodex.pipeline_dry_run",
+    );
     let node_ids = body["dry_run"]["node_ids"]
         .as_array()
         .expect("dry-run body must expose node ids")

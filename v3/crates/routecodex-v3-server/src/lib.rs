@@ -51,6 +51,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -741,6 +742,17 @@ async fn pending_endpoint(
             error,
         ));
     }
+    if let Some(response) = capture_v3_live_raw_request(
+        &state,
+        &trace_scope,
+        &entry_protocol,
+        execution_mode,
+        &path,
+        &request_id,
+        &payload,
+    ) {
+        return response;
+    }
     let snapshot_session_id = if entry_protocol == "responses" {
         match start_v3_live_snapshot_session(&state, &trace_scope) {
             Ok(session_id) => session_id,
@@ -798,6 +810,17 @@ async fn pending_endpoint(
         ) {
             return response;
         }
+        if let Some(response) = capture_v3_foundation_runtime_response(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            execution_mode,
+            &path,
+            &request_id,
+            &output,
+        ) {
+            return response;
+        }
         return foundation_output_response(output);
     }
     if is_provider_request_dry_run(&request_headers)
@@ -836,6 +859,17 @@ async fn pending_endpoint(
             output.status,
             &output.node_trace,
             "provider_request_dry_run",
+        ) {
+            return response;
+        }
+        if let Some(response) = capture_v3_foundation_runtime_response(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            execution_mode,
+            &path,
+            &request_id,
+            &output,
         ) {
             return response;
         }
@@ -979,6 +1013,16 @@ async fn pending_endpoint(
                 Ok(output) => output,
                 Err(error) => project_v3_responses_relay_runtime_failure(error),
             };
+        if let Some(response) = capture_v3_responses_relay_response(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &output,
+        ) {
+            return response;
+        }
         if let Some(response) = record_v3_live_snapshot_projection(
             &state,
             &trace_scope,
@@ -1683,6 +1727,255 @@ fn record_and_emit_v3_error_projection(
     None
 }
 
+fn capture_v3_live_raw_request(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    entry_protocol: &str,
+    execution_mode: V3EntryProtocolExecutionMode,
+    endpoint: &str,
+    request_id: &str,
+    payload: &Value,
+) -> Option<Response<Body>> {
+    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        let payload = state.debug.redact_payload_for_side_channel(payload.clone());
+        if let Err(error) = persist_v3_codex_sample_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "request.json",
+            &payload,
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug02RawRequestCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
+        return None;
+    }
+    let projection = match state
+        .debug
+        .capture_raw_request(trace_scope, payload.clone())
+    {
+        Ok(projection) => projection,
+        Err(error) => {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug02RawRequestCaptured",
+                error,
+            )));
+        }
+    };
+    if let Some(projection) = projection {
+        if let Err(error) = persist_v3_codex_sample_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "request.json",
+            &projection.payload,
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug02RawRequestCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
+    }
+    None
+}
+
+fn capture_v3_responses_relay_response(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &V3ResponsesRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    let payload = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value.clone(),
+        V3ResponsesRelayClientBody::Sse(_) => json!({
+            "stream": true,
+            "status": output.status,
+            "node_trace": output.node_trace,
+            "error_chain": output.error_chain,
+            "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+        }),
+    };
+    let projection = match state.debug.capture_raw_response(trace_scope, payload) {
+        Ok(projection) => projection,
+        Err(error) => {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug03RawResponseCaptured",
+                error,
+            )));
+        }
+    };
+    if let Some(projection) = projection {
+        if let Err(error) = persist_v3_codex_sample_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "response.json",
+            &projection.payload,
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug03RawResponseCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
+    }
+    None
+}
+
+fn capture_v3_foundation_runtime_response(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    entry_protocol: &str,
+    execution_mode: V3EntryProtocolExecutionMode,
+    endpoint: &str,
+    request_id: &str,
+    output: &V3FoundationRuntimeOutput,
+) -> Option<Response<Body>> {
+    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        let payload = state
+            .debug
+            .redact_payload_for_side_channel(output.body.clone());
+        if let Err(error) = persist_v3_codex_sample_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "response.json",
+            &payload,
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug03RawResponseCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
+        return None;
+    }
+    let projection = match state
+        .debug
+        .capture_raw_response(trace_scope, output.body.clone())
+    {
+        Ok(projection) => projection,
+        Err(error) => {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug03RawResponseCaptured",
+                error,
+            )));
+        }
+    };
+    if let Some(projection) = projection {
+        if let Err(error) = persist_v3_codex_sample_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "response.json",
+            &projection.payload,
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug03RawResponseCaptured",
+                V3DebugError::Sink(error),
+            )));
+        }
+    }
+    None
+}
+
+fn project_v3_runtime_observability_debug(observability: &V3RuntimeObservability) -> Value {
+    json!({
+        "routing_group_id": observability.routing_group_id,
+        "pool_id": observability.pool_id,
+        "provider_id": observability.provider_id,
+        "provider_key": observability.provider_key,
+        "model_id": observability.model_id,
+        "wire_model": observability.wire_model,
+        "provider_type": observability.provider_type,
+        "attempts": observability.attempts,
+        "transport": observability.transport,
+        "provider_status": observability.provider_status,
+        "response_status": observability.response_status,
+        "finish_reason": observability.finish_reason,
+        "target_path": observability.target_path,
+        "unavailable_candidates": observability.unavailable_candidates,
+        "usage": observability.usage.as_ref().map(project_v3_runtime_usage_debug),
+    })
+}
+
+fn project_v3_runtime_usage_debug(usage: &V3RuntimeUsageSummary) -> Value {
+    json!({
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+        "cached_tokens": usage.cached_tokens,
+    })
+}
+
+fn persist_v3_codex_sample_payload(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    file_name: &str,
+    payload: &Value,
+) -> Result<(), String> {
+    let Some(root) = std::env::var_os("HOME") else {
+        return Ok(());
+    };
+    let dir = PathBuf::from(root)
+        .join(".rcc")
+        .join("codex-samples")
+        .join(format_v3_codex_sample_endpoint_dir(
+            entry_protocol,
+            endpoint,
+        ))
+        .join("ports")
+        .join(state.server.port.to_string())
+        .join(sanitize_v3_codex_sample_path_segment(request_id));
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(file_name);
+    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
+    serde_json::to_writer_pretty(&mut file, payload).map_err(|error| error.to_string())?;
+    file.write_all(b"\n").map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn format_v3_codex_sample_endpoint_dir(entry_protocol: &str, endpoint: &str) -> String {
+    match (entry_protocol, endpoint) {
+        ("responses", "/v1/responses") => "openai-responses".to_string(),
+        ("openai_chat", "/v1/chat/completions") => "openai-chat-completions".to_string(),
+        ("anthropic", "/v1/messages") => "anthropic-messages".to_string(),
+        ("gemini", _) => "gemini-generate-content".to_string(),
+        _ => sanitize_v3_codex_sample_path_segment(
+            endpoint.trim_start_matches('/').replace('/', "-").as_str(),
+        ),
+    }
+}
+
+fn sanitize_v3_codex_sample_path_segment(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn start_v3_live_snapshot_session(
     state: &V3ListenerState,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
@@ -1781,6 +2074,7 @@ fn emit_v3_request_start_console_line(
         raw_input_items
     );
     let color_key = resolve_v3_log_session_color_key(headers, payload, request_id);
+    append_v3_human_console_line(state, &line);
     println!(
         "{}",
         colorize_v3_request_console_line(&line, color_key.as_deref())
@@ -1858,6 +2152,7 @@ fn emit_v3_request_route_console_line(
     );
     let color_key =
         resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    append_v3_human_console_line(&context.state, &line);
     println!(
         "{}",
         colorize_v3_request_console_line(&line, color_key.as_deref())
@@ -1899,6 +2194,7 @@ fn emit_v3_request_complete_console_line(
     );
     let color_key =
         resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    append_v3_human_console_line(&context.state, &line);
     println!(
         "{}",
         colorize_v3_request_console_line(&line, color_key.as_deref())
@@ -1946,10 +2242,25 @@ fn emit_v3_usage_console_line(
     );
     let color_key =
         resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    append_v3_human_console_line(&context.state, &line);
     println!(
         "{}",
         colorize_v3_request_console_line(&line, color_key.as_deref())
     );
+}
+
+fn append_v3_human_console_line(state: &V3ListenerState, line: &str) {
+    if let Err(error) = state.debug.append_human_console_line(line) {
+        eprintln!(
+            "{}",
+            colorize_v3_error_console_line(&format!(
+                "[{}] ❌ [debug] {} request debug-log failed (status=500 error=V3E00 subcode=debug_sink node=V3DebugEventLedgerRecorded) {}",
+                state.server.port,
+                console_timestamp_hhmmss(),
+                error
+            ))
+        );
+    }
 }
 
 fn emit_v3_observability_console_lines(

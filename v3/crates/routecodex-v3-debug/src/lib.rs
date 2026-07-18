@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -218,6 +218,10 @@ struct V3SnapshotSession {
 impl V3DebugRuntime {
     pub fn new(config: V3DebugRuntimeConfig) -> V3DebugResult<Self> {
         if let Some(path) = config.log_file.as_deref() {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+            }
             OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -283,6 +287,23 @@ impl V3DebugRuntime {
         }
         self.write_sink(&projection)?;
         Ok(projection)
+    }
+
+    pub fn append_human_console_line(&self, line: &str) -> V3DebugResult<()> {
+        let Some(path) = self.config.log_file.as_deref() else {
+            return Ok(());
+        };
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+        writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
+        Ok(())
+    }
+
+    pub fn redact_payload_for_side_channel(&self, payload: Value) -> Value {
+        redact_debug_value(&self.config.redaction, payload)
     }
 
     pub fn capture_raw_request(

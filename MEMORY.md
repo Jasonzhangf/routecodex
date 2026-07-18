@@ -3638,6 +3638,12 @@
 - Responses Relay local continuation restore applies only to orphan tool outputs. If the current full-history `input` already contains a tool call and matching output with the same `call_id`, that pair is complete transcript truth and must not query the local continuation store.
 - Live installed 5555 evidence after the correction: minimal foreground startup line; colored request and error monitor lines; `/health` and `/v1/models` success; real provider single-turn JSON success; body-only `client_metadata` two-turn tool replay success without invented headers; no-session paired full-history replay HTTP 200/completed; V2 5520/4444/10000 stayed healthy concurrently.
 
+# 2026-07-18: V3 live observability closeout requires entry+exit blackbox
+
+- V3 foreground console alone is not sufficient evidence for `/v1/responses` live closeout. A closed debug/sample loop must prove both sides: `/_routecodex/debug/status` raw request/response counts increment, `~/.rcc/logs/server-<port>.log` receives human monitor lines, and canonical `~/.rcc/codex-samples/openai-responses/ports/<port>/<requestId>/request.json|response.json` exist.
+- `rccv3 start --snap` with no configured `debug.log_file` must project `~/.rcc/logs/server-<first listener port>.log` and keep snapshots enabled. Blackbox proof is a real provider-request dry-run through the running server, not only debug crate unit tests.
+- For Responses Relay SSE replay, success evidence is HTTP 200 plus semantic terminal (`response.completed`/`response.done`) and `[DONE]`, absence of synthetic failure/local continuation/provider availability errors, and matching route/usage/finishReason console lines. On 2026-07-18, prior 561899 payload replayed on installed 5555 with `response.completed=2`, `[DONE]=1`, and usage `in:162538 out:653 total=163191`.
+
 # 2026-07-17: `/v1/models` capability catalog uses explicit route-surface authority
 
 - For `server.models_capability_contract`, installed/live `/v1/models` must derive visible bare Codex model capabilities from compiled Virtual Router runtime status when it exists. Source-config projection is only for construction/test contexts without runtime status; it must not recover empty/malformed/conflicting runtime status.

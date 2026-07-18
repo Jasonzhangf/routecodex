@@ -255,16 +255,18 @@ fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Chil
         .unwrap()
 }
 
-fn spawn_top_level_start_with_args(
+fn spawn_top_level_start_with_args_and_home(
     binary: &str,
     state_root: &Path,
     config: &Path,
     extra_args: &[&str],
+    home: &Path,
 ) -> Child {
     let mut command = Command::new(binary);
     command.args(["start", "--config"]).arg(config);
     command.args(extra_args);
     command
+        .env("HOME", home)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
         .env(
             "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
@@ -814,16 +816,37 @@ fn top_level_lifecycle_without_config_uses_home_config_v3_toml() {
 fn top_level_start_snap_forces_debug_snapshots() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
     let ports = [free_port(), free_port()];
     let config = write_config_with_snapshots(&root, ports, false);
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let start = spawn_top_level_start_with_args(binary, &state_root, &config, &["--snap"]);
+    let start =
+        spawn_top_level_start_with_args_and_home(binary, &state_root, &config, &["--snap"], &home);
     for port in ports {
         wait_port(port, true);
     }
     let debug = http_get_json(ports[0], "/_routecodex/debug/status");
     assert_eq!(debug["debug"]["snapshots_enabled"], true);
+    let expected_log_file = home
+        .join(".rcc")
+        .join("logs")
+        .join(format!("server-{}.log", ports[0]));
+    assert_eq!(
+        debug["debug"]["log_file"],
+        expected_log_file.display().to_string(),
+        "foreground start must project the production-style server log file path"
+    );
+    send_responses_dry_run_request(ports[0], "snap-log-file");
+    let log_text = fs::read_to_string(&expected_log_file).unwrap();
+    assert!(
+        log_text.contains("▶ [/v1/responses]")
+            && log_text.contains("🎯 [/v1/responses]")
+            && log_text.contains("✅ [/v1/responses]")
+            && log_text.contains("[usage]"),
+        "foreground dry-run must persist the same human monitor lines into server log, got:\n{log_text}"
+    );
 
     let stop = run_top_level(binary, &state_root, &config, "stop");
     assert!(
