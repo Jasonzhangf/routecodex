@@ -2747,7 +2747,52 @@ fn emit_v3_startup_console_line(listeners: &[V3ListenerHandle]) {
         .map(|listener| listener.addr.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    println!("[RouteCodexV3] Server started on {addresses}");
+    let executable = std::env::current_exe().ok();
+    let binary = executable
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    println!(
+        "[RouteCodexV3] Server started version={} crate={} binary={} on {addresses}",
+        executable
+            .as_deref()
+            .and_then(resolve_routecodex_package_version)
+            .unwrap_or_else(|| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION"),
+        binary
+    );
+}
+
+fn resolve_routecodex_package_version(executable: &std::path::Path) -> Option<String> {
+    std::env::var("ROUTECODEX_VERSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| read_nearest_package_version(executable))
+}
+
+fn read_nearest_package_version(executable: &std::path::Path) -> Option<String> {
+    for ancestor in executable.ancestors() {
+        let package_json = ancestor.join("package.json");
+        let Ok(raw) = std::fs::read_to_string(package_json) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if parsed
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| value == "routecodex")
+            .unwrap_or(false)
+        {
+            return parsed
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+        }
+    }
+    None
 }
 
 const ANSI_RESET: &str = "\x1b[0m";

@@ -423,6 +423,87 @@ fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governanc
 }
 
 #[test]
+fn stopless_request_hook_captures_repeat_state_from_current_cli_output() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_state"), scope())
+        .with_local_context(
+            "rcc_stopless_state",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}'\"}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let state = governed
+        .stopless_state()
+        .expect("current CLI output must become hook-carried state");
+    assert_eq!(state.repeat_count(), 1);
+    assert_eq!(state.max_repeats(), 3);
+    assert_eq!(state.trigger_hint(), Some("no_schema"));
+    assert_eq!(
+        governed.payload()["input"],
+        json!([{"role":"user","content":"继续。"}])
+    );
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
+fn stopless_request_hook_captures_repeat_state_from_codex_transcript_output() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_state_transcript"), scope())
+        .with_local_context(
+            "rcc_stopless_state_transcript",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"Chunk ID: abc\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let state = governed
+        .stopless_state()
+        .expect("Codex transcript JSON must still carry repeat state");
+    assert_eq!(state.repeat_count(), 2);
+    assert_eq!(state.max_repeats(), 3);
+    assert_eq!(state.trigger_hint(), Some("no_schema"));
+}
+
+#[test]
 fn stopless_request_hook_malformed_cli_output_is_fail_fast() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("rcc_stopless"), scope()).with_local_context(
@@ -546,6 +627,52 @@ fn stopless_request_hook_is_disabled_without_stopless_profile() {
 }
 
 #[test]
+fn stopless_request_hook_disabled_profile_keeps_codex_transcript_unparsed() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: 2c3627\nOutput:\nnot json\n"
+                    }
+                ]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(governed.tool_output_count(), 1);
+    assert_eq!(governed.payload()["input"][0]["type"], "function_call");
+    assert_eq!(
+        governed.payload()["input"][1]["type"],
+        "function_call_output"
+    );
+    assert_eq!(
+        governed.payload()["input"][1]["output"],
+        "Chunk ID: 2c3627\nOutput:\nnot json\n"
+    );
+    assert!(governed.payload().get("instructions").is_none());
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessTextRewritten));
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04StoplessToolInjected));
+}
+
+#[test]
 fn stopless_request_hook_missing_next_step_uses_default_prompt() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_default"), scope())
@@ -606,6 +733,43 @@ fn stopless_request_hook_accepts_cli_continuation_prompt() {
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
                     "output":"{\"continuationPrompt\":\"继续。\"}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(
+        governed.payload()["input"],
+        json!([{"role":"user","content":"继续。"}])
+    );
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
+fn stopless_request_hook_accepts_codex_exec_command_output_transcript() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_codex_transcript"), scope())
+        .with_local_context(
+            "rcc_stopless_codex_transcript",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"Chunk ID: 2c3627\nWall time: 0.1169 seconds\nProcess exited with code 0\nOriginal token count: 82\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"input\":{\"triggerHint\":\"no_schema\"}}\n"
                 }]
             })),
             &lookup,

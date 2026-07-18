@@ -1,3 +1,10 @@
+# 2026-07-18T13:02+08:00 V3 direct targetRuntime init / compat profile loading
+
+- Direct `provider.model` runtime missing came from `initializeProviderRuntimes` filtering `targetRuntime` candidates through `routingProviderScope`. That left direct model routes with no initialized handle and produced `Provider runtime 1token.key1 not found`.
+- Fix: `targetRuntime` direct candidates now bypass `isInRoutingScope`; only base `runtime` still respects scope. This keeps direct model routes initialized without changing route selection or adding fallback.
+- V3 compat profile loading now lands in the adjacent Rust crate `sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core`; `v3/crates/routecodex-v3-runtime/src/hub_v1.rs` imports that crate and uses the existing profile behavior instead of rewriting it.
+- Validation: `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/http-server-runtime-providers.create-provider-handle.spec.ts`; `npm run test:v3-provider-compat-profile-loading`; `routecodex restart --port 5520`; live `POST /v1/responses {"model":"1token.gpt-5.5","input":"hi","stream":false}` now returns upstream `HTTP_403 Insufficient account balance` instead of runtime-missing / `PROVIDER_NOT_AVAILABLE`, and a normal `gpt-5.5` smoke returns HTTP 200.
+
 # 2026-07-17T11:20+08:00 V3 skeleton / edge / control architecture audit
 
 - Scope: audit-only for `feature_id:v3.skeleton_edge_control_architecture_audit`; no runtime behavior, live config, global install, restart, credential, or provider traffic mutation.

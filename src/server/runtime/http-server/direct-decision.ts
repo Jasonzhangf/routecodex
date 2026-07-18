@@ -54,6 +54,7 @@ export interface DirectRetryPlanLike {
   defaultPoolAvailable?: boolean;
   policyExhausted?: boolean;
   mayProject?: boolean;
+  routeName?: string;
 }
 
 export interface DecideDirectRouterRetryArgs {
@@ -63,6 +64,7 @@ export interface DecideDirectRouterRetryArgs {
   maxAttempts: number;
   providerKey: string;
   error: unknown;
+  routeName?: string;
 }
 
 function newExcluded(excluded: ReadonlySet<string>, key: string): Set<string> {
@@ -78,6 +80,13 @@ function readPlanRemainingRouteCandidateCount(plan: DirectRetryPlanLike): number
   return plan.routePoolRemainingAfterExclusion.filter((candidate) => (
     typeof candidate === 'string' && candidate.trim().length > 0
   )).length;
+}
+
+function isExplicitDirectRoute(plan: DirectRetryPlanLike, routeName?: string): boolean {
+  const effectiveRouteName = typeof routeName === 'string' && routeName.trim()
+    ? routeName.trim()
+    : (typeof plan.routeName === 'string' ? plan.routeName.trim() : '');
+  return effectiveRouteName === 'direct';
 }
 
 function rethrowDecision(error: unknown, excluded: ReadonlySet<string>): DirectRetryDecision {
@@ -112,6 +121,7 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     maxAttempts,
     providerKey,
     error,
+    routeName,
   } = args;
 
   // Reverse 1: client_disconnect. Caller rethrows so http-error-mapper
@@ -146,6 +156,9 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     return rethrowDecision(error, excludedProviderKeys);
   }
   if (remainingCandidates <= 0) {
+    if (isExplicitDirectRoute(retryExecutionPlan, routeName)) {
+      return rethrowDecision(error, excludedProviderKeys);
+    }
     if (
       retryExecutionPlan.defaultPoolAvailable === true
       && retryExecutionPlan.mayProject !== true

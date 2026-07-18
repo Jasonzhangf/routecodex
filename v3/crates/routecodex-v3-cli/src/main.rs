@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use routecodex_v3_config::{default_v3_config_path, V3Config05ManifestPublished, V3ConfigStore};
 use routecodex_v3_lifecycle::V3ManagedLifecycle;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Parser)]
@@ -91,6 +91,16 @@ enum ServerCommand {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if should_print_version() {
+        let executable = std::env::current_exe()?;
+        println!(
+            "rccv3 {} (crate {})",
+            resolve_routecodex_package_version(&executable)
+                .unwrap_or_else(|| "unknown".to_string()),
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
     match Args::parse().command {
         Command::Config {
             command: ConfigCommand::Check { config },
@@ -106,6 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Start { config, snap } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            emit_v3_cli_start_console_line("start", &config, &executable, snap);
             V3ManagedLifecycle::new(config)?
                 .with_snapshots_enabled(snap)
                 .with_console_enabled(true)
@@ -123,6 +134,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let config = resolve_config_path(config)?;
             if foreground {
                 let executable = std::env::current_exe()?;
+                emit_v3_cli_start_console_line(
+                    "server start --foreground",
+                    &config,
+                    &executable,
+                    snap,
+                );
                 V3ManagedLifecycle::new(config)?
                     .with_snapshots_enabled(snap)
                     .with_console_enabled(true)
@@ -205,4 +222,55 @@ fn load_manifest(
     config: impl Into<PathBuf>,
 ) -> Result<V3Config05ManifestPublished, Box<dyn std::error::Error>> {
     Ok(V3ConfigStore::new(config).load_snapshot()?)
+}
+
+fn should_print_version() -> bool {
+    let mut args = std::env::args().skip(1);
+    let Some(first) = args.next() else {
+        return false;
+    };
+    args.next().is_none() && matches!(first.as_str(), "--version" | "-V" | "version")
+}
+
+fn emit_v3_cli_start_console_line(command: &str, config: &Path, executable: &Path, snap: bool) {
+    println!(
+        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={}",
+        resolve_routecodex_package_version(executable).unwrap_or_else(|| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION"),
+        executable.display(),
+        config.display(),
+        snap
+    );
+}
+
+fn resolve_routecodex_package_version(executable: &Path) -> Option<String> {
+    std::env::var("ROUTECODEX_VERSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| read_nearest_package_version(executable))
+}
+
+fn read_nearest_package_version(executable: &Path) -> Option<String> {
+    for ancestor in executable.ancestors() {
+        let package_json = ancestor.join("package.json");
+        let Ok(raw) = std::fs::read_to_string(package_json) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if parsed
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| value == "routecodex")
+            .unwrap_or(false)
+        {
+            return parsed
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+        }
+    }
+    None
 }

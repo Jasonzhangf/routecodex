@@ -4426,6 +4426,29 @@ verification:
       - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and no synthetic terminal success."
       - "V3 crates must import `routecodex-v3-sse`, not `sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core`."
 
+  - feature_id: v3.provider_compat_profile_loading
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+    contract:
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
+    integration:
+      - npm run test:v3-workspace
+    smoke:
+      - npm run test:v3-provider-compat-profile-loading
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - cargo test --workspace --manifest-path v3/Cargo.toml
+    notes:
+      - "This verification entry exists because provider-compat-core declares feature_id: v3.provider_compat_profile_loading."
+      - "Positive coverage must prove profile loading/application at ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat."
+      - "Negative coverage must prove provider compat does not own routing, stopless/tool governance, fallback, continuation, or SSE semantics."
+
   - feature_id: v3.v2_config_toml_compat_5555
     change_risk: high
     unit:

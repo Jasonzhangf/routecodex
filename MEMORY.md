@@ -1,3 +1,9 @@
+# 2026-07-18: direct provider.model runtimes bypass scope during init; V3 compat profile loads via provider-compat-core
+
+- In `src/server/runtime/http-server/http-server-runtime-providers.ts`, `targetRuntime` direct candidates must bypass `routingProviderScope` when initializing provider runtimes. Only base `runtime` remains scope-filtered. This prevents direct routes from failing with `Provider runtime <runtimeKey> not found`.
+- V3 provider compat profile loading now uses the adjacent Rust crate `sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core`, imported from `v3/crates/routecodex-v3-runtime/src/hub_v1.rs`. The crate preserves the existing profile behavior instead of rewriting it in TS or config.
+- Verified with `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/http-server-runtime-providers.create-provider-handle.spec.ts`, `npm run test:v3-provider-compat-profile-loading`, `routecodex restart --port 5520`, and live `POST /v1/responses {"model":"1token.gpt-5.5","input":"hi","stream":false}` returning upstream `HTTP_403 Insufficient account balance` instead of `ERR_PROVIDER_NOT_FOUND` / `PROVIDER_NOT_AVAILABLE`.
+
 # 2026-07-12: Hub/runtime rustification rounds require live install/restart
 
 - For Hub Pipeline / runtime rustification work, each implementation round must compile/build, install the target globally/release-side, restart the managed port with `routecodex restart --port <port>`, verify `routecodex --version` / `~/.rcc/install/current/package.json` / `/health.version`, inspect target server logs and samples for errors, and fix any new failures before reporting the round complete.

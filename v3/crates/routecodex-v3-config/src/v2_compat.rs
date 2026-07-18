@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
 const V2_SECRET_HANDLE_DIR: &str = ".routecodex-v3-secret-handles";
 
@@ -573,6 +574,9 @@ fn compile_v2_providers(
             }
             .to_string();
             let v2_responses = provider.responses.as_ref();
+            let compatibility_profile = provider
+                .compatibility_profile
+                .or_else(|| resolve_v2_provider_default_compatibility_profile(&provider_id));
             let responses = if provider_type == "responses" {
                 Some(V3ProviderResponsesAuthoringConfig {
                     process: v2_responses
@@ -608,11 +612,43 @@ fn compile_v2_providers(
                         }
                     }),
                     health: None,
+                    compatibility_profile,
                     features: BTreeMap::new(),
                 },
             ))
         })
         .collect()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ProviderResolutionConfig {
+    #[serde(default)]
+    compatibility_profile_blocks: Vec<V2CompatibilityProfileBlock>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2CompatibilityProfileBlock {
+    provider_id: String,
+    compatibility_profile: String,
+}
+
+fn resolve_v2_provider_default_compatibility_profile(provider_id: &str) -> Option<String> {
+    static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> =
+        LazyLock::new(|| {
+            serde_json::from_str(include_str!(
+                "../../../../sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json"
+            ))
+            .expect("V2 provider resolution compatibility profile config must parse")
+        });
+
+    PROVIDER_RESOLUTION_CONFIG
+        .compatibility_profile_blocks
+        .iter()
+        .find(|block| block.provider_id.eq_ignore_ascii_case(provider_id.trim()))
+        .map(|block| block.compatibility_profile.trim().to_string())
+        .filter(|profile| !profile.is_empty())
 }
 
 fn compile_v2_auth(
@@ -830,6 +866,8 @@ struct V2ProviderConfig {
     auth: V2ProviderAuthConfig,
     responses: Option<V2ProviderResponsesConfig>,
     concurrency: Option<V2ProviderConcurrencyConfig>,
+    #[serde(default, alias = "compatibilityProfile")]
+    compatibility_profile: Option<String>,
     #[serde(default)]
     models: BTreeMap<String, V2ProviderModelConfig>,
 }

@@ -467,6 +467,62 @@ describe('direct passthrough route-level', () => {
     expect(extractProviderRuntimeMetadata(sentPayload as Record<string, unknown>)?.metadata?.__responsesDirectPassthrough).toBe(true);
   });
 
+  it('router direct provider.model runtime resolution ignores port allowedProviders only for explicit direct', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5520 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    const providerHandle = {
+      runtimeKey: '1token.key1',
+      providerId: '1token',
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerProtocol: 'openai-responses',
+      runtime: {},
+      instance: {
+        initialize: async () => {},
+        cleanup: async () => {},
+        processIncoming: jest.fn(),
+        processIncomingDirect: jest.fn(),
+      },
+    };
+    const scopedMetadata = {
+      allowedProviders: ['cc.key1.gpt-5.5'],
+      metadataCenterSnapshot: {
+        allowedProviders: ['cc.key1.gpt-5.5'],
+      },
+    };
+
+    (server as any).providerHandles = new Map([
+      [providerHandle.runtimeKey, providerHandle],
+    ]);
+    (server as any).providerKeyToRuntimeKey = new Map([
+      ['1token.key1.gpt-5.5', providerHandle.runtimeKey],
+    ]);
+
+    expect((server as any).resolveProviderHandleForBinding(
+      '1token.key1.gpt-5.5',
+      scopedMetadata,
+    )).toBeUndefined();
+    expect((server as any).resolveProviderHandleForBinding(
+      '1token.key1.gpt-5.5',
+      scopedMetadata,
+      { ignoreMetadataScope: true },
+    )).toBe(providerHandle);
+    expect((server as any).resolveProviderHandleForBinding(
+      '1token.key1',
+      scopedMetadata,
+      { ignoreMetadataScope: true },
+    )).toBe(providerHandle);
+  });
+
   it('router same-protocol direct stays direct for responses target with chat process mode', async () => {
     jest.resetModules();
     const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');

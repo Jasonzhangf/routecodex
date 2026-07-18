@@ -5,6 +5,7 @@ use super::{
     build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
+    V3StoplessHookState,
 };
 use serde_json::Value;
 use std::{
@@ -210,6 +211,7 @@ pub struct V3HubRelayRequestOutcome {
     local_context: Option<Arc<Value>>,
     tool_output_count: usize,
     events: Vec<V3HubRelayRequestHookEvent>,
+    stopless_state: Option<V3StoplessHookState>,
 }
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
@@ -232,6 +234,9 @@ impl V3HubRelayRequestOutcome {
     }
     pub fn tool_output_count(&self) -> usize {
         self.tool_output_count
+    }
+    pub fn stopless_state(&self) -> Option<&V3StoplessHookState> {
+        self.stopless_state.as_ref()
     }
     pub fn into_governed(self) -> V3HubReqChatProcess04Governed {
         self.governed
@@ -335,12 +340,14 @@ impl V3HubRelayRequestHooks {
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
-        if profile.stopless_reasoning_stop_enabled() {
+        let stopless_state = if profile.stopless_reasoning_stop_enabled() {
             apply_v3_stopless_request_hook_at_req04(
                 &mut classified.previous.previous.payload.0,
                 &mut events,
-            )?;
-        }
+            )?
+        } else {
+            None
+        };
         if govern_apply_patch_guidance_at_req04(
             classified.previous.previous.entry_protocol,
             &mut classified.previous.previous.payload.0,
@@ -373,6 +380,7 @@ impl V3HubRelayRequestHooks {
             local_context,
             tool_output_count,
             events,
+            stopless_state,
         })
     }
 }

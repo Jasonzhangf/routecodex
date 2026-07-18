@@ -259,6 +259,39 @@ function updateCurrentSymlink(installRoot, releaseDir) {
   }
 }
 
+function readActiveProcessCommandLines() {
+  const result = spawnSync('ps', ['-axo', 'command='], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  if ((result.status ?? 0) !== 0) {
+    return [];
+  }
+  return String(result.stdout || '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function collectActiveReleaseIds(entries) {
+  if (!entries.length) {
+    return new Set();
+  }
+  const commands = readActiveProcessCommandLines();
+  if (!commands.length) {
+    return new Set();
+  }
+  const active = new Set();
+  for (const entry of entries) {
+    const releasePath = path.resolve(entry.fullPath);
+    const releasePathWithSep = `${releasePath}${path.sep}`;
+    if (commands.some((command) => command.includes(releasePathWithSep) || command.includes(releasePath))) {
+      active.add(entry.name);
+    }
+  }
+  return active;
+}
+
 function pruneOldReleases(releasesDir, currentReleaseId, keepCount = 3) {
   if (!fs.existsSync(releasesDir)) {
     return [];
@@ -271,6 +304,7 @@ function pruneOldReleases(releasesDir, currentReleaseId, keepCount = 3) {
       return { name: entry.name, fullPath, mtimeMs: stat.mtimeMs };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const activeReleaseIds = collectActiveReleaseIds(entries);
   const removed = [];
   let retained = 0;
   for (const entry of entries) {
@@ -278,7 +312,10 @@ function pruneOldReleases(releasesDir, currentReleaseId, keepCount = 3) {
       retained += 1;
       continue;
     }
-    if (retained < keepCount - 1) {
+    if (activeReleaseIds.has(entry.name)) {
+      continue;
+    }
+    if (retained < keepCount) {
       retained += 1;
       continue;
     }

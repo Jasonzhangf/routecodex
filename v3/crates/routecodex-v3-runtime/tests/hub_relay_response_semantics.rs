@@ -1,6 +1,7 @@
 use routecodex_v3_runtime::{
     build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04,
     build_v3_provider_resp_inbound_01_raw,
+    build_v3_provider_resp_inbound_01_raw_with_compat_profile,
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
     compile_v3_hub_relay_response_hooks, V3HubContinuationCommit, V3HubContinuationOwnership,
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
@@ -8,6 +9,16 @@ use routecodex_v3_runtime::{
     V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
+
+fn stopless_cli_input_from_arguments(arguments: &str) -> Value {
+    let parsed: Value = serde_json::from_str(arguments).expect("arguments must be JSON");
+    let cmd = parsed["cmd"].as_str().expect("cmd is required");
+    let marker = "--input-json '";
+    let start = cmd.find(marker).expect("input-json marker") + marker.len();
+    let rest = &cmd[start..];
+    let end = rest.find('\'').expect("input-json closing quote");
+    serde_json::from_str(&rest[..end]).expect("input-json must be JSON")
+}
 
 fn relay_raw(
     payload: Value,
@@ -22,6 +33,83 @@ fn relay_raw(
         V3HubInvocationSource::Client,
         transport,
     )
+}
+
+#[test]
+fn minimax_profile_is_loaded_at_resp02_before_chat_process_governance() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let raw = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        json!({
+            "object": "response",
+            "id": "resp_minimax_tool_text",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+                }],
+                "output_text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+            }],
+            "output_text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+        }),
+        V3HubEntryProtocol::Responses,
+        V3HubProviderWireProtocol::Responses,
+        V3HubContinuationOwnership::New,
+        V3HubExecutionMode::Relay,
+        V3HubInvocationSource::Client,
+        V3HubTransportIntent::Json,
+        Some("chat:minimax"),
+    );
+
+    let resp02 = hooks.normalize(raw).unwrap();
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    assert_eq!(resp03.tool_call_count(), 1);
+
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["output"][0]["type"], "function_call");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert_eq!(payload["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(!serialized.contains("<function_calls>"));
+    assert!(!serialized.contains("</function_calls>"));
+}
+
+#[test]
+fn passthrough_profile_does_not_harvest_minimax_text_tool_calls() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let raw = relay_raw(
+        json!({
+            "object": "response",
+            "id": "resp_minimax_passthrough_text",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+                }]
+            }]
+        }),
+        V3HubTransportIntent::Json,
+    );
+
+    let resp02 = hooks.normalize(raw).unwrap();
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    assert_eq!(resp03.tool_call_count(), 0);
+
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(serialized.contains("<function_calls>"));
 }
 
 #[test]
@@ -114,14 +202,88 @@ fn stopless_response_hook_projects_cli_before_continuation_commit() {
         .as_str()
         .unwrap()
         .contains("routecodex hook run reasoningStop"));
-    assert!(payload["output"][0]["arguments"]
-        .as_str()
-        .unwrap()
-        .contains("--input-json '{}'"));
+    let cli_input =
+        stopless_cli_input_from_arguments(payload["output"][0]["arguments"].as_str().unwrap());
+    assert_eq!(cli_input["repeatCount"], json!(1));
+    assert_eq!(cli_input["maxRepeats"], json!(3));
+    assert_eq!(cli_input["triggerHint"], json!("no_schema"));
     assert!(!payload["output"][0]["arguments"]
         .as_str()
         .unwrap()
         .contains("status-control"));
+}
+
+#[test]
+fn stopless_response_hook_projects_next_repeat_count_from_request_state() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_missing_schema_second_round",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"still missing schema"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(routecodex_v3_runtime::V3StoplessHookState::new(
+                    1,
+                    3,
+                    Some("no_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    let arguments = payload["output"][0]["arguments"].as_str().unwrap();
+    let cli_input = stopless_cli_input_from_arguments(arguments);
+    assert_eq!(
+        cli_input["repeatCount"],
+        json!(2),
+        "second no_schema projection must advance repeatCount: {arguments}"
+    );
+    assert_eq!(cli_input["maxRepeats"], json!(3));
+    assert_eq!(cli_input["triggerHint"], json!("no_schema"));
+}
+
+#[test]
+fn stopless_response_hook_does_not_project_no_schema_after_repeat_budget() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_missing_schema_budget",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"third missing schema should pass through"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(routecodex_v3_runtime::V3StoplessHookState::new(
+                    2,
+                    3,
+                    Some("no_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
 }
 
 #[test]
@@ -249,6 +411,10 @@ fn stopless_response_hook_stopreason_two_does_not_require_finish_reason() {
     assert!(
         !arguments.contains("--input-json '{}'"),
         "stopreason=2 must not be downgraded to missing-schema CLI input: {arguments}"
+    );
+    assert!(
+        stopless_cli_input_from_arguments(arguments)["repeatCount"] == json!(1),
+        "stopreason=2 CLI input must still carry the hook repeat state: {arguments}"
     );
 }
 

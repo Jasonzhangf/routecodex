@@ -40,7 +40,7 @@ fn response04(
         V3HubInvocationSource::Client,
         transport_intent,
     );
-    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(raw);
+    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(raw).unwrap();
     let normalized = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat);
     let governed = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(normalized);
     build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(

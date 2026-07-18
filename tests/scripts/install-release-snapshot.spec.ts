@@ -84,6 +84,27 @@ describe('install-release-snapshot', () => {
     );
   }
 
+  function runInstallReleaseSnapshotForProject(
+    projectRoot: string,
+    tempHome: string,
+    extraEnv: Record<string, string> = {}
+  ) {
+    execFileSync(
+      process.execPath,
+      ['scripts/install-release-snapshot.mjs'],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          ...extraEnv,
+          RCC_HOME: tempHome,
+          ROUTECODEX_RELEASE_SOURCE_ROOT: process.cwd()
+        },
+        stdio: 'pipe'
+      }
+    );
+  }
+
   test('copies sharedmodule llmswitch-core dist into release snapshot', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-release-snapshot-'));
     tempDirs.push(tempHome);
@@ -140,6 +161,52 @@ describe('install-release-snapshot', () => {
     expect(scriptSource).toContain('removeIfExists(targetPath);');
     expect(scriptSource).toContain('verifySnapshotProductionDependencies(stagingDir);');
     expect(scriptSource).toContain('verifySnapshotRuntimeImports(stagingDir);');
+  });
+
+  test('does not prune a release directory still referenced by a live process command', () => {
+    const projectRoot = createMinimalSnapshotProject();
+    writeTextFile(
+      path.join(projectRoot, 'node_modules', 'rcc-errorhandling', 'package.json'),
+      '{"name":"rcc-errorhandling"}\n'
+    );
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-release-snapshot-'));
+    tempDirs.push(tempHome);
+    const releasesDir = path.join(tempHome, 'install', 'releases');
+    const liveRelease = path.join(releasesDir, 'routecodex-0.0.0-test-live-old');
+    const staleRelease = path.join(releasesDir, 'routecodex-0.0.0-test-stale-old');
+    const recentOne = path.join(releasesDir, 'routecodex-0.0.0-test-recent-one');
+    const recentTwo = path.join(releasesDir, 'routecodex-0.0.0-test-recent-two');
+    for (const dir of [liveRelease, staleRelease, recentOne, recentTwo]) {
+      writeTextFile(path.join(dir, 'dist', 'index.js'), 'export {};\n');
+      writeTextFile(path.join(dir, 'package.json'), '{"version":"0.0.0-test"}\n');
+    }
+    const now = Date.now();
+    fs.utimesSync(liveRelease, new Date(now - 40_000), new Date(now - 40_000));
+    fs.utimesSync(staleRelease, new Date(now - 30_000), new Date(now - 30_000));
+    fs.utimesSync(recentOne, new Date(now - 20_000), new Date(now - 20_000));
+    fs.utimesSync(recentTwo, new Date(now - 10_000), new Date(now - 10_000));
+
+    const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-fake-ps-'));
+    tempDirs.push(fakeBin);
+    const fakePs = path.join(fakeBin, 'ps');
+    writeTextFile(
+      fakePs,
+      [
+        '#!/usr/bin/env node',
+        `console.log('/opt/homebrew/bin/node ${liveRelease}/dist/index.js config/modules.json');`,
+        ''
+      ].join('\n')
+    );
+    fs.chmodSync(fakePs, 0o755);
+
+    runInstallReleaseSnapshotForProject(projectRoot, tempHome, {
+      PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ''}`
+    });
+
+    expect(fs.existsSync(liveRelease)).toBe(true);
+    expect(fs.existsSync(recentOne)).toBe(true);
+    expect(fs.existsSync(recentTwo)).toBe(true);
+    expect(fs.existsSync(staleRelease)).toBe(false);
   });
 
   test('writes manifest with stable release metadata', () => {

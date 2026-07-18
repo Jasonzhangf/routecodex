@@ -491,6 +491,8 @@ impl VirtualRouterEngineCore {
                 return Err(format_virtual_router_error("CONFIG_ERROR", error_message));
             }
             {
+                let mut direct_routing_state = routing_state_for_selection.clone();
+                direct_routing_state.allowed_providers.clear();
                 let candidate_keys = self.provider_registry.list_provider_keys(&provider_id);
                 let mut eligible: Vec<String> = Vec::new();
                 for key in candidate_keys {
@@ -503,7 +505,7 @@ impl VirtualRouterEngineCore {
                 eligible.sort();
                 let eligible = filter_candidates_by_state(
                     &eligible,
-                    &routing_state_for_selection,
+                    &direct_routing_state,
                     &self.provider_registry,
                 );
                 let cooldown_candidate_keys = eligible.clone();
@@ -513,7 +515,7 @@ impl VirtualRouterEngineCore {
                 let available: Vec<String> = self.apply_standard_filters(
                     env,
                     &eligible,
-                    &routing_state_for_selection,
+                    &direct_routing_state,
                     &excluded_keys,
                     false,
                 );
@@ -567,7 +569,7 @@ impl VirtualRouterEngineCore {
                     }
                     if let Some(mode) = resolve_instruction_process_mode_for_selection(
                         &selection.provider_key,
-                        &routing_state_for_selection,
+                        &direct_routing_state,
                         &self.provider_registry,
                     ) {
                         map.insert("processMode".to_string(), Value::String(mode));
@@ -1243,6 +1245,67 @@ mod tests {
             .as_str()
             .unwrap_or_default()
             .contains("direct_model:DF.DeepSeek-V4-Pro"));
+    }
+
+    #[test]
+    fn router_direct_provider_model_ignores_port_allowed_providers_scope() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "model": "openai.gpt-4o",
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-router-direct-model-allowed-scope",
+                "allowedProviders": ["anthropic.key1.claude-sonnet"]
+            }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("explicit provider.model direct route must not be emptied by port route-scope allowedProviders");
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(decision["routeName"].as_str(), Some("direct"));
+        assert_eq!(decision["providerKey"].as_str(), Some("openai.key1.gpt-4o"));
+        assert_eq!(
+            decision["reasoning"].as_str(),
+            Some("direct_model:openai.gpt-4o")
+        );
+    }
+
+    #[test]
+    fn router_direct_provider_model_still_respects_explicit_disabled_key() {
+        let mut core = build_route_test_core();
+        let request = json!({
+            "model": "openai.gpt-4o",
+            "messages": [
+                { "role": "user", "content": "hello" }
+            ]
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-router-direct-model-disabled-key",
+                "allowedProviders": ["anthropic.key1.claude-sonnet"],
+                "disabledProviderKeyAliases": ["openai.key1"]
+            }
+        });
+
+        let result = core.route(
+            unsafe { Env::from_raw(std::ptr::null_mut()) },
+            &request,
+            &metadata,
+        );
+        let error = result.expect_err("disabled explicit provider.model key must still fail");
+        assert!(error.contains("PROVIDER_NOT_AVAILABLE"));
+        assert!(error.contains("All providers unavailable for model openai.gpt-4o"));
     }
 
     #[test]

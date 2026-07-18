@@ -1,6 +1,6 @@
 use super::{
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
-    V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized,
+    V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessHookState,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -32,14 +32,17 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
     };
     let cli_input = match classify_stopless_schema(text) {
         V3StoplessSchemaDecision::Terminal => return Ok(input),
-        V3StoplessSchemaDecision::Continue => stopless_cli_input_from_schema(text),
+        V3StoplessSchemaDecision::Continue => stopless_cli_input_from_schema(text, profile),
         V3StoplessSchemaDecision::Missing => {
             if !response_has_stopless_stop_trigger(input.provider_payload().as_ref())
                 && !response_is_completed_responses_object(input.provider_payload().as_ref())
             {
                 return Ok(input);
             }
-            None
+            let Some(cli_input) = stopless_no_schema_cli_input_from_profile(profile) else {
+                return Ok(input);
+            };
+            Some(cli_input)
         }
     };
     let command = build_stopless_cli_command(cli_input.as_ref());
@@ -60,11 +63,11 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
 pub fn apply_v3_stopless_request_hook_at_req04(
     payload: &mut Value,
     events: &mut Vec<V3HubRelayRequestHookEvent>,
-) -> Result<(), V3HubRelayRequestError> {
+) -> Result<Option<V3StoplessHookState>, V3HubRelayRequestError> {
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         inject_stopless_schema(payload);
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(());
+        return Ok(None);
     };
     let Some((index, output)) = input
         .iter()
@@ -73,18 +76,18 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     else {
         inject_stopless_schema(payload);
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(());
+        return Ok(None);
     };
-    let next_step = parse_stopless_next_step(output, index)?;
+    let parsed = parse_stopless_cli_output(output, index)?;
     *input = vec![json!({
         "role": "user",
-        "content": next_step
+        "content": parsed.next_step
     })];
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
     inject_stopless_schema(payload);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-    Ok(())
+    Ok(Some(parsed.state))
 }
 
 fn first_output_text(output: Option<&Value>) -> Option<&str> {
@@ -198,8 +201,70 @@ fn read_stopless_stopreason_from_value(parsed: &Value) -> Option<i64> {
     })
 }
 
-fn stopless_cli_input_from_schema(text: &str) -> Option<Value> {
-    read_stopless_json_object(text).filter(|value| value.get("stopreason").is_some())
+fn stopless_cli_input_from_schema(
+    text: &str,
+    profile: &V3HubRelayResponseHookProfile,
+) -> Option<Value> {
+    let mut value =
+        read_stopless_json_object(text).filter(|value| value.get("stopreason").is_some())?;
+    let state = next_stopless_projection_state(profile, Some("schema_continue"));
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("flowId".to_string())
+            .or_insert_with(|| json!("stop_message_flow"));
+        object
+            .entry("repeatCount".to_string())
+            .or_insert_with(|| json!(state.repeat_count));
+        object
+            .entry("maxRepeats".to_string())
+            .or_insert_with(|| json!(state.max_repeats));
+        object
+            .entry("triggerHint".to_string())
+            .or_insert_with(|| json!("schema_continue"));
+    }
+    Some(value)
+}
+
+fn stopless_no_schema_cli_input_from_profile(
+    profile: &V3HubRelayResponseHookProfile,
+) -> Option<Value> {
+    let state = next_stopless_projection_state(profile, Some("no_schema"));
+    if state.repeat_count >= state.max_repeats {
+        return None;
+    }
+    Some(json!({
+        "flowId": "stop_message_flow",
+        "repeatCount": state.repeat_count,
+        "maxRepeats": state.max_repeats,
+        "triggerHint": state.trigger_hint.unwrap_or_else(|| "no_schema".to_string())
+    }))
+}
+
+#[derive(Debug, Clone)]
+struct V3NextStoplessProjectionState {
+    repeat_count: u32,
+    max_repeats: u32,
+    trigger_hint: Option<String>,
+}
+
+fn next_stopless_projection_state(
+    profile: &V3HubRelayResponseHookProfile,
+    trigger_hint: Option<&str>,
+) -> V3NextStoplessProjectionState {
+    let current = profile.stopless_request_state();
+    V3NextStoplessProjectionState {
+        repeat_count: current
+            .map(V3StoplessHookState::repeat_count)
+            .unwrap_or(0)
+            .saturating_add(1),
+        max_repeats: current
+            .map(V3StoplessHookState::max_repeats)
+            .unwrap_or(3)
+            .max(1),
+        trigger_hint: trigger_hint
+            .map(str::to_string)
+            .or_else(|| current.and_then(|state| state.trigger_hint().map(str::to_string))),
+    }
 }
 
 fn read_stopless_json_object(text: &str) -> Option<Value> {
@@ -222,10 +287,19 @@ fn build_stopless_cli_command(cli_input: Option<&Value>) -> String {
     let input_json = cli_input
         .map(Value::to_string)
         .unwrap_or_else(|| "{}".to_string());
-    format!(
+    let mut command = format!(
         "routecodex hook run reasoningStop --input-json {}",
         shell_quote_for_stopless_cli(&input_json)
-    )
+    );
+    if let Some(cli_input) = cli_input {
+        if let Some(repeat_count) = read_stopless_u32_field(cli_input, "repeatCount") {
+            command.push_str(&format!(" --repeat-count '{}'", repeat_count));
+        }
+        if let Some(max_repeats) = read_stopless_u32_field(cli_input, "maxRepeats") {
+            command.push_str(&format!(" --max-repeats '{}'", max_repeats));
+        }
+    }
+    command
 }
 
 fn shell_quote_for_stopless_cli(value: &str) -> String {
@@ -260,29 +334,117 @@ fn is_stopless_cli_output(item: &Value) -> bool {
         .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
 }
 
-fn parse_stopless_next_step(
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3ParsedStoplessCliOutput {
+    next_step: String,
+    state: V3StoplessHookState,
+}
+
+fn parse_stopless_cli_output(
     output: &Value,
     index: usize,
-) -> Result<String, V3HubRelayRequestError> {
+) -> Result<V3ParsedStoplessCliOutput, V3HubRelayRequestError> {
     let raw = output.get("output").and_then(Value::as_str).ok_or(
         V3HubRelayRequestError::MalformedStoplessCliOutput {
             index,
             reason: "output string is required",
         },
     )?;
-    let parsed: Value = serde_json::from_str(raw).map_err(|_| {
-        V3HubRelayRequestError::MalformedStoplessCliOutput {
-            index,
-            reason: "output must be JSON",
-        }
-    })?;
-    Ok(parsed
+    let parsed = parse_stopless_cli_output_json(raw, index)?;
+    let next_step = parsed
         .get("next_step")
         .or_else(|| parsed.get("continuationPrompt"))
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(STOPLESS_DEFAULT_PROMPT)
-        .to_owned())
+        .to_owned();
+    Ok(V3ParsedStoplessCliOutput {
+        next_step,
+        state: parse_stopless_state_from_cli_output(&parsed),
+    })
+}
+
+fn parse_stopless_state_from_cli_output(parsed: &Value) -> V3StoplessHookState {
+    let repeat_count = read_stopless_nested_u32(parsed, &["repeatCount", "repeat_count"])
+        .or_else(|| {
+            parsed
+                .get("input")
+                .and_then(|input| read_stopless_nested_u32(input, &["repeatCount", "repeat_count"]))
+        })
+        .unwrap_or(1)
+        .max(1);
+    let max_repeats = read_stopless_nested_u32(parsed, &["maxRepeats", "max_repeats"])
+        .or_else(|| {
+            parsed
+                .get("input")
+                .and_then(|input| read_stopless_nested_u32(input, &["maxRepeats", "max_repeats"]))
+        })
+        .unwrap_or(3)
+        .max(1);
+    let trigger_hint = parsed
+        .get("input")
+        .and_then(|input| read_stopless_nested_string(input, &["triggerHint", "trigger_hint"]))
+        .or_else(|| read_stopless_nested_string(parsed, &["triggerHint", "trigger_hint"]))
+        .or_else(|| {
+            parsed.get("schemaGuidance").and_then(|value| {
+                read_stopless_nested_string(value, &["triggerHint", "trigger_hint"])
+            })
+        })
+        .or_else(|| {
+            parsed.get("schemaFeedback").and_then(|value| {
+                read_stopless_nested_string(value, &["triggerHint", "trigger_hint"])
+            })
+        })
+        .or_else(|| Some("no_schema".to_string()));
+    V3StoplessHookState::new(repeat_count, max_repeats, trigger_hint)
+}
+
+fn read_stopless_nested_u32(value: &Value, keys: &[&str]) -> Option<u32> {
+    keys.iter()
+        .find_map(|key| read_stopless_u32_field(value, key))
+}
+
+fn read_stopless_u32_field(value: &Value, key: &str) -> Option<u32> {
+    value.get(key).and_then(|field| {
+        field
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+            .or_else(|| field.as_str()?.trim().parse().ok())
+    })
+}
+
+fn read_stopless_nested_string(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn parse_stopless_cli_output_json(
+    raw: &str,
+    index: usize,
+) -> Result<Value, V3HubRelayRequestError> {
+    serde_json::from_str(raw.trim())
+        .or_else(|_| {
+            let Some(stdout) = codex_exec_output_section(raw) else {
+                return Err(());
+            };
+            serde_json::from_str(stdout.trim()).map_err(|_| ())
+        })
+        .map_err(|_| V3HubRelayRequestError::MalformedStoplessCliOutput {
+            index,
+            reason: "output must be JSON",
+        })
+}
+
+fn codex_exec_output_section(raw: &str) -> Option<&str> {
+    ["Output:\n", "Output:\r\n", "Output:\r"]
+        .iter()
+        .find_map(|marker| raw.rfind(marker).map(|index| &raw[index + marker.len()..]))
 }
 
 fn inject_stopless_schema(payload: &mut Value) {

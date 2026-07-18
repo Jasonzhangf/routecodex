@@ -611,6 +611,8 @@ fn compile_providers(
             let models = compile_models(&id, provider.models)?;
             let responses = compile_provider_responses(&id, provider.responses, &models)?;
             let health = compile_provider_health(&id, provider.health)?;
+            let compatibility_profile =
+                normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
             Ok((
                 id.clone(),
                 V3ProviderManifest {
@@ -624,11 +626,18 @@ fn compile_providers(
                     responses,
                     concurrency: provider.concurrency,
                     health,
+                    compatibility_profile,
                     features: provider.features,
                 },
             ))
         })
         .collect()
+}
+
+fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Option<String> {
+    profile
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn compile_provider_responses(

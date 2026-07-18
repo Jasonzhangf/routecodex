@@ -423,6 +423,71 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
 }
 
 #[test]
+fn stopless_hook_blackbox_rewrites_codex_transcript_from_full_history() {
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let mut input = Vec::new();
+    for index in 0..240 {
+        input.push(json!({
+            "type":"function_call",
+            "call_id":format!("call_unrelated_{index}"),
+            "name":"exec_command",
+            "arguments":"{}"
+        }));
+        input.push(json!({
+            "type":"function_call_output",
+            "call_id":format!("call_unrelated_{index}"),
+            "output":"ok"
+        }));
+    }
+    input.push(json!({
+        "type":"function_call",
+        "call_id":"call_stopless_reasoning",
+        "name":"exec_command",
+        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+    }));
+    input.push(json!({
+        "type":"function_call_output",
+        "call_id":"call_stopless_reasoning",
+        "output":"Chunk ID: 2c3627\nWall time: 0.1169 seconds\nProcess exited with code 0\nOriginal token count: 82\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"继续。\",\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+    }));
+
+    let outcome = request_hooks
+        .run(
+            raw_request(json!({
+                "model":"gpt-5.5",
+                "input":input,
+                "stream":true
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    assert_eq!(outcome.tool_output_count(), 0);
+    assert_eq!(
+        outcome.payload()["input"],
+        json!([{"role":"user","content":"继续。"}])
+    );
+    assert!(outcome.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("stopreason"));
+    let serialized = serde_json::to_string(outcome.payload()).unwrap();
+    for forbidden in [
+        "function_call_output",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "exec_command",
+        "Chunk ID:",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "rewritten full-history request leaked stopless CLI artifact: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
     let response_hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = response_hooks

@@ -8,7 +8,10 @@ import {
   mapErrorToPublicLogSummary,
   type HttpErrorPayload,
 } from '../utils/http-error-mapper.js';
-import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
+import {
+  reportRouteError,
+  type RouteErrorPayload
+} from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import { colorizeRequestLog, formatHighlightedFinishReasonLabel, registerRequestLogContext } from '../utils/request-log-color.js';
@@ -776,7 +779,6 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
 }): Promise<HttpErrorPayload> {
   const mapped = mapErrorToHttp(buildClientHttpProjectionSource(args.routePayload, args.normalizedError));
   try {
-    const { reportRouteError } = await import('../../error-handling/route-error-hub.js');
     await reportRouteError(args.routePayload, { includeHttpResult: true });
   } catch (error) {
     args.onReportError?.(error);

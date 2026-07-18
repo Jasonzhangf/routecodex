@@ -367,6 +367,8 @@ pub enum V3ResponsesRelayRuntimeError {
     Target(String),
     #[error("V3 Responses Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
+    #[error("V3 Responses Relay provider compat failed: {0}")]
+    ProviderCompat(#[from] V3ProviderCompatError),
     #[error("V3 Responses Relay provider health failed: {0}")]
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
@@ -589,6 +591,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     )?;
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
+    let stopless_state = request_outcome.stopless_state().cloned();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -651,7 +654,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         );
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target())?;
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -724,8 +727,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
                 let provider_value: Value = serde_json::from_slice(&bytes)?;
-                let (action, finalized_provider_value) =
-                    run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+                let (action, finalized_provider_value) = run_json_response_hooks(
+                    &provider_value,
+                    transport_intent,
+                    &mut trace,
+                    selected.candidate.compatibility_profile.as_deref(),
+                    stopless_state.as_ref(),
+                )?;
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
@@ -760,8 +768,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value =
                     collect_v3_responses_relay_sse_response(stream, &stream_observation).await?;
-                let (action, finalized_provider_value) =
-                    run_json_response_hooks(&provider_value, transport_intent, &mut trace)?;
+                let (action, finalized_provider_value) = run_json_response_hooks(
+                    &provider_value,
+                    transport_intent,
+                    &mut trace,
+                    selected.candidate.compatibility_profile.as_deref(),
+                    stopless_state.as_ref(),
+                )?;
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
@@ -1142,8 +1155,10 @@ fn run_json_response_hooks(
     provider_value: &Value,
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
+    compatibility_profile: Option<&str>,
+    stopless_state: Option<&V3StoplessHookState>,
 ) -> Result<(V3HubContinuationCommit, Value), V3ResponsesRelayRuntimeError> {
-    let resp01 = build_v3_provider_resp_inbound_01_raw(
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value.clone(),
         V3HubEntryProtocol::Responses,
         V3HubProviderWireProtocol::Responses,
@@ -1151,13 +1166,14 @@ fn run_json_response_hooks(
         V3HubExecutionMode::Relay,
         V3HubInvocationSource::Client,
         transport_intent,
+        compatibility_profile,
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks.normalize(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
     trace.push("V3HubRespInbound02Normalized");
-    let response_hook_profile = responses_relay_response_hook_profile();
+    let response_hook_profile = responses_relay_response_hook_profile(stopless_state);
     let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
@@ -1175,8 +1191,14 @@ fn responses_relay_request_hook_profile() -> V3HubServertoolRequestProfile {
     V3HubServertoolRequestProfile::stopless_reasoning_stop()
 }
 
-fn responses_relay_response_hook_profile() -> V3HubRelayResponseHookProfile {
-    V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop()
+fn responses_relay_response_hook_profile(
+    stopless_state: Option<&V3StoplessHookState>,
+) -> V3HubRelayResponseHookProfile {
+    let profile = V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop();
+    match stopless_state {
+        Some(state) => profile.with_stopless_request_state(state.clone()),
+        None => profile,
+    }
 }
 
 fn build_v3_relay_observability_from_selected(

@@ -52,6 +52,21 @@ fn write_nested_reasoning_effort(payload: &mut Map<String, Value>, level: &str) 
     true
 }
 
+fn write_nested_reasoning_effort_if_absent(
+    payload: &mut Map<String, Value>,
+    level: &str,
+) -> bool {
+    if payload
+        .get("reasoning")
+        .and_then(Value::as_object)
+        .and_then(|reasoning| trimmed(reasoning.get("effort")))
+        .is_some()
+    {
+        return false;
+    }
+    write_nested_reasoning_effort(payload, level)
+}
+
 fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     let root = input.as_object();
     let mut payload = root
@@ -96,7 +111,7 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
             payload.insert("reasoning_effort".to_string(), Value::String(level.clone()));
         }
     } else if let Some(level) = legacy_reasoning_effort.as_deref() {
-        if write_nested_reasoning_effort(&mut payload, level) {
+        if write_nested_reasoning_effort_if_absent(&mut payload, level) {
             payload_changed = true;
         }
     }
@@ -521,6 +536,34 @@ mod tests {
         .expect("responses request plan");
         assert!(output["payload"].get("reasoning_effort").is_none());
         assert_eq!(output["payload"]["reasoning"]["effort"], "low");
+        assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
+        assert_eq!(output["payloadChanged"], true);
+    }
+
+    #[test]
+    fn request_plan_preserves_existing_responses_nested_effort_when_legacy_alias_conflicts_without_route_thinking(
+    ) {
+        let resolved = resolve_direct_semantic_classification(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "reasoning_effort": "low",
+                "reasoning":{"effort":"high","summary":"auto"}
+            },
+            "targetModelId":"gpt-5.5"
+        }))
+        .expect("resolved routing semantics");
+        let output = plan_request_hooks(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "reasoning_effort": "low",
+                "reasoning":{"effort":"high","summary":"auto"}
+            },
+            "resolvedSemantics": resolved,
+            "providerProtocol": "openai-responses"
+        }))
+        .expect("responses request plan");
+        assert!(output["payload"].get("reasoning_effort").is_none());
+        assert_eq!(output["payload"]["reasoning"]["effort"], "high");
         assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
         assert_eq!(output["payloadChanged"], true);
     }

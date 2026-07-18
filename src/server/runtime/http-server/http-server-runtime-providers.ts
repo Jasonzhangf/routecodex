@@ -65,6 +65,11 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     routedProviderKeys,
     isInRoutingScope
   } = resolveProviderRoutingScope(server.routingProviderScope as { providerKeys?: unknown[] } | undefined);
+  const directTargetRuntimeProviderKeys = new Set(
+    Object.keys(targetRuntimeMap ?? {})
+      .map((key) => (typeof key === 'string' ? key.trim().toLowerCase() : ''))
+      .filter(Boolean)
+  );
 
   const runtimeKeyAuthType = new Map<string, string | null>();
   const apikeyDailyResetTime = (() => {
@@ -91,7 +96,8 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
     if (!providerKey) {
       continue;
     }
-    if (!isInRoutingScope(providerKey)) {
+    const directTargetRuntime = directTargetRuntimeProviderKeys.has(providerKey.toLowerCase());
+    if (!directTargetRuntime && !isInRoutingScope(providerKey)) {
       continue;
     }
     if (!runtime) {

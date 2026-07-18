@@ -23,7 +23,7 @@ const classificationRuntime = source.classification.split('#[cfg(test)]', 1)[0] 
 const failures = [];
 
 for (const required of [
-  'normalize_model_direct_semantic',
+  'normalize_model_direct_policy',
   'direct_semantics',
   'direct_semantic',
 ]) {

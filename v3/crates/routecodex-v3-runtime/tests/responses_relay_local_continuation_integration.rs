@@ -26,6 +26,19 @@ struct ApplyPatchSseTransport {
     captures: Mutex<Vec<Value>>,
 }
 
+fn stopless_cli_input_from_client_body(body: &Value) -> Value {
+    let arguments = body["output"][0]["arguments"]
+        .as_str()
+        .expect("stopless projection arguments");
+    let parsed: Value = serde_json::from_str(arguments).expect("arguments JSON");
+    let cmd = parsed["cmd"].as_str().expect("exec_command cmd");
+    let marker = "--input-json '";
+    let start = cmd.find(marker).expect("input-json marker") + marker.len();
+    let rest = &cmd[start..];
+    let end = rest.find('\'').expect("closing input-json quote");
+    serde_json::from_str(&rest[..end]).expect("stopless CLI input JSON")
+}
+
 #[async_trait]
 impl ResponsesTransport for SequentialJsonTransport {
     async fn send(
@@ -403,6 +416,181 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
     assert_eq!(
         captures[1]["input"],
         json!([{"role":"user","content":"continue round two"}])
+    );
+    for capture in captures.iter().skip(1) {
+        let provider_wire = serde_json::to_string(capture).unwrap();
+        assert!(provider_wire.contains("stopreason"));
+        for forbidden in [
+            "call_stopless_reasoning",
+            "function_call_output",
+            "routecodex hook run reasoningStop",
+        ] {
+            assert!(
+                !provider_wire.contains(forbidden),
+                "provider payload leaked stopless artifact: {forbidden}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "object":"response",
+                "id":"resp_stopless_no_schema_1",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"missing schema round one"}]
+                }]
+            }),
+            json!({
+                "object":"response",
+                "id":"resp_stopless_no_schema_2",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"missing schema round two"}]
+                }]
+            }),
+            json!({
+                "object":"response",
+                "id":"resp_stopless_no_schema_3",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"missing schema round three"}]
+                }]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-no-schema",
+        "conversation-stopless-no-schema",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-no-schema-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Trigger missing schema"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        50_000,
+    )
+    .await
+    .unwrap();
+    let first_body = match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first no_schema turn must be JSON"),
+    };
+    assert_eq!(first_body["status"], "requires_action");
+    assert_eq!(
+        stopless_cli_input_from_client_body(&first_body)["repeatCount"],
+        json!(1)
+    );
+    assert!(first.observability.unwrap().stopless_activation);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-no-schema-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        51_000,
+    )
+    .await
+    .unwrap();
+    let second_body = match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second no_schema turn must be JSON"),
+    };
+    assert_eq!(second_body["status"], "requires_action");
+    assert_eq!(
+        stopless_cli_input_from_client_body(&second_body)["repeatCount"],
+        json!(2)
+    );
+    assert!(second.observability.unwrap().stopless_activation);
+
+    let third = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-no-schema-3".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        52_000,
+    )
+    .await
+    .unwrap();
+    let third_observability = third.observability.as_ref().unwrap();
+    assert!(
+        !third_observability.stopless_activation,
+        "third consecutive no_schema must not project another reasoningStop"
+    );
+    match third.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "completed");
+            assert!(serde_json::to_string(&body)
+                .unwrap()
+                .contains("missing schema round three"));
+            assert!(!serde_json::to_string(&body)
+                .unwrap()
+                .contains("call_stopless_reasoning"));
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("third no_schema turn must be JSON"),
+    }
+    assert!(state.is_empty().unwrap());
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 3);
+    assert_eq!(
+        captures[1]["input"],
+        json!([{"role":"user","content":"继续。"}])
+    );
+    assert_eq!(
+        captures[2]["input"],
+        json!([{"role":"user","content":"继续。"}])
     );
     for capture in captures.iter().skip(1) {
         let provider_wire = serde_json::to_string(capture).unwrap();

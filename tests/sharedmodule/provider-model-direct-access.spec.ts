@@ -117,6 +117,57 @@ describe('provider.model direct access without routing', () => {
     expect(result.target?.providerKey).toMatch(/glm/);
   });
 
+  it('should not let port allowedProviders empty an explicit provider.model direct request', async () => {
+    const input: any = {
+      virtualrouter: {
+        providers: {
+          glm: {
+            id: 'glm',
+            type: 'glm',
+            enabled: true,
+            endpoint: 'https://apis.glm.cn/v1',
+            auth: { type: 'apikey', apiKey: 'TEST_KEY' },
+            models: {
+              'glm-4.7': {}
+            }
+          },
+          backup: {
+            id: 'backup',
+            type: 'openai',
+            enabled: true,
+            endpoint: 'https://backup.example/v1',
+            auth: { type: 'apikey', apiKey: 'TEST_KEY' },
+            models: {
+              'backup-model': {}
+            }
+          }
+        },
+        routing: {
+          default: ['backup.backup-model']
+        }
+      }
+    };
+
+    const config = bootstrapVirtualRouterConfig(input);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
+
+    const result = await engine.route(
+      {
+        model: 'glm.glm-4.7',
+        messages: [{ role: 'user', content: 'Hello' }]
+      },
+      {
+        allowedProviders: ['backup.key1.backup-model'],
+        requestId: 'test-provider-model-direct-allowed-provider-scope'
+      }
+    );
+
+    expect(result.decision?.routeName).toBe('direct');
+    expect(result.target?.providerKey).toContain('glm');
+    expect(result.target?.modelId).toBe('glm-4.7');
+  });
+
   it('should return PROVIDER_NOT_AVAILABLE when provider is disabled', async () => {
     const input: any = {
       virtualrouter: {

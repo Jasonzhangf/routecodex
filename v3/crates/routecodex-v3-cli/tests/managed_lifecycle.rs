@@ -661,8 +661,19 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     let start_stdout = String::from_utf8_lossy(&start_output.stdout);
     let start_stderr = String::from_utf8_lossy(&start_output.stderr);
     assert!(
-        start_stdout.contains("[RouteCodexV3] Server started on "),
-        "top-level start must stream standard human startup status even when config log_console=false, got:\n{start_stdout}"
+        start_stdout.contains("[RouteCodexV3] rccv3 start version=")
+            && start_stdout.contains(" crate=")
+            && start_stdout.contains(" binary=")
+            && start_stdout.contains(" config=")
+            && start_stdout.contains(" snap="),
+        "top-level start must print the exact rccv3 binary/config/snap version line before streaming server logs, got:\n{start_stdout}"
+    );
+    assert!(
+        start_stdout.contains("[RouteCodexV3] Server started version=")
+            && start_stdout.contains(" crate=")
+            && start_stdout.contains(" binary=")
+            && start_stdout.contains(" on "),
+        "top-level start must stream standard human startup status with version/binary evidence even when config log_console=false, got:\n{start_stdout}"
     );
     assert!(
         start_stdout.contains("▶ [/v1/responses]")

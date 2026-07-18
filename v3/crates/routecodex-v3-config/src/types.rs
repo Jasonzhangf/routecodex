@@ -313,6 +313,8 @@ pub struct V3ProviderAuthoringConfig {
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
+    #[serde(default, alias = "compatibilityProfile")]
+    pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
 }
@@ -672,6 +674,7 @@ pub struct V3ProviderManifest {
     pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
+    pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
 }
 

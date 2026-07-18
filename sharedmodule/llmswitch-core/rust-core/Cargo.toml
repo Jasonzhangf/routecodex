@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/sse-transport-core",
+  "crates/provider-compat-core",
   "crates/router-hotpath-napi",
   "crates/stop-message-core",
   "crates/followup-core",

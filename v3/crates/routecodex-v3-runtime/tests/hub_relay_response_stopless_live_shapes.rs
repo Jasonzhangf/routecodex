@@ -6,6 +6,16 @@ use routecodex_v3_runtime::{
 };
 use serde_json::{json, Value};
 
+fn stopless_cli_input_from_arguments(arguments: &str) -> Value {
+    let parsed: Value = serde_json::from_str(arguments).expect("arguments must be JSON");
+    let cmd = parsed["cmd"].as_str().expect("cmd is required");
+    let marker = "--input-json '";
+    let start = cmd.find(marker).expect("input-json marker") + marker.len();
+    let rest = &cmd[start..];
+    let end = rest.find('\'').expect("input-json closing quote");
+    serde_json::from_str(&rest[..end]).expect("input-json must be JSON")
+}
+
 fn relay_raw(payload: Value) -> routecodex_v3_runtime::V3ProviderRespInbound01Raw {
     build_v3_provider_resp_inbound_01_raw(
         payload,
@@ -53,10 +63,10 @@ fn stopless_projects_cli_for_live_responses_object_missing_finish_reason_and_sch
     assert_eq!(payload["status"], "requires_action");
     assert_eq!(payload["output"][0]["call_id"], "call_stopless_reasoning");
     assert_eq!(payload["output"][0]["name"], "exec_command");
-    assert!(payload["output"][0]["arguments"]
-        .as_str()
-        .unwrap()
-        .contains("--input-json '{}'"));
+    let cli_input =
+        stopless_cli_input_from_arguments(payload["output"][0]["arguments"].as_str().unwrap());
+    assert_eq!(cli_input["repeatCount"], json!(1));
+    assert_eq!(cli_input["triggerHint"], json!("no_schema"));
 }
 
 #[test]

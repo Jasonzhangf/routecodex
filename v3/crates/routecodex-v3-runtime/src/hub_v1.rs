@@ -2,6 +2,10 @@ use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
     V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
 };
+use provider_compat_core::req_outbound_stage3_compat::{
+    run_req_outbound_stage3_compat, run_resp_inbound_stage3_compat, AdapterContext,
+    ReqOutboundCompatInput,
+};
 use serde_json::{Map, Value};
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -132,11 +136,13 @@ pub struct V3HubReqOutbound07ProviderSemantic {
 pub struct ProviderReqCompat06ProviderCompat {
     previous: V3HubReqOutbound07ProviderSemantic,
     profile: V3ProviderCompatProfileId,
+    payload: V3HubOpaquePayload,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderCompatProfileId {
     Passthrough,
+    Profile(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,12 +164,21 @@ pub struct V3ProviderRespInbound01Raw {
     execution: V3HubExecutionMode,
     invocation_source: V3HubInvocationSource,
     transport_intent: V3HubTransportIntent,
+    compatibility_profile: V3ProviderCompatProfileId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderRespCompat02ProviderCompat {
     previous: V3ProviderRespInbound01Raw,
     profile: V3ProviderCompatProfileId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("provider compat profile {profile} failed at {stage}: {reason}")]
+pub struct V3ProviderCompatError {
+    stage: &'static str,
+    profile: String,
+    reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -196,6 +211,37 @@ pub enum V3HubResponseTerminality {
 pub enum V3HubServertoolResponseAction {
     None,
     FollowupRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3StoplessHookState {
+    repeat_count: u32,
+    max_repeats: u32,
+    trigger_hint: Option<String>,
+}
+
+impl V3StoplessHookState {
+    pub fn new(repeat_count: u32, max_repeats: u32, trigger_hint: Option<String>) -> Self {
+        Self {
+            repeat_count,
+            max_repeats: max_repeats.max(1),
+            trigger_hint: trigger_hint
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        }
+    }
+
+    pub fn repeat_count(&self) -> u32 {
+        self.repeat_count
+    }
+
+    pub fn max_repeats(&self) -> u32 {
+        self.max_repeats
+    }
+
+    pub fn trigger_hint(&self) -> Option<&str> {
+        self.trigger_hint.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -320,11 +366,16 @@ pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
 
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     input: V3HubReqOutbound07ProviderSemantic,
-) -> ProviderReqCompat06ProviderCompat {
-    ProviderReqCompat06ProviderCompat {
+) -> Result<ProviderReqCompat06ProviderCompat, V3ProviderCompatError> {
+    let profile = V3ProviderCompatProfileId::from_config(
+        input.selected_target().compatibility_profile.as_deref(),
+    );
+    let payload = apply_v3_provider_req_compat(&input, &profile)?;
+    Ok(ProviderReqCompat06ProviderCompat {
         previous: input,
-        profile: V3ProviderCompatProfileId::Passthrough,
-    }
+        profile,
+        payload: V3HubOpaquePayload(payload),
+    })
 }
 
 pub fn build_v3_provider_req_outbound_08_from_provider_req_compat_06(
@@ -358,12 +409,12 @@ impl V3HubReqOutbound07ProviderSemantic {
 }
 
 impl ProviderReqCompat06ProviderCompat {
-    pub fn profile(&self) -> V3ProviderCompatProfileId {
-        self.profile
+    pub fn profile(&self) -> &V3ProviderCompatProfileId {
+        &self.profile
     }
 
     fn provider_semantic_payload(&self) -> &Value {
-        self.previous.provider_semantic_payload()
+        &self.payload.0
     }
 }
 
@@ -374,37 +425,121 @@ impl V3ProviderReqOutbound09TransportRequest {
 }
 
 impl V3ProviderCompatProfileId {
-    pub const fn as_str(self) -> &'static str {
+    fn from_config(profile: Option<&str>) -> Self {
+        match profile.map(str::trim).filter(|profile| !profile.is_empty()) {
+            Some(profile) if profile.eq_ignore_ascii_case("compat:passthrough") => {
+                Self::Passthrough
+            }
+            Some(profile) => Self::Profile(profile.to_string()),
+            None => Self::Passthrough,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
         match self {
             Self::Passthrough => "compat:passthrough",
+            Self::Profile(profile) => profile.as_str(),
+        }
+    }
+
+    fn as_optional_string(&self) -> Option<String> {
+        match self {
+            Self::Passthrough => None,
+            Self::Profile(profile) => Some(profile.clone()),
         }
     }
 }
 
 impl V3ProviderReqOutbound08WirePayload {
-    fn compat_profile(&self) -> V3ProviderCompatProfileId {
+    fn compat_profile(&self) -> &V3ProviderCompatProfileId {
         self.previous.profile()
     }
 }
 
 impl V3ProviderReqOutbound09TransportRequest {
-    pub fn compat_profile_id(&self) -> &'static str {
+    pub fn compat_profile_id(&self) -> &str {
         self.previous.compat_profile().as_str()
     }
 }
 
+fn apply_v3_provider_req_compat(
+    input: &V3HubReqOutbound07ProviderSemantic,
+    profile: &V3ProviderCompatProfileId,
+) -> Result<Value, V3ProviderCompatError> {
+    let selected = input.selected_target();
+    let provider_key = format!(
+        "{}:{}:{}",
+        selected.provider_id, selected.auth_alias, selected.model_id
+    );
+    run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload: input.provider_semantic_payload().clone(),
+        adapter_context: AdapterContext {
+            compatibility_profile: profile.as_optional_string(),
+            provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
+            model_id: Some(selected.model_id.clone()),
+            original_model_id: Some(selected.wire_model.clone()),
+            provider_id: Some(selected.provider_id.clone()),
+            provider_key: Some(provider_key.clone()),
+            runtime_key: Some(provider_key),
+            ..Default::default()
+        },
+        explicit_profile: profile.as_optional_string(),
+    })
+    .map(|result| result.payload)
+    .map_err(|reason| V3ProviderCompatError {
+        stage: "request",
+        profile: profile.as_str().to_string(),
+        reason,
+    })
+}
+
+fn apply_v3_provider_resp_compat(
+    input: &V3ProviderRespInbound01Raw,
+    profile: &V3ProviderCompatProfileId,
+) -> Result<Value, V3ProviderCompatError> {
+    run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+        payload: input.payload.0.as_ref().clone(),
+        adapter_context: AdapterContext {
+            compatibility_profile: profile.as_optional_string(),
+            provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
+            ..Default::default()
+        },
+        explicit_profile: profile.as_optional_string(),
+    })
+    .map(|result| result.payload)
+    .map_err(|reason| V3ProviderCompatError {
+        stage: "response",
+        profile: profile.as_str().to_string(),
+        reason,
+    })
+}
+
+fn provider_protocol_compat_id(protocol: V3HubProviderWireProtocol) -> String {
+    match protocol {
+        V3HubProviderWireProtocol::Responses => "openai-responses",
+        V3HubProviderWireProtocol::Anthropic => "anthropic-messages",
+        V3HubProviderWireProtocol::Gemini => "gemini-chat",
+        V3HubProviderWireProtocol::OpenAiChat => "openai-chat",
+    }
+    .to_string()
+}
+
 pub fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(
     input: V3ProviderRespInbound01Raw,
-) -> ProviderRespCompat02ProviderCompat {
-    ProviderRespCompat02ProviderCompat {
+) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
+    let profile = input.compatibility_profile.clone();
+    let mut input = input;
+    let payload = apply_v3_provider_resp_compat(&input, &profile)?;
+    input.payload = V3HubResponsePayload(Arc::new(payload));
+    Ok(ProviderRespCompat02ProviderCompat {
         previous: input,
-        profile: V3ProviderCompatProfileId::Passthrough,
-    }
+        profile,
+    })
 }
 
 impl ProviderRespCompat02ProviderCompat {
-    pub fn profile(&self) -> V3ProviderCompatProfileId {
-        self.profile
+    pub fn profile(&self) -> &V3ProviderCompatProfileId {
+        &self.profile
     }
 
     fn raw(&self) -> &V3ProviderRespInbound01Raw {
@@ -443,6 +578,28 @@ pub fn build_v3_provider_resp_inbound_01_raw(
     invocation_source: V3HubInvocationSource,
     transport_intent: V3HubTransportIntent,
 ) -> V3ProviderRespInbound01Raw {
+    build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        payload,
+        entry_protocol,
+        provider_protocol,
+        continuation,
+        execution,
+        invocation_source,
+        transport_intent,
+        None,
+    )
+}
+
+pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+    payload: Value,
+    entry_protocol: V3HubEntryProtocol,
+    provider_protocol: V3HubProviderWireProtocol,
+    continuation: V3HubContinuationOwnership,
+    execution: V3HubExecutionMode,
+    invocation_source: V3HubInvocationSource,
+    transport_intent: V3HubTransportIntent,
+    compatibility_profile: Option<&str>,
+) -> V3ProviderRespInbound01Raw {
     V3ProviderRespInbound01Raw {
         payload: V3HubResponsePayload(Arc::new(payload)),
         entry_protocol,
@@ -451,6 +608,7 @@ pub fn build_v3_provider_resp_inbound_01_raw(
         execution,
         invocation_source,
         transport_intent,
+        compatibility_profile: V3ProviderCompatProfileId::from_config(compatibility_profile),
     }
 }
 
@@ -586,6 +744,7 @@ impl V3ServerRespOutbound06ClientFrame {
 pub struct V3HubRelayResponseHookProfile {
     servertool_names: BTreeSet<String>,
     stopless_reasoning_stop: bool,
+    stopless_request_state: Option<V3StoplessHookState>,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -600,6 +759,7 @@ impl V3HubRelayResponseHookProfile {
                 .map(|name| name.as_ref().to_owned())
                 .collect(),
             stopless_reasoning_stop: false,
+            stopless_request_state: None,
         }
     }
 
@@ -612,8 +772,17 @@ impl V3HubRelayResponseHookProfile {
         self
     }
 
+    pub fn with_stopless_request_state(mut self, state: V3StoplessHookState) -> Self {
+        self.stopless_request_state = Some(state);
+        self
+    }
+
     pub fn stopless_reasoning_stop_enabled(&self) -> bool {
         self.stopless_reasoning_stop
+    }
+
+    pub fn stopless_request_state(&self) -> Option<&V3StoplessHookState> {
+        self.stopless_request_state.as_ref()
     }
 }
 
@@ -633,6 +802,8 @@ pub enum V3HubRelayResponseError {
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
     UnsupportedStatus { status: String },
+    #[error("provider response compat failed: {reason}")]
+    ProviderCompatFailed { reason: String },
     #[error("stopless response hook projection failed: {reason}")]
     StoplessProjectionFailed { reason: &'static str },
 }
@@ -695,7 +866,12 @@ fn normalize_v3_hub_relay_response(
     if let Some(key) = find_v3_hub_side_channel_key(&input.payload.0) {
         return Err(V3HubRelayResponseError::SideChannelLeaked { key });
     }
-    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input);
+    let compat =
+        build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input).map_err(|error| {
+            V3HubRelayResponseError::ProviderCompatFailed {
+                reason: error.to_string(),
+            }
+        })?;
     Ok(build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(
         compat,
     ))
@@ -1120,6 +1296,7 @@ mod tests {
                 base_url: "http://127.0.0.1:1/v1".into(),
                 responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
                 websocket_v2_url: None,
+                compatibility_profile: None,
                 env_name: Some("V3_TEST_KEY".into()),
                 token_file: None,
                 path: vec!["provider".into()],
@@ -1129,7 +1306,7 @@ mod tests {
             req06,
             V3HubProviderWireProtocol::Responses,
         );
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
 
@@ -1142,7 +1319,8 @@ mod tests {
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
         );
-        let resp_compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01);
+        let resp_compat =
+            build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
         let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(resp_compat);
         let resp03 = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(resp02);
         let resp04 = build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
@@ -1151,6 +1329,56 @@ mod tests {
         );
         let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
         let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
+    }
+
+    #[test]
+    fn provider_req_compat_loads_selected_target_profile() {
+        let req01 = build_v3_hub_req_inbound_01_client_raw(
+            json!({
+                "model": "MiniMax-M3",
+                "input": [{"role": "user", "content": "hi"}]
+            }),
+            V3HubEntryProtocol::Responses,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
+        let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
+            req02,
+            V3HubContinuationOwnership::New,
+        );
+        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+        let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+            req04,
+            V3HubExecutionMode::Relay,
+        );
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05,
+            V3HubTargetResolution::Routed,
+            routecodex_v3_target::V3TargetCandidate {
+                provider_id: "minimax".into(),
+                provider_type: "anthropic".into(),
+                auth_alias: "key1".into(),
+                model_id: "MiniMax-M3".into(),
+                wire_model: "MiniMax-M3".into(),
+                base_url: "http://127.0.0.1:1/v1".into(),
+                responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                compatibility_profile: Some("chat:minimax".into()),
+                env_name: Some("V3_TEST_KEY".into()),
+                token_file: None,
+                path: vec!["provider".into()],
+            },
+        );
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            V3HubProviderWireProtocol::Responses,
+        );
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
+        assert_eq!(req_compat.profile().as_str(), "chat:minimax");
+        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
+        let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
+        assert_eq!(req09.compat_profile_id(), "chat:minimax");
     }
 
     #[test]

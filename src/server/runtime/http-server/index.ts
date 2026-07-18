@@ -1145,7 +1145,11 @@ export class RouteCodexHttpServer {
     };
   }
 
-  private resolveRuntimeKeyForProviderBinding(bindingKey?: string, metadata?: Record<string, unknown>): string | undefined {
+  private resolveRuntimeKeyForProviderBinding(
+    bindingKey?: string,
+    metadata?: Record<string, unknown>,
+    options?: { ignoreMetadataScope?: boolean },
+  ): string | undefined {
     if (!bindingKey) {
       return undefined;
     }
@@ -1153,18 +1157,27 @@ export class RouteCodexHttpServer {
     if (!normalizedBinding) {
       return undefined;
     }
+    const ignoreMetadataScope = options?.ignoreMetadataScope === true;
     if (this.providerKeyToRuntimeKey.has(normalizedBinding)) {
       const runtimeKey = this.providerKeyToRuntimeKey.get(normalizedBinding);
-      return this.isProviderVisibleInMetadataScope(runtimeKey, metadata) ? runtimeKey : undefined;
+      if (!runtimeKey) {
+        return undefined;
+      }
+      return ignoreMetadataScope || this.isProviderVisibleInMetadataScope(runtimeKey, metadata)
+        ? runtimeKey
+        : undefined;
     }
-    if (this.providerHandles.has(normalizedBinding) && this.isProviderVisibleInMetadataScope(normalizedBinding, metadata)) {
+    if (
+      this.providerHandles.has(normalizedBinding)
+      && (ignoreMetadataScope || this.isProviderVisibleInMetadataScope(normalizedBinding, metadata))
+    ) {
       return normalizedBinding;
     }
     return undefined;
   }
 
-  private resolveProviderHandleForBinding(bindingKey?: string, metadata?: Record<string, unknown>): ProviderHandle | undefined {
-    const runtimeKey = this.resolveRuntimeKeyForProviderBinding(bindingKey, metadata);
+  private resolveProviderHandleForBinding(bindingKey?: string, metadata?: Record<string, unknown>, options?: { ignoreMetadataScope?: boolean }): ProviderHandle | undefined {
+    const runtimeKey = this.resolveRuntimeKeyForProviderBinding(bindingKey, metadata, options);
     return runtimeKey ? this.providerHandles.get(runtimeKey) : undefined;
   }
 
@@ -1734,6 +1747,14 @@ export class RouteCodexHttpServer {
     }
     const providerKey = target.providerKey.trim();
     const runtimeKey = typeof target.runtimeKey === 'string' && target.runtimeKey.trim() ? target.runtimeKey.trim() : providerKey;
+    const routingDecisionRouteNameForTarget =
+      typeof routingDecision?.routeName === 'string' && routingDecision.routeName.trim()
+        ? routingDecision.routeName.trim()
+        : undefined;
+    const isExplicitProviderModelDirectRoute = routingDecisionRouteNameForTarget === 'direct';
+    const directRuntimeResolutionOptions = isExplicitProviderModelDirectRoute
+      ? { ignoreMetadataScope: true }
+      : undefined;
     const providerType = typeof target.providerType === 'string' ? target.providerType : '';
     const targetOutboundProfile =
       typeof target.outboundProfile === 'string' && target.outboundProfile.trim()
@@ -1873,8 +1894,15 @@ export class RouteCodexHttpServer {
     }
 
     const requestPayload = rawDirectPayload;
-    const directProviderHandle = this.resolveProviderHandleForBinding(providerKey, metadataForHub)
-      ?? this.resolveProviderHandleForBinding(runtimeKey, metadataForHub);
+    const directProviderHandle = this.resolveProviderHandleForBinding(
+      providerKey,
+      metadataForHub,
+      directRuntimeResolutionOptions,
+    ) ?? this.resolveProviderHandleForBinding(
+      runtimeKey,
+      metadataForHub,
+      directRuntimeResolutionOptions,
+    );
     if (!directProviderHandle) {
       const resolveError = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
         code: 'ERR_PROVIDER_NOT_FOUND',
@@ -1959,6 +1987,9 @@ export class RouteCodexHttpServer {
         extractRetryErrorSnapshot,
       });
       retryState.lastError = resolveError;
+      if (isExplicitProviderModelDirectRoute) {
+        throw resolveError;
+      }
       if (directAttempt < retryState.maxAttempts) {
         return await this.executeRouterDirectPipelineForPort(portConfig, input, retryState, directAttempt + 1);
       }
@@ -2020,6 +2051,9 @@ export class RouteCodexHttpServer {
       pipelineMetadata: metadataForHub,
       resolveProviderByRuntimeKey: (runtimeKey?: string) => {
         if (!runtimeKey) return undefined;
+        if (isExplicitProviderModelDirectRoute) {
+          return this.providerHandles.get(runtimeKey) ?? directProviderHandle;
+        }
         return this.isProviderVisibleInMetadataScope(runtimeKey, metadataForHub)
           ? this.providerHandles.get(runtimeKey)
           : undefined;
@@ -2185,7 +2219,11 @@ export class RouteCodexHttpServer {
           dependencies: this.getModuleDependencies(),
           runtimeManager: {
             resolveRuntimeKey: (bindingKey, scopedMetadata) =>
-              this.resolveRuntimeKeyForProviderBinding(bindingKey, scopedMetadata),
+              this.resolveRuntimeKeyForProviderBinding(
+                bindingKey,
+                scopedMetadata,
+                directRuntimeResolutionOptions,
+              ),
           },
           attempt: directAttempt,
           maxAttempts: retryState.maxAttempts,
@@ -2241,6 +2279,7 @@ export class RouteCodexHttpServer {
           maxAttempts: retryState.maxAttempts,
           providerKey: ctx.providerKey,
           error,
+          routeName: routingDecisionRouteName,
         });
         retryState.excludedProviderKeys = directRetryDecision.mutatedExcluded;
         const routePoolRemainingAfterExclusion =

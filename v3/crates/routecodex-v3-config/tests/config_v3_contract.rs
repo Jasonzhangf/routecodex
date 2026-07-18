@@ -852,6 +852,16 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
     assert_eq!(manifest.providers["orangeai"].provider_type, "openai_chat");
     assert_eq!(manifest.providers["minimax"].provider_type, "anthropic");
     assert_eq!(manifest.providers["cc"].provider_type, "responses");
+    assert_eq!(
+        manifest.providers["minimax"].compatibility_profile.as_deref(),
+        Some("chat:minimax"),
+        "V2 MiniMax provider must materialize the existing compatibility profile into the V3 manifest"
+    );
+    assert_eq!(
+        manifest.providers["orangeai"].compatibility_profile.as_deref(),
+        None,
+        "providers without an existing V2 compatibility profile must not get a synthetic profile"
+    );
     assert!(manifest.providers["orangeai"].auth.entries[0]
         .token_file
         .as_ref()

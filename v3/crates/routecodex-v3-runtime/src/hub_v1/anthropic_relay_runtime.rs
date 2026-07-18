@@ -127,6 +127,8 @@ pub enum V3AnthropicRelayRuntimeError {
     Target(String),
     #[error("V3 Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
+    #[error("V3 Relay provider compat failed: {0}")]
+    ProviderCompat(#[from] V3ProviderCompatError),
     #[error("V3 Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
     #[error("V3 Relay structured SSE projection failed: {0}")]
@@ -316,6 +318,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         &req05.previous.previous.previous.previous.payload.0,
     )?;
     let selected_target_provider_id = selected.candidate.provider_id.clone();
+    let selected_target_compatibility_profile = selected.candidate.compatibility_profile.clone();
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
         req05,
         V3HubTargetResolution::Routed,
@@ -328,7 +331,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     );
     trace.push("V3HubReqOutbound07ProviderSemantic");
     let target = provider_target(manifest, req07.selected_target())?;
-    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
     trace.push("ProviderReqCompat06ProviderCompat");
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
     let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -362,7 +365,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             .await
             .map_err(V3AnthropicRelayRuntimeError::StructuredSse)?;
         let (canonical_response, client_events) = projection.into_parts();
-        let resp01 = build_v3_provider_resp_inbound_01_raw(
+        let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
             canonical_response,
             V3HubEntryProtocol::Anthropic,
             V3HubProviderWireProtocol::Responses,
@@ -370,6 +373,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Sse,
+            selected_target_compatibility_profile.as_deref(),
         );
         trace.push("V3ProviderRespInbound01Raw");
         let hooks = compile_v3_hub_relay_response_hooks();
@@ -405,7 +409,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         unreachable!("SSE returned above")
     };
     let provider_value: Value = serde_json::from_slice(&bytes)?;
-    let resp01 = build_v3_provider_resp_inbound_01_raw(
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
         V3HubEntryProtocol::Anthropic,
         V3HubProviderWireProtocol::Responses,
@@ -413,6 +417,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         V3HubExecutionMode::Relay,
         V3HubInvocationSource::Client,
         transport_intent,
+        selected_target_compatibility_profile.as_deref(),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();

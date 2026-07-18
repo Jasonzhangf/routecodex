@@ -9036,6 +9036,55 @@ owners:
       - "This is a V3 workspace copy of the protocol-neutral SSE transport core so V3 can build and run independently from the V2 llmswitch-core crate tree."
       - "Protocol semantics, tool governance, continuation, stopless, and provider-specific event projection remain outside this transport module."
 
+  - feature_id: v3.provider_compat_profile_loading
+    status: active
+    summary: "V3 provider compat profiles have an explicit Rust owner between provider semantic/wire nodes and response inbound parsing"
+    owner_kind: rust_ssot
+    owner_scope: "ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat only load/apply provider-family compatibility profiles at the provider-runtime boundary; they must not own routing, tool governance, protocol conversion, fallback, or request/response lifecycle state"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+    canonical_types:
+      - AdapterContext
+      - ReqOutboundCompatInput
+      - CompatResult
+      - ProviderReqCompat06ProviderCompat
+      - ProviderRespCompat02ProviderCompat
+    canonical_builders:
+      - run_req_outbound_stage3_compat
+      - run_resp_inbound_stage3_compat
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/tests
+      - docs/architecture
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-target
+      - src/server/runtime/http-server
+      - src/providers
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
+      - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
+    required_gates:
+      - npm run test:v3-provider-compat-profile-loading
+      - npm run test:v3-workspace
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "This entry registers the real Rust source anchor already present in provider-compat-core; it is not a runtime behavior change."
+      - "Provider compat may perform provider-family profile tweaks only at ProviderReqCompat06ProviderCompat / ProviderRespCompat02ProviderCompat."
+      - "Tool governance, stopless, continuation, routing, retry/failure policy, and protocol lifecycle conversion remain owned by their existing Hub/VR/Error nodes."
+
   - feature_id: v3.v2_config_toml_compat_5555
     status: active
     summary: "V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract"

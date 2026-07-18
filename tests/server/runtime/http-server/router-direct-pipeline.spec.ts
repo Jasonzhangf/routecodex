@@ -448,6 +448,44 @@ describe('router-direct-pipeline', () => {
       expect(requestPayload.reasoningEffort).toBe('high');
     });
 
+    it('preserves canonical nested Responses effort when a legacy alias conflicts without route thinking', async () => {
+      const responsesHandle = createMockProviderHandle('openai-responses');
+      const requestPayload = {
+        model: 'gpt-5.5',
+        reasoning_effort: 'low',
+        reasoning: { effort: 'high', summary: 'auto' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      };
+
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: requestPayload,
+        requestPayload,
+        target: {
+          providerKey: 'asxs.crsa.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: responsesHandle.runtimeKey,
+          modelId: 'gpt-5.5',
+        },
+        routingDecision: { routeName: 'default', pool: ['asxs.crsa.gpt-5.5'] },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === responsesHandle.runtimeKey ? responsesHandle : undefined,
+      });
+
+      expect(result.used).toBe(true);
+      const sentPayload = (responsesHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, any>;
+      expect(sentPayload).not.toHaveProperty('reasoning_effort');
+      expect(sentPayload.reasoning).toEqual({
+        effort: 'high',
+        summary: 'auto',
+      });
+      expect(requestPayload.reasoning_effort).toBe('low');
+      expect(requestPayload.reasoning).toEqual({
+        effort: 'high',
+        summary: 'auto',
+      });
+    });
+
     it('applies configured historical tool image cleanup in direct hook only', async () => {
       const responsesHandle = createMockProviderHandle('openai-responses');
       const requestPayload = {

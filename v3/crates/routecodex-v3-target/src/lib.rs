@@ -62,6 +62,7 @@ routing_group = "g"
 type = "responses"
 base_url = "http://a.invalid/v1"
 default_model = "m"
+compatibility_profile = "chat:minimax"
 auth = { type = "api_key", entries = [{ alias = "ka", env = "KEY_A" }] }
 [providers.a.models.m]
 [providers.b]
@@ -146,6 +147,11 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
         let expanded = expanded();
         assert_eq!(expanded.route.hit_count, 1);
         assert_eq!(expanded.candidates.len(), 2);
+        assert_eq!(
+            expanded.candidates[0].compatibility_profile.as_deref(),
+            Some("chat:minimax")
+        );
+        assert_eq!(expanded.candidates[1].compatibility_profile, None);
         let selected = V3TargetInterpreter::default()
             .select_available(
                 expanded,
@@ -252,6 +258,7 @@ pub struct V3TargetCandidate {
     pub base_url: String,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
+    pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
     pub path: Vec<String>,
@@ -563,6 +570,7 @@ impl V3TargetInterpreter {
                     .responses
                     .as_ref()
                     .and_then(|responses| responses.websocket_v2_url.clone()),
+                compatibility_profile: provider.compatibility_profile.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
                 path: path.clone(),

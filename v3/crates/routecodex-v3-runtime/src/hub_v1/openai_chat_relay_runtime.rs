@@ -74,6 +74,8 @@ pub enum V3OpenAiChatRelayRuntimeError {
     Target(String),
     #[error("V3 OpenAI Chat provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
+    #[error("V3 OpenAI Chat provider compat failed: {0}")]
+    ProviderCompat(#[from] V3ProviderCompatError),
     #[error("V3 OpenAI Chat JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
     #[error("V3 OpenAI Chat structured SSE projection failed: {0}")]
@@ -149,6 +151,7 @@ pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
         &req05.previous.previous.previous.previous.payload.0,
     )?;
     let selected_target_provider_id = selected.candidate.provider_id.clone();
+    let selected_target_compatibility_profile = selected.candidate.compatibility_profile.clone();
     let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
         req05,
         V3HubTargetResolution::Routed,
@@ -161,7 +164,7 @@ pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     );
     trace.push("V3HubReqOutbound07ProviderSemantic");
     let target = provider_target(manifest, req07.selected_target())?;
-    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07);
+    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
     trace.push("ProviderReqCompat06ProviderCompat");
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
     let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -194,8 +197,12 @@ pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     match provider_raw.into_body() {
         V3ProviderResponseBody::Json(bytes) => {
             let provider_value = serde_json::from_slice(&bytes)?;
-            let client_response =
-                project_json_response(provider_value, transport_intent, &mut trace)?;
+            let client_response = project_json_response(
+                provider_value,
+                transport_intent,
+                &mut trace,
+                selected_target_compatibility_profile.as_deref(),
+            )?;
             Ok(V3OpenAiChatRelayRuntimeOutput {
                 status: 200,
                 client_body: V3OpenAiChatRelayClientBody::Json(client_response),
@@ -253,6 +260,7 @@ fn project_json_response(
     provider_value: Value,
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
+    compatibility_profile: Option<&str>,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
     let semantic = characterize_v3_openai_chat_provider_raw_to_hub_response_semantic(
         provider_value,
@@ -260,7 +268,7 @@ fn project_json_response(
         transport_intent,
     )?;
     let governance = build_openai_chat_json_governance_response(semantic.payload())?;
-    let resp01 = build_v3_provider_resp_inbound_01_raw(
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         governance,
         V3HubEntryProtocol::OpenAiChat,
         V3HubProviderWireProtocol::OpenAiChat,
@@ -268,6 +276,7 @@ fn project_json_response(
         V3HubExecutionMode::Relay,
         V3HubInvocationSource::Client,
         transport_intent,
+        compatibility_profile,
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
