@@ -498,6 +498,13 @@ fn merge_restored_local_context_at_req04(
         .ok_or_else(|| V3LocalContinuationError::Codec {
             message: "Req04 provider semantic input must be an array".to_string(),
         })?;
+    let restored_reasoning_items = restored_items
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let current_items =
+        maybe_drop_duplicate_restored_reasoning(current_items, &restored_reasoning_items);
     let mut merged = restored_items;
     let restored_keys = merged
         .iter()
@@ -519,6 +526,25 @@ fn merge_restored_local_context_at_req04(
     }));
     current["input"] = Value::Array(merged);
     Ok(())
+}
+
+fn maybe_drop_duplicate_restored_reasoning(
+    mut current_items: Vec<Value>,
+    restored_reasoning_items: &[Value],
+) -> Vec<Value> {
+    let Some(first_current) = current_items.first() else {
+        return current_items;
+    };
+    if first_current.get("type").and_then(Value::as_str) != Some("reasoning") {
+        return current_items;
+    }
+    if restored_reasoning_items
+        .iter()
+        .any(|item| item.get("summary") == first_current.get("summary"))
+    {
+        current_items.remove(0);
+    }
+    current_items
 }
 
 fn commit_or_release_local_continuation(

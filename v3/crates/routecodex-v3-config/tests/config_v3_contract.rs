@@ -858,7 +858,9 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
         "V2 MiniMax provider must materialize the existing compatibility profile into the V3 manifest"
     );
     assert_eq!(
-        manifest.providers["orangeai"].compatibility_profile.as_deref(),
+        manifest.providers["orangeai"]
+            .compatibility_profile
+            .as_deref(),
         None,
         "providers without an existing V2 compatibility profile must not get a synthetic profile"
     );

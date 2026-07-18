@@ -74,32 +74,24 @@ pub fn apply_v3_stopless_request_hook_at_req04(
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(None);
     };
-    let Some((index, output)) = input
-        .iter()
-        .enumerate()
-        .find(|(_, item)| is_stopless_cli_output(item))
-    else {
+    let Some((index, output)) = latest_stopless_cli_output(input) else {
+        strip_stopless_cli_artifacts(input);
         inject_stopless_schema(payload);
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(None);
     };
+    if has_stopless_reset_boundary_after(input, index) {
+        strip_stopless_cli_artifacts(input);
+        inject_stopless_schema(payload);
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
+        return Ok(None);
+    }
     let parsed = parse_stopless_cli_output(output, index)?;
     let replacement = json!({
         "role": "user",
         "content": parsed.next_step
     });
-    if index > 0
-        && input
-            .get(index - 1)
-            .and_then(Value::as_object)
-            .and_then(|item| item.get("type"))
-            .and_then(Value::as_str)
-            .is_some_and(|kind| kind == "function_call" || kind == "tool_call")
-    {
-        input.splice(index - 1..=index, [replacement]);
-    } else {
-        input[index] = replacement;
-    }
+    rewrite_active_stopless_pair_and_strip_stale(input, index, replacement);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
     inject_stopless_schema(payload);
@@ -356,6 +348,91 @@ fn is_stopless_cli_output(item: &Value) -> bool {
         .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
 }
 
+fn latest_stopless_cli_output(input: &[Value]) -> Option<(usize, &Value)> {
+    input
+        .iter()
+        .enumerate()
+        .rfind(|(_, item)| is_stopless_cli_output(item))
+}
+
+fn has_stopless_reset_boundary_after(input: &[Value], output_index: usize) -> bool {
+    input
+        .iter()
+        .skip(output_index.saturating_add(1))
+        .any(is_stopless_reset_boundary_item)
+}
+
+fn is_stopless_reset_boundary_item(item: &Value) -> bool {
+    if is_stopless_cli_artifact(item) {
+        return false;
+    }
+    let role = item.get("role").and_then(Value::as_str).unwrap_or_default();
+    if matches!(role, "user" | "assistant") {
+        return true;
+    }
+    match item.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "function_call"
+        | "custom_tool_call"
+        | "tool_call"
+        | "function_call_output"
+        | "custom_tool_call_output"
+        | "tool_call_output" => true,
+        "message" => !matches!(role, "developer" | "system"),
+        _ => false,
+    }
+}
+
+fn rewrite_active_stopless_pair_and_strip_stale(
+    input: &mut Vec<Value>,
+    output_index: usize,
+    replacement: Value,
+) {
+    let call_index = output_index
+        .checked_sub(1)
+        .filter(|index| input.get(*index).is_some_and(is_stopless_cli_call));
+    let mut next = Vec::with_capacity(input.len());
+    for (index, item) in std::mem::take(input).into_iter().enumerate() {
+        if Some(index) == call_index {
+            next.push(replacement.clone());
+            continue;
+        }
+        if index == output_index {
+            if call_index.is_none() {
+                next.push(replacement.clone());
+            }
+            continue;
+        }
+        if is_stopless_cli_artifact(&item) {
+            continue;
+        }
+        next.push(item);
+    }
+    *input = next;
+}
+
+fn strip_stopless_cli_artifacts(input: &mut Vec<Value>) {
+    input.retain(|item| !is_stopless_cli_artifact(item));
+}
+
+fn is_stopless_cli_artifact(item: &Value) -> bool {
+    is_stopless_cli_call(item) || is_stopless_cli_output(item)
+}
+
+fn is_stopless_cli_call(item: &Value) -> bool {
+    matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call" | "tool_call")
+    ) && (item
+        .get("call_id")
+        .and_then(Value::as_str)
+        .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
+        || item
+            .get("arguments")
+            .or_else(|| item.get("input"))
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("routecodex hook run reasoningStop")))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct V3ParsedStoplessCliOutput {
     next_step: String,
@@ -484,5 +561,28 @@ fn inject_stopless_schema(payload: &mut Value) {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_stopless_cli_output_json;
+
+    #[test]
+    fn parse_stopless_cli_output_json_extracts_real_5555_transcript_output() {
+        let raw = r#"Chunk ID: cdb280
+Wall time: 0.1387 seconds
+Process exited with code 0
+Original token count: 82
+Output:
+{"ok":true,"kind":"stop_message_auto","tool":"stop_message_auto","summary":"继续","toolName":"stop_message_auto","flowId":"stop_message_flow","routeHint":"thinking","continuationPrompt":"继续。","repeatCount":2,"maxRepeats":3,"input":{"flowId":"stop_message_flow","maxRepeats":3,"repeatCount":2,"triggerHint":"no_schema"}}
+"#;
+        let parsed = parse_stopless_cli_output_json(raw, 278).expect("real transcript must parse");
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["kind"], "stop_message_auto");
+        assert_eq!(parsed["continuationPrompt"], "继续。");
+        assert_eq!(parsed["repeatCount"], 2);
+        assert_eq!(parsed["maxRepeats"], 3);
+        assert_eq!(parsed["input"]["triggerHint"], "no_schema");
     }
 }

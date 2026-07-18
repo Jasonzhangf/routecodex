@@ -635,13 +635,12 @@ struct V2CompatibilityProfileBlock {
 }
 
 fn resolve_v2_provider_default_compatibility_profile(provider_id: &str) -> Option<String> {
-    static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> =
-        LazyLock::new(|| {
-            serde_json::from_str(include_str!(
-                "../../../../sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json"
-            ))
-            .expect("V2 provider resolution compatibility profile config must parse")
-        });
+    static PROVIDER_RESOLUTION_CONFIG: LazyLock<V2ProviderResolutionConfig> = LazyLock::new(|| {
+        serde_json::from_str(include_str!(
+            "../../../../sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json"
+        ))
+        .expect("V2 provider resolution compatibility profile config must parse")
+    });
 
     PROVIDER_RESOLUTION_CONFIG
         .compatibility_profile_blocks

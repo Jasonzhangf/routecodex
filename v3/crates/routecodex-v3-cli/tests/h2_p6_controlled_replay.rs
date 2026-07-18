@@ -336,7 +336,14 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .json()
         .await
         .unwrap();
-    assert!(snapshots["snapshots"].as_array().unwrap().is_empty());
+    let live_snapshots = snapshots["snapshots"].as_array().unwrap();
+    assert!(
+        !live_snapshots.is_empty(),
+        "snapshots=true must retain live snapshots for the controlled replay harness"
+    );
+    assert!(serde_json::to_string(&snapshots)
+        .unwrap()
+        .contains("\"live\":true"));
 
     let request_ids = collect_request_ids(&logs);
     let evidence_path = write_evidence_artifact(json!({

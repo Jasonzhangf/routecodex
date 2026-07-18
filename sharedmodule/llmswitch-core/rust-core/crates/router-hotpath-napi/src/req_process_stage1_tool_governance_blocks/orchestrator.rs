@@ -1458,7 +1458,8 @@ mod apply_patch_tool_schema_tests {
         })
         .expect("governed request");
 
-        let serialized = serde_json::to_string(&output.processed_request).expect("serialize request");
+        let serialized =
+            serde_json::to_string(&output.processed_request).expect("serialize request");
         assert!(serialized.contains("<rcc_stop_schema>"));
         assert!(!serialized.contains("reasoningStop"));
         assert!(!serialized.contains("stop_message_auto"));

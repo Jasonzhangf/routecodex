@@ -1568,6 +1568,19 @@ fn normalize_responses_history_item(value: Value) -> Value {
         return Value::Object(out);
     }
 
+    if matches!(
+        item_type.as_str(),
+        "custom_tool_call" | "tool_call" | "custom_tool_call_output" | "tool_call_output"
+    ) {
+        let mut out = row.clone();
+        out.remove("namespace");
+        if let Some(function) = out.get_mut("function").and_then(Value::as_object_mut) {
+            function.remove("namespace");
+        }
+        out.insert("type".to_string(), Value::String(item_type));
+        return Value::Object(out);
+    }
+
     value
 }
 
@@ -8475,6 +8488,49 @@ mod tests {
         assert_eq!(input[0]["type"], json!("message"));
         let serialized = serde_json::to_string(payload).unwrap();
         assert!(!serialized.contains("historical leak"));
+    }
+
+    #[test]
+    fn normalize_responses_request_input_for_chat_codec_strips_namespace_from_custom_tool_history_items(
+    ) {
+        let input = normalize_responses_request_input_for_chat_codec(vec![
+            json!({
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_custom_1",
+                "name": "multi_agent_v1.spawn_agent",
+                "namespace": "multi_agent_v1",
+                "function": {
+                    "name": "spawn_agent",
+                    "namespace": "multi_agent_v1",
+                    "arguments": "{\"task\":\"inspect\"}"
+                }
+            }),
+            json!({
+                "type": "custom_tool_call_output",
+                "id": "ctco_1",
+                "call_id": "call_custom_1",
+                "namespace": "multi_agent_v1",
+                "function": {
+                    "name": "spawn_agent",
+                    "namespace": "multi_agent_v1"
+                },
+                "output": "{\"ok\":true}"
+            }),
+        ]);
+
+        assert_eq!(input.len(), 2);
+        assert_eq!(input[0]["type"], json!("custom_tool_call"));
+        assert_eq!(input[0]["call_id"], json!("call_custom_1"));
+        assert_eq!(input[0]["name"], json!("multi_agent_v1.spawn_agent"));
+        assert!(input[0].get("namespace").is_none());
+        assert!(input[0]["function"].get("namespace").is_none());
+        assert_eq!(input[1]["type"], json!("custom_tool_call_output"));
+        assert_eq!(input[1]["call_id"], json!("call_custom_1"));
+        assert!(input[1].get("namespace").is_none());
+        assert!(input[1]["function"].get("namespace").is_none());
+        let serialized = serde_json::to_string(&input).unwrap();
+        assert!(!serialized.contains("\"namespace\""));
     }
 
     #[test]

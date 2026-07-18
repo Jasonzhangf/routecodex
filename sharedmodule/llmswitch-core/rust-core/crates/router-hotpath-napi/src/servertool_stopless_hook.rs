@@ -561,8 +561,12 @@ mod tests {
             }
         });
 
-        let output = run_stopless_response_hook(&payload, &metadata_center_snapshot, "req-relay-stopless-policy")
-            .expect("stopless response hook");
+        let output = run_stopless_response_hook(
+            &payload,
+            &metadata_center_snapshot,
+            "req-relay-stopless-policy",
+        )
+        .expect("stopless response hook");
 
         let output = output.expect("relay stopless policy should still activate response hook");
         let serialized = serde_json::to_string(&output.payload).expect("serialize hook payload");

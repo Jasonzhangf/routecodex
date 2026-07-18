@@ -52,10 +52,7 @@ fn write_nested_reasoning_effort(payload: &mut Map<String, Value>, level: &str) 
     true
 }
 
-fn write_nested_reasoning_effort_if_absent(
-    payload: &mut Map<String, Value>,
-    level: &str,
-) -> bool {
+fn write_nested_reasoning_effort_if_absent(payload: &mut Map<String, Value>, level: &str) -> bool {
     if payload
         .get("reasoning")
         .and_then(Value::as_object)
@@ -120,6 +117,9 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     {
         payload_changed = true;
     }
+    if openai_responses_protocol && strip_responses_history_tool_namespaces(&mut payload) > 0 {
+        payload_changed = true;
+    }
     let provider_model_id = trimmed(payload.get("model")).map(str::to_string);
     Ok(json!({
         "payload": payload,
@@ -139,6 +139,42 @@ fn replace_historical_tool_images(payload: &mut Map<String, Value>) -> usize {
         replaced += replace_historical_chat_tool_images(messages);
     }
     replaced
+}
+
+fn strip_responses_history_tool_namespaces(payload: &mut Map<String, Value>) -> usize {
+    let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    input
+        .iter_mut()
+        .filter_map(Value::as_object_mut)
+        .filter(|entry| is_responses_history_tool_entry(entry))
+        .map(strip_namespace_from_tool_history_entry)
+        .sum()
+}
+
+fn is_responses_history_tool_entry(entry: &Map<String, Value>) -> bool {
+    matches!(
+        entry
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim(),
+        "function_call"
+            | "function_call_output"
+            | "custom_tool_call"
+            | "custom_tool_call_output"
+            | "tool_call"
+            | "tool_call_output"
+    )
+}
+
+fn strip_namespace_from_tool_history_entry(entry: &mut Map<String, Value>) -> usize {
+    let mut removed = usize::from(entry.remove("namespace").is_some());
+    if let Some(function) = entry.get_mut("function").and_then(Value::as_object_mut) {
+        removed += usize::from(function.remove("namespace").is_some());
+    }
+    removed
 }
 
 fn replace_historical_responses_tool_images(input: &mut [Value]) -> usize {
@@ -566,6 +602,65 @@ mod tests {
         assert_eq!(output["payload"]["reasoning"]["effort"], "high");
         assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
         assert_eq!(output["payloadChanged"], true);
+    }
+
+    #[test]
+    fn request_plan_strips_responses_history_tool_namespace_without_touching_protocol_data() {
+        let resolved = resolve_direct_semantic_classification(&json!({
+            "payload": {"model":"gpt-5.5"},
+            "targetModelId":"gpt-5.5"
+        }))
+        .expect("resolved routing semantics");
+        let output = plan_request_hooks(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "metadata": {"client": "kept"},
+                "tools": [{
+                    "type": "namespace",
+                    "name": "collaboration",
+                    "tools": [{"type":"function", "name":"spawn_agent"}]
+                }],
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "spawn_agent",
+                        "namespace": "collaboration",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_2",
+                        "name": "spawn_agent",
+                        "namespace": "collaboration",
+                        "function": {
+                            "name": "spawn_agent",
+                            "namespace": "collaboration",
+                            "arguments": "{}"
+                        }
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "namespace in ordinary text is data"
+                        }]
+                    }
+                ]
+            },
+            "resolvedSemantics": resolved,
+            "providerProtocol": "openai-responses"
+        }))
+        .expect("responses request plan");
+        assert_eq!(output["payloadChanged"], true);
+        assert!(output["payload"]["input"][0].get("namespace").is_none());
+        assert!(output["payload"]["input"][1].get("namespace").is_none());
+        assert!(output["payload"]["input"][1]["function"]
+            .get("namespace")
+            .is_none());
+        assert_eq!(output["payload"]["metadata"]["client"], "kept");
+        assert_eq!(output["payload"]["tools"][0]["type"], "namespace");
     }
 
     #[test]

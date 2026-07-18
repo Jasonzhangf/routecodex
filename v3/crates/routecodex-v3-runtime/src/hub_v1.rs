@@ -6,7 +6,7 @@ use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, run_resp_inbound_stage3_compat, AdapterContext,
     ReqOutboundCompatInput,
 };
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::{collections::BTreeSet, sync::Arc};
 
 mod relay_request;
@@ -367,9 +367,10 @@ pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
 pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     input: V3HubReqOutbound07ProviderSemantic,
 ) -> Result<ProviderReqCompat06ProviderCompat, V3ProviderCompatError> {
-    let profile = V3ProviderCompatProfileId::from_config(
-        input.selected_target().compatibility_profile.as_deref(),
-    );
+    let profile = match input.selected_target().compatibility_profile.as_deref() {
+        Some(profile) => V3ProviderCompatProfileId::from_config(Some(profile)),
+        None => V3ProviderCompatProfileId::Passthrough,
+    };
     let payload = apply_v3_provider_req_compat(&input, &profile)?;
     Ok(ProviderReqCompat06ProviderCompat {
         previous: input,
@@ -527,7 +528,10 @@ fn provider_protocol_compat_id(protocol: V3HubProviderWireProtocol) -> String {
 pub fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(
     input: V3ProviderRespInbound01Raw,
 ) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
-    let profile = input.compatibility_profile.clone();
+    let profile = match &input.compatibility_profile {
+        V3ProviderCompatProfileId::Passthrough => V3ProviderCompatProfileId::Passthrough,
+        profile => profile.clone(),
+    };
     let mut input = input;
     let payload = apply_v3_provider_resp_compat(&input, &profile)?;
     input.payload = V3HubResponsePayload(Arc::new(payload));
@@ -1107,13 +1111,49 @@ fn normalize_v3_apply_patch_freeform_input_for_client(arguments_text: &str) -> S
 }
 
 pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str> {
-    const FORBIDDEN: [&str; 6] = [
+    const FORBIDDEN: [&str; 42] = [
         "routecodex_internal",
+        "routecodexInternal",
         "metadata_center",
+        "metadataCenter",
+        "__metadataCenter",
         "debug_snapshot",
+        "debugSnapshot",
         "provider_protocol",
+        "providerProtocol",
+        "provider_runtime",
+        "providerRuntime",
         "resource_handle",
+        "resourceHandle",
         "continuation_owner",
+        "continuationOwner",
+        "runtime_control",
+        "runtimeControl",
+        "request_truth",
+        "requestTruth",
+        "route_selection",
+        "routeSelection",
+        "retry_exclusion_set",
+        "retryExclusionSet",
+        "selected_target",
+        "selectedTarget",
+        "resume_meta",
+        "resumeMeta",
+        "servertool_state",
+        "servertoolState",
+        "stopless_state",
+        "stoplessState",
+        "error_chain",
+        "errorChain",
+        "node_trace",
+        "nodeTrace",
+        "capturedChatRequest",
+        "entryOriginRequest",
+        "requestSemantics",
+        "responsesRequestContext",
+        "__raw_request_body",
+        "__rt",
+        "__rccDryRunSerialized",
     ];
     match value {
         Value::Array(items) => items.iter().find_map(find_v3_hub_side_channel_key),
@@ -1155,14 +1195,21 @@ pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
     current: &mut Value,
     restored: &Value,
 ) -> Result<(), V3LocalContinuationError> {
+    let current_object =
+        current
+            .as_object_mut()
+            .ok_or_else(|| V3LocalContinuationError::Codec {
+                message: "Req04 provider semantic payload must be an object".to_string(),
+            })?;
     let restored_items = restored
-        .get("output")
+        .get("input")
+        .or_else(|| restored.get("output"))
         .and_then(Value::as_array)
         .cloned()
         .ok_or_else(|| V3LocalContinuationError::Codec {
-            message: "restored local continuation output must be an array".to_string(),
+            message: "restored local continuation input/output must be an array".to_string(),
         })?;
-    let current_items = current
+    let current_items = current_object
         .get_mut("input")
         .and_then(Value::as_array_mut)
         .map(std::mem::take)
@@ -1188,26 +1235,87 @@ pub(crate) fn merge_v3_relay_restored_local_context_at_req04(
             })
         })
     }));
-    current["input"] = Value::Array(merged);
+    current_object.insert("input".to_string(), Value::Array(merged));
+    copy_restored_protocol_field_if_missing(current_object, restored, "tools");
+    copy_restored_protocol_field_if_missing(current_object, restored, "tool_choice");
+    copy_restored_protocol_field_if_missing(current_object, restored, "parallel_tool_calls");
+    copy_restored_protocol_field_if_missing(current_object, restored, "instructions");
     Ok(())
 }
 
-pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
-    store: &mut V3LocalContinuationStore,
-    scope: V3LocalContinuationScopeKey,
-    now_epoch_ms: u64,
-    ttl_ms: u64,
-    restored_context_ids: &[String],
-    canonical_response: &Value,
-    action: V3HubContinuationCommit,
-) -> Result<(), V3LocalContinuationError> {
-    for context_id in restored_context_ids {
-        store.release_in_scope(&scope, context_id);
+fn copy_restored_protocol_field_if_missing(
+    current: &mut Map<String, Value>,
+    restored: &Value,
+    field: &'static str,
+) {
+    let current_missing = match current.get(field) {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(items)) => items.is_empty(),
+        Some(Value::String(text)) => text.trim().is_empty(),
+        _ => false,
+    };
+    if !current_missing {
+        return;
     }
-    if action != V3HubContinuationCommit::LocalContext {
-        return Ok(());
+    if let Some(value) = restored.get(field) {
+        current.insert(field.to_string(), value.clone());
     }
-    let context_ids = canonical_response
+}
+
+pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
+    canonical_request: &Value,
+    finalized_response: &Value,
+) -> Result<Value, V3LocalContinuationError> {
+    let mut input = canonical_request_input_items_at_resp04(canonical_request)?;
+    let response_output = finalized_response
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| V3LocalContinuationError::Codec {
+            message: "Resp04 local finalized response output must be an array".to_string(),
+        })?;
+    input.extend(response_output.clone());
+
+    let mut context = Map::new();
+    context.insert("input".to_string(), Value::Array(input));
+    context.insert("output".to_string(), Value::Array(response_output));
+    for field in [
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "instructions",
+    ] {
+        if let Some(value) = canonical_request.get(field) {
+            context.insert(field.to_string(), value.clone());
+        }
+    }
+    Ok(Value::Object(context))
+}
+
+fn canonical_request_input_items_at_resp04(
+    canonical_request: &Value,
+) -> Result<Vec<Value>, V3LocalContinuationError> {
+    let Some(input) = canonical_request.get("input") else {
+        return Err(V3LocalContinuationError::Codec {
+            message: "Resp04 local canonical request input is required".to_string(),
+        });
+    };
+    match input {
+        Value::Array(items) => Ok(items.clone()),
+        Value::String(text) => Ok(vec![json!({
+            "role": "user",
+            "content": text
+        })]),
+        _ => Err(V3LocalContinuationError::Codec {
+            message: "Resp04 local canonical request input must be an array or string".to_string(),
+        }),
+    }
+}
+
+fn restored_context_call_ids(
+    canonical_context: &Value,
+) -> Result<Vec<String>, V3LocalContinuationError> {
+    canonical_context
         .get("output")
         .and_then(Value::as_array)
         .into_iter()
@@ -1228,12 +1336,43 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
                     message: "Resp04 local context has a tool call without id".to_string(),
                 })
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()
+}
+
+pub(crate) fn assert_v3_relay_local_continuation_context_has_call_ids(
+    canonical_context: &Value,
+) -> Result<Vec<String>, V3LocalContinuationError> {
+    let context_ids = restored_context_call_ids(canonical_context)?;
     if context_ids.is_empty() {
         return Err(V3LocalContinuationError::Codec {
             message: "Resp04 local context has no tool call id".to_string(),
         });
     }
+    Ok(context_ids)
+}
+
+fn local_continuation_context_ids(
+    canonical_context: &Value,
+) -> Result<Vec<String>, V3LocalContinuationError> {
+    assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)
+}
+
+pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
+    store: &mut V3LocalContinuationStore,
+    scope: V3LocalContinuationScopeKey,
+    now_epoch_ms: u64,
+    ttl_ms: u64,
+    restored_context_ids: &[String],
+    canonical_response: &Value,
+    action: V3HubContinuationCommit,
+) -> Result<(), V3LocalContinuationError> {
+    for context_id in restored_context_ids {
+        store.release_in_scope(&scope, context_id);
+    }
+    if action != V3HubContinuationCommit::LocalContext {
+        return Ok(());
+    }
+    let context_ids = local_continuation_context_ids(canonical_response)?;
     if let Some(duplicate) = context_ids
         .iter()
         .find(|id| store.contains_in_scope(&scope, id))
@@ -1393,5 +1532,136 @@ mod tests {
         assert_eq!(facts.1, V3HubContinuationOwnership::RouteCodexLocalOwned);
         assert_eq!(facts.2, V3HubExecutionMode::Relay);
         assert_eq!(facts.3, V3HubProviderWireProtocol::Gemini);
+    }
+
+    #[test]
+    fn routecodex_control_and_payload_mirror_aliases_are_rejected_recursively() {
+        for key in [
+            "routecodexInternal",
+            "metadataCenter",
+            "__metadataCenter",
+            "runtimeControl",
+            "requestTruth",
+            "providerRuntime",
+            "continuationOwner",
+            "routeSelection",
+            "retryExclusionSet",
+            "selectedTarget",
+            "resumeMeta",
+            "servertoolState",
+            "stoplessState",
+            "errorChain",
+            "nodeTrace",
+            "capturedChatRequest",
+            "entryOriginRequest",
+            "requestSemantics",
+            "responsesRequestContext",
+            "__raw_request_body",
+            "__rt",
+            "__rccDryRunSerialized",
+        ] {
+            let payload = json!({
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": "keep"
+                    }],
+                    key: {"internal": true}
+                }]
+            });
+            assert_eq!(
+                find_v3_hub_side_channel_key(&payload),
+                Some(key),
+                "{key} must fail instead of being stripped or forwarded"
+            );
+        }
+    }
+
+    #[test]
+    fn protocol_data_fields_are_not_misclassified_as_routecodex_control() {
+        let payload = json!({
+            "metadata": {"client": "kept"},
+            "client_metadata": {"session_id": "client-owned"},
+            "x-codex-client-field": true,
+            "tools": [{
+                "type": "function",
+                "name": "multi_agent_v1.spawn_agent",
+                "namespace": "multi_agent_v1"
+            }],
+            "input": [{
+                "type": "custom_tool_call",
+                "call_id": "call_client_1",
+                "name": "multi_agent_v1.spawn_agent",
+                "namespace": "multi_agent_v1"
+            }]
+        });
+        assert_eq!(find_v3_hub_side_channel_key(&payload), None);
+    }
+
+    #[test]
+    fn local_continuation_context_preserves_request_history_tools_and_response_delta() {
+        let canonical_request = json!({
+            "input": [{"role": "user", "content": "original task"}],
+            "tools": [{"type": "function", "name": "exec_command"}],
+            "instructions": "base instructions with stopreason"
+        });
+        let finalized_response = json!({
+            "status": "requires_action",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_stopless_reasoning",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+            }]
+        });
+        let context = build_v3_relay_local_continuation_context_at_resp04(
+            &canonical_request,
+            &finalized_response,
+        )
+        .unwrap();
+        assert_eq!(
+            context["input"],
+            json!([
+                {"role": "user", "content": "original task"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_stopless_reasoning",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                }
+            ])
+        );
+        assert_eq!(context["tools"], canonical_request["tools"]);
+        assert_eq!(context["instructions"], canonical_request["instructions"]);
+
+        let mut current = json!({
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_stopless_reasoning",
+                "output": "{\"ok\":true,\"continuationPrompt\":\"继续。\"}"
+            }]
+        });
+        merge_v3_relay_restored_local_context_at_req04(&mut current, &context).unwrap();
+        assert_eq!(
+            current["input"],
+            json!([
+                {"role": "user", "content": "original task"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_stopless_reasoning",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_stopless_reasoning",
+                    "output": "{\"ok\":true,\"continuationPrompt\":\"继续。\"}"
+                }
+            ])
+        );
+        assert_eq!(current["tools"], canonical_request["tools"]);
+        assert_eq!(current["instructions"], canonical_request["instructions"]);
     }
 }

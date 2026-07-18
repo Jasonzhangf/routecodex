@@ -244,7 +244,10 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
     assert_eq!(captures.len(), 2);
     assert_eq!(
         captures[1]["input"],
-        json!([{"role":"user","content":"continue from stopless runtime"}])
+        json!([
+            {"role":"user","content":"Trigger stopless"},
+            {"role":"user","content":"continue from stopless runtime"}
+        ])
     );
     let provider_wire = serde_json::to_string(&captures[1]).unwrap();
     assert!(provider_wire.contains("stopreason"));
@@ -586,11 +589,18 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
     assert_eq!(captures.len(), 3);
     assert_eq!(
         captures[1]["input"],
-        json!([{"role":"user","content":"继续。"}])
+        json!([
+            {"role":"user","content":"Trigger missing schema"},
+            {"role":"user","content":"继续。"}
+        ])
     );
     assert_eq!(
         captures[2]["input"],
-        json!([{"role":"user","content":"继续。"}])
+        json!([
+            {"role":"user","content":"Trigger missing schema"},
+            {"role":"user","content":"继续。"},
+            {"role":"user","content":"继续。"}
+        ])
     );
     for capture in captures.iter().skip(1) {
         let provider_wire = serde_json::to_string(capture).unwrap();
@@ -761,11 +771,18 @@ async fn json_stopless_invalid_schema_stops_after_three_cross_request_rounds() {
     assert_eq!(captures.len(), 3);
     assert_eq!(
         captures[1]["input"],
-        json!([{"role":"user","content":"继续。"}])
+        json!([
+            {"role":"user","content":"Trigger invalid schema"},
+            {"role":"user","content":"继续。"}
+        ])
     );
     assert_eq!(
         captures[2]["input"],
-        json!([{"role":"user","content":"继续。"}])
+        json!([
+            {"role":"user","content":"Trigger invalid schema"},
+            {"role":"user","content":"继续。"},
+            {"role":"user","content":"继续。"}
+        ])
     );
     for capture in captures.iter().skip(1) {
         let provider_wire = serde_json::to_string(capture).unwrap();
@@ -1021,6 +1038,7 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
     assert_eq!(
         captures[1]["input"],
         json!([
+            {"role":"user","content":"Lookup alpha"},
             {
                 "type":"function_call",
                 "call_id":"call_local_1",
@@ -1145,11 +1163,13 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
-    assert_eq!(captures[1]["input"][0]["type"], "custom_tool_call");
-    assert_eq!(captures[1]["input"][0]["name"], "apply_patch");
-    assert_eq!(captures[1]["input"][0]["input"], patch);
-    assert_eq!(captures[1]["input"][1]["type"], "custom_tool_call_output");
-    let feedback = captures[1]["input"][1]["output"].as_str().unwrap();
+    assert_eq!(captures[1]["input"][0]["role"], "user");
+    assert_eq!(captures[1]["input"][0]["content"], "Patch a file");
+    assert_eq!(captures[1]["input"][1]["type"], "custom_tool_call");
+    assert_eq!(captures[1]["input"][1]["name"], "apply_patch");
+    assert_eq!(captures[1]["input"][1]["input"], patch);
+    assert_eq!(captures[1]["input"][2]["type"], "custom_tool_call_output");
+    let feedback = captures[1]["input"][2]["output"].as_str().unwrap();
     assert!(feedback.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
     assert!(feedback.contains("Retry with apply_patch only"));
     assert!(!feedback.contains("/tmp/codex-patch-test"));

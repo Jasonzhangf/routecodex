@@ -4,7 +4,8 @@ use routecodex_v3_runtime::{
     V3HubEntryProtocol, V3HubInvocationSource, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
     V3HubRequestSemanticProtocol, V3HubServertoolRequestProfile, V3HubTransportIntent,
 };
-use serde_json::json;
+use serde_json::{json, Value};
+use std::{fs, path::Path};
 
 fn raw(payload: serde_json::Value) -> routecodex_v3_runtime::V3HubReqInbound01ClientRaw {
     raw_for(payload, V3HubEntryProtocol::Responses)
@@ -28,6 +29,22 @@ fn scope() -> V3HubContinuationScope {
 
 fn scope_for(entry_protocol: V3HubEntryProtocol) -> V3HubContinuationScope {
     V3HubContinuationScope::new(entry_protocol, "server-a", "group-a", "session-a")
+}
+
+fn real_5555_sample_json(sample_dir_name: &str, file_name: &str) -> Option<Value> {
+    let home = std::env::var_os("HOME")?;
+    for base in [
+        Path::new(&home).join(".rcc/codex-samples/openai-responses/ports/5555"),
+        Path::new(&home).join(".rcc/codex-samples/openai-responses/port-5555"),
+    ] {
+        let file = base.join(sample_dir_name).join(file_name);
+        if !file.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(file).ok()?;
+        return serde_json::from_str(&content).ok();
+    }
+    None
 }
 
 #[test]
@@ -816,4 +833,169 @@ fn stopless_request_hook_output_string_is_required() {
             ..
         })
     ));
+}
+
+#[test]
+fn stopless_request_hook_rewrites_latest_real_5555_sample_pair_and_strips_stale_pair() {
+    let sample = real_5555_sample_json(
+        "openai-responses-router-gpt-5.5-20260718T175824023-567209-6198",
+        "request.json",
+    );
+    let Some(sample) = sample else {
+        return;
+    };
+    let input = sample["input"].as_array().expect("sample input array");
+    assert!(
+        input.len() >= 10,
+        "real 5555 sample must have a replayable tail"
+    );
+
+    let tail: Vec<Value> = input[input.len() - 10..].to_vec();
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("ctx_real_5555_stopless"), scope())
+        .with_local_context(
+            "ctx_real_5555_stopless",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model": sample.get("model").cloned().unwrap_or_else(|| json!("gpt-5.5")),
+                "stream": sample.get("stream").cloned().unwrap_or_else(|| json!(true)),
+                "input": tail,
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    let governed_input = governed.payload()["input"]
+        .as_array()
+        .expect("governed input array");
+    assert_eq!(governed_input.len(), 7);
+    assert_eq!(
+        governed_input.last().unwrap(),
+        &json!({"role":"user","content":"继续。"})
+    );
+    assert!(governed_input.iter().any(|item| {
+        item.get("role").and_then(Value::as_str) == Some("user")
+            && item
+                .get("content")
+                .map(Value::to_string)
+                .is_some_and(|content| content.contains("只读审计"))
+    }));
+    assert!(governed_input
+        .iter()
+        .any(|item| item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")));
+    let state = governed
+        .stopless_state()
+        .expect("sample replay must carry stopless state");
+    assert_eq!(state.repeat_count(), 2);
+    assert_eq!(state.max_repeats(), 3);
+    assert_eq!(state.trigger_hint(), Some("no_schema"));
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .expect("instructions")
+        .contains("stopreason"));
+    for item in governed_input {
+        assert!(
+            item.get("call_id").and_then(Value::as_str) != Some("call_stopless_reasoning"),
+            "rewritten active-pair request kept stopless call_id item: {item}"
+        );
+        assert!(
+            !item
+                .get("arguments")
+                .and_then(Value::as_str)
+                .is_some_and(|arguments| arguments.contains("routecodex hook run reasoningStop")),
+            "rewritten active-pair request kept stopless CLI call item: {item}"
+        );
+    }
+}
+
+#[test]
+fn stopless_request_hook_real_progress_after_stopless_pair_resets_state_and_preserves_tools() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "input":[
+                    {
+                        "role":"developer",
+                        "content":"preserve tool catalog holder",
+                        "tools":[
+                            {"name":"exec_command","description":"run command"},
+                            {"name":"request_user_input","description":"ask user"}
+                        ]
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: stale\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+                    },
+                    {"role":"user","content":"奶继续检查，我已经补了一些测试了"},
+                    {
+                        "type":"function_call",
+                        "call_id":"call_real_exec",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"git log --oneline -10\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_real_exec",
+                        "output":"2fde79946 fix(v3): preserve stopless followup context"
+                    }
+                ]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    assert!(
+        governed.stopless_state().is_none(),
+        "real user/tool progress after an old stopless pair must reset the consecutive stopless state"
+    );
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 4);
+    assert_eq!(input[0]["tools"][0]["name"], "exec_command");
+    assert_eq!(input[0]["tools"][1]["name"], "request_user_input");
+    assert_eq!(input[1]["role"], "user");
+    assert_eq!(input[1]["content"], "奶继续检查，我已经补了一些测试了");
+    assert_eq!(input[2]["call_id"], "call_real_exec");
+    assert_eq!(input[3]["call_id"], "call_real_exec");
+    assert_eq!(governed.tool_output_count(), 1);
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .expect("instructions")
+        .contains("stopreason"));
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "repeatCount",
+        "Chunk ID: stale",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "reset-boundary request leaked stale stopless artifact: {forbidden}"
+        );
+    }
 }

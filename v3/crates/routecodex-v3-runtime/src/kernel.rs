@@ -449,6 +449,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
 
     let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
     trace.push("V3Req04StandardizedResponses");
+    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&standardized.body) {
+        return error_output(
+            runtime_source(
+                "V3Req04StandardizedResponses",
+                format!("RouteCodex side-channel field {key} cannot enter request payload"),
+            ),
+            trace,
+            &hook_registry,
+        );
+    }
     let previous_response_id = standardized
         .body
         .get("previous_response_id")
@@ -1447,6 +1457,55 @@ mod tests {
             }
             V3ClientBody::Bytes(_) => panic!("error response must be JSON"),
             V3ClientBody::Sse(_) => panic!("error response must be JSON"),
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send() {
+        struct NoSendTransport;
+        #[async_trait]
+        impl ResponsesTransport for NoSendTransport {
+            async fn send(
+                &self,
+                _request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                panic!("side-channel control payload must fail before provider transport")
+            }
+        }
+
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &test_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req-control-leak".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({
+                    "model":"client-model",
+                    "input":"hello",
+                    "metadata": {"client": "kept"},
+                    "metadataCenter": {"providerKey": "must-not-enter-body"}
+                }),
+            },
+            crate::register_responses_direct_hooks(),
+            &NoSendTransport,
+        )
+        .await;
+
+        assert_eq!(output.client_payload.status, 500);
+        assert!(output.node_trace.contains(&"V3Req04StandardizedResponses"));
+        assert!(!output
+            .node_trace
+            .contains(&"V3Provider12ResponsesWirePayload"));
+        match output.client_payload.body {
+            V3ClientBody::Json(body) => {
+                assert!(body["error"]["message"]
+                    .as_str()
+                    .expect("error message")
+                    .contains("metadataCenter"));
+            }
+            V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => panic!("error response must be JSON"),
         }
     }
 

@@ -9,6 +9,7 @@ use routecodex_v3_runtime::{
     V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
+use std::{fs, path::Path};
 
 fn stopless_cli_input_from_arguments(arguments: &str) -> Value {
     let parsed: Value = serde_json::from_str(arguments).expect("arguments must be JSON");
@@ -33,6 +34,22 @@ fn relay_raw(
         V3HubInvocationSource::Client,
         transport,
     )
+}
+
+fn real_5555_sample_json(sample_dir_name: &str, file_name: &str) -> Option<Value> {
+    let home = std::env::var_os("HOME")?;
+    for base in [
+        Path::new(&home).join(".rcc/codex-samples/openai-responses/ports/5555"),
+        Path::new(&home).join(".rcc/codex-samples/openai-responses/port-5555"),
+    ] {
+        let file = base.join(sample_dir_name).join(file_name);
+        if !file.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(file).ok()?;
+        return serde_json::from_str(&content).ok();
+    }
+    None
 }
 
 #[test]
@@ -776,4 +793,48 @@ fn direct_response_cannot_enter_relay_response_hooks() {
         hooks.normalize(direct),
         Err(V3HubRelayResponseError::ExecutionModeNotRelay)
     ));
+}
+
+#[test]
+fn stopless_real_5555_sample_5973_reports_activation_true_and_requires_action() {
+    let sample = real_5555_sample_json(
+        "openai-responses-router-gpt-5.5-20260718T171347967-566984-5973",
+        "response.json",
+    );
+    let Some(sample) = sample else {
+        return;
+    };
+    let obs = sample["observability"]
+        .as_object()
+        .expect("sample observability object");
+    assert_eq!(obs.get("stopless_activation"), Some(&json!(true)));
+    assert_eq!(obs.get("response_status"), Some(&json!("requires_action")));
+    assert_eq!(obs.get("finish_reason"), Some(&json!("tool_calls")));
+    assert_eq!(obs.get("model_id"), Some(&json!("glm-5.2")));
+    assert_eq!(
+        obs.get("target_path"),
+        Some(&json!([
+            "pool:default",
+            "forwarder:fwd.glm.glm-5.2",
+            "provider:orangeai"
+        ]))
+    );
+}
+
+#[test]
+fn stopless_real_5555_sample_6272_reports_activation_false_and_terminal_stop() {
+    let sample = real_5555_sample_json(
+        "openai-responses-router-gpt-5.5-20260718T180101332-567283-6272",
+        "response.json",
+    );
+    let Some(sample) = sample else {
+        return;
+    };
+    let obs = sample["observability"]
+        .as_object()
+        .expect("sample observability object");
+    assert_eq!(obs.get("stopless_activation"), Some(&json!(false)));
+    assert_eq!(obs.get("response_status"), Some(&json!("completed")));
+    assert_eq!(obs.get("finish_reason"), Some(&json!("stop")));
+    assert_eq!(obs.get("model_id"), Some(&json!("glm-5.2")));
 }

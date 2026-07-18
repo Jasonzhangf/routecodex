@@ -592,13 +592,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let stopless_state = request_outcome.stopless_state().cloned();
+    let provider_semantic_body = request_outcome.payload().clone();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
     );
     trace.push("V3HubReqExecution05Planned");
-    let provider_semantic_body = req05.previous.previous.previous.previous.payload.0.clone();
     let mut failed_candidates = BTreeSet::new();
     let mut pending_provider_failure: Option<V3ResponsesRelayProviderFailure> = None;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
@@ -737,6 +737,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
+                    &provider_semantic_body,
                     &finalized_provider_value,
                     action,
                 )?;
@@ -778,6 +779,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
+                    &provider_semantic_body,
                     &finalized_provider_value,
                     action,
                 )?;
@@ -964,11 +966,17 @@ fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
 fn commit_or_release_responses_local_continuation(
     local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
     restored_context_ids: &[String],
+    canonical_request: &Value,
     canonical_response: &Value,
     action: V3HubContinuationCommit,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     let Some(local) = local else {
         return Ok(());
+    };
+    let canonical_context = if action == V3HubContinuationCommit::LocalContext {
+        build_v3_relay_local_continuation_context_at_resp04(canonical_request, canonical_response)?
+    } else {
+        canonical_response.clone()
     };
     let mut store = local.state.lock_store()?;
     commit_or_release_v3_relay_local_continuation_at_resp04(
@@ -977,7 +985,7 @@ fn commit_or_release_responses_local_continuation(
         local.now_epoch_ms,
         V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS,
         restored_context_ids,
-        canonical_response,
+        &canonical_context,
         action,
     )?;
     Ok(())
