@@ -287,6 +287,132 @@ fn stopless_response_hook_does_not_project_no_schema_after_repeat_budget() {
 }
 
 #[test]
+fn stopless_response_hook_stopreason_two_uses_v2_non_terminal_trigger_hint() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_non_terminal_trigger",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"still working\",\"next_step\":\"continue the proof\"}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    let arguments = payload["output"][0]["arguments"].as_str().unwrap();
+    let cli_input = stopless_cli_input_from_arguments(arguments);
+    assert_eq!(cli_input["repeatCount"], json!(1));
+    assert_eq!(cli_input["maxRepeats"], json!(3));
+    assert_eq!(cli_input["triggerHint"], json!("non_terminal_schema"));
+}
+
+#[test]
+fn stopless_response_hook_does_not_project_non_terminal_schema_after_repeat_budget() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_non_terminal_budget",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"still working\",\"next_step\":\"continue the proof\"}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(routecodex_v3_runtime::V3StoplessHookState::new(
+                    2,
+                    3,
+                    Some("non_terminal_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+}
+
+#[test]
+fn stopless_response_hook_invalid_schema_uses_v2_trigger_hint() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_invalid_trigger",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"{\"stopreason\":\"bad\",\"reason\":\"not numeric\"}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    let arguments = payload["output"][0]["arguments"].as_str().unwrap();
+    let cli_input = stopless_cli_input_from_arguments(arguments);
+    assert_eq!(cli_input["repeatCount"], json!(1));
+    assert_eq!(cli_input["maxRepeats"], json!(3));
+    assert_eq!(cli_input["triggerHint"], json!("invalid_schema"));
+}
+
+#[test]
+fn stopless_response_hook_does_not_project_invalid_schema_after_repeat_budget() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_invalid_budget",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"{\"stopreason\":\"bad\",\"reason\":\"not numeric\"}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(routecodex_v3_runtime::V3StoplessHookState::new(
+                    2,
+                    3,
+                    Some("invalid_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+}
+
+#[test]
 fn stopless_terminal_schema_does_not_project_cli() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks

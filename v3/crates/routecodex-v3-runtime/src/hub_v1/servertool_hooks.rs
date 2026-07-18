@@ -32,20 +32,25 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
     };
     let cli_input = match classify_stopless_schema(text) {
         V3StoplessSchemaDecision::Terminal => return Ok(input),
-        V3StoplessSchemaDecision::Continue => stopless_cli_input_from_schema(text, profile),
+        V3StoplessSchemaDecision::Continue => {
+            stopless_cli_input_from_schema(text, profile, "non_terminal_schema")
+        }
+        V3StoplessSchemaDecision::Invalid => {
+            stopless_cli_input_from_schema(text, profile, "invalid_schema")
+        }
         V3StoplessSchemaDecision::Missing => {
             if !response_has_stopless_stop_trigger(input.provider_payload().as_ref())
                 && !response_is_completed_responses_object(input.provider_payload().as_ref())
             {
                 return Ok(input);
             }
-            let Some(cli_input) = stopless_no_schema_cli_input_from_profile(profile) else {
-                return Ok(input);
-            };
-            Some(cli_input)
+            stopless_no_schema_cli_input_from_profile(profile)
         }
     };
-    let command = build_stopless_cli_command(cli_input.as_ref());
+    let Some(cli_input) = cli_input else {
+        return Ok(input);
+    };
+    let command = build_stopless_cli_command(Some(&cli_input));
     let projected = json!({
         "id": object.get("id").cloned().unwrap_or_else(|| json!("resp_stopless_projected")),
         "status": "requires_action",
@@ -164,50 +169,57 @@ fn response_string_path(value: &Value, path: &[&str]) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum V3StoplessSchemaDecision {
     Missing,
+    Invalid,
     Continue,
     Terminal,
 }
 
 fn classify_stopless_schema(text: &str) -> V3StoplessSchemaDecision {
-    let Some(stopreason) = read_stopless_stopreason(text) else {
+    let Some(parsed) = read_stopless_json_object(text) else {
+        return classify_stopless_schema_from_scan(text);
+    };
+    let Some(stopreason_value) = parsed.get("stopreason") else {
         return V3StoplessSchemaDecision::Missing;
+    };
+    let Some(stopreason) = stopreason_value
+        .as_i64()
+        .or_else(|| stopreason_value.as_str()?.trim().parse().ok())
+    else {
+        return V3StoplessSchemaDecision::Invalid;
     };
     match stopreason {
         0 | 1 => V3StoplessSchemaDecision::Terminal,
-        _ => V3StoplessSchemaDecision::Continue,
+        2 => V3StoplessSchemaDecision::Continue,
+        _ => V3StoplessSchemaDecision::Invalid,
     }
 }
 
-fn read_stopless_stopreason(text: &str) -> Option<i64> {
-    read_stopless_stopreason_from_json(text)
-        .or_else(|| {
-            read_stopless_json_object(text)
-                .as_ref()
-                .and_then(read_stopless_stopreason_from_value)
-        })
-        .or_else(|| read_stopless_stopreason_by_scan(text))
-}
-
-fn read_stopless_stopreason_from_json(text: &str) -> Option<i64> {
-    let parsed: Value = serde_json::from_str(text.trim()).ok()?;
-    read_stopless_stopreason_from_value(&parsed)
-}
-
-fn read_stopless_stopreason_from_value(parsed: &Value) -> Option<i64> {
-    parsed.get("stopreason").and_then(|value| {
-        value
-            .as_i64()
-            .or_else(|| value.as_str()?.trim().parse().ok())
-    })
+fn classify_stopless_schema_from_scan(text: &str) -> V3StoplessSchemaDecision {
+    let Some(stopreason) = read_stopless_stopreason_by_scan(text) else {
+        return if text.contains("stopreason") {
+            V3StoplessSchemaDecision::Invalid
+        } else {
+            V3StoplessSchemaDecision::Missing
+        };
+    };
+    match stopreason {
+        0 | 1 => V3StoplessSchemaDecision::Terminal,
+        2 => V3StoplessSchemaDecision::Continue,
+        _ => V3StoplessSchemaDecision::Invalid,
+    }
 }
 
 fn stopless_cli_input_from_schema(
     text: &str,
     profile: &V3HubRelayResponseHookProfile,
+    trigger_hint: &'static str,
 ) -> Option<Value> {
     let mut value =
         read_stopless_json_object(text).filter(|value| value.get("stopreason").is_some())?;
-    let state = next_stopless_projection_state(profile, Some("schema_continue"));
+    let state = next_stopless_projection_state(profile, Some(trigger_hint));
+    if state.repeat_count >= state.max_repeats {
+        return None;
+    }
     if let Some(object) = value.as_object_mut() {
         object
             .entry("flowId".to_string())
@@ -220,7 +232,7 @@ fn stopless_cli_input_from_schema(
             .or_insert_with(|| json!(state.max_repeats));
         object
             .entry("triggerHint".to_string())
-            .or_insert_with(|| json!("schema_continue"));
+            .or_insert_with(|| json!(trigger_hint));
     }
     Some(value)
 }

@@ -274,7 +274,8 @@
 ## 2026-07 V3 stopless live/finishReason 调试补充
 
 - V3 Relay stopless live 问题先分两段：请求侧 profile 是否在 Req04 启用，响应侧 profile 是否在 Resp03 启用。controlled hook tests 手动传 profile 过绿，不代表 runtime live 已接线。
-- 响应侧 stopless 只能由 provider semantic stop 触发：`finish_reason` / `finishReason` / `stop_reason` / `stopReason` 为 `stop` 时才判断 stop schema。普通 `status=completed` 且没有 finish/stop reason 的 tool follow-up 或 full-history final 不能被投成 `requires_action`。
+- 响应侧 stopless 先看 provider semantic stop / canonical Responses completed object，再做 schema 评估；普通已完成文本如果没有 stop/schema 证据且也不是 canonical Responses completed object，不得被投成 `requires_action`。
+- `stopreason=2` 归 `non_terminal_schema`，stop schema 字段非数值或明显损坏归 `invalid_schema`；`no_schema`、`invalid_schema`、`non_terminal_schema` 三类都要在 repeat budget 到顶时直接 passthrough，不再投影新的 `reasoningStop`。
 - finishReason 是观测与 hook 输入，不是 MetadataCenter 控制补丁。若 console 没打印，先在 provider response / SSE terminal event / runtime observability 里保留并读取该字段；不要在 SSE writer、server handler 或 outbound projection 里猜 stopless。
 - Relay SSE 若需要 stopless，合法路径是 provider raw SSE 在 runtime response owner 内 materialize 成 Hub response semantic，再进入 Resp03 hook、Resp04 continuation commit、Resp05/06 client frame。禁止把 stopless schema 判断、CLI projection、continuation save/restore 放进 V3 SSE crate、server closeout wrapper 或 handler。
 - 请求侧顺序必须是 continuation/local context restore+merge -> stopless CLI result parse/rewrite -> tool output governance。disabled stopless profile 仍可保留已恢复的 function_call + current tool output；它只是不解析/改写 stopless CLI。
