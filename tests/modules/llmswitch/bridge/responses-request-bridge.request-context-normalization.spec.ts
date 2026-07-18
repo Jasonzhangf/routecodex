@@ -363,6 +363,9 @@ describe('responses-request-bridge relay request-context normalization', () => {
             call_id: 'call_submit_direct_1',
             output: '{"ok":true}'
           }
+        ],
+        tools: [
+          { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
         ]
       },
       context: {
@@ -372,6 +375,9 @@ describe('responses-request-bridge relay request-context normalization', () => {
             call_id: 'call_submit_direct_1',
             output: '{"ok":true}'
           }
+        ],
+        toolsRaw: [
+          { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
         ]
       }
     });
@@ -430,6 +436,9 @@ describe('responses-request-bridge relay request-context normalization', () => {
             call_id: 'call_submit_direct_1',
             output: '{"ok":true}'
           }
+        ],
+        tools: [
+          { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
         ]
       },
       context: {
@@ -439,6 +448,9 @@ describe('responses-request-bridge relay request-context normalization', () => {
             call_id: 'call_submit_direct_1',
             output: '{"ok":true}'
           }
+        ],
+        toolsRaw: [
+          { type: 'function', name: 'exec_command', parameters: { type: 'object', properties: {} } }
         ]
       },
       sessionId: 'sess_submit_direct_1',

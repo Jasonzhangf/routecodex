@@ -463,23 +463,17 @@ fn stopless_hook_blackbox_rewrites_codex_transcript_from_full_history() {
         )
         .unwrap();
 
-    assert_eq!(outcome.tool_output_count(), 0);
-    assert_eq!(
-        outcome.payload()["input"],
-        json!([{"role":"user","content":"继续。"}])
-    );
+    assert_eq!(outcome.tool_output_count(), 240);
+    let input = outcome.payload()["input"].as_array().expect("input array");
+    assert_eq!(input.len(), 481);
+    assert_eq!(input.first().unwrap()["call_id"], "call_unrelated_0");
+    assert_eq!(input.last().unwrap(), &json!({"role":"user","content":"继续。"}));
     assert!(outcome.payload()["instructions"]
         .as_str()
         .unwrap()
         .contains("stopreason"));
     let serialized = serde_json::to_string(outcome.payload()).unwrap();
-    for forbidden in [
-        "function_call_output",
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "exec_command",
-        "Chunk ID:",
-    ] {
+    for forbidden in ["call_stopless_reasoning", "routecodex hook run reasoningStop", "Chunk ID:"] {
         assert!(
             !serialized.contains(forbidden),
             "rewritten full-history request leaked stopless CLI artifact: {forbidden}"

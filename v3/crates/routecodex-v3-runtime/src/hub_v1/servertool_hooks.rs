@@ -84,10 +84,22 @@ pub fn apply_v3_stopless_request_hook_at_req04(
         return Ok(None);
     };
     let parsed = parse_stopless_cli_output(output, index)?;
-    *input = vec![json!({
+    let replacement = json!({
         "role": "user",
         "content": parsed.next_step
-    })];
+    });
+    if index > 0
+        && input
+            .get(index - 1)
+            .and_then(Value::as_object)
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "function_call" || kind == "tool_call")
+    {
+        input.splice(index - 1..=index, [replacement]);
+    } else {
+        input[index] = replacement;
+    }
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
     inject_stopless_schema(payload);

@@ -318,10 +318,20 @@ export async function buildResponsesRequestContextForHttp(args: {
       throw new Error('Responses request context planner returned invalid context input');
     }
     const plannedInput: unknown[] = plannedInputValue;
+    const plannedToolsRawValue = (plannedContext as Record<string, unknown>).toolsRaw;
+    const plannedToolsRaw = Array.isArray(plannedToolsRawValue)
+      ? plannedToolsRawValue
+      : Array.isArray((plannedPayload as Record<string, unknown>).tools)
+        ? (plannedPayload as Record<string, unknown>).tools as unknown[]
+        : [];
+    if (plannedToolsRaw.length && !(plannedPayload as Record<string, unknown>).tools) {
+      (plannedPayload as Record<string, unknown>).tools = plannedToolsRaw;
+    }
     return {
       payload: plannedPayload as AnyRecord,
       context: {
         input: plannedInput,
+        toolsRaw: plannedToolsRaw,
       },
       sessionId: readResponsesSessionIdFromHttp(args.metadata),
       conversationId: readResponsesConversationIdFromHttp(args.metadata),

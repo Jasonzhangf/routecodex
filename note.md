@@ -31518,3 +31518,14 @@ Pure Rust NAPI candidates:
   - schema matrix `/tmp/stopless-5555-live-schema-matrix-20260718T0855.json` passed all three scenarios: `schema_correct`, `schema_missing`, `schema_invalid`
   - SSE live probe `/tmp/stopless-5555-live-sse-1784365137332.json` passed: first turn `text/event-stream` + `response.created`/`response.output_item.done`/`response.completed`/[DONE], submit round `completed`, no transport error
 - Remaining caution: live direct/provider-direct negative is already locked by focused direct-path tests; do not widen scope to production ports.
+
+# 2026-07-18T17:xx+08:00 V3 stopless minimal replacement fix
+- Fix scope narrowed after review: do not collapse the whole transcript when stopless fires. The request hook only replaces the final stopless shell pair, preserving earlier unrelated history.
+- Request-context bridge now preserves `toolsRaw`/`tools` on the context path so the next request round does not lose the tool contract.
+- Verification: focused Rust parity test `stopless_hook_blackbox_rewrites_codex_transcript_from_full_history` passed, and JS `responses-request-bridge.request-context-normalization.spec.ts` passed. The remaining work here is just keeping the scope narrow; no broader pipeline rewrite was added.
+
+# 2026-07-18T17:52+08:00 V3 stopless minimal replacement installed/live evidence
+- Rebuilt and installed: `npm run build:base` PASS; `npm run install:global` PASS; global `routecodex --version` = `0.90.3945`, `rccv3 --version` = `rccv3 0.90.3945`, both `~/.rcc/install/current/package.json` and `/Volumes/extension/.rcc/install/current/package.json` = `0.90.3945`.
+- Restarted only V3 5555 using `rccv3 restart -c /Users/fanzhang/.rcc/config.5555.v2.toml`; `/health` returned `status=ok`, `port=5555`, `server_id=gateway_priority_5555`, `manifest_version=3`.
+- Live stopless probe on installed 5555: `STOPLESS_BASE_URL=http://127.0.0.1:5555 STOPLESS_MODELS=gpt-5.5 STOPLESS_ROUTE_HINT=search STOPLESS_ATTEMPTS=3 STOPLESS_OUTPUT=/tmp/stopless-5555-live-probe-0.90.3945.json node scripts/tests/stopless-5555-live-probe.mjs` completed `requires_action -> requires_action -> completed`.
+- Provider-send dry-run proof on installed 5555 with a crafted payload containing prior history, unrelated tool pair, stopless shell pair, and `tools`: `x-routecodex-dry-run: provider-request` returned HTTP 200 with `stoppedBeforeProviderSend=true`, provider body `inputLen=4`, `toolsLen=2`, first input preserved `"历史问题：先保留这句话。"`, unrelated `call_unrelated_1` preserved, final input rewritten to `"继续最小替换验证。"`, and provider body contained no `call_stopless_reasoning`, no `routecodex hook run reasoningStop`, no `Chunk ID`.
