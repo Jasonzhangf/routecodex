@@ -3,7 +3,8 @@ use napi_derive::napi;
 use serde_json::{json, Map, Value};
 
 use crate::direct_semantic_classification::{
-    build_direct_req_04_projection_plan, DirectFieldProjection, VrDirect03ResolvedSemantics,
+    build_direct_req_04_projection_plan, DirectFieldProjection, DirectSemanticClass,
+    VrDirect03ResolvedSemantics,
 };
 
 // feature_id: hub.direct_route_model_hooks
@@ -21,6 +22,34 @@ fn is_openai_responses_protocol(value: Option<&Value>) -> bool {
         trimmed(value).map(|value| value.to_ascii_lowercase()),
         Some(value) if value == "openai-responses"
     )
+}
+
+fn take_legacy_reasoning_effort(payload: &mut Map<String, Value>) -> (bool, Option<String>) {
+    let mut removed = false;
+    let mut effort = None;
+    for key in ["reasoning_effort", "reasoningEffort"] {
+        if let Some(value) = payload.remove(key) {
+            removed = true;
+            if effort.is_none() {
+                effort = trimmed(Some(&value)).map(str::to_string);
+            }
+        }
+    }
+    (removed, effort)
+}
+
+fn write_nested_reasoning_effort(payload: &mut Map<String, Value>, level: &str) -> bool {
+    let mut reasoning = payload
+        .get("reasoning")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if reasoning.get("effort").and_then(Value::as_str) == Some(level) {
+        return false;
+    }
+    reasoning.insert("effort".to_string(), Value::String(level.to_string()));
+    payload.insert("reasoning".to_string(), Value::Object(reasoning));
+    true
 }
 
 fn plan_request_hooks(input: &Value) -> Result<Value, String> {
@@ -42,7 +71,18 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     let original_client_model = resolved.original_client_model.clone();
     let openai_responses_protocol =
         is_openai_responses_protocol(root.and_then(|row| row.get("providerProtocol")));
+    let normalize_legacy_responses_thinking =
+        openai_responses_protocol && resolved.semantic_class == DirectSemanticClass::Routing;
     let mut payload_changed = false;
+    let legacy_reasoning_effort = if normalize_legacy_responses_thinking {
+        let (removed, effort) = take_legacy_reasoning_effort(&mut payload);
+        if removed {
+            payload_changed = true;
+        }
+        effort
+    } else {
+        None
+    };
     if let DirectFieldProjection::Set(target) = &projection.model {
         if inbound_model.as_deref() != Some(target.as_str()) {
             payload.insert("model".to_string(), Value::String(target.clone()));
@@ -51,16 +91,14 @@ fn plan_request_hooks(input: &Value) -> Result<Value, String> {
     }
     if let DirectFieldProjection::Set(level) = &projection.thinking {
         payload_changed = true;
-        let mut reasoning = payload
-            .get("reasoning")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        reasoning.insert("effort".to_string(), Value::String(level.clone()));
+        write_nested_reasoning_effort(&mut payload, level);
         if !openai_responses_protocol {
             payload.insert("reasoning_effort".to_string(), Value::String(level.clone()));
         }
-        payload.insert("reasoning".to_string(), Value::Object(reasoning));
+    } else if let Some(level) = legacy_reasoning_effort.as_deref() {
+        if write_nested_reasoning_effort(&mut payload, level) {
+            payload_changed = true;
+        }
     }
     if resolved.direct_history_tool_image_cleanup
         && replace_historical_tool_images(&mut payload) > 0
@@ -426,6 +464,65 @@ mod tests {
         assert!(output["payload"].get("reasoning_effort").is_none());
         assert_eq!(output["payload"]["reasoning"]["effort"], "medium");
         assert_eq!(output["payload"]["reasoning"]["summary"], "detailed");
+    }
+
+    #[test]
+    fn request_plan_removes_legacy_reasoning_effort_for_openai_responses_direct() {
+        let resolved = resolve_direct_semantic_classification(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "reasoning_effort": "low",
+                "reasoningEffort": "high",
+                "reasoning":{"summary":"detailed"}
+            },
+            "targetModelId":"gpt-5.5",
+            "routeThinking":"medium"
+        }))
+        .expect("resolved routing semantics");
+        let output = plan_request_hooks(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "reasoning_effort": "low",
+                "reasoningEffort": "high",
+                "reasoning":{"summary":"detailed"}
+            },
+            "resolvedSemantics": resolved,
+            "providerProtocol": "openai-responses"
+        }))
+        .expect("responses request plan");
+        assert!(output["payload"].get("reasoning_effort").is_none());
+        assert!(output["payload"].get("reasoningEffort").is_none());
+        assert_eq!(output["payload"]["reasoning"]["effort"], "medium");
+        assert_eq!(output["payload"]["reasoning"]["summary"], "detailed");
+        assert_eq!(output["payloadChanged"], true);
+    }
+
+    #[test]
+    fn request_plan_maps_legacy_reasoning_effort_into_responses_nested_effort_when_preserving_route_thinking(
+    ) {
+        let resolved = resolve_direct_semantic_classification(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "reasoning_effort": "low",
+                "reasoning":{"summary":"auto"}
+            },
+            "targetModelId":"gpt-5.5"
+        }))
+        .expect("resolved routing semantics");
+        let output = plan_request_hooks(&json!({
+            "payload": {
+                "model":"gpt-5.5",
+                "reasoning_effort": "low",
+                "reasoning":{"summary":"auto"}
+            },
+            "resolvedSemantics": resolved,
+            "providerProtocol": "openai-responses"
+        }))
+        .expect("responses request plan");
+        assert!(output["payload"].get("reasoning_effort").is_none());
+        assert_eq!(output["payload"]["reasoning"]["effort"], "low");
+        assert_eq!(output["payload"]["reasoning"]["summary"], "auto");
+        assert_eq!(output["payloadChanged"], true);
     }
 
     #[test]

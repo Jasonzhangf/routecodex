@@ -237,6 +237,7 @@ describe('router-direct passthrough HTTP blackbox', () => {
       directSemantics: undefined,
       expectedUpstreamModel: 'gpt-5.5',
       expectedUpstreamThinking: 'high',
+      expectedUpstreamLegacyThinking: undefined,
       expectedClientModel: 'client-visible-model',
     },
     {
@@ -244,12 +245,14 @@ describe('router-direct passthrough HTTP blackbox', () => {
       directSemantics: 'passthrough' as const,
       expectedUpstreamModel: 'client-visible-model',
       expectedUpstreamThinking: 'low',
+      expectedUpstreamLegacyThinking: 'low',
       expectedClientModel: 'provider-response-model',
     },
   ])('HTTP BLACKBOX: $label applies paired request/response semantic projection', async ({
     directSemantics,
     expectedUpstreamModel,
     expectedUpstreamThinking,
+    expectedUpstreamLegacyThinking,
     expectedClientModel,
   }) => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'rcc-router-direct-semantic-'));
@@ -306,7 +309,11 @@ describe('router-direct passthrough HTTP blackbox', () => {
 
       expect(response.status).toBe(200);
       expect(forwarded.model).toBe(expectedUpstreamModel);
-      expect(forwarded.reasoning_effort).toBe(expectedUpstreamThinking);
+      if (expectedUpstreamLegacyThinking === undefined) {
+        expect(forwarded).not.toHaveProperty('reasoning_effort');
+      } else {
+        expect(forwarded.reasoning_effort).toBe(expectedUpstreamLegacyThinking);
+      }
       expect((forwarded.reasoning as Record<string, unknown>).effort).toBe(expectedUpstreamThinking);
       expect(body.model).toBe(expectedClientModel);
       expect(body.reasoning_effort).toBe('xhigh');
@@ -754,7 +761,8 @@ describe('router-direct passthrough HTTP blackbox', () => {
       expect(primaryForwarded.model).toBe('client-visible-model');
       expect(primaryForwarded.reasoning_effort).toBe('low');
       expect(backupForwarded.model).toBe('gpt-5.5');
-      expect(backupForwarded.reasoning_effort).toBe('high');
+      expect(backupForwarded).not.toHaveProperty('reasoning_effort');
+      expect((backupForwarded.reasoning as Record<string, unknown>).effort).toBe('high');
       expect(body.model).toBe('client-visible-model');
       expect(body.reasoning_effort).toBe('xhigh');
     } finally {

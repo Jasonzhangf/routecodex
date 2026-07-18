@@ -409,6 +409,45 @@ describe('router-direct-pipeline', () => {
       expect(requestPayload).not.toHaveProperty('reasoning_effort');
     });
 
+    it('removes legacy reasoning_effort from OpenAI Responses direct routing requests', async () => {
+      const responsesHandle = createMockProviderHandle('openai-responses');
+      const requestPayload = {
+        model: 'gpt-5.5',
+        reasoning_effort: 'low',
+        reasoningEffort: 'high',
+        reasoning: { summary: 'auto' },
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'raw' }] }],
+      };
+
+      const result = await executeRouterDirectPipeline({
+        portConfig: createRouterPortConfig(),
+        providerPayload: requestPayload,
+        requestPayload,
+        target: {
+          providerKey: 'asxs.crsa.gpt-5.5',
+          providerType: 'openai',
+          runtimeKey: responsesHandle.runtimeKey,
+          modelId: 'gpt-5.5',
+          routeThinking: 'medium',
+        },
+        routingDecision: { routeName: 'default', pool: ['asxs.crsa.gpt-5.5'] },
+        requestInfo: { path: '/v1/responses', headers: {} },
+        resolveProviderByRuntimeKey: (rt?: string) => rt === responsesHandle.runtimeKey ? responsesHandle : undefined,
+      });
+
+      expect(result.used).toBe(true);
+      const sentPayload = (responsesHandle.instance.processIncomingDirect as jest.Mock).mock.calls[0]?.[0] as Record<string, any>;
+      expect(sentPayload).not.toBe(requestPayload);
+      expect(sentPayload).not.toHaveProperty('reasoning_effort');
+      expect(sentPayload).not.toHaveProperty('reasoningEffort');
+      expect(sentPayload.reasoning).toEqual({
+        effort: 'medium',
+        summary: 'auto',
+      });
+      expect(requestPayload.reasoning_effort).toBe('low');
+      expect(requestPayload.reasoningEffort).toBe('high');
+    });
+
     it('applies configured historical tool image cleanup in direct hook only', async () => {
       const responsesHandle = createMockProviderHandle('openai-responses');
       const requestPayload = {
