@@ -31487,3 +31487,34 @@ Pure Rust NAPI candidates:
 - Runtime wiring proof: `cargo test -p routecodex-v3-runtime --manifest-path v3/Cargo.toml provider_req_compat_loads_selected_target_profile -- --nocapture` passed and ran the actual V3 adjacent node profile load test. Config proof `config_store_compiles_v2_root_and_provider_toml_for_5555_contract` passed, proving V2 MiniMax profile materializes into V3 manifest.
 - Architecture gates: `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `git diff --check`, and provider-compat-core fmt check passed. `npm run verify:v3-cargo-fmt` is still blocked by unrelated pre-existing formatting drift in untouched files (`direct_route_model_hooks.rs`, stopless files, v3 config files).
 - Workspace gate caveat: `npm run test:v3-workspace` failed in existing H2 controlled replay test because `snapshots["snapshots"]` was non-empty after a controlled 503; this path is unrelated to provider compat and should be handled separately before claiming full workspace green.
+# 2026-07-18T16:55+08:00 V3 stopless direct policy / 5555 live closeout
+
+- Root cause: `stopMessageExcludeDirect` is a policy flag for actual direct/provider-direct routes, not a relay disable signal. Relay stopless must still inject the stop schema and run the response hook when `stopMessageEnabled=true`.
+- Rust owner touchpoints: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs` and `src/servertool_stopless_hook.rs` now assert policy-vs-relay semantics; direct negative is locked in `tests/server/runtime/http-server/direct-passthrough-route-level.spec.ts` with actual direct path execution.
+- Guard fix: `tests/servertool/stopless-direct-mode-guard.spec.ts` now checks retired TS shells stay deleted and active servertool sources do not resurrect `direct_mode_no_followup` / `allowFollowup === false`.
+- Docs: added `docs/goals/stopless-v2-blackbox-hook-chain-parity-plan.md` as the explicit implementation plan for the current closeout.
+- Verification PASS:
+  - `cargo test -p router-hotpath-napi stopless -- --nocapture` → 88 passed
+  - `cargo test -p servertool-core stopless --lib -- --nocapture` → 56 passed
+  - `cargo test -p servertool-core cli_contract --lib -- --nocapture` → 51 passed
+  - `cargo test -p servertool-core persisted_lookup --lib -- --nocapture` → 41 passed
+  - `npm run verify:stopless-contract-blackbox`
+  - `npm run verify:stopless-invalid-schema-blackbox`
+  - `npm run verify:servertool-cli-binary-blackbox`
+  - `npm run verify:servertool-rust-only`
+  - `npm run verify:servertool-mount-boundary`
+  - `npm run verify:function-map-compile-gate`
+  - `npm run verify:architecture-mainline-call-map`
+  - `npm run verify:architecture-mainline-manifest-sync`
+  - focused Jest direct negative + stopless suites
+  - `npm run build:native-hotpath`
+  - `npm run build:base`
+  - `npm run install:global`
+- Runtime evidence:
+  - `routecodex --version` / `rccv3 --version` / both `~/.rcc/install/current/package.json` snapshots all report `0.90.3944`
+  - `rccv3 restart -c /Users/fanzhang/.rcc/config.5555.v2.toml`
+  - `curl http://127.0.0.1:5555/health` returned ok after restart
+  - JSON live probe `/tmp/stopless-5555-live-probe-20260718T0855.json` completed: first turn `requires_action` + `call_stopless_reasoning`, submit round 1 `requires_action`, submit round 2 `completed`
+  - schema matrix `/tmp/stopless-5555-live-schema-matrix-20260718T0855.json` passed all three scenarios: `schema_correct`, `schema_missing`, `schema_invalid`
+  - SSE live probe `/tmp/stopless-5555-live-sse-1784365137332.json` passed: first turn `text/event-stream` + `response.created`/`response.output_item.done`/`response.completed`/[DONE], submit round `completed`, no transport error
+- Remaining caution: live direct/provider-direct negative is already locked by focused direct-path tests; do not widen scope to production ports.

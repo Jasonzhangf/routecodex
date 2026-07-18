@@ -530,4 +530,42 @@ mod tests {
         assert_eq!(messages[1]["role"], json!("user"));
         assert_eq!(messages[1]["content"], json!("运行 cargo test 验证"));
     }
+
+    #[test]
+    fn response_hook_treats_exclude_direct_as_policy_not_relay_disable() {
+        let payload = json!({
+            "id": "chatcmpl-relay-stopless-policy",
+            "object": "chat.completion",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "第一轮普通 stop，无 schema"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let metadata_center_snapshot = json!({
+            "requestTruth": {
+                "requestId": "req-relay-stopless-policy",
+                "sessionId": "sess-relay-stopless-policy"
+            },
+            "runtimeControl": {
+                "stopMessageEnabled": true,
+                "stopMessageExcludeDirect": true,
+                "stopless": {
+                    "active": true,
+                    "repeatCount": 1,
+                    "maxRepeats": 3
+                }
+            }
+        });
+
+        let output = run_stopless_response_hook(&payload, &metadata_center_snapshot, "req-relay-stopless-policy")
+            .expect("stopless response hook");
+
+        let output = output.expect("relay stopless policy should still activate response hook");
+        let serialized = serde_json::to_string(&output.payload).expect("serialize hook payload");
+        assert!(serialized.contains("routecodex hook run reasoningStop"));
+    }
 }

@@ -1423,6 +1423,46 @@ mod apply_patch_tool_schema_tests {
         );
         assert!(request.get("tool_choice").is_none());
     }
+
+    #[test]
+    fn request_governance_treats_exclude_direct_as_policy_not_relay_disable() {
+        let output = apply_req_process_tool_governance(ToolGovernanceInput {
+            request: json!({
+                "model": "gpt-test",
+                "messages": [{
+                    "role": "user",
+                    "content": "继续执行当前任务"
+                }],
+                "stream": false
+            }),
+            raw_payload: Value::Null,
+            metadata: json!({}),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req-stopless-direct-skip".to_string(),
+            has_active_stop_message_for_continue_execution: Some(false),
+            metadata_center_snapshot: json!({
+                "requestTruth": {
+                    "requestId": "req-stopless-direct-skip",
+                    "sessionId": "sess-stopless-direct-skip"
+                },
+                "runtimeControl": {
+                    "stopMessageEnabled": true,
+                    "stopMessageExcludeDirect": true,
+                    "stopless": {
+                        "active": true,
+                        "repeatCount": 1,
+                        "maxRepeats": 3
+                    }
+                }
+            }),
+        })
+        .expect("governed request");
+
+        let serialized = serde_json::to_string(&output.processed_request).expect("serialize request");
+        assert!(serialized.contains("<rcc_stop_schema>"));
+        assert!(!serialized.contains("reasoningStop"));
+        assert!(!serialized.contains("stop_message_auto"));
+    }
 }
 
 #[napi]

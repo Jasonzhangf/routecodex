@@ -1091,6 +1091,7 @@ describe('direct passthrough route-level', () => {
           mode: 'router',
           routingPolicyGroup: 'gateway_priority_5555',
           sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
         }],
       },
     };
@@ -1140,6 +1141,7 @@ describe('direct passthrough route-level', () => {
           mode: 'router',
           routingPolicyGroup: 'gateway_priority_5555',
           sameProtocolBehavior: 'direct',
+          stopMessage: { enabled: false },
         }],
       },
     };
@@ -1555,10 +1557,14 @@ describe('direct passthrough route-level', () => {
         },
       },
     ]]);
-    const executePipelineSpy = jest.spyOn(server as any, 'executePipeline');
-    const directSpy = jest.spyOn(server as any, 'executeRouterDirectPipelineForPort');
-
-    const result = await (server as any).executePortAwarePipeline(5555, {
+    const result = await (server as any).executeRouterDirectPipelineForPort({
+      port: 5555,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5555',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    }, {
       requestId: 'req_router_direct_stopless_stays_direct',
       entryEndpoint: '/v1/chat/completions',
       method: 'POST',
@@ -1574,9 +1580,100 @@ describe('direct passthrough route-level', () => {
       },
     });
 
-    expect(result.body?.id).toBe('chatcmpl_direct_stopless_metadata_passthrough');
-    expect(directSpy).toHaveBeenCalledTimes(1);
-    expect(executePipelineSpy).not.toHaveBeenCalled();
+    expect(result.used).toBe(true);
+    expect(result.response).toEqual(expect.objectContaining({
+      status: 200,
+      data: expect.objectContaining({
+        id: 'chatcmpl_direct_stopless_metadata_passthrough',
+      }),
+    }));
+  });
+
+  it('router same-protocol direct respects stopMessageExcludeDirect and does not activate stopless', async () => {
+    jest.resetModules();
+    const { RouteCodexHttpServer } = await import('../../../../src/server/runtime/http-server/index.js');
+
+    const server = new RouteCodexHttpServer({
+      configPath: '/tmp/routecodex-test-config.json',
+      server: { host: '127.0.0.1', port: 5555 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {},
+    } as any);
+
+    (server as any).userConfig = {
+      httpserver: {
+        ports: [{
+          port: 5555,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'gateway_priority_5555',
+          sameProtocolBehavior: 'direct',
+        }],
+      },
+    };
+    installNativeHubPipelineRoute(server, 'gateway_priority_5555', jest.fn(() => ({
+      target: {
+        providerKey: 'direct.key1.gpt-test',
+        providerType: 'openai',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'direct.key1.gpt-test',
+        modelId: 'gpt-test',
+      },
+      decision: { routeName: 'search', pool: ['direct.key1.gpt-test'] },
+      diagnostics: {},
+    })));
+    (server as any).providerHandles = new Map([[
+      'direct.key1.gpt-test',
+      {
+        providerProtocol: 'openai-responses',
+        instance: {
+          processIncomingDirect: jest.fn(async () => ({
+            status: 200,
+            data: {
+              id: 'resp_direct_stopless_exclude_passthrough',
+              object: 'response',
+              status: 'completed',
+              model: 'gpt-test',
+              output_text: 'ok',
+            },
+          })),
+        },
+      },
+    ]]);
+    const result = await (server as any).executeRouterDirectPipelineForPort({
+      port: 5555,
+      host: '127.0.0.1',
+      mode: 'router',
+      routingPolicyGroup: 'gateway_priority_5555',
+      sameProtocolBehavior: 'direct',
+      stopMessage: { enabled: false },
+    }, {
+      requestId: 'req_router_direct_stopless_exclude_passthrough',
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      headers: {},
+      query: {},
+      body: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      },
+      metadata: {
+        stopMessageEnabled: true,
+        stopMessageExcludeDirect: true,
+        sessionId: 'direct-stopless-exclude',
+      },
+    });
+
+    expect(result.used).toBe(true);
+    expect(result.response).toEqual(expect.objectContaining({
+      status: 200,
+      data: expect.objectContaining({
+        id: 'resp_direct_stopless_exclude_passthrough',
+      }),
+    }));
+    expect(JSON.stringify(result.response)).not.toContain('routecodex hook run reasoningStop');
+    expect(JSON.stringify(result.response)).not.toContain('tool_calls');
   });
 
   it('router same-protocol direct with stop finish_reason does not project stopless cli/tool call', async () => {
