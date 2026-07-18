@@ -380,6 +380,36 @@ fn stopless_response_hook_invalid_schema_uses_v2_trigger_hint() {
 }
 
 #[test]
+fn stopless_response_hook_normalizes_schema_continue_alias_to_v2_trigger_hint() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_schema_continue_alias",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"still working\",\"next_step\":\"continue the proof\",\"triggerHint\":\"schema_continue\"}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    let arguments = payload["output"][0]["arguments"].as_str().unwrap();
+    let cli_input = stopless_cli_input_from_arguments(arguments);
+    assert_eq!(cli_input["repeatCount"], json!(1));
+    assert_eq!(cli_input["maxRepeats"], json!(3));
+    assert_eq!(cli_input["triggerHint"], json!("non_terminal_schema"));
+}
+
+#[test]
 fn stopless_response_hook_does_not_project_invalid_schema_after_repeat_budget() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks

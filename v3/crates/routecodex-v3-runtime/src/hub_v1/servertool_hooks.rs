@@ -230,9 +230,7 @@ fn stopless_cli_input_from_schema(
         object
             .entry("maxRepeats".to_string())
             .or_insert_with(|| json!(state.max_repeats));
-        object
-            .entry("triggerHint".to_string())
-            .or_insert_with(|| json!(trigger_hint));
+        object.insert("triggerHint".to_string(), json!(trigger_hint));
     }
     Some(value)
 }

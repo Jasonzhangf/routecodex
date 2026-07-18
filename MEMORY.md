@@ -2,7 +2,7 @@
 
 - In `src/server/runtime/http-server/http-server-runtime-providers.ts`, `targetRuntime` direct candidates must bypass `routingProviderScope` when initializing provider runtimes. Only base `runtime` remains scope-filtered. This prevents direct routes from failing with `Provider runtime <runtimeKey> not found`.
 - V3 provider compat profile loading now uses the adjacent Rust crate `sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core`, imported from `v3/crates/routecodex-v3-runtime/src/hub_v1.rs`. The crate preserves the existing profile behavior instead of rewriting it in TS or config.
-- Verified with `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/http-server-runtime-providers.create-provider-handle.spec.ts`, `npm run test:v3-provider-compat-profile-loading`, `routecodex restart --port 5520`, and live `POST /v1/responses {"model":"1token.gpt-5.5","input":"hi","stream":false}` returning upstream `HTTP_403 Insufficient account balance` instead of `ERR_PROVIDER_NOT_FOUND` / `PROVIDER_NOT_AVAILABLE`.
+- Verified with `npm run jest:run -- --runInBand --runTestsByPath tests/server/runtime/http-server/http-server-runtime-providers.create-provider-handle.spec.ts`, `npm run test:v3-provider-compat-profile-loading`, `routecodex restart --port 5520`, and live direct samples on the actual providers `POST /v1/responses {"model":"cc.gpt-5.5","input":"hi","stream":false}` and `{"model":"asxs.gpt-5.5","input":"hi","stream":false}`. Both routed to `cc[key1].gpt-5.5` / `asxs[crsa].gpt-5.5` and returned HTTP 200, which is the correct live proof for the direct targetRuntime init fix. The earlier 1token request was only a minimal repro.
 
 # 2026-07-12: Hub/runtime rustification rounds require live install/restart
 
