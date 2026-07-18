@@ -7,6 +7,7 @@ use routecodex_v3_runtime::{
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
     V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubResponseNormalizedKind,
     V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTransportIntent,
+    V3StoplessHookState,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -312,7 +313,7 @@ fn stopless_response_hook_stopreason_two_uses_v2_non_terminal_trigger_hint() {
                 "id":"resp_stopless_non_terminal_trigger",
                 "status":"completed",
                 "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"still working\",\"next_step\":\"continue the proof\"}"}]
+                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"current_goal\":\"finish proof\",\"reason\":\"still working\",\"next_step\":\"continue the proof\"}"}]
             }),
             V3HubTransportIntent::Json,
         ))
@@ -405,7 +406,7 @@ fn stopless_response_hook_normalizes_schema_continue_alias_to_v2_trigger_hint() 
                 "id":"resp_stopless_schema_continue_alias",
                 "status":"completed",
                 "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"reason\":\"still working\",\"next_step\":\"continue the proof\",\"triggerHint\":\"schema_continue\"}"}]
+                "output":[{"type":"output_text","text":"{\"stopreason\":2,\"current_goal\":\"finish proof\",\"reason\":\"still working\",\"next_step\":\"continue the proof\",\"triggerHint\":\"schema_continue\"}"}]
             }),
             V3HubTransportIntent::Json,
         ))
@@ -468,7 +469,7 @@ fn stopless_terminal_schema_does_not_project_cli() {
                 "id":"resp_stopless_terminal",
                 "status":"completed",
                 "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"done {\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"ok\"]}"}]
+                "output":[{"type":"output_text","text":"done {\"stopreason\":0,\"has_evidence\":1,\"evidence\":\"ok\"}"}]
             }),
             V3HubTransportIntent::Json,
         ))
@@ -483,6 +484,56 @@ fn stopless_terminal_schema_does_not_project_cli() {
     assert_eq!(resp03.tool_call_count(), 0);
     let resp04 = hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let visible = resp04.finalized_payload()["output"][0]["text"]
+        .as_str()
+        .expect("terminal visible text");
+    assert_eq!(visible, "done");
+    assert!(!visible.contains("stopreason"));
+}
+
+#[test]
+fn stopless_budget_exhausted_terminal_schema_strips_control_json() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_budget_exhausted_terminal_schema",
+                "object":"response",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{
+                        "type":"output_text",
+                        "text":"```json\n{\"stopreason\":0,\"current_goal\":\"验证 V3 stopless 连续两轮恢复\",\"reason\":\"已完成两轮停止检查恢复验证，has_evidence=1，evidence=5555 live submit_tool_outputs\",\"next_step\":\"\",\"next_suggested_path\":\"\",\"learned\":\"summary must be markdown\"}\n```"
+                    }]
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(V3StoplessHookState::new(
+                    2,
+                    3,
+                    Some("non_terminal_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let visible = resp04.finalized_payload()["output"][0]["content"][0]["text"]
+        .as_str()
+        .expect("visible budget-exhausted text");
+    assert!(visible.contains("## 完成内容"));
+    assert!(visible.contains("已完成两轮停止检查恢复验证"));
+    assert!(!visible.contains("stopreason"));
 }
 
 #[test]
@@ -659,7 +710,7 @@ fn stopless_response_hook_stopreason_two_projects_cli_for_next_turn() {
 }
 
 #[test]
-fn stopless_response_hook_empty_output_does_not_project_cli() {
+fn stopless_response_hook_empty_output_projects_no_schema_cli() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -678,10 +729,182 @@ fn stopless_response_hook_empty_output_does_not_project_cli() {
             &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
         )
         .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert_eq!(payload["output"][0]["call_id"], "call_stopless_reasoning");
+    let cli_input =
+        stopless_cli_input_from_arguments(payload["output"][0]["arguments"].as_str().unwrap());
+    assert_eq!(cli_input["repeatCount"], json!(1));
+    assert_eq!(cli_input["maxRepeats"], json!(3));
+    assert_eq!(cli_input["triggerHint"], json!("no_schema"));
+}
+
+#[test]
+fn stopless_response_hook_missing_output_projects_no_schema_cli() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "object":"response",
+                "id":"resp_stopless_missing_output",
+                "status":"completed",
+                "finish_reason":"stop"
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert_eq!(payload["output"][0]["call_id"], "call_stopless_reasoning");
+    let cli_input =
+        stopless_cli_input_from_arguments(payload["output"][0]["arguments"].as_str().unwrap());
+    assert_eq!(cli_input["triggerHint"], json!("no_schema"));
+}
+
+#[test]
+fn stopless_response_hook_does_not_project_empty_tool_calls_completed_response() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "object":"response",
+                "id":"resp_tool_calls_empty_output",
+                "status":"completed",
+                "finish_reason":"tool_calls",
+                "output":[]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
     assert_eq!(resp03.tool_call_count(), 0);
     let resp04 = hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+    assert_eq!(
+        resp04.finalized_payload()["finish_reason"],
+        json!("tool_calls")
+    );
+}
+
+#[test]
+fn stopless_response_hook_budget_exhausted_missing_output_returns_visible_terminal() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "object":"response",
+                "id":"resp_stopless_budget_missing_output",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(V3StoplessHookState::new(
+                    2,
+                    3,
+                    Some("no_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "completed");
+    let visible = payload["output"][0]["content"][0]["text"]
+        .as_str()
+        .expect("budget exhausted stop must be visible");
+    assert!(visible.contains("自动续轮已停止"));
+    assert!(!visible.contains("reasoningStop"));
+}
+
+#[test]
+fn stopless_response_hook_budget_exhausted_strips_malformed_tool_call_output() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "object":"response",
+                "id":"resp_stopless_budget_malformed_tool_call",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"function_call",
+                    "id":"fc_auto_1",
+                    "call_id":"call_auto_1",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_request_state(V3StoplessHookState::new(
+                    2,
+                    3,
+                    Some("no_schema".to_string()),
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "completed");
+    let visible = payload["output"][0]["content"][0]["text"]
+        .as_str()
+        .expect("budget exhausted stop must be visible");
+    assert!(visible.contains("自动续轮已停止"));
+    let serialized = serde_json::to_string(payload).unwrap();
+    for forbidden in [
+        "function_call",
+        "call_auto_1",
+        "exec_command",
+        "arguments",
+        "reasoningStop",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "budget-exhausted terminal response leaked tool artifact: {forbidden}"
+        );
+    }
 }
 
 #[test]

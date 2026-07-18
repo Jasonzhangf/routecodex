@@ -15,6 +15,8 @@ routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses
 routecodex-v3-target = { path = "../routecodex-v3-target" }
 routecodex-v3-virtual-router = { path = "../routecodex-v3-virtual-router" }
 provider-compat-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core" }
+servertool-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/servertool-core" }
+stop-message-core = { path = "../../../sharedmodule/llmswitch-core/rust-core/crates/stop-message-core" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -161,7 +161,7 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
                 "id":"resp_stopless_runtime_2",
                 "status":"completed",
                 "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"done {\"stopreason\":0}"}]
+                "output":[{"type":"output_text","text":"done {\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"runtime completed\"}"}]
             }),
         ])),
     };
@@ -264,6 +264,119 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
 }
 
 #[tokio::test]
+async fn provider_request_dry_run_uses_live_local_continuation_state() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_stopless_dry_run_preserve_tools_1",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{
+                    "type":"output_text",
+                    "text":"{\"stopreason\":2,\"reason\":\"round one\",\"next_step\":\"continue and keep tools\"}"
+                }]
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-dry-run",
+        "conversation-stopless-dry-run",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-dry-run-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "tools":[{"type":"function","name":"exec_command","description":"run command"}],
+                    "content":[{"type":"input_text","text":"Trigger stopless with tools"}]
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        70_000,
+    )
+    .await
+    .unwrap();
+    let first_body = match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
+    };
+    assert_eq!(first_body["status"], "requires_action");
+    assert_eq!(state.len().unwrap(), 1);
+
+    let dry_run = routecodex_v3_runtime::execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-dry-run-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "previous_response_id": first_body["id"].as_str().unwrap(),
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"continuationPrompt\":\"continue and keep tools\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"non_terminal_schema\"}}"
+                }],
+                "stream":false
+            }),
+        },
+        &state,
+        scope,
+        71_000,
+    )
+    .await;
+
+    assert_eq!(dry_run.status, 200);
+    let provider_request = dry_run
+        .body
+        .get("providerRequest")
+        .expect("dry-run provider request");
+    let body = provider_request
+        .get("body")
+        .or_else(|| provider_request.get("payload"))
+        .or(Some(provider_request))
+        .unwrap();
+    let input = body["input"]
+        .as_array()
+        .expect("provider request input must be array");
+    assert_eq!(
+        input[0]["content"][0]["text"],
+        "Trigger stopless with tools"
+    );
+    assert_eq!(input[0]["tools"][0]["name"], "exec_command");
+    assert_eq!(input[1]["role"], "user");
+    assert_eq!(input[1]["content"], "continue and keep tools");
+    let provider_wire = serde_json::to_string(body).unwrap();
+    assert!(provider_wire.contains("stopreason"));
+    for forbidden in [
+        "call_stopless_reasoning",
+        "function_call_output",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !provider_wire.contains(forbidden),
+            "provider-request dry-run leaked stopless artifact: {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn json_stopless_repeat_releases_consumed_context_before_next_projection() {
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
@@ -289,7 +402,7 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
             json!({
                 "id":"resp_stopless_repeat_3",
                 "status":"completed",
-                "output":[{"type":"output_text","text":"{\"stopreason\":0,\"reason\":\"done\"}"}]
+                "output":[{"type":"output_text","text":"{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"three rounds completed\"}"}]
             }),
         ])),
     };
@@ -615,6 +728,133 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
                 "provider payload leaked stopless artifact: {forbidden}"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn json_stopless_no_schema_budget_exhaustion_ignores_trailing_tool_errors() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "object":"response",
+            "id":"resp_stopless_no_schema_after_tool_errors",
+            "status":"completed",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"missing schema after bad tool outputs"}]
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-tool-error-tail",
+        "conversation-stopless-tool-error-tail",
+        5555,
+        "controlled",
+    );
+
+    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-tool-error-tail".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: stopless\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}\n"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_auto_1",
+                        "name":"exec_command",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_auto_1",
+                        "output":"failed to parse function arguments: missing field `cmd` at line 1 column 2"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_auto_2",
+                        "name":"tools",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_auto_2",
+                        "output":"unsupported call: tools"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '1' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: poisoned-r1\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}\n"
+                    }
+                ],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        52_500,
+    )
+    .await
+    .unwrap();
+
+    let observability = output.observability.as_ref().unwrap();
+    assert!(
+        !observability.stopless_activation,
+        "repeatCount=2 plus another no_schema must exhaust instead of projecting repeatCount=1"
+    );
+    match output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "completed");
+            let body_text = serde_json::to_string(&body).unwrap();
+            assert!(body_text.contains("missing schema after bad tool outputs"));
+            assert!(!body_text.contains("call_stopless_reasoning"));
+            assert!(!body_text.contains("routecodex hook run reasoningStop"));
+        }
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("tool-error-tail no_schema turn must be JSON")
+        }
+    }
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let provider_wire = serde_json::to_string(&captures[0]).unwrap();
+    assert!(provider_wire.contains("stopreason"));
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "Chunk ID: stopless",
+        "Chunk ID: poisoned-r1",
+        "failed to parse function arguments",
+        "unsupported call: tools",
+        "call_auto_1",
+        "call_auto_2",
+    ] {
+        assert!(
+            !provider_wire.contains(forbidden),
+            "provider request leaked stopless artifact or client tool error: {forbidden}"
+        );
     }
 }
 

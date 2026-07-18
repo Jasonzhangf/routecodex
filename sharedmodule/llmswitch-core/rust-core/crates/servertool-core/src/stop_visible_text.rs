@@ -109,6 +109,7 @@ pub fn build_stop_message_terminal_visible_payload(
     if !prefix.is_empty() && !payload_has_any_visible_stop_text(&payload) {
         changed = ensure_visible_stop_content(&mut payload, &prefix) || changed;
     }
+    changed = strip_terminal_visible_response_tool_items(&mut payload) || changed;
     strip_terminal_visible_reasoning_fields(&mut payload);
     changed = normalize_terminal_stop_chat_payload(&mut payload) || changed;
     StopMessageTerminalVisiblePayloadOutput { payload, changed }
@@ -734,6 +735,20 @@ fn prefix_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
         let Some(row) = item.as_object_mut() else {
             continue;
         };
+        if let Some(Value::String(text)) = row.get_mut("text") {
+            *text = format!("{prefix}\n{text}");
+            if let Some(Value::String(output_text)) = payload.get_mut("output_text") {
+                *output_text = format!("{prefix}\n{output_text}");
+            }
+            return true;
+        }
+        if let Some(Value::String(output_text)) = row.get_mut("output_text") {
+            *output_text = format!("{prefix}\n{output_text}");
+            if let Some(Value::String(top_level_output_text)) = payload.get_mut("output_text") {
+                *top_level_output_text = format!("{prefix}\n{top_level_output_text}");
+            }
+            return true;
+        }
         let Some(Value::Array(content)) = row.get_mut("content") else {
             continue;
         };
@@ -758,6 +773,16 @@ fn replace_responses_output_content(payload: &mut Value, prefix: &str) -> bool {
         let Some(row) = item.as_object_mut() else {
             continue;
         };
+        if row.get("text").and_then(Value::as_str).is_some() {
+            row.insert("text".to_string(), Value::String(prefix.to_string()));
+            changed = true;
+            continue;
+        }
+        if row.get("output_text").and_then(Value::as_str).is_some() {
+            row.insert("output_text".to_string(), Value::String(prefix.to_string()));
+            changed = true;
+            continue;
+        }
         if row.get("content").and_then(Value::as_array).is_some()
             || row.get("type") == Some(&Value::String("message".to_string()))
         {
@@ -817,6 +842,30 @@ fn ensure_responses_visible_stop_content(payload: &mut Value, text: &str) -> boo
         let Some(item_row) = item.as_object_mut() else {
             continue;
         };
+        if item_row.get("text").is_some() {
+            if item_row
+                .get("text")
+                .is_some_and(value_has_visible_stop_text)
+            {
+                row.insert("output_text".to_string(), Value::String(text.to_string()));
+                return true;
+            }
+            item_row.insert("text".to_string(), Value::String(text.to_string()));
+            row.insert("output_text".to_string(), Value::String(text.to_string()));
+            return true;
+        }
+        if item_row.get("output_text").is_some() {
+            if item_row
+                .get("output_text")
+                .is_some_and(value_has_visible_stop_text)
+            {
+                row.insert("output_text".to_string(), Value::String(text.to_string()));
+                return true;
+            }
+            item_row.insert("output_text".to_string(), Value::String(text.to_string()));
+            row.insert("output_text".to_string(), Value::String(text.to_string()));
+            return true;
+        }
         let item_type = item_row
             .get("type")
             .and_then(Value::as_str)
@@ -868,7 +917,12 @@ fn payload_has_any_visible_stop_text(payload: &Value) -> bool {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .any(|item| item.get("content").is_some_and(value_has_visible_stop_text))
+            .any(|item| {
+                item.get("content")
+                    .or_else(|| item.get("text"))
+                    .or_else(|| item.get("output_text"))
+                    .is_some_and(value_has_visible_stop_text)
+            })
 }
 
 fn value_has_visible_stop_text(value: &Value) -> bool {
@@ -912,6 +966,44 @@ fn strip_terminal_visible_reasoning_fields(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+fn strip_terminal_visible_response_tool_items(value: &mut Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter_mut().fold(false, |changed, item| {
+            strip_terminal_visible_response_tool_items(item) || changed
+        }),
+        Value::Object(row) => {
+            let mut changed = false;
+            if let Some(output) = row.get_mut("output").and_then(Value::as_array_mut) {
+                let before = output.len();
+                output.retain(|item| !is_responses_tool_item(item));
+                changed |= output.len() != before;
+            }
+            for child in row.values_mut() {
+                changed |= strip_terminal_visible_response_tool_items(child);
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn is_responses_tool_item(value: &Value) -> bool {
+    matches!(
+        value
+            .as_object()
+            .and_then(|row| row.get("type"))
+            .and_then(Value::as_str),
+        Some(
+            "function_call"
+                | "custom_tool_call"
+                | "tool_call"
+                | "function_call_output"
+                | "custom_tool_call_output"
+                | "tool_call_output"
+        )
+    )
 }
 
 fn is_responses_reasoning_item(value: &Value) -> bool {
@@ -1228,6 +1320,61 @@ visible after
             output.payload["output"][0]["content"][0]["text"],
             "停止原因：验证已经完成"
         );
+    }
+
+    #[test]
+    fn terminal_responses_replace_removes_tool_items_from_client_output() {
+        let output = build_stop_message_terminal_visible_payload(
+            StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "status": "completed",
+                    "output": [
+                        { "type": "function_call", "call_id": "call_auto_1", "name": "exec_command", "arguments": "{}" },
+                        { "type": "function_call_output", "call_id": "call_auto_1", "output": "failed to parse function arguments: missing field `cmd`" },
+                        { "type": "reasoning", "summary": [{ "text": "private" }] },
+                        { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "" }] }
+                    ]
+                }),
+                mode: Some("replace".to_string()),
+                prefix: Some("自动续轮已停止".to_string()),
+            },
+        );
+        assert!(output.changed);
+        assert_eq!(output.payload["output"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            output.payload["output"][0]["content"][0]["text"],
+            "自动续轮已停止"
+        );
+        let serialized = output.payload.to_string();
+        assert!(!serialized.contains("function_call"));
+        assert!(!serialized.contains("call_auto_1"));
+        assert!(!serialized.contains("failed to parse function arguments"));
+    }
+
+    #[test]
+    fn terminal_responses_flat_output_text_replaces_schema_only_item() {
+        let output =
+            build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+                payload: json!({
+                    "status": "completed",
+                    "output": [{
+                        "type": "output_text",
+                        "text": "{\"stopreason\":0,\"reason\":\"验证已经完成\"}"
+                    }]
+                }),
+                mode: Some("replace".to_string()),
+                prefix: Some("## 完成内容\n\n- 结论: 验证已经完成\n".to_string()),
+            });
+        assert!(output.changed);
+        assert_eq!(
+            output.payload["output"][0]["text"],
+            "## 完成内容\n\n- 结论: 验证已经完成"
+        );
+        assert_eq!(
+            output.payload["output_text"],
+            "## 完成内容\n\n- 结论: 验证已经完成"
+        );
+        assert!(!output.payload.to_string().contains("stopreason"));
     }
 
     #[test]

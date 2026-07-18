@@ -2,7 +2,8 @@ use super::{
     apply_v3_stopless_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
-    build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
+    build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
+    drop_v3_client_tool_error_pairs_at_req04, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
     V3StoplessHookState,
@@ -643,6 +644,7 @@ fn govern_tool_outputs_at_req04(
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
+    drop_v3_client_tool_error_pairs_at_req04(input);
     let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
     let mut output_count = 0;
     for (index, item) in input.iter_mut().enumerate() {

@@ -585,7 +585,7 @@ fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
                 "finish_reason":"stop",
                 "output":[{
                     "type":"output_text",
-                    "text":"{\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"done\"]}"
+                    "text":"{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"done\"}"
                 }]
             }),
             V3HubTransportIntent::Json,
@@ -601,10 +601,12 @@ fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
     let resp04 = response_hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
     assert_eq!(resp04.canonical_context_count(), 0);
-    assert_eq!(
-        resp04.finalized_payload()["output"][0]["text"],
-        "{\"stopreason\":0,\"has_evidence\":1,\"evidence\":[\"done\"]}"
-    );
+    let visible = resp04.finalized_payload()["output"][0]["text"]
+        .as_str()
+        .expect("terminal visible text");
+    assert!(visible.contains("## 完成内容"));
+    assert!(visible.contains("done"));
+    assert!(!visible.contains("stopreason"));
 }
 
 #[test]

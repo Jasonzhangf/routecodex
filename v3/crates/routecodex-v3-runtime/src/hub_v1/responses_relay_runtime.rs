@@ -1031,6 +1031,33 @@ pub async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None).await
+}
+
+pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    state: &V3ResponsesRelayLocalContinuationState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+) -> crate::V3FoundationRuntimeOutput {
+    execute_v3_responses_relay_dry_run_runtime_inner(
+        manifest,
+        input,
+        Some(V3ResponsesRelayLocalContinuationExecution {
+            state,
+            scope,
+            now_epoch_ms,
+        }),
+    )
+    .await
+}
+
+async fn execute_v3_responses_relay_dry_run_runtime_inner(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
+) -> crate::V3FoundationRuntimeOutput {
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ResponsesRelayDryRunNoNetworkTransport {
         response_payload: json!({
@@ -1045,7 +1072,17 @@ pub async fn execute_v3_responses_relay_dry_run_runtime(
         }),
         captured_provider_request: Arc::clone(&captured_provider_request),
     };
-    let mut output = match execute_v3_responses_relay_runtime(manifest, input, &transport).await {
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
+    let mut output = match execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        &transport,
+        local,
+        provider_health.store,
+        V3ResponsesRelayRetryPolicy::default(),
+    )
+    .await
+    {
         Ok(output) => output,
         Err(error) => project_v3_responses_relay_runtime_failure(error),
     };

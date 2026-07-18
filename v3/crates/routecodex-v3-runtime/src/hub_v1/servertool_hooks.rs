@@ -1,13 +1,25 @@
 use super::{
+    is_v3_client_tool_error_output_at_req04, is_v3_client_tool_error_pair_at_req04,
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessHookState,
 };
 use serde_json::{json, Value};
+use servertool_core::stop_visible_text::{
+    build_stop_message_terminal_visible_payload, strip_stop_schema_control_text,
+    StopMessageTerminalVisiblePayloadInput,
+};
 use std::sync::Arc;
+use stop_message_core::{
+    build_stop_schema_budget_exhausted_summary_prefix, evaluate_stop_schema_gate,
+    evaluate_stop_schema_gate_with_reasoning_stop_arguments, StopSchemaGateAction,
+    StopSchemaGateDecision,
+};
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_SCHEMA_INSTRUCTION: &str = "Stopless managed turn: final answers must include a stop schema JSON object with numeric stopreason 0, 1, or 2. Use stopreason=2 with next_step when more work is needed.";
 const STOPLESS_DEFAULT_PROMPT: &str = "Continue from the previous stopless hook result.";
+const STOPLESS_NO_VISIBLE_TEXT_BUDGET_EXHAUSTED: &str =
+    "自动续轮已停止：模型连续返回空完成信号，没有提供可继续执行的结果。为避免循环风暴，本轮已停止。";
 
 pub fn apply_v3_stopless_response_hook_at_resp03(
     mut input: V3HubRespInbound02Normalized,
@@ -27,27 +39,62 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
     if status != "completed" {
         return Ok(input);
     }
-    let Some(text) = first_output_text(object.get("output")) else {
-        return Ok(input);
+    let stop_candidate = response_has_stopless_stop_trigger(input.provider_payload().as_ref())
+        || response_is_completed_responses_object_without_finish_reason(
+            input.provider_payload().as_ref(),
+        );
+    let output_text = first_output_text(object.get("output"))
+        .map(str::to_string)
+        .filter(|text| !text.trim().is_empty());
+    let schema_decision = match output_text.as_deref() {
+        Some(text) => classify_stopless_schema(text),
+        None if stop_candidate => V3StoplessSchemaDecision::Missing,
+        None => return Ok(input),
     };
-    let cli_input = match classify_stopless_schema(text) {
-        V3StoplessSchemaDecision::Terminal => return Ok(input),
+    let cli_input = match schema_decision {
+        V3StoplessSchemaDecision::Terminal => {
+            let text = output_text
+                .as_deref()
+                .expect("terminal stopless schema requires visible text");
+            let projected = build_stopless_terminal_visible_payload(input.provider_payload(), text);
+            *input.provider_payload_mut() = Arc::new(projected);
+            return Ok(input);
+        }
         V3StoplessSchemaDecision::Continue => {
+            let text = output_text
+                .as_deref()
+                .expect("non-terminal stopless schema requires visible text");
             stopless_cli_input_from_schema(text, profile, "non_terminal_schema")
         }
         V3StoplessSchemaDecision::Invalid => {
+            let text = output_text
+                .as_deref()
+                .expect("invalid stopless schema requires visible text");
             stopless_cli_input_from_schema(text, profile, "invalid_schema")
         }
         V3StoplessSchemaDecision::Missing => {
-            if !response_has_stopless_stop_trigger(input.provider_payload().as_ref())
-                && !response_is_completed_responses_object(input.provider_payload().as_ref())
-            {
+            if !stop_candidate {
                 return Ok(input);
             }
             stopless_no_schema_cli_input_from_profile(profile)
         }
     };
     let Some(cli_input) = cli_input else {
+        if schema_decision == V3StoplessSchemaDecision::Missing && output_text.is_none() {
+            let projected =
+                build_stopless_no_visible_budget_exhausted_payload(input.provider_payload());
+            *input.provider_payload_mut() = Arc::new(projected);
+        } else if let Some(text) = output_text.as_deref() {
+            if matches!(
+                schema_decision,
+                V3StoplessSchemaDecision::Continue | V3StoplessSchemaDecision::Invalid
+            ) && read_stopless_json_object(text).is_some()
+            {
+                let projected =
+                    build_stopless_budget_exhausted_visible_payload(input.provider_payload(), text);
+                *input.provider_payload_mut() = Arc::new(projected);
+            }
+        }
         return Ok(input);
     };
     let command = build_stopless_cli_command(Some(&cli_input));
@@ -74,18 +121,12 @@ pub fn apply_v3_stopless_request_hook_at_req04(
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(None);
     };
-    let Some((index, output)) = latest_stopless_cli_output(input) else {
+    let Some((index, output)) = active_stopless_cli_output(input) else {
         strip_stopless_cli_artifacts(input);
         inject_stopless_schema(payload);
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(None);
     };
-    if has_stopless_reset_boundary_after(input, index) {
-        strip_stopless_cli_artifacts(input);
-        inject_stopless_schema(payload);
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(None);
-    }
     let parsed = parse_stopless_cli_output(output, index)?;
     let replacement = json!({
         "role": "user",
@@ -143,7 +184,7 @@ fn response_has_stopless_stop_trigger(response: &Value) -> bool {
     })
 }
 
-fn response_is_completed_responses_object(response: &Value) -> bool {
+fn response_is_completed_responses_object_without_finish_reason(response: &Value) -> bool {
     response
         .get("object")
         .and_then(Value::as_str)
@@ -152,6 +193,24 @@ fn response_is_completed_responses_object(response: &Value) -> bool {
             .get("status")
             .and_then(Value::as_str)
             .is_some_and(|value| value.eq_ignore_ascii_case("completed"))
+        && response_finish_reason(response).is_none()
+}
+
+fn response_finish_reason(response: &Value) -> Option<String> {
+    [
+        &["finish_reason"][..],
+        &["finishReason"][..],
+        &["stop_reason"][..],
+        &["stopReason"][..],
+        &["response", "finish_reason"][..],
+        &["response", "finishReason"][..],
+        &["response", "stop_reason"][..],
+        &["response", "stopReason"][..],
+        &["choices", "0", "finish_reason"][..],
+        &["candidates", "0", "finishReason"][..],
+    ]
+    .iter()
+    .find_map(|path| response_string_path(response, path))
 }
 
 fn response_string_path(value: &Value, path: &[&str]) -> Option<String> {
@@ -179,37 +238,15 @@ enum V3StoplessSchemaDecision {
 }
 
 fn classify_stopless_schema(text: &str) -> V3StoplessSchemaDecision {
-    let Some(parsed) = read_stopless_json_object(text) else {
-        return classify_stopless_schema_from_scan(text);
-    };
-    let Some(stopreason_value) = parsed.get("stopreason") else {
-        return V3StoplessSchemaDecision::Missing;
-    };
-    let Some(stopreason) = stopreason_value
-        .as_i64()
-        .or_else(|| stopreason_value.as_str()?.trim().parse().ok())
-    else {
-        return V3StoplessSchemaDecision::Invalid;
-    };
-    match stopreason {
-        0 | 1 => V3StoplessSchemaDecision::Terminal,
-        2 => V3StoplessSchemaDecision::Continue,
-        _ => V3StoplessSchemaDecision::Invalid,
-    }
-}
-
-fn classify_stopless_schema_from_scan(text: &str) -> V3StoplessSchemaDecision {
-    let Some(stopreason) = read_stopless_stopreason_by_scan(text) else {
-        return if text.contains("stopreason") {
-            V3StoplessSchemaDecision::Invalid
-        } else {
-            V3StoplessSchemaDecision::Missing
-        };
-    };
-    match stopreason {
-        0 | 1 => V3StoplessSchemaDecision::Terminal,
-        2 => V3StoplessSchemaDecision::Continue,
-        _ => V3StoplessSchemaDecision::Invalid,
+    let gate = evaluate_v3_stopless_schema_gate(text);
+    match gate.action {
+        StopSchemaGateAction::AllowStop => V3StoplessSchemaDecision::Terminal,
+        StopSchemaGateAction::FailFast => V3StoplessSchemaDecision::Invalid,
+        StopSchemaGateAction::Followup => match gate.reason_code.as_str() {
+            "stop_schema_missing" => V3StoplessSchemaDecision::Missing,
+            "stop_schema_continue_next_step" => V3StoplessSchemaDecision::Continue,
+            _ => V3StoplessSchemaDecision::Invalid,
+        },
     }
 }
 
@@ -252,6 +289,60 @@ fn stopless_no_schema_cli_input_from_profile(
         "maxRepeats": state.max_repeats,
         "triggerHint": state.trigger_hint.unwrap_or_else(|| "no_schema".to_string())
     }))
+}
+
+fn build_stopless_terminal_visible_payload(payload: &Value, text: &str) -> Value {
+    let gate = evaluate_v3_stopless_schema_gate(text);
+    build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+        payload: payload.clone(),
+        mode: Some("strip".to_string()),
+        prefix: gate.summary_prefix,
+    })
+    .payload
+}
+
+fn build_stopless_budget_exhausted_visible_payload(payload: &Value, text: &str) -> Value {
+    let gate = evaluate_v3_stopless_schema_gate(text);
+    let prefix = gate
+        .parsed
+        .as_ref()
+        .and_then(build_stop_schema_budget_exhausted_summary_prefix);
+    build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+        payload: payload.clone(),
+        mode: Some("replace".to_string()),
+        prefix,
+    })
+    .payload
+}
+
+fn build_stopless_no_visible_budget_exhausted_payload(payload: &Value) -> Value {
+    build_stop_message_terminal_visible_payload(StopMessageTerminalVisiblePayloadInput {
+        payload: payload.clone(),
+        mode: Some("replace".to_string()),
+        prefix: Some(STOPLESS_NO_VISIBLE_TEXT_BUDGET_EXHAUSTED.to_string()),
+    })
+    .payload
+}
+
+fn evaluate_v3_stopless_schema_gate(text: &str) -> StopSchemaGateDecision {
+    let gate = evaluate_stop_schema_gate(text, 0, 3, "", 0);
+    let control_only_terminal = gate.action == StopSchemaGateAction::AllowStop
+        && gate.summary_prefix.is_none()
+        && strip_stop_schema_control_text(text).trim().is_empty();
+    if gate.reason_code != "stop_schema_missing" && !control_only_terminal {
+        return gate;
+    }
+    let Some(arguments) = read_stopless_json_object(text).map(|value| value.to_string()) else {
+        return gate;
+    };
+    evaluate_stop_schema_gate_with_reasoning_stop_arguments(
+        "",
+        Some(arguments.as_str()),
+        0,
+        3,
+        "",
+        0,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -320,24 +411,6 @@ fn shell_quote_for_stopless_cli(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn read_stopless_stopreason_by_scan(text: &str) -> Option<i64> {
-    let key_index = text.find("\"stopreason\"")?;
-    let tail = &text[key_index + "\"stopreason\"".len()..];
-    let colon_index = tail.find(':')?;
-    let mut value = tail[colon_index + 1..].trim_start();
-    if let Some(rest) = value.strip_prefix('"') {
-        value = rest.trim_start();
-    }
-    let digits: String = value
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit() || *ch == '-')
-        .collect();
-    if digits.is_empty() {
-        return None;
-    }
-    digits.parse().ok()
-}
-
 fn is_stopless_cli_output(item: &Value) -> bool {
     matches!(
         item.get("type").and_then(Value::as_str),
@@ -348,18 +421,46 @@ fn is_stopless_cli_output(item: &Value) -> bool {
         .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
 }
 
-fn latest_stopless_cli_output(input: &[Value]) -> Option<(usize, &Value)> {
-    input
-        .iter()
-        .enumerate()
-        .rfind(|(_, item)| is_stopless_cli_output(item))
-}
-
-fn has_stopless_reset_boundary_after(input: &[Value], output_index: usize) -> bool {
-    input
-        .iter()
-        .skip(output_index.saturating_add(1))
-        .any(is_stopless_reset_boundary_item)
+fn active_stopless_cli_output(input: &[Value]) -> Option<(usize, &Value)> {
+    let mut best: Option<(usize, &Value, V3StoplessHookState)> = None;
+    let mut index = input.len();
+    while index > 0 {
+        index -= 1;
+        let item = &input[index];
+        if is_stopless_cli_output(item) {
+            let Some(state) = parse_stopless_cli_output(item, index)
+                .ok()
+                .map(|parsed| parsed.state)
+            else {
+                return Some((index, item));
+            };
+            let replace = best.as_ref().is_none_or(|(best_index, _, best_state)| {
+                state.repeat_count() > best_state.repeat_count()
+                    || (state.repeat_count() == best_state.repeat_count() && index > *best_index)
+            });
+            if replace {
+                best = Some((index, item, state));
+            }
+            continue;
+        }
+        if is_stopless_cli_call(item) {
+            continue;
+        }
+        if is_v3_client_tool_error_output_at_req04(item) {
+            continue;
+        }
+        if index > 0 && is_v3_client_tool_error_pair_at_req04(input, index - 1) {
+            index -= 1;
+            continue;
+        }
+        if is_v3_client_tool_error_pair_at_req04(input, index) {
+            continue;
+        }
+        if is_stopless_reset_boundary_item(item) {
+            break;
+        }
+    }
+    best.map(|(index, output, _)| (index, output))
 }
 
 fn is_stopless_reset_boundary_item(item: &Value) -> bool {

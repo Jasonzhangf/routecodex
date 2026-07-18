@@ -11,6 +11,8 @@ use std::{collections::BTreeSet, sync::Arc};
 
 mod relay_request;
 pub use relay_request::*;
+mod tool_error_governance;
+pub(crate) use tool_error_governance::*;
 mod servertool_hooks;
 pub use servertool_hooks::*;
 mod anthropic_codec;

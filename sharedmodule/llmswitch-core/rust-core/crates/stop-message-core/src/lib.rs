@@ -973,7 +973,7 @@ fn push_markdown_field(out: &mut String, label: &str, value: Option<&String>) {
     out.push('\n');
 }
 
-fn build_allow_stop_summary_prefix_from_parsed(
+pub fn build_allow_stop_summary_prefix_from_parsed(
     parsed: &StopSchemaParsed,
     stopreason: u8,
     fallback_reason: &str,
@@ -1004,6 +1004,30 @@ fn build_allow_stop_summary_prefix_from_parsed(
     }
     out.push('\n');
     out
+}
+
+pub fn build_stop_schema_budget_exhausted_summary_prefix(
+    parsed: &StopSchemaParsed,
+) -> Option<String> {
+    if let Some(stopreason @ 0..=1) = parsed.stopreason {
+        let fallback_reason = parsed.reason.as_deref().unwrap_or("");
+        return Some(build_allow_stop_summary_prefix_from_parsed(
+            parsed,
+            stopreason,
+            fallback_reason,
+        ));
+    }
+    let reason = parsed.reason.as_deref().map(str::trim).unwrap_or("");
+    if reason.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    out.push_str("## 当前结果\n\n");
+    out.push_str("- 结论: ");
+    out.push_str(reason);
+    out.push('\n');
+    push_markdown_field(&mut out, "建议下一步", parsed.next_step.as_ref());
+    Some(out)
 }
 
 fn build_needs_user_input_summary_prefix(
@@ -2173,6 +2197,31 @@ mod tests {
             assert!(decision.missing_fields.contains(&missing_field.to_string()));
             assert!(decision.count_budget);
         }
+    }
+
+    #[test]
+    fn budget_exhausted_summary_preserves_invalid_schema_reason_without_control_json() {
+        let parsed = StopSchemaParsed {
+            stopreason: None,
+            simple_question: None,
+            has_evidence: None,
+            forcestop: None,
+            reason: Some("not numeric".to_string()),
+            current_goal: None,
+            next_step: None,
+            next_suggested_path: None,
+            evidence: None,
+            done_steps: None,
+            learned: None,
+            issue_cause: None,
+            excluded_factors: None,
+            diagnostic_order: None,
+            needs_user_input: None,
+        };
+        let summary = build_stop_schema_budget_exhausted_summary_prefix(&parsed).expect("summary");
+        assert!(summary.contains("## 当前结果"));
+        assert!(summary.contains("not numeric"));
+        assert!(!summary.contains("stopreason"));
     }
 
     #[test]

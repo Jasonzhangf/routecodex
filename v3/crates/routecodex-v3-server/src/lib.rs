@@ -22,7 +22,7 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
-    execute_v3_responses_relay_dry_run_runtime,
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation,
     execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
@@ -827,13 +827,45 @@ async fn pending_endpoint(
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Relay
     {
-        let output = execute_v3_responses_relay_dry_run_runtime(
+        let continuation_scope = match build_responses_relay_local_continuation_scope(
+            &request_headers,
+            &request_id,
+            &state.server,
+            &path,
+            &payload,
+        ) {
+            Ok(scope) => scope,
+            Err(message) => {
+                return error_output_response_for_server(
+                    &state.server,
+                    &path,
+                    &request_id,
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                );
+            }
+        };
+        let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3HubReqContinuation03Classified",
+                    V3DebugError::MalformedFixture(format!(
+                        "system time precedes Unix epoch: {error}"
+                    )),
+                ));
+            }
+        };
+        let output = execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
             &state.manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: state.server.id.clone(),
                 request_id: request_id.clone(),
                 payload: payload.clone(),
             },
+            &state.responses_relay_local_continuation,
+            continuation_scope,
+            now_epoch_ms,
         )
         .await;
         let observability = build_v3_foundation_console_observability(&state, &output);

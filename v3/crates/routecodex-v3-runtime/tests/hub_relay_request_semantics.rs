@@ -521,6 +521,185 @@ fn stopless_request_hook_captures_repeat_state_from_codex_transcript_output() {
 }
 
 #[test]
+fn stopless_request_hook_tool_errors_after_stopless_pair_do_not_reset_state() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: stopless\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}\n"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_auto_1",
+                        "name":"exec_command",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_auto_1",
+                        "output":"failed to parse function arguments: missing field `cmd` at line 1 column 2"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_auto_2",
+                        "name":"tools",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_auto_2",
+                        "output":"unsupported call: tools"
+                    }
+                ]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    let state = governed
+        .stopless_state()
+        .expect("tool parse/unsupported errors after a stopless pair are not progress resets");
+    assert_eq!(state.repeat_count(), 2);
+    assert_eq!(state.max_repeats(), 3);
+    assert_eq!(state.trigger_hint(), Some("no_schema"));
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input[0], json!({"role":"user","content":"继续。"}));
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0], json!({"role":"user","content":"继续。"}));
+    assert_eq!(governed.tool_output_count(), 0);
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "Chunk ID: stopless",
+        "call_auto_1",
+        "call_auto_2",
+        "failed to parse function arguments",
+        "unsupported call: tools",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "request leaked stopless artifact or client tool error: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn stopless_request_hook_poisoned_later_repeat_one_does_not_reset_repeat_state() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "input":[
+                    {
+                        "role":"user",
+                        "content":"1. direct 是否锁住不走 stopless？\n2. 全局是否有 stopless 停止的 schema 引导？"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '1' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: r1\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}\n"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: r2\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}\n"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_auto_1",
+                        "name":"exec_command",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_auto_1",
+                        "output":"failed to parse function arguments: missing field `cmd` at line 1 column 2"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_auto_1",
+                        "name":"tools",
+                        "arguments":"{}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_auto_1",
+                        "output":"unsupported call: tools"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '1' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: poisoned-r1\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}\n"
+                    }
+                ]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    let state = governed
+        .stopless_state()
+        .expect("poisoned repeatCount=1 tail must not erase same-segment repeatCount=2");
+    assert_eq!(state.repeat_count(), 2);
+    assert_eq!(state.max_repeats(), 3);
+    assert_eq!(state.trigger_hint(), Some("no_schema"));
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 2);
+    assert_eq!(input[0]["role"], "user");
+    assert_eq!(input[1], json!({"role":"user","content":"继续。"}));
+    assert_eq!(governed.tool_output_count(), 0);
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "repeatCount",
+        "call_auto_1",
+        "failed to parse function arguments",
+        "unsupported call: tools",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "poisoned request leaked stopless or client tool error state: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn stopless_request_hook_malformed_cli_output_is_fail_fast() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("rcc_stopless"), scope()).with_local_context(
