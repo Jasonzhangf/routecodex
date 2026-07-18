@@ -3726,3 +3726,9 @@
 - The stable runtime truth for console activation is an internal observability bit derived from finalized stopless projection evidence: `output[].call_id=call_stopless_reasoning` and `name=exec_command`.
 - Server console may print the fixed purple `🧭 [stopless]` human monitor line from that observability bit, but must not mutate protocol-visible headers, session IDs, provider/client body, MetadataCenter payload, or SSE semantics.
 - Verified live on installed 5555: `scripts/tests/stopless-5555-live-probe.mjs` completed `requires_action -> requires_action -> completed`, and foreground tmux capture showed two ANSI purple `\x1b[35m[5555] 🧭 [stopless]` lines with `hook=reasoningStop callId=call_stopless_reasoning action=exec_command finishReason=tool_calls`.
+
+# 2026-07-18: V3 live Responses stopless must accept completed Responses object without finish_reason
+
+- Real 5555 Responses Relay providers can return canonical Responses JSON with `object=response,status=completed` and no top-level `finish_reason`. Stopless response hook decisions must not depend on later console finishReason inference.
+- In Resp03, when stopless profile is active and the assistant output has missing/invalid terminal schema, `object=response,status=completed` is a valid stop candidate for projecting `exec_command(routecodex hook run reasoningStop ...)`. This belongs only to Chat Process response hook owner, not SSE/server handler/resp_outbound/logging.
+- Verified installed/live on 5555 after global install `0.90.3937`: `/tmp/stopless-5555-live-schema-matrix-after-fix-full-20260718T021415Z.json` ran schema_correct/schema_missing/schema_invalid with 3 attempts each and submit continuation rounds up to 3; all scenarios were `ok=true`, with no `local continuation not found` and no `local continuation is already committed`.

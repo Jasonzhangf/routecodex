@@ -34,7 +34,9 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
         V3StoplessSchemaDecision::Terminal => return Ok(input),
         V3StoplessSchemaDecision::Continue => stopless_cli_input_from_schema(text),
         V3StoplessSchemaDecision::Missing => {
-            if !response_has_stopless_stop_trigger(input.provider_payload().as_ref()) {
+            if !response_has_stopless_stop_trigger(input.provider_payload().as_ref())
+                && !response_is_completed_responses_object(input.provider_payload().as_ref())
+            {
                 return Ok(input);
             }
             None
@@ -127,6 +129,17 @@ fn response_has_stopless_stop_trigger(response: &Value) -> bool {
     .any(|path| {
         response_string_path(response, path).is_some_and(|value| value.eq_ignore_ascii_case("stop"))
     })
+}
+
+fn response_is_completed_responses_object(response: &Value) -> bool {
+    response
+        .get("object")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case("response"))
+        && response
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.eq_ignore_ascii_case("completed"))
 }
 
 fn response_string_path(value: &Value, path: &[&str]) -> Option<String> {
