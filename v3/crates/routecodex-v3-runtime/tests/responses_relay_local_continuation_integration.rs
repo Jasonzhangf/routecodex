@@ -188,6 +188,7 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
         Some("requires_action")
     );
     assert_eq!(first_observability.finish_reason.as_deref(), Some("stop"));
+    assert!(first_observability.stopless_activation);
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
@@ -311,6 +312,7 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
         first_observability.finish_reason.as_deref(),
         Some("tool_calls")
     );
+    assert!(first_observability.stopless_activation);
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
@@ -358,6 +360,7 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
         second_observability.finish_reason.as_deref(),
         Some("tool_calls")
     );
+    assert!(second_observability.stopless_activation);
     match second.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
@@ -459,6 +462,7 @@ async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context
         Some("requires_action")
     );
     assert_eq!(output_observability.finish_reason.as_deref(), Some("stop"));
+    assert!(output_observability.stopless_activation);
     let stream_observation = output
         .stream_observation
         .clone()

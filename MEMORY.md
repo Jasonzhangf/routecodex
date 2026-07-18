@@ -3719,3 +3719,10 @@
 - Provider-specific apply_patch schema compatibility belongs in provider transport/compat, not normalization, SSE, server handler, store transport, MetadataCenter, or direct request cleanup.
 - Anthropic schema-less custom `apply_patch` maps to a required `patch` string schema with `additionalProperties=true`; unrelated schema-less custom tools use a generic object schema and must not inherit apply_patch schema.
 - Verified with focused positive/reverse Req04 tests, Anthropic provider compat tests, V3 relay/module/fmt/clippy/provider gates, function/verification-map gates, global install 0.90.3937, managed V3 5555 restart, `/health`, and live apply_patch replay on `http://127.0.0.1:5555/v1/responses` preserving the exact raw patch with zero function-arguments or JSON-wrapper leaks.
+
+# 2026-07-18: V3 stopless console activation observability
+
+- V3 stopless console printing must not infer activation from `finishReason=stop`. After stopless projection, finalized observability can be `responseStatus=requires_action` with `finishReason=tool_calls`.
+- The stable runtime truth for console activation is an internal observability bit derived from finalized stopless projection evidence: `output[].call_id=call_stopless_reasoning` and `name=exec_command`.
+- Server console may print the fixed purple `🧭 [stopless]` human monitor line from that observability bit, but must not mutate protocol-visible headers, session IDs, provider/client body, MetadataCenter payload, or SSE semantics.
+- Verified live on installed 5555: `scripts/tests/stopless-5555-live-probe.mjs` completed `requires_action -> requires_action -> completed`, and foreground tmux capture showed two ANSI purple `\x1b[35m[5555] 🧭 [stopless]` lines with `hook=reasoningStop callId=call_stopless_reasoning action=exec_command finishReason=tool_calls`.

@@ -117,6 +117,7 @@ pub struct V3RuntimeObservability {
     pub provider_status: Option<u16>,
     pub response_status: Option<String>,
     pub finish_reason: Option<String>,
+    pub stopless_activation: bool,
     pub attempts: Option<usize>,
     pub unavailable_candidates: Vec<String>,
     pub target_path: Vec<String>,
@@ -744,6 +745,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         });
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
+                observability.stopless_activation =
+                    response_has_stopless_activation(&finalized_provider_value);
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     client_body: V3ResponsesRelayClientBody::Json(finalized_provider_value),
@@ -800,6 +803,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             .ok()
                             .and_then(|snapshot| snapshot.usage)
                     });
+                observability.stopless_activation =
+                    response_has_stopless_activation(&finalized_provider_value);
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     client_body: V3ResponsesRelayClientBody::Sse(
@@ -1198,6 +1203,7 @@ fn build_v3_relay_observability_from_selected(
         provider_status: None,
         response_status: None,
         finish_reason: None,
+        stopless_activation: false,
         attempts: Some(selected.attempts),
         unavailable_candidates: selected.unavailable_candidates.clone(),
         target_path: selected.candidate.path.clone(),
@@ -1259,6 +1265,23 @@ fn infer_v3_runtime_finish_reason(
             }
         }
     }
+}
+
+fn response_has_stopless_activation(value: &Value) -> bool {
+    value
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("call_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|call_id| call_id == "call_stopless_reasoning")
+                    && item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name == "exec_command")
+            })
+        })
 }
 
 fn read_v3_runtime_string_path(value: &Value, path: &[&str]) -> Option<String> {

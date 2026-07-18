@@ -1900,6 +1900,7 @@ fn project_v3_runtime_observability_debug(observability: &V3RuntimeObservability
         "provider_status": observability.provider_status,
         "response_status": observability.response_status,
         "finish_reason": observability.finish_reason,
+        "stopless_activation": observability.stopless_activation,
         "target_path": observability.target_path,
         "unavailable_candidates": observability.unavailable_candidates,
         "usage": observability.usage.as_ref().map(project_v3_runtime_usage_debug),
@@ -2249,6 +2250,33 @@ fn emit_v3_usage_console_line(
     );
 }
 
+fn emit_v3_stopless_console_line(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+) {
+    if !context.state.console_enabled || !is_v3_stopless_console_activation(observability) {
+        return;
+    }
+    let finish_reason = observability
+        .finish_reason
+        .as_deref()
+        .unwrap_or("unreported");
+    let line = format!(
+        "[{}] 🧭 [stopless] {} request {} activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finishReason={} transport={})",
+        context.state.server.port,
+        console_timestamp_hhmmss(),
+        context.request_id,
+        finish_reason,
+        observability.transport
+    );
+    append_v3_human_console_line(&context.state, &line);
+    println!("{}", colorize_v3_stopless_console_line(&line));
+}
+
+fn is_v3_stopless_console_activation(observability: &V3RuntimeObservability) -> bool {
+    observability.stopless_activation
+}
+
 fn append_v3_human_console_line(state: &V3ListenerState, line: &str) {
     if let Err(error) = state.debug.append_human_console_line(line) {
         eprintln!(
@@ -2274,6 +2302,7 @@ fn emit_v3_observability_console_lines(
     emit_v3_request_route_console_line(context, observability);
     if include_usage {
         let elapsed = started_at.elapsed();
+        emit_v3_stopless_console_line(context, observability);
         if should_emit_v3_request_complete_console_line(status, observability) {
             emit_v3_request_complete_console_line(
                 context,
@@ -2349,6 +2378,7 @@ impl V3SseConsoleFinalizer {
                     self.observability.usage = snapshot.usage;
                 }
                 let elapsed = self.started_at.elapsed();
+                emit_v3_stopless_console_line(&self.context, &self.observability);
                 emit_v3_request_complete_console_line(
                     &self.context,
                     self.status,
@@ -2533,6 +2563,7 @@ fn build_v3_foundation_console_observability(
         provider_status: Some(output.status),
         response_status,
         finish_reason,
+        stopless_activation: false,
         attempts: Some(1),
         unavailable_candidates: Vec::new(),
         target_path: vec!["dry_run:provider_request".to_string()],
@@ -2722,6 +2753,7 @@ fn emit_v3_startup_console_line(listeners: &[V3ListenerHandle]) {
 const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_WHITE: &str = "\x1b[97m";
 const ANSI_ERROR_RED: &str = "\x1b[31m";
+const ANSI_STOPLESS_PURPLE: &str = "\x1b[35m";
 
 fn is_v3_console_color_enabled() -> bool {
     let routecodex_force = std::env::var("ROUTECODEX_FORCE_LOG_COLOR")
@@ -2766,6 +2798,18 @@ fn colorize_v3_error_console_line(line: &str) -> String {
         "{}{}{}",
         ANSI_ERROR_RED,
         highlight_v3_console_key_values(line, ANSI_ERROR_RED),
+        ANSI_RESET
+    )
+}
+
+fn colorize_v3_stopless_console_line(line: &str) -> String {
+    if !is_v3_console_color_enabled() {
+        return line.to_string();
+    }
+    format!(
+        "{}{}{}",
+        ANSI_STOPLESS_PURPLE,
+        highlight_v3_console_key_values(line, ANSI_STOPLESS_PURPLE),
         ANSI_RESET
     )
 }
@@ -2845,6 +2889,9 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "target"
             | "upstreamStatus"
             | "upstreamCode"
+            | "hook"
+            | "callId"
+            | "action"
     )
 }
 
@@ -4370,6 +4417,42 @@ mod tests {
             200,
             &observability
         ));
+    }
+
+    #[test]
+    fn stopless_console_activation_requires_action_stop_and_uses_fixed_color() {
+        let active = V3RuntimeObservability {
+            response_status: Some("requires_action".to_string()),
+            finish_reason: Some("tool_calls".to_string()),
+            stopless_activation: true,
+            ..Default::default()
+        };
+        assert!(is_v3_stopless_console_activation(&active));
+
+        let completed = V3RuntimeObservability {
+            response_status: Some("completed".to_string()),
+            finish_reason: Some("stop".to_string()),
+            stopless_activation: false,
+            ..Default::default()
+        };
+        assert!(!is_v3_stopless_console_activation(&completed));
+
+        let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
+        std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
+        let colored = colorize_v3_stopless_console_line(
+            "[5555] 🧭 [stopless] 00:00:00 request req activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finishReason=stop transport=sse)",
+        );
+        if let Some(previous) = previous {
+            std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", previous);
+        } else {
+            std::env::remove_var("ROUTECODEX_FORCE_LOG_COLOR");
+        }
+        assert!(
+            colored.starts_with(ANSI_STOPLESS_PURPLE),
+            "stopless console line must use fixed purple color: {colored:?}"
+        );
+        assert!(colored.contains("hook=reasoningStop"));
+        assert!(colored.contains("callId=call_stopless_reasoning"));
     }
 
     #[tokio::test]
