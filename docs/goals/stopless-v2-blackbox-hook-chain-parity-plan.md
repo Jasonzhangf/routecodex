@@ -7,7 +7,7 @@ Align the V3 stopless / `reasoningStop` behavior with the V2 black-box contract 
 Acceptance:
 
 - The important V2 black-box cases reproduce on V3:
-  - missing schema → passthrough
+  - missing schema → round 1/2 CLI repair prompt, round 3 budget-exhausted passthrough
   - forcestop bypass
   - `needs_user_input` bypass
   - `<rcc_stop_schema>` fence
@@ -133,7 +133,7 @@ Tests and verification surfaces:
 ### Black-box gates
 
 - Positive and negative pairs for the V2 case matrix:
-  - missing → passthrough
+  - missing → round 1/2 CLI repair prompt, round 3 budget-exhausted passthrough
   - forcestop bypass
   - `needs_user_input` bypass
   - fence / schema cases

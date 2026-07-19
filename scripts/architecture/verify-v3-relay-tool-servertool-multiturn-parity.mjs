@@ -5,6 +5,9 @@ import YAML from 'yaml';
 const files = {
   response: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+  responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  providerResponsesTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
   tests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
   responsesLocalTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   manifest: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
@@ -75,6 +78,66 @@ requireAll(text.request, files.request, [
   'SideChannelLeaked',
   'replace_historical_media_with_placeholder',
 ]);
+requireAll(text.servertoolHooks, files.servertoolHooks, [
+  'fn inject_reasoning_stop_tool(payload: &mut Value)',
+  'fn inject_reasoning_stop_tool_into_array',
+  'fn inject_reasoning_stop_tool_into_additional_tools',
+  'additional_tools.tools must be an array; refusing to rebuild original tool JSON path',
+  'inject_reasoning_stop_tool_into_array(embedded_tools, "input[].tools")',
+]);
+forbid(text.servertoolHooks, files.servertoolHooks, /lift_additional_tools_into_provider_tool_surface|collect_additional_tools_from_responses_input|provider_tool_surface_contains_equivalent_tool/, 'tool declaration shape rebuild helper');
+requireAll(text.providerResponsesTransport, files.providerResponsesTransport, [
+  'responses_http_provider_request_preserves_additional_tools_surface',
+  'lift_responses_additional_tools_for_anthropic_messages_body',
+  'request path $.tools must be absent because the original request did not contain $.tools',
+]);
+forbid(
+  text.providerResponsesTransport,
+  files.providerResponsesTransport,
+  /normalize_responses_additional_tools_for_provider_request|responses_http_provider_request_lifts_additional_tools_to_protocol_tools/,
+  'Responses HTTP additional_tools global lift',
+);
+const transportBuildStart = text.providerResponsesTransport.indexOf(
+  'pub fn build_v3_transport_13_responses_request_from_v3_provider_12',
+);
+const transportBuildEnd = text.providerResponsesTransport.indexOf(
+  'fn lift_responses_additional_tools_for_anthropic_messages_body',
+  transportBuildStart,
+);
+if (transportBuildStart < 0 || transportBuildEnd < 0) {
+  fail(`${files.providerResponsesTransport}: unable to isolate Responses provider transport builder`);
+} else {
+  const transportBuildBody = text.providerResponsesTransport.slice(transportBuildStart, transportBuildEnd);
+  requireOrdered(transportBuildBody, files.providerResponsesTransport, [
+    'if target.provider_type.eq_ignore_ascii_case("anthropic")',
+    'lift_responses_additional_tools_for_anthropic_messages_body',
+    'build_anthropic_messages_body',
+  ]);
+  const liftCalls = [
+    ...transportBuildBody.matchAll(/lift_responses_additional_tools_for_anthropic_messages_body/g),
+  ];
+  if (liftCalls.length !== 1) {
+    fail(`${files.providerResponsesTransport}: additional_tools lift must be called exactly once inside the Anthropic Messages codec branch`);
+  }
+  const anthropicBranchStart = transportBuildBody.indexOf(
+    'if target.provider_type.eq_ignore_ascii_case("anthropic")',
+  );
+  if (anthropicBranchStart < 0 || liftCalls[0]?.index < anthropicBranchStart) {
+    fail(`${files.providerResponsesTransport}: additional_tools lift must stay inside the Anthropic Messages codec branch`);
+  }
+}
+const injectStart = text.servertoolHooks.indexOf('fn inject_reasoning_stop_tool(payload: &mut Value)');
+const injectEnd = text.servertoolHooks.indexOf('fn inject_reasoning_stop_tool_into_array', injectStart);
+if (injectStart < 0 || injectEnd < 0) {
+  fail(`${files.servertoolHooks}: unable to isolate stopless tool injection owner`);
+} else {
+  const injectBody = text.servertoolHooks.slice(injectStart, injectEnd);
+  requireOrdered(injectBody, files.servertoolHooks, [
+    'object.contains_key("tools")',
+    'inject_reasoning_stop_tool_into_additional_tools',
+    'object.insert(',
+  ]);
+}
 requireAll(text.response, files.response, [
   'pub enum V3HubRelayToolKind',
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
@@ -82,10 +145,22 @@ requireAll(text.response, files.response, [
   'normalize_v3_apply_patch_freeform_input_for_client',
   'tool_call_kinds',
   'canonical_tool_call_kinds',
+  'fn canonicalize_v3_hub_resp04_finalized_payload',
+  'canonical_context_shares_provider_payload',
   'SideChannelLeaked',
   'servertool_action',
   'V3HubServertoolResponseAction::FollowupRequired',
 ]);
+requireAll(text.responsesRelayRuntime, files.responsesRelayRuntime, [
+  'Some("requires_action") => "response.requires_action"',
+  '"response.completed" | "response.requires_action"',
+]);
+forbid(
+  text.responsesRelayRuntime,
+  files.responsesRelayRuntime,
+  /v3_runtime_sse_event_has_tool_call|v3_runtime_sse_item_is_tool_call/,
+  'SSE transport tool-call semantic inference',
+);
 
 const runWithStart = text.request.indexOf('pub fn run_with_attachment_history_policy');
 const runFromNormalizedStart = text.request.indexOf('pub fn run_from_normalized(');
@@ -140,9 +215,21 @@ requireAll(text.tests, files.tests, [
 ]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
+  'json_stopless_preserves_codex_additional_tools_across_continuation',
+  'json_stopless_budget_exhausted_provider_tool_call_returns_requires_action',
+  'Responses Relay client SSE must not relabel Hub-finalized requires_action as completed',
+  'Responses Relay client SSE must not relabel Hub-finalized tool-call continuation as completed',
   'json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
-  'assert_eq!(captures[1]["tools"], second_tools);',
+  'original request path $.tools must preserve original tools and append exactly one internal reasoningStop tool',
+  'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
+  'assert_additional_tools_preserved_without_shape_rebuild',
+  'provider_tool_names',
+  'body.get("tools").is_none()',
+  'request path $.tools must be absent because the original request did not contain $.tools',
+  'original additional_tools path $.input[].tools must stay unchanged except one appended reasoningStop',
+  'provider request created a sibling tool declaration surface that was not present in the original request path',
+  '"strict":false',
   '"type":"function_call"',
   '"type":"function_call_output"',
   'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
@@ -169,8 +256,10 @@ for (const script of supportingProtocolScripts) {
 }
 
 const responseOwnerSource = text.response.split('#[cfg(test)]')[0];
-forbid(text.request, files.request, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in request governance');
-forbid(responseOwnerSource, files.response, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in response governance');
+const requestWrongOwnerAuditSource = stripStringLiterals(text.request);
+const responseWrongOwnerAuditSource = stripStringLiterals(responseOwnerSource);
+forbid(requestWrongOwnerAuditSource, files.request, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in request governance');
+forbid(responseWrongOwnerAuditSource, files.response, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in response governance');
 forbid(text.request + text.response, 'V3 Relay tool parity Rust owner', /fallback|full_materiali[sz]e|collect\s*::<\s*Vec|read_dir|libloading/i, 'fallback/materialization/dynamic hook');
 forbid(text.request + text.response, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
 forbid(text.tests, files.tests, /fallback/i, 'fallback in parity tests');
@@ -207,6 +296,10 @@ function requireOrdered(source, owner, phrases) {
     }
     previousIndex = index;
   }
+}
+
+function stripStringLiterals(source) {
+  return source.replace(/"(?:\\.|[^"\\])*"/g, '""');
 }
 
 function fail(message) {

@@ -82,6 +82,26 @@ fn stopless_projected_call(payload: &Value) -> &Value {
         .expect("projected stopless exec_command call")
 }
 
+fn assert_no_schema_feedback_user_prompt(item: &Value) {
+    assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
+    let content = item
+        .get("content")
+        .and_then(Value::as_str)
+        .expect("no_schema feedback prompt");
+    assert!(
+        content.contains("缺少 stop schema"),
+        "no_schema prompt must explain the missing stop schema: {content}"
+    );
+    assert!(
+        content.contains("stopreason") && content.contains("<rcc_stop_schema>"),
+        "no_schema prompt must carry schema guidance: {content}"
+    );
+    assert!(
+        !content.trim().eq("继续。"),
+        "no_schema prompt must not collapse to legacy continue text"
+    );
+}
+
 fn provider_protocol_for_entry(entry_protocol: V3HubEntryProtocol) -> V3HubProviderWireProtocol {
     match entry_protocol {
         V3HubEntryProtocol::Responses => V3HubProviderWireProtocol::Responses,
@@ -412,10 +432,7 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
     assert_eq!(outcome.tool_output_count(), 0);
     assert_eq!(
         outcome.payload()["input"],
-        json!([
-            {"type":"output_text","text":"stopping without schema"},
-            {"role":"user","content":"blackbox next request text"}
-        ])
+        json!([{"role":"user","content":"blackbox next request text"}])
     );
     assert!(outcome.payload()["instructions"]
         .as_str()
@@ -479,10 +496,7 @@ fn stopless_hook_blackbox_rewrites_codex_transcript_from_full_history() {
     let input = outcome.payload()["input"].as_array().expect("input array");
     assert_eq!(input.len(), 481);
     assert_eq!(input.first().unwrap()["call_id"], "call_unrelated_0");
-    assert_eq!(
-        input.last().unwrap(),
-        &json!({"role":"user","content":"继续。"})
-    );
+    assert_no_schema_feedback_user_prompt(input.last().unwrap());
     assert!(outcome.payload()["instructions"]
         .as_str()
         .unwrap()
@@ -496,6 +510,120 @@ fn stopless_hook_blackbox_rewrites_codex_transcript_from_full_history() {
         assert!(
             !serialized.contains(forbidden),
             "rewritten full-history request leaked stopless CLI artifact: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn stopless_hook_blackbox_strips_accumulated_cli_projection_messages_from_full_history() {
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let input = vec![
+        json!({"role":"user","content":"先保留的真实用户问题"}),
+        json!({
+            "type":"message",
+            "role":"assistant",
+            "status":"completed",
+            "content":[{"type":"output_text","text":"old visible stop text one"}]
+        }),
+        json!({
+            "type":"function_call",
+            "call_id":"call_stopless_reasoning",
+            "name":"exec_command",
+            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}'\"}"
+        }),
+        json!({
+            "type":"function_call_output",
+            "call_id":"call_stopless_reasoning",
+            "output":"Chunk ID: old-one\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"old prompt one\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+        }),
+        json!({
+            "type":"function_call",
+            "call_id":"call_bad_local_tool",
+            "name":"exec_command",
+            "arguments":"{}"
+        }),
+        json!({
+            "type":"function_call_output",
+            "call_id":"call_bad_local_tool",
+            "output":"failed to parse function arguments: missing field `cmd` at line 1 column 2"
+        }),
+        json!({"role":"user","content":"1. direct 是否锁住不走 stopless？\n2. 全局是否有 stopless 停止的 schema 引导？"}),
+        json!({
+            "type":"message",
+            "role":"assistant",
+            "status":"completed",
+            "content":[{"type":"output_text","text":"latest visible stop text repeat one"}]
+        }),
+        json!({
+            "type":"function_call",
+            "call_id":"call_stopless_reasoning",
+            "name":"exec_command",
+            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '1' --max-repeats '3'\"}"
+        }),
+        json!({
+            "type":"function_call_output",
+            "call_id":"call_stopless_reasoning",
+            "output":"Chunk ID: latest-one\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"latest prompt one\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+        }),
+        json!({
+            "type":"message",
+            "role":"assistant",
+            "status":"completed",
+            "content":[{"type":"output_text","text":"latest visible stop text repeat two"}]
+        }),
+        json!({
+            "type":"function_call",
+            "call_id":"call_stopless_reasoning",
+            "name":"exec_command",
+            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
+        }),
+        json!({
+            "type":"function_call_output",
+            "call_id":"call_stopless_reasoning",
+            "output":"Chunk ID: latest-two\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"latest repeat two prompt\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+        }),
+    ];
+
+    let outcome = request_hooks
+        .run(
+            raw_request(json!({
+                "model":"gpt-5.5",
+                "input":input,
+                "stream":true
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        outcome.stopless_state().map(|state| state.repeat_count()),
+        Some(2),
+        "request-side hook must use the latest active stopless evidence instead of resetting the loop"
+    );
+    let output = outcome.payload()["input"].as_array().expect("input array");
+    assert!(
+        output
+            .iter()
+            .any(|item| item["content"] == json!("1. direct 是否锁住不走 stopless？\n2. 全局是否有 stopless 停止的 schema 引导？")),
+        "real user reset-boundary text must stay in the provider-visible request"
+    );
+    assert_no_schema_feedback_user_prompt(output.last().unwrap());
+    let serialized = serde_json::to_string(outcome.payload()).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "Chunk ID:",
+        "old prompt one",
+        "latest prompt one",
+        "latest repeat two prompt",
+        "old visible stop text one",
+        "latest visible stop text repeat one",
+        "latest visible stop text repeat two",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "rewritten full-history request leaked accumulated stopless CLI projection artifact: {forbidden}"
         );
     }
 }
@@ -663,9 +791,13 @@ fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_outp
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
     let input = outcome.payload()["input"].as_array().expect("input array");
-    assert!(input
-        .iter()
-        .any(|item| item.get("text").and_then(Value::as_str) == Some("missing stop schema")));
+    assert!(input.iter().any(|item| {
+        item.get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|part| part.get("text").and_then(Value::as_str) == Some("missing stop schema"))
+    }));
     let kept_call = input
         .iter()
         .find(|item| {

@@ -11,8 +11,11 @@ under test remains owned by the Relay request/response/resource workers.
 ## Lifecycle under test
 
 1. Relay JSON request moves from `V3HubReqInbound01ClientRaw` through Req04 governance.
-2. Relay SSE response keeps one provider response payload through Resp01-Resp04 and reaches the
-   single `V3ServerRespOutbound06ClientFrame` transport exit without full-stream materialization.
+2. Responses Relay keeps SSE transport-only. The SSE layer only frames bytes; it does not own
+   request/response semantics. The adjacent provider Responses event codec may read `data` payloads
+   after SSE frame decode and produce Hub response semantic truth; after Hub hooks, the adjacent
+   client event codec may encode finalized client semantic truth as SSE frames. Relay has no raw SSE
+   pass-through business branch and no SSE-owned schema/tool/continuation/finish-reason logic.
 3. Local continuation truth is retained from lookup through Req04 restore, remains available after
    the lookup owner is released, and is released when the governed request outcome is dropped.
 4. A servertool response is governed at Resp03, commits one canonical local context at Resp04, and
@@ -23,7 +26,7 @@ under test remains owned by the Relay request/response/resource workers.
 | Probe | Positive assertion | Negative risk locked |
 | --- | --- | --- |
 | Relay JSON | large nested request remains semantically equal after Req01-Req04 | runtime full-payload clone or JSON round-trip |
-| Relay SSE | normalized kind is SSE, canonical context shares finalized payload, one response exit remains | SSE collection/materialization or second exit |
+| Relay SSE | SSE remains transport-only while provider/client Responses event codecs bracket Hub response hooks | raw SSE business pass-through, cross-node shortcut, skipped response hooks, or SSE-owned semantic repair |
 | Local continuation | context survives lookup drop until governed outcome drop; restore precedes servertool | early release, restore outside Req04, retained duplicate truth |
 | Servertool roundtrip | Resp03 detects followup, Resp04 stores one shared context, next Req04 restores before servertool | servertool-owned response exit or duplicated context payload |
 
@@ -38,7 +41,10 @@ The gate rejects:
 
 - unbounded `deep_clone`, `deepClone`, or full-payload `.clone()` paths;
 - `serde_json::to_string`/`from_str` or `to_value`/`from_value` cloning round-trips;
-- SSE `collect`, `collect::<Vec<_>>`, `body_text`, or full-buffer materialization;
+- Responses Relay transport/codec lifecycle violations: `collect`, `collect::<Vec<_>>`, `body_text`,
+  full-buffer materialization outside the provider Responses event codec, raw stream projector
+  resurrection, skipped response hooks, SSE-owned schema/tool/continuation/finish-reason logic,
+  or synthetic SSE emission outside the client-frame codec;
 - Debug/snapshot payloads used as request, response, or continuation truth;
 - hook planning that retains, owns, or clones the current-node business payload;
 - removal of the canonical `Arc::ptr_eq` response ownership assertion or the Req04 restore point.

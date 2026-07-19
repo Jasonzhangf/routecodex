@@ -1484,6 +1484,7 @@ features:
 
   - feature_id: v3.responses_websocket_v2_transport_hardening
     owner_crates: [routecodex-v3-provider-responses]
+    owner_scope: "Provider-owned WebSocket v2 connection/session guard, incremental event framing, same-stream WebSocket event aggregation into V3ProviderResp14Raw, cancellation, terminal reuse, and fail-closed discard lifecycle."
     owner_files:
       - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs

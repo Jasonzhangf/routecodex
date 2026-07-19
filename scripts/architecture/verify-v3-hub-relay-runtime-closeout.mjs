@@ -157,18 +157,38 @@ for (const phrase of [
   'build_v3_provider_12_responses_wire_payload',
   'build_v3_transport_13_responses_http_request_from_v3_provider_12',
   'run_json_response_hooks',
-  'collect_v3_responses_relay_sse_response',
-  'project_finalized_response_sse_stream',
+  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
+  'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
+  'let (action, finalized_provider_value) = run_json_response_hooks(',
+  'commit_or_release_responses_local_continuation(',
+  'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
+  'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
+  'fn observe_v3_runtime_responses_sse_transport_chunk(',
+  'fn apply_responses_stream_protocol_events_to_terminal_response(',
 ]) requireText(responsesRuntime, responsesRuntimePath, phrase);
 for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
 for (const node of expectedNodes.slice(10)) {
-  requireCount(responsesRuntime, responsesRuntimePath, node, 1);
+  requireCount(responsesRuntime, responsesRuntimePath, `trace.push("${node}");`, 1);
 }
+requireCount(
+  responsesRuntime,
+  responsesRuntimePath,
+  'let (action, finalized_provider_value) = run_json_response_hooks(',
+  2,
+);
+requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
+  'V3ProviderResponseBody::Sse(stream) => {',
+  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
+  'let (action, finalized_provider_value) = run_json_response_hooks(',
+  'commit_or_release_responses_local_continuation(',
+  'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
+]);
 forbid(responsesRuntime, responsesRuntimePath, [
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /collect\s*::<\s*Vec|full_buffer/i,
+  /\bproject_sse_stream\b|\bV3ObservedSseState\b|\bproject_finalized_response_sse_stream\b/,
 ]);
 
 for (const phrase of [
@@ -186,7 +206,7 @@ for (const phrase of [
 for (const phrase of [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
-  'assert_eq!(captures[1]["tools"], second_tools);',
+  'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
   '"type":"function_call_output"',
   'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
 ]) requireText(localContinuationTests, localContinuationTestPath, phrase);
@@ -270,6 +290,18 @@ function requireOrdered(text, owner, earlier, later, expected) {
       return;
     }
     index = laterIndex + later.length;
+  }
+}
+
+function requireOrderedSequence(text, owner, phrases) {
+  let index = 0;
+  for (const phrase of phrases) {
+    const next = text.indexOf(phrase, index);
+    if (next < 0) {
+      failures.push(`${owner}: missing ordered SSE response path phrase ${phrase}`);
+      return;
+    }
+    index = next + phrase.length;
   }
 }
 

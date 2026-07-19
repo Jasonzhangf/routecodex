@@ -106,6 +106,71 @@ fn scope() -> V3ResponsesDirectContinuationScope {
     )
 }
 
+async fn assert_direct_response_does_not_run_relay_stopless(response: Value, label: &str) {
+    let manifest = manifest();
+    let transport = PassthroughTransport::with_response(response);
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &V3ResponsesDirectContinuationState::default(),
+        &manifest,
+        request(json!({
+            "model": "client-model",
+            "input": format!("direct stopless negative {label}"),
+            "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
+            "stream": false
+        })),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
+    let wire = transport
+        .request
+        .lock()
+        .unwrap()
+        .take()
+        .expect("direct provider wire payload captured");
+    let wire_serialized = serde_json::to_string(&wire).unwrap();
+    assert_eq!(
+        wire["tools"].as_array().map(|items| items.len()),
+        Some(1),
+        "{label}: direct path must preserve original tools and not append stopless: {wire}"
+    );
+    assert_eq!(wire["tools"][0]["name"], "exec_command");
+    for forbidden in [
+        "reasoningStop",
+        "<rcc_stop_schema>",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !wire_serialized.contains(forbidden),
+            "{label}: direct provider wire leaked relay stopless artifact: {forbidden}"
+        );
+    }
+    assert!(
+        !output
+            .node_trace
+            .contains(&"V3HubRespChatProcess03Governed"),
+        "{label}: direct runtime must not enter Relay RespChatProcess: {:?}",
+        output.node_trace
+    );
+    let V3ClientBody::Json(parsed) = &output.client_payload.body else {
+        panic!("{label}: direct client body must be JSON: {:#?}", output);
+    };
+    let client_serialized = serde_json::to_string(parsed).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !client_serialized.contains(forbidden),
+            "{label}: direct response leaked relay stopless projection: {forbidden}"
+        );
+    }
+}
+
 fn assert_control_truth_isolated(body: &Value) {
     for forbidden in [
         "provider_id",
@@ -380,5 +445,66 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
             !serialized.contains(forbidden),
             "direct response leaked stopless projection: {forbidden}"
         );
+    }
+}
+
+#[tokio::test]
+async fn direct_kernel_does_not_run_relay_stopless_for_same_stopless_payload_matrix() {
+    let payloads = [
+        (
+            "no_schema",
+            json!({
+                "object":"response",
+                "id":"resp_direct_matrix_no_schema",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"direct matrix missing schema"}]
+                }]
+            }),
+        ),
+        (
+            "invalid_schema",
+            json!({
+                "object":"response",
+                "id":"resp_direct_matrix_invalid_schema",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"{\"stopreason\":\"bad\",\"reason\":\"not numeric\"}"}]
+                }]
+            }),
+        ),
+        (
+            "terminal_schema",
+            json!({
+                "object":"response",
+                "id":"resp_direct_matrix_terminal_schema",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"direct proof\",\"needs_user_input\":false}\n</rcc_stop_schema>"}]
+                }]
+            }),
+        ),
+        (
+            "reasoning_stop_text_shaped",
+            json!({
+                "object":"response",
+                "id":"resp_direct_matrix_reasoning_stop_text",
+                "status":"completed",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"provider text mentions reasoningStop and <rcc_stop_schema> but direct must not enter relay stopless"}]
+                }]
+            }),
+        ),
+    ];
+    for (label, payload) in payloads {
+        assert_direct_response_does_not_run_relay_stopless(payload, label).await;
     }
 }

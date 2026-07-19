@@ -1,9 +1,10 @@
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 
 import { describe, expect, it, jest } from '@jest/globals';
 
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
+import { buildLlmswitchNativeExportsFake } from '../../helpers/llmswitch-native-exports-fake.js';
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
   reportProviderErrorToRouterPolicy: async () => undefined,
@@ -12,16 +13,18 @@ jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integ
 }));
 
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/native-exports.js', () => ({
-  getRouterHotpathJsonBindingSync: () => ({}),
-  convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
-    request: {
-      model: payload.model,
-      messages: [],
-      tools: payload.tools,
-    },
+  ...buildLlmswitchNativeExportsFake({
+    convertResponsesRequestToChatNative: (payload: Record<string, unknown>) => ({
+      request: {
+        model: payload.model,
+        messages: [],
+        tools: payload.tools,
+      },
+    }),
+    normalizeResponsesDirectCurrentRequestPayload: (input: { payload?: Record<string, unknown> }) => input.payload ?? {},
+    sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
+    evaluateSingletonRoutePoolExhaustionNative: () => ({ exhausted: false }),
   }),
-  normalizeResponsesDirectCurrentRequestPayload: (input: { payload?: Record<string, unknown> }) => input.payload ?? {},
-  sanitizeProviderOutboundPayload: async (input: { payload: Record<string, unknown> }) => input.payload,
 }));
 
 const { ResponsesProvider } = await import('../../../../src/providers/core/runtime/responses-provider.js');
@@ -58,6 +61,42 @@ async function readSseStreamText(stream: AsyncIterable<unknown>): Promise<string
 }
 
 describe('ResponsesProvider direct SSE terminal validation', () => {
+  it('rejects direct passthrough upstream SSE that terminates after lifecycle preamble only', async () => {
+    const provider = createProvider();
+    provider.httpClient = {
+      postStream: async () => {
+        const stream = new PassThrough();
+        setImmediate(() => {
+          stream.write(
+            'event: response.created\n'
+              + 'data: {"type":"response.created","response":{"id":"resp_preamble_only","status":"in_progress"}}\n\n'
+          );
+          setTimeout(() => {
+            stream.destroy(Object.assign(new Error('terminated'), { code: 'UND_ERR_SOCKET' }));
+          }, 5).unref?.();
+        });
+        return stream;
+      },
+    };
+
+    try {
+      const response = await provider.processIncomingDirect({
+        model: 'gpt-5.5',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+        stream: true,
+      });
+      (response.sseStream as NodeJS.ReadableStream | undefined)?.on?.('error', () => undefined);
+      throw new Error('direct passthrough returned a client stream before classifying preamble-only upstream termination');
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'UPSTREAM_STREAM_TERMINATED',
+        statusCode: 502,
+        retryable: true,
+        requestExecutorProviderErrorStage: 'provider.responses',
+      });
+    }
+  });
+
   it('rejects direct passthrough upstream SSE that closes before response.completed', async () => {
     const provider = createProvider();
     provider.httpClient = {
@@ -94,13 +133,11 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
       ]),
     };
 
-    const response = await provider.processIncomingDirect({
+    await expect(provider.processIncomingDirect({
       model: 'gpt-5.5',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
       stream: true,
-    });
-
-    await expect(readSseStreamText(response.sseStream)).rejects.toMatchObject({
+    })).rejects.toMatchObject({
       code: 'UPSTREAM_STREAM_INCOMPLETE',
       statusCode: 502,
       retryable: true,
@@ -127,6 +164,6 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
     const text = await readSseStreamText(response.sseStream);
     expect(text).toContain('event: response.created');
     expect(text).toContain('event: response.completed');
-    expect(text).toContain('data: [DONE]');
+    expect(text).not.toContain('data: [DONE]');
   });
 });

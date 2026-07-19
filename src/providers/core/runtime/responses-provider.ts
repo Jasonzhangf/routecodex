@@ -49,7 +49,11 @@ import {
 import {
   buildResponsesSseIncompleteError,
   buildResponsesSseProviderError,
-  inspectResponsesSseBlockForProviderFailure
+  buildResponsesSseTerminatedError,
+  inspectResponsesSseBlockForProviderFailure,
+  isResponsesSseIncompleteBlock,
+  isResponsesSseLifecyclePreambleBlock,
+  isResponsesSseTerminalBlock
 } from './responses-sse-error-guard.js';
 import { applyProviderConfiguredErrorMapping } from './provider-configured-error-mapping.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
@@ -309,6 +313,7 @@ async function prepareDirectResponsesSsePassthroughStream(
   const bufferedFrames: string[] = [];
   let pending = '';
   let sawSemanticFrame = false;
+  let sawTerminalFrame = false;
   let lastSemanticActivityAt = Date.now();
 
   const processBlock = async (part: string): Promise<boolean> => {
@@ -323,9 +328,43 @@ async function prepareDirectResponsesSsePassthroughStream(
       }
       throw buildResponsesSseProviderError(providerFailurePayload);
     }
+    if (isResponsesSseIncompleteBlock(part)) {
+      if (typeof iterator.return === 'function') {
+        await iterator.return().catch(() => undefined);
+      }
+      throw buildResponsesSseIncompleteError('stream ended with response.incomplete before response.completed');
+    }
+    if (isResponsesSseTerminalBlock(part)) {
+      sawTerminalFrame = true;
+    }
+    if (isResponsesSseLifecyclePreambleBlock(part)) {
+      return false;
+    }
     sawSemanticFrame = true;
     lastSemanticActivityAt = Date.now();
     return true;
+  };
+
+  const normalizeStreamReadError = (error: unknown): Error => {
+    if (error && typeof error === 'object') {
+      const code = (error as { code?: unknown }).code;
+      if (typeof code === 'string' && code.trim().startsWith('UPSTREAM_STREAM_')) {
+        return error instanceof Error ? error : Object.assign(new Error(String(code)), { code });
+      }
+    }
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+    const normalizedCode = typeof code === 'string' ? code.trim().toLowerCase() : '';
+    const normalizedMessage = message.trim().toLowerCase();
+    if (
+      normalizedMessage.includes('terminated')
+      || normalizedCode.includes('terminated')
+      || normalizedCode === 'und_err_socket'
+      || normalizedCode === 'econnreset'
+    ) {
+      return buildResponsesSseTerminatedError(message || 'stream terminated before response.completed');
+    }
+    return error instanceof Error ? error : new Error(String(error ?? 'unknown direct Responses SSE stream error'));
   };
 
   const startStreamingRemainder = (output: PassThrough): void => {
@@ -370,60 +409,71 @@ async function prepareDirectResponsesSsePassthroughStream(
             output.write(tail);
           }
         }
+        if (!closed && !sawTerminalFrame) {
+          throw buildResponsesSseIncompleteError();
+        }
         if (!closed) {
           output.end();
         }
       } catch (error) {
-        output.destroy(error instanceof Error ? error : new Error(String(error)));
+        output.destroy(normalizeStreamReadError(error));
       }
     })();
   };
 
-  while (true) {
-    const next = await readDirectResponsesChunkWithSemanticTimeout(
-      iterator,
-      sawSemanticFrame ? options?.contentIdleTimeoutMs : options?.noContentTimeoutMs,
-      lastSemanticActivityAt,
-      sawSemanticFrame ? 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' : 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
-    );
-    if (next.done) {
-      break;
-    }
-    const chunk = Buffer.isBuffer(next.value)
-      ? next.value
-      : Buffer.from(String(next.value));
-    pending += chunk.toString('utf8');
+  try {
     while (true) {
-      const nextFrame = takeNextSseBlock(pending);
-      if (!nextFrame) {
+      const next = await readDirectResponsesChunkWithSemanticTimeout(
+        iterator,
+        sawSemanticFrame ? options?.contentIdleTimeoutMs : options?.noContentTimeoutMs,
+        lastSemanticActivityAt,
+        sawSemanticFrame ? 'UPSTREAM_STREAM_CONTENT_IDLE_TIMEOUT' : 'UPSTREAM_STREAM_NO_CONTENT_TIMEOUT'
+      );
+      if (next.done) {
         break;
       }
-      const semantic = await processBlock(nextFrame.block);
-      bufferedFrames.push(nextFrame.rawFrame);
-      pending = nextFrame.rest;
+      const chunk = Buffer.isBuffer(next.value)
+        ? next.value
+        : Buffer.from(String(next.value));
+      pending += chunk.toString('utf8');
+      while (true) {
+        const nextFrame = takeNextSseBlock(pending);
+        if (!nextFrame) {
+          break;
+        }
+        const semantic = await processBlock(nextFrame.block);
+        bufferedFrames.push(nextFrame.rawFrame);
+        pending = nextFrame.rest;
+        if (semantic) {
+          const output = new PassThrough();
+          for (const frame of bufferedFrames) {
+            output.write(frame);
+          }
+          startStreamingRemainder(output);
+          return output;
+        }
+      }
+    }
+    if (pending) {
+      const semantic = await processBlock(pending);
+      const tail = pending;
+      pending = '';
+      bufferedFrames.push(tail);
       if (semantic) {
         const output = new PassThrough();
         for (const frame of bufferedFrames) {
           output.write(frame);
         }
-        startStreamingRemainder(output);
+        if (!sawTerminalFrame) {
+          output.destroy(buildResponsesSseIncompleteError());
+          return output;
+        }
+        output.end();
         return output;
       }
     }
-  }
-  if (pending) {
-    const semantic = await processBlock(pending);
-    const tail = pending;
-    pending = '';
-    bufferedFrames.push(tail);
-    if (semantic) {
-      const output = new PassThrough();
-      for (const frame of bufferedFrames) {
-        output.write(frame);
-      }
-      output.end();
-      return output;
-    }
+  } catch (error) {
+    throw normalizeStreamReadError(error);
   }
   throw buildResponsesSseIncompleteError();
 }

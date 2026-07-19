@@ -121,7 +121,7 @@ fn stopless_projects_cli_for_live_responses_object_invalid_schema_without_finish
 }
 
 #[test]
-fn stopless_projects_cli_for_live_stopreason_two_after_prior_repeat_two_state() {
+fn stopless_projects_cli_for_third_consecutive_live_stopreason_two() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let live_text = "{\"stopreason\":2,\"reason\":\"第二轮还没做完\",\"current_goal\":\"验证 V3 stopless 连续两轮恢复\",\"has_evidence\":0,\"evidence\":\"\",\"issue_cause\":\"\",\"excluded_factors\":\"\",\"diagnostic_order\":\"\",\"done_steps\":\"\",\"next_step\":\"继续最终核对：只输出 stop schema JSON，stopreason=0\",\"next_suggested_path\":\"\",\"needs_user_input\":false,\"learned\":\"\"}";
     let resp02 = hooks
@@ -166,17 +166,15 @@ fn stopless_projects_cli_for_live_stopreason_two_after_prior_repeat_two_state() 
     assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     let payload = resp04.canonical_context_payload().unwrap();
     assert_eq!(payload["status"], "requires_action");
-    let call = stopless_projected_call(payload);
-    assert_eq!(call["name"], "exec_command");
-    let cli_input = stopless_cli_input_from_arguments(call["arguments"].as_str().unwrap());
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(serialized.contains("routecodex hook run reasoningStop"));
+    assert!(serialized.contains("call_stopless_reasoning"));
+    let arguments = stopless_projected_call(payload)["arguments"]
+        .as_str()
+        .unwrap();
+    let cli_input = stopless_cli_input_from_arguments(arguments);
     assert_eq!(cli_input["repeatCount"], json!(1));
     assert_eq!(cli_input["triggerHint"], json!("non_terminal_schema"));
-    assert!(
-        !serde_json::to_string(payload)
-            .unwrap()
-            .contains("\"status\":\"completed\""),
-        "valid stopreason=2 live shape must not pass through as completed"
-    );
 }
 
 #[test]
@@ -224,11 +222,12 @@ fn stopless_projects_cli_for_live_stopreason_two_with_preface_and_fenced_schema(
     let cli_input = stopless_cli_input_from_arguments(call["arguments"].as_str().unwrap());
     assert_eq!(cli_input["stopreason"], json!(2));
     assert_eq!(cli_input["triggerHint"], json!("non_terminal_schema"));
-    assert!(
-        !serde_json::to_string(payload)
-            .unwrap()
-            .contains("\"status\":\"completed\""),
-        "mixed live text plus fenced stopreason=2 must not pass through as completed"
+    assert_eq!(payload["output"][0]["type"], "message");
+    assert_eq!(payload["output"][0]["status"], "completed");
+    assert_eq!(payload["output"][1]["type"], "function_call");
+    assert_eq!(
+        payload["output"][0]["content"][0]["text"], "继续。",
+        "client-visible CLI shell must strip stop-schema control JSON from ordinary assistant text"
     );
 }
 

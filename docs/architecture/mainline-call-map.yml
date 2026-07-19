@@ -1705,7 +1705,7 @@ chains:
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
         semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
-        semantic_output: "ordinary user continuation for the next provider turn: exact `next_step` when valid, otherwise the fixed transparent continuation prompt; all stopless shell/tool history and internal feedback fields are removed"
+        semantic_output: "ordinary user continuation for the next provider turn: exact `next_step` when valid; deterministic schema repair prompt for no_schema/invalid/missing-next-step; all stopless shell/tool history and control fields are removed"
         resource_flow:
           consumes: [request.normal_payload, stopless.cli_result, stopless.runtime_snapshot]
           produces: [stopless.guidance_rewrite]

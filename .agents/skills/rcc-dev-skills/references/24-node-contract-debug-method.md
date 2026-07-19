@@ -53,6 +53,7 @@
 - 先用样本锁“哪一轮、哪一个节点之后断了”，再回 function map / mainline call map 锁唯一 owner。
 - 典型反模式：看到 client-response 停在 `tool_calls`，就把问题归到 `resp_outbound` / `SSE`；如果合同写的是 direct request-side continuation / tool-result follow-up owner，则必须回那个 owner。
 - transport / outbound / handler 层默认只作为证据面；除非 function map 明确把该语义归给它，否则不得把症状层当修复 owner。
+- SSE 在 V2/V3 都只是传输层。SSE 可以作为 client-facing 黑盒观测面，但不能成为 schema 判断、tool/governance、continuation save/restore、finish_reason 归因、response 清理、stopless 投影或 provider/client payload 语义修复 owner。
 
 5.2 数据与控制分流是刚性规则
 - `MetadataCenter` 只承载控制信号，不承载请求数据、响应数据、上下文对象、normalized input、payload 镜像。
@@ -67,6 +68,19 @@
 - save 后到 restore 前，`resp_outbound` / SSE / server handler / adapter / provider-response converter / `req_inbound` 只能做归一化、投影、传输、scope 校验和释放。
 - 这些层禁止做语义转换、上下文恢复、history/tool 修补、required_action 判断、stopless/servertool guidance 注入、request rebuild。
 - 看到 `entryOriginRequest` / `capturedChatRequest` / `requestSemantics` / session-only scope 被用于 continuation 恢复或历史补偿，先按 owner 违规处理：删除越界逻辑，回 Chat Process save/restore owner 修。
+
+5.4 节点不得重建 request/response shape
+- 每个节点只允许在自己的相邻合同字段上原位治理、追加或投影；禁止为了让后续节点方便而把请求/响应换一种等价-looking shape 重新包一遍。
+- 工具声明尤其要锁原始声明面：原请求是顶层 `tools` 就只在顶层追加；原请求是 Responses `input[].type=additional_tools.tools` 就只在该数组原位追加；禁止从 `additional_tools` 提升/复制到顶层 `tools`。
+- 黑盒必须同时锁“目标语义存在”和“未出现新 sibling surface”。例如 provider-facing stopless 要断言 exactly-one `reasoningStop`，也要断言 Codex `additional_tools` 请求没有被重建出顶层 `tools`。
+- 发现工具/历史丢失时，先比较客户端入口 shape、Chat Process governed shape、provider wire shape；不得用重建 shape 当修复。
+
+5.5 只能相邻节点调用，禁止跨节点 shortcut
+- Pipeline 类型节点不仅要保留 payload shape，还必须按相邻 builder/parser 调用；禁止从 `RespInbound01Raw` 直接到 `RespOutbound05/ServerRespOutbound06`，也禁止从 request 中段直接构造 provider wire。
+- Relay SSE 没有业务语义分支；SSE 只负责帧传输/编码/解码。Responses/OpenAI/Anthropic/Gemini 的 `data` 事件 payload 解析属于对应 provider/client protocol codec owner，不属于 SSE 传输 owner。
+- `SSE frame -> protocol event payload -> Hub JSON semantic` 与 `Hub JSON semantic -> protocol event payload -> SSE frame` 只能由相邻 codec owner 完成；SSE crate/server handler 只能 opaque framing/backpressure/closeout。
+- ChatProcess 必须消费 codec 产出的 Hub JSON semantic；stopless/servertool 不得在 raw SSE/handler/outbound 上执行，也不得绕过 `run_json_response_hooks`。
+- Gate 必须同时锁顺序和反向：正向断言相邻函数顺序，反向红测删除 `run_json_response_hooks`、复活 raw `project_sse_stream`、或跳过中间节点会失败。
 
 6. 每轮只收一个 blocker
 - focused 白盒/黑盒绿了，只能说明这一层过了。
@@ -211,14 +225,14 @@ Round 3 Guard
 ### no schema
 - deny stop
 - project CLI
-- next request 使用固定透明 user prompt
+- next request 使用确定 no-schema 修复 prompt，说明缺少 stop schema/stopreason，不能退成 `继续。`
 - system instruction 持续提供完整 schema
 
 ### bad schema
 - deny stop
 - project CLI
 - CLI 可返回私有 `schemaFeedback{reasonCode,missingFields}`
-- next request 对 provider 只使用固定透明 user prompt；合法 next_step 则原文使用
+- next request 对 provider 使用字段级修复 prompt；合法 `stopreason=2 + current_goal + next_step` 则原文使用 `next_step`
 
 ### harvest miss / parse miss
 - 不允许直接放过

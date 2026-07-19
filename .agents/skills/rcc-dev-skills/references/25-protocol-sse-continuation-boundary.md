@@ -8,6 +8,15 @@
 
 ## Core Rule
 
+SSE is transport-only in both V2 and V3. It never owns request/response
+semantics. It may encode/decode frames, preserve order, handle backpressure,
+timeouts, keepalive, closeout, and expose black-box evidence. Provider/client
+protocol codecs may parse the already-decoded `data` payloads, but that is not
+SSE ownership. SSE must not decide schema validity, tool governance,
+continuation save/restore, finish reason, stopless/servertool projection,
+response cleanup, retry/reroute policy, or any provider/client payload semantic
+repair.
+
 Continuation is only the `/v1/responses` protocol save/restore boundary, and its owner is Chat Process.
 
 It is not a history transformer, response repair layer, request converter, stopless hook owner, tool-governance owner, or SSE transport owner.
@@ -32,7 +41,7 @@ This is the highest-priority rule for continuation bugs:
 - The only legal restore point is **next request Chat Process entry** before request-side tool governance / hook restore / provider-facing request semantics.
 - The interval between those two points is immutable. It may carry bytes, ids, frames, and control metadata, but it must not interpret or rewrite semantic content.
 - `req_inbound` and `resp_outbound` are normalization/projection boundaries only. They do not own continuation logic.
-- SSE and server handlers are transport only. They do not own continuation logic.
+- SSE and server handlers are transport only. They do not own continuation logic or any request/response semantic logic.
 - Adapter/context/converter helpers may pass already-finalized values to the next owner, but may not rebuild context from stored response/request material.
 
 Forbidden in the immutable interval:
@@ -61,7 +70,7 @@ If any of those operations appears outside Chat Process save/restore, treat it a
 
 - `req_inbound` may perform non-destructive protocol entry normalization only: endpoint capture, request id, raw evidence capture, syntax/shape preservation, and scope binding.
 - `resp_outbound` may perform client protocol projection and frame/body handoff only for already-finalized semantic response truth.
-- SSE transport may write frames, keepalive comments, timeouts, closeout, and already-finalized JSON-to-SSE framing.
+- SSE transport may write frames, keepalive comments, timeouts, closeout, backpressure, and already-finalized JSON-to-SSE framing only.
 - Chat Process request side may restore current-turn context, apply tool governance, stopless/servertool request hooks, and provider-facing request semantics after continuation restore.
 - Chat Process response side may perform tool harvest, stopless/schema judgment, servertool projection, and semantic response finalization before continuation save.
 - MetadataCenter may carry control state such as continuation owner, route/control pins, protocol owner, stream intent, request truth ids, and release status.

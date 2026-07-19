@@ -141,7 +141,7 @@
 - 两端要同时检查：响应侧投影 shell 后，请求侧必须从当前 `responsesResume.toolOutputsDetailed` 恢复私有 repeat state，同时从 provider request 中移除 shell/tool pair。任何 model-visible `reasoningStop -> function_call_output` 都是透明化失败。
 - continuation 与 stopless 顺序锁：必须先 restore/materialize request truth（Responses continuation owner），再做 stopless 3-round 判定；响应侧必须先完成 stopless interception/schema/projection，再由 continuation owner保存 canonical context。判别证据：1）client 端是否产出标准 `exec_command`；2）第二轮是否从 current resume truth 恢复 repeatCount；3）dry-run 最终 `providerRequest.body` 是否只含 system schema + 普通 user prompt；4）continuation store 是否保存 finalized response 而非原始 provider payload。
 - 对 `/v1/responses`，response-side continuation save 不能只回写旧 request 壳；必须保存“上一版 request context + 当前 response delta”，其中 delta 至少覆盖最终 client-visible tool surface（如 stopless 投影后的 `exec_command` / required_action tool calls）。否则下一轮 restore 会丢 `payload.tools/context.toolsRaw`，stopless contract 与 tool visibility 一起断。
-- SSE 是 transport-only。排查 stopless/continuation 时不得把 `handler-response-sse.ts`、SSE frame projector、stream closeout 当 schema judgment、tool restore、continuation save/restore 或 tool list injection owner；SSE 只能验证 framing/metadata isolation/JSON-SSE equivalence for finalized semantic body。如果修复需要改 SSE 才能让 stopless 过，先判为 wrong owner，回到 response governance、continuation owner 或 request hook owner。
+- SSE 是纯传输层，V2 和 V3 都不得承载任何业务语义。排查 stopless/continuation 时不得把 `handler-response-sse.ts`、SSE frame projector、stream closeout 当 schema judgment、tool restore、continuation save/restore、tool list injection、finish_reason 判定或 response repair owner；SSE 只能写/读帧、保序、closeout、backpressure，并作为黑盒观测面验证 finalized semantic body 的 JSON/SSE 等价。如果修复需要改 SSE 才能让 stopless 过，先判为 wrong owner，回到 response governance、continuation owner 或 request hook owner。
 - Responses continuation save 的过渡 TS 锚点只能在 response dispatch / lifecycle bridge 的 outbound 起点，不能在 `handler-response-sse.ts`。`forceSSE` JSON-to-SSE 和 relay SSE stream 都必须先经 lifecycle bridge 保存 finalized response truth，再交给 SSE 传输层写帧；SSE handler 不得 import `responses-response-bridge.js`。
 
 5. 最后固化 red test
@@ -275,10 +275,11 @@
 
 - V3 Relay stopless live 问题先分两段：请求侧 profile 是否在 Req04 启用，响应侧 profile 是否在 Resp03 启用。controlled hook tests 手动传 profile 过绿，不代表 runtime live 已接线。
 - 响应侧 stopless 先看 provider semantic stop / canonical Responses completed object，再做 schema 评估；普通已完成文本如果没有 stop/schema 证据且也不是 canonical Responses completed object，不得被投成 `requires_action`。
-- `stopreason=2` 归 `non_terminal_schema`，stop schema 字段非数值或明显损坏归 `invalid_schema`；`no_schema`、`invalid_schema`、`non_terminal_schema` 三类都要在 repeat budget 到顶时直接 passthrough，不再投影新的 `reasoningStop`。
-- finishReason 是观测与 hook 输入，不是 MetadataCenter 控制补丁。若 console 没打印，先在 provider response / SSE terminal event / runtime observability 里保留并读取该字段；不要在 SSE writer、server handler 或 outbound projection 里猜 stopless。
-- Relay SSE 若需要 stopless，合法路径是 provider raw SSE 在 runtime response owner 内 materialize 成 Hub response semantic，再进入 Resp03 hook、Resp04 continuation commit、Resp05/06 client frame。禁止把 stopless schema 判断、CLI projection、continuation save/restore 放进 V3 SSE crate、server closeout wrapper 或 handler。
+- `stopreason=2` 归 `non_terminal_schema`，但合法 `current_goal + next_step` 是进展控制，不消耗 schema-error budget；stop schema 字段非数值或明显损坏归 `invalid_schema`，只有 `no_schema` / `invalid_schema` 连续错误到顶时 passthrough，不再投影新的 `reasoningStop`。
+- finishReason 是 provider/codec 观测与 hook 输入，不是 MetadataCenter 控制补丁。若 console 没打印，先在 provider response / provider stream event payload / runtime observability 里保留并读取该字段；不要在 SSE writer、server handler 或 outbound projection 里猜 stopless。
+- Relay SSE 若需要 stopless，SSE 仍只做传输：先由 provider Responses event codec 从 `data` payload 形成 Hub response semantic，再进入 Resp03 hook、Resp04 continuation commit、Resp05/06 client frame codec。禁止把 stopless schema 判断、CLI projection、continuation save/restore、finish_reason 判定放进 V3 SSE crate、server closeout wrapper 或 handler。
 - 请求侧顺序必须是 continuation/local context restore+merge -> stopless CLI result parse/rewrite -> tool output governance。disabled stopless profile 仍可保留已恢复的 function_call + current tool output；它只是不解析/改写 stopless CLI。
+- stopless/tool 注入不得重建原请求工具声明 shape。Codex Responses 若用 `input[].type=additional_tools.tools` 承载工具，request hook 只能在该原数组原位追加 exactly-one internal `reasoningStop`；禁止把这些工具提升、复制或包装成新的顶层 `tools`。provider 黑盒必须锁 no new top-level tools + original tool definitions exact + one internal tool。
 
 ## 2026-07-17 V3 stopless continuation closeout
 
@@ -295,8 +296,7 @@
 - `stopreason=2` 是已解析到的非终态 schema，不等同 missing schema；响应 hook 必须把该
   schema 作为 CLI status/control 输入传给 `reasoningStop`，让 CLI 返回 schema 中的
   `next_step`。如果把它降级成 `{}`，下一轮只会拿到泛化 `继续。`，容易一轮静默停止。
-- stopless CLI 结果优先读取 `continuationPrompt`，再读取 `next_step`，并转为普通 user
-  prompt；不得把 CLI 控制结果重新伪装成 provider-visible built-in tool。
+- stopless CLI 结果优先读取合法 `next_step`；`no_schema` / `invalid_schema` / missing-next-step 必须转成确定 schema 修复 prompt，不能退成 `继续。`；`continuationPrompt` 只允许作为无 trigger/feedback legacy explicit continuation 或 valid continue 的兼容输入。不得把 CLI 控制结果重新伪装成 provider-visible built-in tool。
 - provider 没有 finish reason 时，只能在 Resp04 已确认 `LocalContext` 后把观测字段推导为
   `tool_calls`；推导只用于 observability，不得反向驱动 stopless/schema 判定。
 - 必跑回归：Responses Relay local continuation JSON/SSE runtime integration、response stopless `requires_stop_finish_reason`、request stopless order/disabled profile、servertool multiturn parity stopless、relay response red fixtures，以及 global install + managed 5555 live probe。

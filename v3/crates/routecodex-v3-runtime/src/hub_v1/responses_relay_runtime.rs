@@ -22,8 +22,6 @@ use routecodex_v3_sse::{
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-#[cfg(test)]
-use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -34,28 +32,15 @@ const V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
     "provider SSE stream ended before response.completed";
 const V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE: &str =
     "provider SSE stream failed before response.completed";
+const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str =
+    "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
+const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
+    "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
 const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize = 3;
 const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 = 5_000;
 
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
-
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V3RuntimeSseTerminal {
-    Completed,
-    Failed,
-}
-
-#[cfg(test)]
-struct V3ObservedSseState {
-    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
-    decoder: SseIncrementalDecoder,
-    observation: V3RuntimeStreamObservation,
-    ready: VecDeque<Vec<u8>>,
-    terminal_seen: bool,
-    done: bool,
-}
 
 pub enum V3ResponsesRelayClientBody {
     Json(Value),
@@ -239,8 +224,12 @@ impl V3RuntimeStreamObservation {
         if response_status.is_some() {
             snapshot.response_status = response_status;
         }
-        if finish_reason.is_some() {
-            snapshot.finish_reason = finish_reason;
+        if let Some(finish_reason) = finish_reason {
+            if finish_reason == "tool_calls"
+                || snapshot.finish_reason.as_deref() != Some("tool_calls")
+            {
+                snapshot.finish_reason = Some(finish_reason);
+            }
         }
         if usage.is_some() {
             snapshot.usage = usage;
@@ -248,20 +237,16 @@ impl V3RuntimeStreamObservation {
         Ok(())
     }
 
-    fn record_finish_reason_if_missing(&self, finish_reason: Option<&str>) -> Result<(), String> {
-        let Some(finish_reason) = finish_reason
-            .map(str::trim)
-            .filter(|finish_reason| !finish_reason.is_empty())
-        else {
+    fn record_finish_reason(&self, finish_reason: &str) -> Result<(), String> {
+        let finish_reason = finish_reason.trim();
+        if finish_reason.is_empty() {
             return Ok(());
-        };
+        }
         let mut snapshot = self
             .inner
             .lock()
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())?;
-        if snapshot.finish_reason.is_none() {
-            snapshot.finish_reason = Some(finish_reason.to_string());
-        }
+        snapshot.finish_reason = Some(finish_reason.to_string());
         Ok(())
     }
 }
@@ -768,7 +753,11 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             V3ProviderResponseBody::Sse(stream) => {
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value =
-                    collect_v3_responses_relay_sse_response(stream, &stream_observation).await?;
+                    build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+                        stream,
+                        &stream_observation,
+                    )
+                    .await?;
                 let (action, finalized_provider_value) = run_json_response_hooks(
                     &provider_value,
                     transport_intent,
@@ -806,9 +795,11 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         .or_else(|| {
                             infer_v3_runtime_finish_reason(action, response_status.as_deref())
                         });
-                stream_observation
-                    .record_finish_reason_if_missing(observability.finish_reason.as_deref())
-                    .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                if let Some(finish_reason) = observability.finish_reason.as_deref() {
+                    stream_observation
+                        .record_finish_reason(finish_reason)
+                        .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                }
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value)
                     .or_else(|| extract_v3_runtime_usage_summary(&provider_value))
@@ -823,7 +814,9 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
                     client_body: V3ResponsesRelayClientBody::Sse(
-                        project_finalized_response_sse_stream(finalized_provider_value),
+                        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
+                            finalized_provider_value,
+                        ),
                     ),
                     node_trace: trace,
                     error_chain: None,
@@ -1406,72 +1399,38 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
     })
 }
 
-async fn collect_v3_responses_relay_sse_response(
+fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
+    let data = serde_json::to_string(payload)
+        .unwrap_or_else(|_| {
+            format!(
+                "{{\"type\":\"response.failed\",\"response\":{{\"status\":\"failed\",\"error\":{{\"code\":\"provider_response_sse_stream\",\"message\":\"{}\",\"type\":\"provider_error\"}}}}}}",
+                V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE
+            )
+        });
+    format!("event: {event}\ndata: {data}\n\n").into_bytes()
+}
+
+async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     use futures_util::StreamExt;
 
+    let _owner = V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER;
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut terminal_response: Option<Value> = None;
     let mut output_items: Vec<Value> = Vec::new();
     let mut output_text = String::new();
     while let Some(chunk) = provider.next().await {
         let chunk = chunk?;
-        let frames = decoder
-            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
-        for frame in frames {
-            let Some((event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
-                continue;
-            };
-            if data == "[DONE]" {
-                continue;
-            }
-            let event: Value = serde_json::from_str(&data).map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "V3 Responses Relay SSE event is malformed: {error}"
-                ))
-            })?;
-            observation
-                .record_event(&event)
-                .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
-            collect_v3_runtime_sse_output_evidence(
-                event_type.as_deref(),
-                &event,
-                &mut output_items,
-                &mut output_text,
-            );
-            let semantic_event_type = event_type
-                .as_deref()
-                .or_else(|| event.get("type").and_then(Value::as_str));
-            match semantic_event_type {
-                Some("response.completed" | "response.done") => {
-                    let mut response = event
-                        .get("response")
-                        .cloned()
-                        .unwrap_or_else(|| event.clone());
-                    complete_v3_runtime_sse_materialized_response(
-                        &mut response,
-                        &output_items,
-                        &output_text,
-                    )?;
-                    terminal_response = Some(response);
-                }
-                Some("response.failed" | "response.incomplete" | "response.error") => {
-                    let message = event
-                        .pointer("/response/error/message")
-                        .or_else(|| event.pointer("/error/message"))
-                        .or_else(|| event.pointer("/response/incomplete_details/reason"))
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or(V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE);
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                        message.to_string(),
-                    ));
-                }
-                _ => {}
-            }
+        if let Some(response) = observe_v3_runtime_responses_sse_transport_chunk(
+            &chunk,
+            &mut decoder,
+            observation,
+            &mut output_items,
+            &mut output_text,
+        )? {
+            terminal_response = Some(response);
         }
     }
     decoder
@@ -1482,6 +1441,85 @@ async fn collect_v3_responses_relay_sse_response(
             V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
         )
     })
+}
+
+fn observe_v3_runtime_responses_sse_transport_chunk(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    observation: &V3RuntimeStreamObservation,
+    output_items: &mut Vec<Value>,
+    output_text: &mut String,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    let frames = decoder
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+    let mut terminal_response = None;
+    for frame in frames {
+        let Some((event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+            continue;
+        };
+        if data == "[DONE]" {
+            continue;
+        }
+        let event: Value = serde_json::from_str(&data).map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                "V3 Responses Relay SSE event is malformed: {error}"
+            ))
+        })?;
+        observation
+            .record_event(&event)
+            .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+        collect_v3_runtime_responses_event_payload_evidence(
+            event_type.as_deref(),
+            &event,
+            output_items,
+            output_text,
+        );
+        let semantic_event_type = event_type
+            .as_deref()
+            .or_else(|| event.get("type").and_then(Value::as_str));
+        match semantic_event_type {
+            Some("response.completed" | "response.done" | "response.requires_action") => {
+                let mut response = event
+                    .get("response")
+                    .cloned()
+                    .unwrap_or_else(|| event.clone());
+                attach_required_action_from_sse_event(&mut response, &event);
+                apply_responses_stream_protocol_events_to_terminal_response(
+                    &mut response,
+                    output_items,
+                    output_text,
+                )?;
+                terminal_response = Some(response);
+            }
+            Some("response.failed" | "response.incomplete" | "response.error") => {
+                let message = event
+                    .pointer("/response/error/message")
+                    .or_else(|| event.pointer("/error/message"))
+                    .or_else(|| event.pointer("/response/incomplete_details/reason"))
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or(V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE);
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                    message.to_string(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(terminal_response)
+}
+
+fn attach_required_action_from_sse_event(response: &mut Value, event: &Value) {
+    let Some(required_action) = event.get("required_action").cloned() else {
+        return;
+    };
+    let Some(object) = response.as_object_mut() else {
+        return;
+    };
+    object
+        .entry("required_action".to_string())
+        .or_insert(required_action);
 }
 
 fn parse_v3_runtime_sse_frame_fields(
@@ -1511,7 +1549,7 @@ fn parse_v3_runtime_sse_frame_fields(
     Ok(Some((event_type, data.to_string())))
 }
 
-fn collect_v3_runtime_sse_output_evidence(
+fn collect_v3_runtime_responses_event_payload_evidence(
     event_type: Option<&str>,
     event: &Value,
     output_items: &mut Vec<Value>,
@@ -1623,7 +1661,7 @@ fn find_v3_runtime_sse_function_item_mut<'items>(
     })
 }
 
-fn complete_v3_runtime_sse_materialized_response(
+fn apply_responses_stream_protocol_events_to_terminal_response(
     response: &mut Value,
     output_items: &[Value],
     output_text: &str,
@@ -1653,15 +1691,22 @@ fn complete_v3_runtime_sse_materialized_response(
     Ok(())
 }
 
-fn project_finalized_response_sse_stream(response: Value) -> V3ResponsesRelayClientStream {
+fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
+    response: Value,
+) -> V3ResponsesRelayClientStream {
     use futures_util::stream;
 
+    let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
     let event_name = match response.get("status").and_then(Value::as_str) {
         Some("failed" | "incomplete") => "response.failed",
+        Some("requires_action") => "response.requires_action",
         _ => "response.completed",
     };
     let mut frames = Vec::new();
-    if event_name == "response.completed" {
+    if matches!(
+        event_name,
+        "response.completed" | "response.requires_action"
+    ) {
         if let Some(response_id) = response.get("id").and_then(Value::as_str) {
             frames.push(Ok(build_v3_runtime_sse_json_frame(
                 "response.created",
@@ -1678,7 +1723,8 @@ fn project_finalized_response_sse_stream(response: Value) -> V3ResponsesRelayCli
             )));
             if let Some(output) = response.get("output").and_then(Value::as_array) {
                 for (index, item) in output.iter().enumerate() {
-                    let projected_item = project_v3_responses_sse_output_item_done_item(item);
+                    let projected_item =
+                        project_v3_responses_client_event_output_item_done_item(item);
                     frames.push(Ok(build_v3_runtime_sse_json_frame(
                         "response.output_item.done",
                         &json!({
@@ -1701,7 +1747,7 @@ fn project_finalized_response_sse_stream(response: Value) -> V3ResponsesRelayCli
     Box::pin(stream::iter(frames))
 }
 
-fn project_v3_responses_sse_output_item_done_item(item: &Value) -> Value {
+fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
     if item.get("type").and_then(Value::as_str) != Some("output_text") {
         return item.clone();
     }
@@ -1718,168 +1764,6 @@ fn project_v3_responses_sse_output_item_done_item(item: &Value) -> Value {
         projected["id"] = id;
     }
     projected
-}
-
-#[cfg(test)]
-fn project_sse_stream(
-    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
-    observation: V3RuntimeStreamObservation,
-) -> V3ResponsesRelayClientStream {
-    use futures_util::{stream, StreamExt};
-
-    Box::pin(stream::unfold(
-        V3ObservedSseState {
-            provider,
-            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
-            observation,
-            ready: VecDeque::new(),
-            terminal_seen: false,
-            done: false,
-        },
-        |mut state| async move {
-            loop {
-                if let Some(chunk) = state.ready.pop_front() {
-                    return Some((Ok(chunk), state));
-                }
-                if state.done {
-                    return None;
-                }
-                match state.provider.next().await {
-                    Some(Ok(chunk)) => match observe_v3_runtime_sse_chunk(
-                        &chunk,
-                        &mut state.decoder,
-                        &state.observation,
-                    ) {
-                        Ok(Some(_terminal)) => {
-                            state.terminal_seen = true;
-                            return Some((Ok(chunk), state));
-                        }
-                        Ok(None) => return Some((Ok(chunk), state)),
-                        Err(error) => {
-                            enqueue_v3_runtime_sse_failed_terminal(&mut state, &error);
-                        }
-                    },
-                    Some(Err(error)) => {
-                        if state.terminal_seen {
-                            return None;
-                        }
-                        enqueue_v3_runtime_sse_failed_terminal(&mut state, &error.to_string());
-                    }
-                    None => {
-                        let finish = std::mem::replace(
-                            &mut state.decoder,
-                            SseIncrementalDecoder::new(SseTransportLimits::default()),
-                        )
-                        .finish();
-                        match finish {
-                            Ok(()) if state.terminal_seen => return None,
-                            Ok(()) => enqueue_v3_runtime_sse_failed_terminal(
-                                &mut state,
-                                V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE,
-                            ),
-                            Err(error) => enqueue_v3_runtime_sse_failed_terminal(
-                                &mut state,
-                                &error.to_string(),
-                            ),
-                        }
-                    }
-                }
-            }
-        },
-    ))
-}
-
-#[cfg(test)]
-fn enqueue_v3_runtime_sse_failed_terminal(state: &mut V3ObservedSseState, message: &str) {
-    let event = build_v3_runtime_sse_failed_event(message);
-    let _ = state.observation.record_event(&event);
-    state
-        .ready
-        .push_back(build_v3_runtime_sse_json_frame("response.failed", &event));
-    state.ready.push_back(b"data: [DONE]\n\n".to_vec());
-    state.terminal_seen = true;
-    state.done = true;
-}
-
-#[cfg(test)]
-fn build_v3_runtime_sse_failed_event(message: &str) -> Value {
-    json!({
-        "type": "response.failed",
-        "response": {
-            "id": "resp_failed",
-            "object": "response",
-            "status": "failed",
-            "model": "",
-            "output": [],
-            "error": {
-                "code": "provider_response_sse_stream",
-                "message": message,
-                "type": "provider_error"
-            }
-        }
-    })
-}
-
-fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
-    let data = serde_json::to_string(payload)
-        .unwrap_or_else(|_| {
-            format!(
-                "{{\"type\":\"response.failed\",\"response\":{{\"status\":\"failed\",\"error\":{{\"code\":\"provider_response_sse_stream\",\"message\":\"{}\",\"type\":\"provider_error\"}}}}}}",
-                V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE
-            )
-        });
-    format!("event: {event}\ndata: {data}\n\n").into_bytes()
-}
-
-#[cfg(test)]
-fn observe_v3_runtime_sse_chunk(
-    chunk: &[u8],
-    decoder: &mut SseIncrementalDecoder,
-    observation: &V3RuntimeStreamObservation,
-) -> Result<Option<V3RuntimeSseTerminal>, String> {
-    let frames = decoder
-        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
-        .map_err(|error| error.to_string())?;
-    let mut terminal = None;
-    for frame in frames {
-        let mut event_type: Option<String> = None;
-        let mut data = String::new();
-        for field in frame.frame().fields() {
-            let SseField::Named { name, value } = field else {
-                continue;
-            };
-            match name.as_str() {
-                "event" => event_type = Some(value.to_string()),
-                "data" => {
-                    if !data.is_empty() {
-                        data.push('\n');
-                    }
-                    data.push_str(value);
-                }
-                _ => {}
-            }
-        }
-        let data = data.trim();
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-        let event: Value = serde_json::from_str(data)
-            .map_err(|error| format!("V3 Responses Relay SSE event is malformed: {error}"))?;
-        observation.record_event(&event)?;
-        let semantic_event_type = event_type
-            .as_deref()
-            .or_else(|| event.get("type").and_then(Value::as_str));
-        match semantic_event_type {
-            Some("response.completed" | "response.done") => {
-                terminal = Some(V3RuntimeSseTerminal::Completed)
-            }
-            Some("response.failed" | "response.incomplete" | "response.error") => {
-                terminal = Some(V3RuntimeSseTerminal::Failed)
-            }
-            _ => {}
-        }
-    }
-    Ok(terminal)
 }
 
 fn resolve_target(
@@ -2192,72 +2076,101 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn projected_sse_eof_without_terminal_emits_response_failed_then_done() {
+    async fn provider_sse_eof_without_terminal_fails_before_client_projection() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
             b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
         )]));
-        let projected =
-            collect_projected_sse(project_sse_stream(provider, observation.clone())).await;
+        let error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
 
-        assert_eq!(projected.len(), 3);
-        assert!(projected[0]
-            .as_ref()
-            .unwrap()
-            .contains("response.output_text.delta"));
-        assert!(projected[1].as_ref().unwrap().contains("response.failed"));
-        assert!(projected[1]
-            .as_ref()
-            .unwrap()
+        assert!(error
+            .to_string()
             .contains("provider SSE stream ended before response.completed"));
-        assert_eq!(projected[2].as_ref().unwrap(), "data: [DONE]\n\n");
-        assert_eq!(
-            observation.snapshot().unwrap().response_status.as_deref(),
-            Some("failed")
-        );
     }
 
     #[tokio::test]
-    async fn projected_sse_provider_error_emits_response_failed_without_stream_err() {
-        let observation = V3RuntimeStreamObservation::default();
-        let provider = Box::pin(stream::iter(vec![Err(V3ProviderError::ResponseBody {
-            request_id: "req".to_string(),
-            provider_id: "upstream".to_string(),
-            reason: "read failed".to_string(),
-        })]));
-        let projected =
-            collect_projected_sse(project_sse_stream(provider, observation.clone())).await;
-
-        assert_eq!(projected.len(), 2);
-        assert!(projected.iter().all(Result::is_ok));
-        assert!(projected[0].as_ref().unwrap().contains("response.failed"));
-        assert!(projected[0].as_ref().unwrap().contains("read failed"));
-        assert_eq!(projected[1].as_ref().unwrap(), "data: [DONE]\n\n");
-        assert_eq!(
-            observation.snapshot().unwrap().response_status.as_deref(),
-            Some("failed")
-        );
-    }
-
-    #[tokio::test]
-    async fn projected_sse_completed_terminal_closes_without_synthetic_failure() {
+    async fn provider_sse_failed_terminal_returns_provider_sse_error() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n".to_vec(),
+            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"upstream stream failed\"}}}\n\n".to_vec(),
         )]));
-        let projected =
-            collect_projected_sse(project_sse_stream(provider, observation.clone())).await;
+        let error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
 
-        assert_eq!(projected.len(), 1);
-        assert!(projected[0]
-            .as_ref()
-            .unwrap()
-            .contains("response.completed"));
+        assert!(error.to_string().contains("upstream stream failed"));
+        assert_eq!(
+            observation.snapshot().unwrap().response_status.as_deref(),
+            Some("failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_sse_done_terminal_aggregates_and_projects_completed_frames() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec()),
+            Ok(b"event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_done\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "output_text");
+        assert_eq!(response["output"][0]["text"], "partial");
         let snapshot = observation.snapshot().unwrap();
         assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
         assert_eq!(
             snapshot.usage.as_ref().and_then(|usage| usage.total_tokens),
             Some(3)
+        );
+
+        let projected = collect_projected_sse(
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(response),
+        )
+        .await;
+        assert!(projected[0].as_ref().unwrap().contains("response.created"));
+        assert!(projected[1]
+            .as_ref()
+            .unwrap()
+            .contains("response.output_item.done"));
+        assert!(projected[2]
+            .as_ref()
+            .unwrap()
+            .contains("response.completed"));
+        assert_eq!(projected[3].as_ref().unwrap(), "data: [DONE]\n\n");
+    }
+
+    #[tokio::test]
+    async fn provider_sse_requires_action_terminal_preserves_required_action() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.requires_action\ndata: {\"type\":\"response.requires_action\",\"response\":{\"id\":\"resp_required\",\"status\":\"requires_action\"},\"required_action\":{\"type\":\"submit_tool_outputs\"}}\n\n".to_vec(),
+        )]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(
+            response["required_action"]["type"].as_str(),
+            Some("submit_tool_outputs")
         );
     }
 }

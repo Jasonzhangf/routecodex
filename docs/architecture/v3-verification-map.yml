@@ -380,7 +380,7 @@ features:
       - v3-hub-relay-copy-probe-05
     required_contract:
       - Relay JSON request payload moves through Req01-Req04 without a runtime full-payload clone or JSON roundtrip
-      - Relay SSE response retains transport intent and one response exit without full stream materialization
+      - Relay SSE response permits only provider-inbound protocol event aggregation at the adjacent owner and retains one response exit without non-owner shape rebuild
       - local continuation context remains available through Req04 restore and has an explicit governed-outcome release point
       - servertool response and following request use one Resp04 canonical context truth and restore before Req04 servertool governance
       - Debug snapshot and hook planning cannot become retained business payload truth
@@ -1156,6 +1156,7 @@ features:
       - Codex-style WebSocket error events preserve status/status_code and error.code/error.type while discarding the dirty connection so a client-owned retry can resend the same previous_response_id on a fresh connection
       - cancellation before connect before reused send and during read remains client_disconnect and discards any active connection
       - split UTF-8 WebSocket frames reassemble into one valid terminal event
+      - same-stream WebSocket event aggregation may fill terminal JSON output only from output items and function-call argument events observed on the current WebSocket response stream; it must not read MetadataCenter debug state continuation state client projection or Hub tool governance
       - provider errors stay typed and no HTTP retry fallback Hub business semantics or Server socket owner exists
     required_gates:
       - npm run test:v3-responses-websocket-v2-transport-hardening

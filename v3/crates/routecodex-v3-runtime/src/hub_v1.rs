@@ -274,6 +274,7 @@ pub enum V3HubContinuationCommit {
 pub struct V3HubRespContinuation04Committed {
     previous: V3HubRespChatProcess03Governed,
     action: V3HubContinuationCommit,
+    finalized_payload: Arc<Value>,
     canonical_context: Option<V3HubRelayCanonicalResponseContext>,
 }
 
@@ -646,10 +647,22 @@ pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
     input: V3HubRespChatProcess03Governed,
     action: V3HubContinuationCommit,
 ) -> V3HubRespContinuation04Committed {
+    let finalized_payload = canonicalize_v3_hub_resp04_finalized_payload(&input);
+    let canonical_context = if action == V3HubContinuationCommit::LocalContext {
+        Some(V3HubRelayCanonicalResponseContext {
+            payload: Arc::clone(&finalized_payload),
+            terminality: input.terminality,
+            tool_calls: input.tool_calls.clone(),
+            servertool_action: input.servertool_action,
+        })
+    } else {
+        None
+    };
     V3HubRespContinuation04Committed {
         previous: input,
         action,
-        canonical_context: None,
+        finalized_payload,
+        canonical_context,
     }
 }
 
@@ -702,6 +715,12 @@ impl V3HubRespContinuation04Committed {
     }
 
     pub fn canonical_context_shares_finalized_payload(&self) -> bool {
+        self.canonical_context
+            .as_ref()
+            .is_some_and(|context| Arc::ptr_eq(&context.payload, &self.finalized_payload))
+    }
+
+    pub fn canonical_context_shares_provider_payload(&self) -> bool {
         self.canonical_context.as_ref().is_some_and(|context| {
             Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())
         })
@@ -727,7 +746,7 @@ impl V3HubRespContinuation04Committed {
     }
 
     pub fn finalized_payload(&self) -> &Value {
-        self.previous.previous.provider_payload().as_ref()
+        self.finalized_payload.as_ref()
     }
 }
 
@@ -1174,12 +1193,13 @@ pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str
 fn commit_v3_hub_relay_response(
     input: V3HubRespChatProcess03Governed,
 ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
+    let finalized_payload = canonicalize_v3_hub_resp04_finalized_payload(&input);
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
         V3HubResponseTerminality::NonTerminal => (
             V3HubContinuationCommit::LocalContext,
             Some(V3HubRelayCanonicalResponseContext {
-                payload: Arc::clone(input.previous.provider_payload()),
+                payload: Arc::clone(&finalized_payload),
                 terminality: input.terminality,
                 tool_calls: input.tool_calls.clone(),
                 servertool_action: input.servertool_action,
@@ -1189,8 +1209,43 @@ fn commit_v3_hub_relay_response(
     Ok(V3HubRespContinuation04Committed {
         previous: input,
         action,
+        finalized_payload,
         canonical_context,
     })
+}
+
+fn canonicalize_v3_hub_resp04_finalized_payload(
+    input: &V3HubRespChatProcess03Governed,
+) -> Arc<Value> {
+    let provider_payload = input.previous.provider_payload();
+    if input.terminality != V3HubResponseTerminality::NonTerminal || input.tool_calls.is_empty() {
+        return Arc::clone(provider_payload);
+    }
+    let Some(source) = provider_payload.as_object() else {
+        return Arc::clone(provider_payload);
+    };
+    let mut projected = source.clone();
+    let mut changed = false;
+    if projected.get("status").and_then(Value::as_str) != Some("requires_action") {
+        projected.insert(
+            "status".to_string(),
+            Value::String("requires_action".to_string()),
+        );
+        changed = true;
+    }
+    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
+        if projected.contains_key(key)
+            && projected.get(key).and_then(Value::as_str) != Some("tool_calls")
+        {
+            projected.insert(key.to_string(), Value::String("tool_calls".to_string()));
+            changed = true;
+        }
+    }
+    if changed {
+        Arc::new(Value::Object(projected))
+    } else {
+        Arc::clone(provider_payload)
+    }
 }
 
 pub(crate) fn merge_v3_relay_restored_local_context_at_req04(

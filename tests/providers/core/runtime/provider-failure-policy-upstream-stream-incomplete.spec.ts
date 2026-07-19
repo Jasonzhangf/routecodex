@@ -37,6 +37,36 @@ describe('provider-failure-policy upstream_stream_incomplete', () => {
     expect(outcome.affectsHealth).toBe(true);
   });
 
+  it('[forward] upstream_stream_terminated affects provider health while remaining recoverable', () => {
+    const classification = resolveProviderFailureClassification({
+      error: {
+        message: 'terminated',
+        code: 'UPSTREAM_STREAM_TERMINATED',
+        statusCode: 502,
+      },
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'UPSTREAM_STREAM_TERMINATED',
+      upstreamCode: 'UPSTREAM_STREAM_TERMINATED',
+      reason: 'terminated',
+    });
+    const outcome = resolveProviderFailureOutcome({
+      error: {
+        message: 'terminated',
+        code: 'UPSTREAM_STREAM_TERMINATED',
+        statusCode: 502,
+      },
+      stage: 'provider.send',
+      statusCode: 502,
+      errorCode: 'UPSTREAM_STREAM_TERMINATED',
+      upstreamCode: 'UPSTREAM_STREAM_TERMINATED',
+      reason: 'terminated',
+    });
+    expect(classification).toBe('recoverable');
+    expect(outcome.recoverable).toBe(true);
+    expect(outcome.affectsHealth).toBe(true);
+  });
+
   it('[forward] upstream_stream_idle_timeout affects provider health while remaining recoverable', () => {
     const classification = resolveProviderFailureClassification({
       error: {

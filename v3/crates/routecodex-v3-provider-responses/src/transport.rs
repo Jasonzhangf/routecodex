@@ -32,6 +32,8 @@ type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 
 const OPENAI_BETA_HEADER: &str = "openai-beta";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
+const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
+    "V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw";
 
 #[derive(Clone, Default)]
 pub struct V3ProviderCancellation {
@@ -225,11 +227,17 @@ fn v3_transport_13_request(
 pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
-    let (request_id, target, stream_intent, mut body) = wire.into_parts();
+    let (request_id, target, stream_intent, body) = wire.into_parts();
     let provider_id = target.provider_id;
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
             if target.provider_type.eq_ignore_ascii_case("anthropic") {
+                let mut body = body;
+                lift_responses_additional_tools_for_anthropic_messages_body(
+                    &request_id,
+                    &provider_id,
+                    &mut body,
+                )?;
                 let body = build_anthropic_messages_body(&request_id, &provider_id, body)?;
                 let url_text = anthropic_messages_url(&target.base_url);
                 let url = reqwest::Url::parse(&url_text).map_err(|error| {
@@ -270,6 +278,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                         provider_id: provider_id.clone(),
                         reason: "websocket_v2 target has no endpoint".to_string(),
                     })?;
+            let mut body = body;
             let event = body
                 .as_object_mut()
                 .ok_or_else(|| V3ProviderError::InvalidWireBody {
@@ -295,6 +304,54 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
             ))
         }
     }
+}
+
+fn lift_responses_additional_tools_for_anthropic_messages_body(
+    request_id: &str,
+    provider_id: &str,
+    body: &mut Value,
+) -> Result<(), V3ProviderError> {
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| V3ProviderError::InvalidWireBody {
+            request_id: request_id.to_string(),
+        })?;
+    let Some(input) = object.get_mut("input").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    let original_input = std::mem::take(input);
+    let mut next_input = Vec::with_capacity(original_input.len());
+    let mut lifted_tools = Vec::new();
+    for item in original_input {
+        if item.get("type").and_then(Value::as_str) != Some("additional_tools") {
+            next_input.push(item);
+            continue;
+        }
+        let tools = item.get("tools").and_then(Value::as_array).ok_or_else(|| {
+            provider_protocol_error(
+                request_id,
+                provider_id,
+                "Anthropic Messages protocol conversion requires additional_tools.tools array",
+            )
+        })?;
+        lifted_tools.extend(tools.iter().cloned());
+    }
+    *input = next_input;
+    if lifted_tools.is_empty() {
+        return Ok(());
+    }
+    let tools_value = object
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let tools = tools_value.as_array_mut().ok_or_else(|| {
+        provider_protocol_error(
+            request_id,
+            provider_id,
+            "Anthropic Messages protocol conversion requires tools array",
+        )
+    })?;
+    tools.extend(lifted_tools);
+    Ok(())
 }
 
 pub fn build_v3_transport_13_responses_http_request_from_parts(
@@ -748,7 +805,7 @@ impl ProviderResponsesTransport {
             ));
         }
 
-        let mut json_events = WebSocketJsonEventAccumulator::default();
+        let mut json_events = V3ResponsesWebSocketProtocolAggregate::default();
         loop {
             let next = match cancellation.clone() {
                 Some(cancellation) => {
@@ -845,8 +902,12 @@ impl ProviderResponsesTransport {
                     ));
                 }
             };
-            let response =
-                json_events.apply_to_terminal_response(response, &request_id, &provider_id)?;
+            let response = json_events
+                .apply_responses_websocket_protocol_events_to_terminal_response(
+                    response,
+                    &request_id,
+                    &provider_id,
+                )?;
             let body = match serde_json::to_vec(&response) {
                 Ok(body) => body,
                 Err(error) => {
@@ -866,11 +927,11 @@ impl ProviderResponsesTransport {
 }
 
 #[derive(Default)]
-struct WebSocketJsonEventAccumulator {
+struct V3ResponsesWebSocketProtocolAggregate {
     function_call_items: BTreeMap<u64, Value>,
 }
 
-impl WebSocketJsonEventAccumulator {
+impl V3ResponsesWebSocketProtocolAggregate {
     fn record(
         &mut self,
         event_type: &str,
@@ -970,12 +1031,13 @@ impl WebSocketJsonEventAccumulator {
         Ok(())
     }
 
-    fn apply_to_terminal_response(
+    fn apply_responses_websocket_protocol_events_to_terminal_response(
         &self,
         response: &Value,
         request_id: &str,
         provider_id: &str,
     ) -> Result<Value, V3ProviderError> {
+        let _owner = V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER;
         let has_terminal_output = response
             .get("output")
             .and_then(Value::as_array)
@@ -984,7 +1046,14 @@ impl WebSocketJsonEventAccumulator {
             return Ok(response.clone());
         }
 
-        let mut projected = response.clone();
+        let source = response.as_object().ok_or_else(|| {
+            websocket_protocol_error(
+                request_id,
+                provider_id,
+                "response.completed response is not an object",
+            )
+        })?;
+        let mut projected = Value::Object(source.clone());
         let object = projected.as_object_mut().ok_or_else(|| {
             websocket_protocol_error(
                 request_id,
@@ -2170,6 +2239,144 @@ mod tests {
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
         }
+    }
+
+    fn responses_http_target() -> V3ResponsesProviderTarget {
+        V3ResponsesProviderTarget {
+            provider_id: "orangeai".into(),
+            provider_type: "responses".into(),
+            base_url: "https://api2.orangeai.cc/v1".into(),
+            canonical_model_id: "glm-5.2".into(),
+            wire_model: "glm-5.2".into(),
+            auth: V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::Environment("ORANGEAI_KEY".into()),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+        }
+    }
+
+    fn reasoning_stop_tool_fixture() -> Value {
+        json!({
+            "type":"function",
+            "name":"reasoningStop",
+            "description":"Use stop schema. Minimal continue sample. Minimal finished sample. Minimal blocked sample. Schema repair sample. stopreason=0 stopreason=1 stopreason=2",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "stopreason":{"type":"integer","enum":[0,1,2]},
+                    "reason":{"type":"string"},
+                    "current_goal":{"type":"string"},
+                    "has_evidence":{"type":"integer","enum":[0,1]},
+                    "evidence":{"type":"string"},
+                    "next_step":{"type":"string"},
+                    "needs_user_input":{"type":"boolean"}
+                },
+                "required":["stopreason"]
+            }
+        })
+    }
+
+    #[test]
+    fn responses_http_provider_request_preserves_additional_tools_surface() {
+        let original_exec = json!({
+            "type":"custom",
+            "name":"exec",
+            "description":"run javascript",
+            "format":{"type":"grammar","syntax":"lark","definition":"start: SOURCE"}
+        });
+        let original_wait = json!({
+            "type":"function",
+            "name":"wait",
+            "description":"wait for exec",
+            "parameters":{"type":"object","properties":{"cell_id":{"type":"string"}}}
+        });
+        let reasoning_stop = reasoning_stop_tool_fixture();
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-responses-additional-tools",
+            responses_http_target(),
+            json!({
+                "model":"client-model",
+                "instructions":"stopreason reasoningStop <rcc_stop_schema>",
+                "input":[
+                    {
+                        "type":"additional_tools",
+                        "role":"developer",
+                        "tools":[original_exec.clone(), original_wait.clone(), reasoning_stop.clone()]
+                    },
+                    {"role":"user","content":"continue"}
+                ],
+                "stream":true
+            }),
+        )
+        .unwrap();
+        let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+        assert_eq!(request.provider_id(), "orangeai");
+        assert!(
+            request.body().get("tools").is_none(),
+            "request path $.tools must be absent because the original request did not contain $.tools: {}",
+            request.body()
+        );
+        assert_eq!(request.body()["input"][0]["type"], "additional_tools");
+        assert_eq!(request.body()["input"][0]["tools"][0], original_exec);
+        assert_eq!(request.body()["input"][0]["tools"][1], original_wait);
+        assert_eq!(request.body()["input"][0]["tools"][2], reasoning_stop);
+        assert_eq!(
+            request.body()["input"][0]["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(request.body()["input"][1]["content"], "continue");
+        assert!(request.body()["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("stopreason"));
+    }
+
+    #[test]
+    fn anthropic_messages_body_lifts_stopless_tools_and_system_guidance() {
+        let reasoning_stop = reasoning_stop_tool_fixture();
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-stopless-tools",
+            minimax_anthropic_target(),
+            json!({
+                "model":"gpt-5.5",
+                "instructions":"stopreason reasoningStop <rcc_stop_schema> next_step evidence",
+                "input":[
+                    {
+                        "type":"additional_tools",
+                        "role":"developer",
+                        "tools":[reasoning_stop.clone()]
+                    },
+                    {"role":"user","content":"continue"}
+                ],
+                "stream":false
+            }),
+        )
+        .unwrap();
+        let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+        assert_eq!(request.provider_id(), "minimax");
+        assert_eq!(
+            request.body()["system"],
+            "stopreason reasoningStop <rcc_stop_schema> next_step evidence"
+        );
+        assert_eq!(
+            request.body()["messages"],
+            json!([{"role":"user","content":[{"type":"text","text":"continue"}]}])
+        );
+        assert_eq!(request.body()["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(request.body()["tools"][0]["name"], "reasoningStop");
+        assert!(request.body()["tools"][0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("Minimal blocked sample"));
+        assert_eq!(
+            request.body()["tools"][0]["input_schema"],
+            reasoning_stop["parameters"]
+        );
     }
 
     #[test]

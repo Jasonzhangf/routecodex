@@ -11,66 +11,90 @@ const models = String(
   .split(',')
   .map((item) => item.trim())
   .filter(Boolean);
-const routeHint = (process.env.STOPLESS_ROUTE_HINT || 'search').trim();
+const routeHint = (process.env.STOPLESS_ROUTE_HINT || 'thinking').trim();
 const maxAttemptsPerModel = Number.parseInt(process.env.STOPLESS_ATTEMPTS || '3', 10);
 const outputPath = process.env.STOPLESS_OUTPUT || '/tmp/stopless-5555-live-probe.json';
 const probeMode = (process.env.STOPLESS_PROBE_MODE || 'fresh').trim().toLowerCase();
 const probeTag = `stopless-live-probe-${Date.now()}`;
 const sessionId = `stopless-live-${Date.now()}`;
+const PROBE_ORIGINAL_TOOL_NAMES = ['exec', 'wait', 'request_user_input'];
+
+function probeAdditionalToolsItem() {
+  return {
+    type: 'additional_tools',
+    role: 'developer',
+    tools: [
+      {
+        type: 'custom',
+        name: 'exec',
+        description: 'probe original custom tool that must survive stopless injection',
+        format: {
+          type: 'grammar',
+          syntax: 'lark',
+          definition: 'start: SOURCE\nSOURCE: /[\\s\\S]+/'
+        }
+      },
+      {
+        type: 'function',
+        name: 'wait',
+        description: 'probe original wait tool that must survive stopless injection',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { cell_id: { type: 'string' } },
+          required: ['cell_id']
+        },
+        strict: false
+      },
+      {
+        type: 'function',
+        name: 'request_user_input',
+        description: 'probe original user-input tool that must survive stopless injection',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { questions: { type: 'array' } },
+          required: ['questions']
+        },
+        strict: false
+      }
+    ]
+  };
+}
 
 function buildFirstBody(model) {
-  const terminalSchema = JSON.stringify({
-    stopreason: 0,
-    current_goal: '验证 V3 stopless 连续两轮恢复',
-    reason: '已完成两轮停止检查恢复验证',
-    has_evidence: 1,
-    evidence: '5555 live submit_tool_outputs',
-    issue_cause: '无',
-    excluded_factors: '已排除一轮即停回归',
-    diagnostic_order: '首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出',
-    done_steps: '完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop',
-    next_step: '',
-    next_suggested_path: '',
-    needs_user_input: false,
-    learned: 'summary must be markdown'
-  });
-  const finalInstruction = `继续最终核对：只输出以下 JSON，不要解释：${terminalSchema}`;
-  const secondSchema = JSON.stringify({
-    stopreason: 2,
-    current_goal: '验证 V3 stopless 连续两轮恢复',
-    reason: '第二轮还没做完',
-    has_evidence: 0,
-    evidence: '',
-    next_step: finalInstruction,
-    needs_user_input: false
-  });
-  const secondInstruction = `继续第二轮 stopless 验证：只输出以下 JSON，不要解释：${secondSchema}`;
+  const phase1 = `PHASE1_${probeTag}`;
+  const phase2 = `PHASE2_${probeTag}`;
+  const phase3 = `PHASE3_${probeTag}`;
   const firstSchema = JSON.stringify({
     stopreason: 2,
-    current_goal: '验证 V3 stopless 连续两轮恢复',
+    current_goal: `验证 V3 stopless 连续两轮恢复 ${probeTag}`,
     reason: '第一轮还没做完',
     has_evidence: 0,
     evidence: '',
-    next_step: secondInstruction,
+    next_step: phase2,
     needs_user_input: false
   });
   const firstTurnText = [
     `这是停止检查在线验证。probeTag=${probeTag}`,
-    '禁止调用工具，禁止解释。',
-    `如果当前没有任何 function_call_output 工具结果，就只输出以下 JSON，不要解释：${firstSchema}`,
-    '如果你收到的用户指令以"继续第二轮 stopless 验证"开头，就严格输出该指令里的 JSON，不要解释。',
-    '如果你收到的用户指令以"继续最终核对"开头，就严格输出该指令里的 JSON，不要解释。'
+    '禁止调用任何工具，禁止解释，禁止输出 Markdown。',
+    '判断规则只看最后一个 user message：',
+    `- 如果最后一个 user message 包含 CURRENT_PHASE=${phase1}，只输出这个 JSON：${firstSchema}`,
+    `- 如果最后一个 user message 完全等于 ${phase2}，只输出合法 stop schema JSON：stopreason=2, current_goal="验证 V3 stopless 连续两轮恢复 ${probeTag}", reason="第二轮还没做完", has_evidence=0, evidence="", next_step="${phase3}", needs_user_input=false。`,
+    `- 如果最后一个 user message 完全等于 ${phase3}，只输出合法 terminal stop schema JSON：stopreason=0, current_goal="验证 V3 stopless 连续两轮恢复 ${probeTag}", reason="已完成两轮停止检查恢复验证", has_evidence=1, evidence="5555 live submit_tool_outputs ${probeTag}", issue_cause="无", excluded_factors="已排除一轮即停回归", diagnostic_order="首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出", done_steps="完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop", next_step="", next_suggested_path="", needs_user_input=false, learned="summary must be markdown"。`,
+    `CURRENT_PHASE=${phase1}`
   ].join('\n');
 
   if (probeMode === 'continuation') {
     return {
       model,
-      stream: false,
+      stream: true,
       metadata: {
         sessionId,
         conversationId: sessionId
       },
       input: [
+        probeAdditionalToolsItem(),
         {
           type: 'message',
           role: 'user',
@@ -100,12 +124,13 @@ function buildFirstBody(model) {
 
   return {
     model,
-    stream: false,
+    stream: true,
     metadata: {
       sessionId,
       conversationId: sessionId
     },
     input: [
+      probeAdditionalToolsItem(),
       {
         role: 'user',
         content: [
@@ -124,7 +149,11 @@ async function requestJson(url, body, extraHeaders = {}) {
     method: body === undefined ? 'GET' : 'POST',
     headers: body === undefined
       ? Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined
-      : { 'content-type': 'application/json', ...extraHeaders },
+      : {
+        'content-type': 'application/json',
+        ...(body?.stream === true ? { accept: 'text/event-stream' } : {}),
+        ...extraHeaders
+      },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const raw = await response.text();
@@ -340,6 +369,222 @@ function isStopMessageAutoCommand(command) {
   );
 }
 
+function expectedProviderPromptFromCliOutput(cliOutput) {
+  if (typeof cliOutput !== 'string' || !cliOutput.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(cliOutput);
+    return readFirstString(
+      parsed,
+      ['continuationPrompt', 'continuation_prompt', 'next_step', 'nextStep', 'followupText']
+    );
+  } catch {
+    return null;
+  }
+}
+
+function readFirstString(value, keys) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate;
+    }
+  }
+  const input = value.input;
+  if (input && typeof input === 'object') {
+    return readFirstString(input, keys);
+  }
+  return null;
+}
+
+function summarizeProviderDryRun(response, expectedPrompt) {
+  const dryBody = response.body && typeof response.body === 'object' ? response.body : {};
+  const providerBody = dryBody?.providerRequest?.body
+    ?? dryBody?.dry_run?.provider_request?.body
+    ?? null;
+  const input = Array.isArray(providerBody?.input) ? providerBody.input : [];
+  const lastUser = extractLastProviderUserText(input);
+  const toolNames = collectProviderToolNames(providerBody);
+  const additionalToolsInputCount = input.filter((item) => item?.type === 'additional_tools').length;
+  const topLevelToolCount = Array.isArray(providerBody?.tools) ? providerBody.tools.length : 0;
+  const originalToolNamesPreserved = PROBE_ORIGINAL_TOOL_NAMES
+    .every((name) => toolNames.includes(name));
+  const noSiblingToolSurfaceForAdditionalTools = additionalToolsInputCount === 0
+    || topLevelToolCount === 0;
+  const structuredStoplessLeaks = collectStructuredStoplessLeaks(providerBody);
+  const structuredControlLeaks = collectStructuredControlLeaks(providerBody);
+  const guidance = typeof providerBody?.instructions === 'string'
+    && [
+      'reasoningStop',
+      '<rcc_stop_schema>',
+      'stopreason',
+      'has_evidence',
+      'evidence',
+      'current_goal',
+      'next_step',
+      'needs_user_input'
+    ].every((token) => providerBody.instructions.includes(token));
+  const stoppedBeforeProviderSend = dryBody?.stoppedBeforeProviderSend === true
+    || dryBody?.dry_run?.stopped_before_provider_send === true
+    || dryBody?.dry_run?.provider_network_send === false;
+  const objectOk = dryBody?.object === 'routecodex.pipeline_dry_run'
+    || dryBody?.dryRun === true
+    || dryBody?.dry_run?.fixture_id === 'responses_relay_provider_request';
+  const lastUserMatchesExpected = expectedPrompt == null || lastUser === expectedPrompt;
+  const reasoningStopCount = toolNames.filter((name) => name === 'reasoningStop').length;
+  return {
+    status: response.status,
+    object: dryBody?.object ?? null,
+    dryRunFixture: dryBody?.dry_run?.fixture_id ?? null,
+    stoppedBeforeProviderSend,
+    providerBodyPresent: Boolean(providerBody),
+    inputLen: input.length,
+    toolNames,
+    additionalToolsInputCount,
+    topLevelToolCount,
+    expectedOriginalToolNames: PROBE_ORIGINAL_TOOL_NAMES,
+    originalToolNamesPreserved,
+    noSiblingToolSurfaceForAdditionalTools,
+    reasoningStopCount,
+    guidance,
+    expectedPrompt,
+    lastUser,
+    lastUserMatchesExpected,
+    structuredStoplessLeaks,
+    structuredControlLeaks,
+    ok: response.status === 200
+      && objectOk
+      && stoppedBeforeProviderSend
+      && Boolean(providerBody)
+      && reasoningStopCount === 1
+      && additionalToolsInputCount === 1
+      && originalToolNamesPreserved
+      && noSiblingToolSurfaceForAdditionalTools
+      && guidance
+      && lastUserMatchesExpected
+      && structuredStoplessLeaks.length === 0
+      && structuredControlLeaks.length === 0
+  };
+}
+
+function collectProviderToolNames(providerBody) {
+  const names = [];
+  const pushToolNames = (tools) => {
+    if (!Array.isArray(tools)) {
+      return;
+    }
+    for (const tool of tools) {
+      if (!tool || typeof tool !== 'object') {
+        continue;
+      }
+      const name = typeof tool.name === 'string'
+        ? tool.name
+        : typeof tool.function?.name === 'string'
+          ? tool.function.name
+          : null;
+      if (name) {
+        names.push(name);
+      }
+    }
+  };
+  pushToolNames(providerBody?.tools);
+  const input = Array.isArray(providerBody?.input) ? providerBody.input : [];
+  for (const item of input) {
+    if (item?.type === 'additional_tools') {
+      pushToolNames(item.tools);
+    }
+  }
+  return names;
+}
+
+function extractLastProviderUserText(input) {
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (item?.role !== 'user') {
+      continue;
+    }
+    return normalizeProviderUserContent(item.content);
+  }
+  return null;
+}
+
+function normalizeProviderUserContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+        if (typeof part?.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (typeof content?.text === 'string') {
+    return content.text;
+  }
+  return content == null ? null : String(content);
+}
+
+function collectStructuredStoplessLeaks(value) {
+  const leaks = [];
+  walkJson(value, 'providerBody', (node, path) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      return;
+    }
+    if (node.name === 'call_stopless_reasoning' || node.call_id === 'call_stopless_reasoning') {
+      leaks.push(path);
+    }
+  });
+  return leaks;
+}
+
+function collectStructuredControlLeaks(value) {
+  const forbidden = new Set([
+    'repeatCount',
+    'maxRepeats',
+    'triggerHint',
+    'schemaFeedback',
+    'reasonCode',
+    'missingFields'
+  ]);
+  const leaks = [];
+  walkJson(value, 'providerBody', (node, path) => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (forbidden.has(key)) {
+        leaks.push(`${path}.${key}`);
+      }
+    }
+  });
+  return leaks;
+}
+
+function walkJson(value, path, visit) {
+  visit(value, path);
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => walkJson(item, `${path}[${index}]`, visit));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      walkJson(child, `${path}.${key}`, visit);
+    }
+  }
+}
+
 async function runResumeRound(model, responseId, toolCallId, command) {
   const cliRun = spawnSync('sh', ['-c', command], {
     encoding: 'utf8',
@@ -363,24 +608,37 @@ async function runResumeRound(model, responseId, toolCallId, command) {
     throw new Error(detail);
   }
   const cliOutput = (cliRun.stdout ?? '').trim();
+  const submitBody = {
+    model,
+    stream: true,
+    previous_response_id: responseId,
+    metadata: {
+      sessionId,
+      conversationId: sessionId
+    },
+    input: [
+      {
+        type: 'function_call_output',
+        call_id: toolCallId,
+        output: cliOutput
+      }
+    ]
+  };
+  const expectedPrompt = expectedProviderPromptFromCliOutput(cliOutput);
+  const providerDryRun = await requestJson(
+    `${baseUrl}/v1/responses`,
+    submitBody,
+    {
+      ...(routeHint ? { 'x-route-hint': routeHint } : {}),
+      'x-session-id': sessionId,
+      'x-conversation-id': sessionId,
+      'x-routecodex-dry-run': 'provider-request',
+      accept: 'application/json'
+    }
+  );
   const response = await requestJson(
     `${baseUrl}/v1/responses`,
-    {
-      model,
-      stream: false,
-      previous_response_id: responseId,
-      metadata: {
-        sessionId,
-        conversationId: sessionId
-      },
-      input: [
-        {
-          type: 'function_call_output',
-          call_id: toolCallId,
-          output: cliOutput
-        }
-      ]
-    },
+    submitBody,
     {
       ...(routeHint ? { 'x-route-hint': routeHint } : {}),
       'x-session-id': sessionId,
@@ -389,6 +647,7 @@ async function runResumeRound(model, responseId, toolCallId, command) {
   );
   return {
     cliOutput,
+    providerDryRun: summarizeProviderDryRun(providerDryRun, expectedPrompt),
     response,
     summary: summarizeAttempt('submit_tool_outputs', 0, response)
   };
@@ -413,6 +672,7 @@ async function main() {
     health: null,
     attempts: [],
     chosenModel: null,
+    providerDryRuns: [],
     resumeChain: [],
     finalStatus: 'unverified'
   };
@@ -463,13 +723,18 @@ async function main() {
           break;
         }
         const resume = await runResumeRound(model, currentResponseId, currentToolCallId, currentCommand);
+        report.providerDryRuns.push({
+          round,
+          ...resume.providerDryRun
+        });
         report.resumeChain.push({
           round,
           cliOutput: resume.cliOutput,
           ...resume.summary
         });
-        const nextExec = extractExecCommand(resume.response.body);
-        currentResponseId = resume.response.body?.id ?? null;
+        const materializedResumeBody = materializeProbeResponseBody(resume.response.body);
+        const nextExec = extractExecCommand(materializedResumeBody);
+        currentResponseId = materializedResumeBody?.id ?? null;
         currentToolCallId = nextExec?.toolCallId ?? null;
         currentCommand = nextExec?.command ?? null;
         if (!nextExec?.command) {
@@ -479,7 +744,10 @@ async function main() {
 
       const firstResume = report.resumeChain[0];
       const finalResume = report.resumeChain.at(-1);
+      const providerDryRunsOk = report.providerDryRuns.length === 2
+        && report.providerDryRuns.every((dryRun) => dryRun.ok === true);
       const completedTwoRoundLoop = report.resumeChain.length === 2
+        && providerDryRunsOk
         && firstResume?.hasExecCommand === true
         && firstResume?.isStopMessageAutoExecCommand === true
         && finalResume?.responseStatus === 'completed'

@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 const STOP_SCHEMA_LOOP_GUARD_MAX_REPEATS: u32 = 3;
 const STOP_SCHEMA_JSON_EXAMPLE: &str = r#"必须在回复末尾附一个 JSON 对象，字段名和类型必须一致：
 {"stopreason":2,"simple_question":false,"reason":"当前状态原因","current_goal":"当前要完成的目标","has_evidence":0,"evidence":"","issue_cause":"","excluded_factors":"","diagnostic_order":"","done_steps":"","next_step":"如果仍需继续，写立刻执行的下一步；否则空字符串","next_suggested_path":"","needs_user_input":false,"learned":""}
-字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 需要 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 需要 reason 非空；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 需要 current_goal 和 next_step 非空，下一轮提示直接使用 next_step，current_goal 只记录当前目标；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
+字段规则：simple_question=true 表示当前用户输入只是非常简单的问题，可以直接自然停止，不需要 stopreason/证据/下一步字段；否则 stopreason 是唯一无条件必填字段，只能是数字 0=finished，1=blocked，2=continue_needed；stopreason=0 需要 has_evidence=1 且 evidence 非空，evidence 内容不做真假校验；stopreason=1 需要 reason 非空、has_evidence=1 且 evidence 非空；needs_user_input=true 时 next_step 必须写给用户的决策问题；stopreason=2 需要 current_goal 和 next_step 非空，下一轮提示直接使用 next_step，current_goal 只记录当前目标；issue_cause/excluded_factors/diagnostic_order/done_steps/next_suggested_path/learned 有内容就写，没有可留空。"#;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -447,7 +447,7 @@ fn evaluate_stop_schema_gate_from_parsed(
                 "stop_schema_stopreason_missing_or_non_numeric",
                 used,
                 provided_cap,
-                &format!("stop schema 的 stopreason 必须是数字 0/1/2。当前缺少 stopreason 或 stopreason 不是 0/1/2；请先补这个字段，再按对应条件填写：完成要 has_evidence=1+evidence，阻塞要 reason，继续要 next_step。{}", STOP_SCHEMA_JSON_EXAMPLE),
+                &format!("stop schema 的 stopreason 必须是数字 0/1/2。当前缺少 stopreason 或 stopreason 不是 0/1/2；请先补这个字段，再按对应条件填写：完成要 has_evidence=1+evidence，阻塞要 reason+has_evidence=1+evidence，继续要 current_goal+next_step。{}", STOP_SCHEMA_JSON_EXAMPLE),
                 parsed,
                 missing,
                 no_change_count,
@@ -459,17 +459,32 @@ fn evaluate_stop_schema_gate_from_parsed(
 
     if parsed.needs_user_input.unwrap_or(false) {
         let next_step_raw = parsed.next_step.as_deref().map(str::trim).unwrap_or("");
+        let mut missing = Vec::new();
         if next_step_raw.is_empty() {
-            let missing = vec!["next_step".to_string()];
+            missing.push("next_step".to_string());
+        }
+        if stopreason == 0 || stopreason == 1 {
+            for field in terminal_missing_fields(&parsed, stopreason) {
+                if !missing.contains(&field) {
+                    missing.push(field);
+                }
+            }
+        }
+        if !missing.is_empty() {
+            let reason_code = if next_step_raw.is_empty() {
+                "stop_schema_needs_user_input_missing_next_step"
+            } else {
+                "stop_schema_terminal_missing_fields"
+            };
             let observation_hash = compute_schema_observation_hash(
-                "stop_schema_needs_user_input_missing_next_step",
+                reason_code,
                 parsed.stopreason,
                 parsed.reason.as_deref(),
                 parsed.next_step.as_deref(),
                 &missing,
             );
             let no_change_count = resolve_no_change_count(
-                "stop_schema_needs_user_input_missing_next_step",
+                reason_code,
                 parsed.stopreason,
                 parsed.reason.as_deref(),
                 parsed.next_step.as_deref(),
@@ -479,10 +494,10 @@ fn evaluate_stop_schema_gate_from_parsed(
             );
             return schema_invalid_followup(
                 assistant_text,
-                "stop_schema_needs_user_input_missing_next_step",
+                reason_code,
                 used,
                 provided_cap,
-                "你声明需要向用户提问（needs_user_input=true），但没有给出问题内容。请只补 next_step 中的问题。",
+                "你声明需要向用户提问（needs_user_input=true），但字段不完整。next_step 必须写给用户的问题；若 stopreason=blocked，还必须给 reason、has_evidence=1 和非空 evidence。",
                 parsed,
                 missing,
                 no_change_count,
@@ -533,7 +548,7 @@ fn evaluate_stop_schema_gate_from_parsed(
             used,
             provided_cap,
             &format!(
-                "stop schema 的 stopreason 必须是数字 0/1/2，当前不是允许值。{}",
+                "stop schema 的 stopreason 必须是数字 0/1/2，当前不是允许值；blocked 也必须有 reason+has_evidence=1+evidence。{}",
                 STOP_SCHEMA_JSON_EXAMPLE
             ),
             parsed,
@@ -569,7 +584,7 @@ fn evaluate_stop_schema_gate_from_parsed(
                 "stop_schema_reason_missing",
                 used,
                 provided_cap,
-                "你声明 blocked，但没有给 reason。blocked 停止只要求说明为什么现在停下来；请只补非空 reason。",
+                "你声明 blocked，但没有给 reason。blocked 停止必须同时给非空 reason、has_evidence=1 和非空 evidence；请补齐 blocked reason/evidence。",
                 parsed,
                 missing,
                 no_change_count,
@@ -1181,7 +1196,6 @@ fn terminal_missing_fields(parsed: &StopSchemaParsed, stopreason: u8) -> Vec<Str
         {
             missing.push("reason".to_string());
         }
-        return missing;
     }
     if parsed.has_evidence != Some(1) {
         missing.push("has_evidence".to_string());
@@ -1232,6 +1246,18 @@ fn remaining_missing_fields(parsed: &StopSchemaParsed) -> Vec<String> {
                 .is_empty()
             {
                 missing.push("reason".to_string());
+            }
+            if parsed.has_evidence != Some(1) {
+                missing.push("has_evidence".to_string());
+            }
+            if parsed
+                .evidence
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+            {
+                missing.push("evidence".to_string());
             }
             if parsed.needs_user_input.unwrap_or(false)
                 && parsed
@@ -2166,6 +2192,27 @@ mod tests {
         assert_eq!(decision.reason_code, "stop_schema_reason_missing");
         assert!(decision.count_budget);
         assert!(decision.followup_text.unwrap().contains("blocked"));
+    }
+
+    #[test]
+    fn stop_schema_blocked_without_evidence_follows_up() {
+        let decision = evaluate_stop_schema_gate(
+            tagged_stop_schema(
+                r#"{"stopreason":1,"reason":"被外部凭证阻塞","has_evidence":0,"evidence":"","next_step":""}"#,
+            )
+            .as_str(),
+            0,
+            3,
+            "",
+            0,
+        );
+        assert_eq!(decision.action, StopSchemaGateAction::Followup);
+        assert_eq!(decision.reason_code, "stop_schema_terminal_missing_fields");
+        assert!(decision
+            .missing_fields
+            .contains(&"has_evidence".to_string()));
+        assert!(decision.missing_fields.contains(&"evidence".to_string()));
+        assert!(decision.count_budget);
     }
 
     #[test]

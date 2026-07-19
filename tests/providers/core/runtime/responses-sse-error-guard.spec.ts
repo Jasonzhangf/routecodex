@@ -4,6 +4,8 @@ import {
   inspectResponsesSseBlockForProviderFailure,
   inspectResponsesSseBlockForProviderRateLimit,
   isResponsesSseAdvisoryRateLimitsBlock,
+  isResponsesSseIncompleteBlock,
+  isResponsesSseLifecyclePreambleBlock,
   isResponsesSseTerminalBlock
 } from '../../../../src/providers/core/runtime/responses-sse-error-guard.js';
 
@@ -96,6 +98,35 @@ describe('responses SSE error guard', () => {
       '',
     ].join('\n');
 
+    expect(isResponsesSseTerminalBlock(block)).toBe(false);
+  });
+
+  it('classifies response.created and response.in_progress as lifecycle preamble, not client-ready content', () => {
+    expect(isResponsesSseLifecyclePreambleBlock([
+      'event: response.created',
+      'data: {"type":"response.created","response":{"status":"in_progress"}}',
+      '',
+    ].join('\n'))).toBe(true);
+    expect(isResponsesSseLifecyclePreambleBlock([
+      'event: response.in_progress',
+      'data: {"type":"response.in_progress","response":{"status":"in_progress"}}',
+      '',
+    ].join('\n'))).toBe(true);
+    expect(isResponsesSseLifecyclePreambleBlock([
+      'event: response.output_item.added',
+      'data: {"type":"response.output_item.added","item":{"type":"message"}}',
+      '',
+    ].join('\n'))).toBe(false);
+  });
+
+  it('classifies response.incomplete as incomplete transport terminal, not success terminal', () => {
+    const block = [
+      'event: response.incomplete',
+      'data: {"type":"response.incomplete","response":{"status":"incomplete"}}',
+      '',
+    ].join('\n');
+
+    expect(isResponsesSseIncompleteBlock(block)).toBe(true);
     expect(isResponsesSseTerminalBlock(block)).toBe(false);
   });
 });

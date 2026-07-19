@@ -7,13 +7,33 @@ const paths = {
   response: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs',
+  responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  anthropicRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+  anthropicRelayCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
+  openaiChatRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
+  geminiRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
+  providerResponsesTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
+  providerResponsesWebsocketTests: 'v3/crates/routecodex-v3-provider-responses/tests/responses_websocket_v2.rs',
+  providerResponsesWebsocketVerifier: 'scripts/architecture/verify-v3-responses-websocket-v2-transport-hardening.mjs',
+  servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   probes: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs',
   design: 'docs/goals/v3-hub-relay-payload-copy-runtime-probes-test-design.md',
 };
 const text = Object.fromEntries(
   Object.entries(paths).map(([key, path]) => [key, readFileSync(resolve(root, path), 'utf8')]),
 );
-const runtime = [text.response, text.request, text.hooks].join('\n');
+const runtime = [
+  text.response,
+  text.request,
+  text.hooks,
+  text.servertoolHooks,
+  text.responsesRelayRuntime,
+  text.anthropicRelayRuntime,
+  text.anthropicRelayCodec,
+  text.openaiChatRelayRuntime,
+  text.geminiRelayRuntime,
+].join('\n');
+const providerTransport = text.providerResponsesTransport;
 const failures = [];
 
 function fail(message) {
@@ -30,10 +50,14 @@ function forbid(source, owner, pattern, label) {
   if (pattern.test(source)) fail(`${owner}: forbidden ${label}`);
 }
 
+function countMatches(source, pattern) {
+  return [...source.matchAll(pattern)].length;
+}
+
 requireAll(text.response, paths.response, [
   'struct V3HubResponsePayload(Arc<Value>);',
-  'Arc::ptr_eq(&context.payload, &self.previous.previous.previous.payload.0)',
-  'payload: Arc::clone(&input.previous.previous.payload.0)',
+  'Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())',
+  'payload: Arc::clone(&finalized_payload),',
   'V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse',
 ]);
 requireAll(text.request, paths.request, [
@@ -59,13 +83,40 @@ requireAll(text.probes, paths.probes, [
 requireAll(text.design, paths.design, [
   'unbounded `deep_clone`',
   '`serde_json::to_string`/`from_str`',
-  'SSE `collect`',
+  'Responses Relay keeps SSE transport-only',
   'Debug/snapshot payloads',
   'hook planning',
   'does not prove live Relay',
 ]);
+requireAll(text.responsesRelayRuntime, paths.responsesRelayRuntime, [
+  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
+  'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
+  'run_json_response_hooks(',
+  'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
+  'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
+  'fn observe_v3_runtime_responses_sse_transport_chunk(',
+  'fn apply_responses_stream_protocol_events_to_terminal_response(',
+]);
+requireAll(text.providerResponsesTransport, paths.providerResponsesTransport, [
+  'V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER',
+  'V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw',
+  'V3ResponsesWebSocketProtocolAggregate',
+  'apply_responses_websocket_protocol_events_to_terminal_response',
+]);
+requireAll(text.servertoolHooks, paths.servertoolHooks, [
+  'fn inject_reasoning_stop_tool_into_additional_tools',
+  'additional_tools.tools must be an array; refusing to rebuild original tool JSON path',
+  'inject_reasoning_stop_tool_into_array(embedded_tools, "input[].tools")',
+  'object.contains_key("tools")',
+]);
 
 forbid(runtime, 'Relay runtime source', /\b(?:deep_clone|deepClone)\s*\(/, 'unbounded deep copy');
+forbid(
+  text.servertoolHooks,
+  paths.servertoolHooks,
+  /lift_additional_tools_into_provider_tool_surface|collect_additional_tools_from_responses_input|provider_tool_surface_contains_equivalent_tool/,
+  'tool declaration shape rebuild helper',
+);
 forbid(
   runtime,
   'Relay runtime source',
@@ -76,8 +127,78 @@ forbid(
   runtime,
   'Relay runtime source',
   /(?:sse|stream)[^\n]{0,100}(?:collect\s*::<\s*Vec|collect\s*\(|body_text|full_buffer|materiali[sz]e)/i,
-  'full SSE materialization',
+  'unowned full SSE materialization',
 );
+forbid(
+  runtime,
+  'Relay runtime source',
+  /\bSseStreamPassthrough\b/,
+  'Relay SSE pass-through body kind',
+);
+forbid(
+  text.responsesRelayRuntime,
+  paths.responsesRelayRuntime,
+  /\bcollect_v3_responses_relay_sse_response\b/,
+  'Responses Relay provider stream collection before response hooks',
+);
+forbid(
+  text.responsesRelayRuntime,
+  paths.responsesRelayRuntime,
+  /\bcomplete_v3_runtime_sse_materialized_response\b/,
+  'Responses Relay terminal response shape materialization',
+);
+forbid(
+  text.responsesRelayRuntime,
+  paths.responsesRelayRuntime,
+  /\bproject_finalized_response_sse_stream\b/,
+  'Responses Relay synthetic SSE re-emission from finalized JSON',
+);
+forbid(
+  text.responsesRelayRuntime,
+  paths.responsesRelayRuntime,
+  /\bproject_sse_stream\b|\bV3ObservedSseState\b/,
+  'Responses Relay raw SSE transport pass-through surface',
+);
+forbid(
+  text.providerResponsesTransport,
+  paths.providerResponsesTransport,
+  /\bWebSocketJsonEventAccumulator\b|\bapply_to_terminal_response\b/,
+  'unowned WebSocket terminal response aggregation surface',
+);
+if (
+  text.responsesRelayRuntime.includes('V3ProviderResponseBody::Sse(stream) => {\n                let client_stream = stream')
+  || text.responsesRelayRuntime.includes('run_sse_response_passthrough_hooks')
+  || text.responsesRelayRuntime.includes('build_v3_provider_resp_inbound_01_sse_stream_passthrough')
+) {
+  fail(`${paths.responsesRelayRuntime}: forbidden raw SSE passthrough branch around Hub response hooks`);
+}
+const providerTerminalOutputReconstructions = countMatches(
+  providerTransport,
+  /(?:response\.clone\(\)|Value::Object\(\s*source\.clone\(\)\s*\))[\s\S]{0,320}object\.insert\(\s*"output"/g,
+);
+if (providerTerminalOutputReconstructions > 1) {
+  fail(
+    `${paths.providerResponsesTransport}: forbidden additional provider transport terminal response output reconstruction outside explicit protocol aggregation owner`,
+  );
+}
+if (providerTerminalOutputReconstructions === 1) {
+  requireAll(providerTransport, paths.providerResponsesTransport, [
+    'const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =',
+    'struct V3ResponsesWebSocketProtocolAggregate',
+    'function_call_items: BTreeMap<u64, Value>',
+    'fn apply_responses_websocket_protocol_events_to_terminal_response(',
+    'response.function_call_arguments.delta arrived before function_call output_item',
+  ]);
+  requireAll(text.providerResponsesWebsocketTests, paths.providerResponsesWebsocketTests, [
+    'websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty',
+    'V3_WS_KEY_ASXS_SHAPE',
+  ]);
+  requireAll(text.providerResponsesWebsocketVerifier, paths.providerResponsesWebsocketVerifier, [
+    'same-stream WebSocket event aggregation',
+    'struct V3ResponsesWebSocketProtocolAggregate',
+    'websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty',
+  ]);
+}
 forbid(
   runtime,
   'Relay runtime source',

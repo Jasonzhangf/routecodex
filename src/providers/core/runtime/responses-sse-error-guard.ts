@@ -150,6 +150,17 @@ export function buildResponsesSseIncompleteError(message = 'stream closed before
   return error;
 }
 
+export function buildResponsesSseTerminatedError(message = 'stream terminated before response.completed'): ResponsesSseProviderError {
+  const error = new Error(message) as ResponsesSseProviderError;
+  error.statusCode = 502;
+  error.status = 502;
+  error.code = 'UPSTREAM_STREAM_TERMINATED';
+  error.upstreamCode = 'UPSTREAM_STREAM_TERMINATED';
+  error.retryable = true;
+  error.requestExecutorProviderErrorStage = 'provider.responses';
+  return error;
+}
+
 export function isResponsesSseTerminalBlock(block: string): boolean {
   const parsed = parseResponsesSseFrame(block);
   const type = pickString(parsed.data?.type);
@@ -164,6 +175,24 @@ export function isResponsesSseTerminalBlock(block: string): boolean {
     || type === 'response.completed'
     || type === 'response.done'
     || type === 'response.requires_action';
+}
+
+export function isResponsesSseLifecyclePreambleBlock(block: string): boolean {
+  const parsed = parseResponsesSseFrame(block);
+  const type = pickString(parsed.data?.type);
+  return parsed.eventName === 'response.created'
+    || parsed.eventName === 'response.in_progress'
+    || type === 'response.created'
+    || type === 'response.in_progress';
+}
+
+export function isResponsesSseIncompleteBlock(block: string): boolean {
+  const parsed = parseResponsesSseFrame(block);
+  const type = pickString(parsed.data?.type);
+  const response = asRecord(parsed.data?.response);
+  return parsed.eventName === 'response.incomplete'
+    || type === 'response.incomplete'
+    || pickString(response.status) === 'incomplete';
 }
 
 export function isResponsesSseCompletedBlock(block: string): boolean {

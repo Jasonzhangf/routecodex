@@ -229,7 +229,27 @@ fn stopless_response_hook_projects_cli_before_continuation_commit() {
     assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     let payload = resp04.canonical_context_payload().unwrap();
     assert_eq!(payload["status"], "requires_action");
-    assert_eq!(payload["output"][0]["text"], "I should stop without schema");
+    assert_eq!(payload["output"][0]["type"], "message");
+    assert_eq!(payload["output"][0]["role"], "assistant");
+    assert_eq!(payload["output"][0]["status"], "completed");
+    assert_eq!(
+        payload["output"][0]["content"][0],
+        json!({
+            "type": "output_text",
+            "text": "I should stop without schema"
+        }),
+        "V2 parity requires the original stop text in the ordinary client-visible assistant message"
+    );
+    assert!(
+        payload["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["type"] != "output_text"),
+        "bare output_text items do not form the V2 client-visible CLI projection shell"
+    );
+    assert!(payload.get("reasoning_text").is_none());
+    assert!(payload.get("reasoning_content").is_none());
     let arguments = stopless_projected_arguments(payload);
     assert!(arguments.contains("routecodex hook run reasoningStop"));
     let call = stopless_projected_call(payload);
@@ -239,6 +259,14 @@ fn stopless_response_hook_projects_cli_before_continuation_commit() {
     assert_eq!(cli_input["repeatCount"], json!(1));
     assert_eq!(cli_input["maxRepeats"], json!(3));
     assert_eq!(cli_input["triggerHint"], json!("no_schema"));
+    assert_eq!(
+        cli_input["schemaFeedback"]["reasonCode"],
+        json!("stop_schema_missing")
+    );
+    assert_eq!(
+        cli_input["schemaFeedback"]["missingFields"],
+        json!(["stopreason"])
+    );
     assert!(!arguments.contains("status-control"));
 }
 
@@ -347,7 +375,7 @@ fn stopless_response_hook_stopreason_two_uses_v2_non_terminal_trigger_hint() {
 }
 
 #[test]
-fn stopless_response_hook_advances_consecutive_non_terminal_schema_repeat_count() {
+fn stopless_response_hook_valid_continue_does_not_consume_schema_error_budget() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -382,14 +410,14 @@ fn stopless_response_hook_advances_consecutive_non_terminal_schema_repeat_count(
     let cli_input = stopless_cli_input_from_arguments(arguments);
     assert_eq!(
         cli_input["repeatCount"],
-        json!(2),
-        "second consecutive stopreason=2 must advance the stop budget: {arguments}"
+        json!(1),
+        "valid stopreason=2 + next_step is progress and must not consume schema-error budget: {arguments}"
     );
     assert_eq!(cli_input["triggerHint"], json!("non_terminal_schema"));
 }
 
 #[test]
-fn stopless_response_hook_does_not_project_third_consecutive_non_terminal_schema() {
+fn stopless_response_hook_projects_third_consecutive_valid_continue_schema() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -414,14 +442,21 @@ fn stopless_response_hook_does_not_project_third_consecutive_non_terminal_schema
                 )),
         )
         .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
-    assert_eq!(resp03.tool_call_count(), 0);
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
     let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.finalized_payload()["status"], "completed");
-    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
-    assert!(!serialized.contains("call_stopless_reasoning"));
-    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    let arguments = stopless_projected_arguments(payload);
+    let cli_input = stopless_cli_input_from_arguments(arguments);
+    assert_eq!(
+        cli_input["repeatCount"],
+        json!(1),
+        "valid continue must stay outside consecutive schema-error budget: {arguments}"
+    );
+    assert_eq!(cli_input["triggerHint"], json!("non_terminal_schema"));
+    assert_eq!(cli_input["next_step"], json!("continue the proof"));
 }
 
 #[test]
@@ -452,6 +487,14 @@ fn stopless_response_hook_invalid_schema_uses_v2_trigger_hint() {
     assert_eq!(cli_input["repeatCount"], json!(1));
     assert_eq!(cli_input["maxRepeats"], json!(3));
     assert_eq!(cli_input["triggerHint"], json!("invalid_schema"));
+    assert_eq!(
+        cli_input["schemaFeedback"]["reasonCode"],
+        json!("stop_schema_stopreason_missing_or_non_numeric")
+    );
+    assert_eq!(
+        cli_input["schemaFeedback"]["missingFields"],
+        json!(["stopreason"])
+    );
 }
 
 #[test]
@@ -530,6 +573,7 @@ fn stopless_terminal_schema_does_not_project_cli() {
                 "id":"resp_stopless_terminal",
                 "status":"completed",
                 "finish_reason":"stop",
+                "tools":[{"type":"function","name":"reasoningStop","parameters":{"type":"object"}}],
                 "output":[{"type":"output_text","text":"done {\"stopreason\":0,\"has_evidence\":1,\"evidence\":\"ok\"}"}]
             }),
             V3HubTransportIntent::Json,
@@ -549,7 +593,89 @@ fn stopless_terminal_schema_does_not_project_cli() {
         .as_str()
         .expect("terminal visible text");
     assert_eq!(visible, "done");
-    assert!(!visible.contains("stopreason"));
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(!serialized.contains("stopreason"));
+    assert!(!serialized.contains("\"name\":\"reasoningStop\""));
+    assert!(resp04.finalized_payload().get("tools").is_none());
+}
+
+#[test]
+fn stopless_blocked_schema_with_evidence_returns_visible_reason_evidence() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_blocked_terminal",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"<rcc_stop_schema>\n{\"stopreason\":1,\"reason\":\"blocked by missing approval\",\"has_evidence\":1,\"evidence\":\"approval ticket absent\",\"needs_user_input\":false}\n</rcc_stop_schema>"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "completed");
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(serialized.contains("blocked by missing approval"));
+    assert!(serialized.contains("approval ticket absent"));
+    for forbidden in [
+        "stopreason",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "blocked terminal response leaked stopless control artifact: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn stopless_completed_schema_missing_evidence_projects_field_feedback() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_completed_missing_evidence",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":0,\"evidence\":\"\"}"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    let cli_input = stopless_cli_input_from_arguments(stopless_projected_arguments(payload));
+    assert_eq!(cli_input["triggerHint"], json!("invalid_schema"));
+    assert_eq!(
+        cli_input["schemaFeedback"]["reasonCode"],
+        json!("stop_schema_terminal_missing_fields")
+    );
+    assert_eq!(
+        cli_input["schemaFeedback"]["missingFields"],
+        json!(["has_evidence", "evidence"])
+    );
 }
 
 #[test]
@@ -779,6 +905,66 @@ fn stopless_response_hook_intercepts_reasoning_stop_tool_call_before_client_proj
 }
 
 #[test]
+fn stopless_response_hook_projects_original_assistant_text_not_reasoning_stop_arguments() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_reasoning_stop_text_projection",
+                "status":"requires_action",
+                "output":[
+                    {
+                        "type":"message",
+                        "role":"assistant",
+                        "status":"completed",
+                        "content":[{
+                            "type":"output_text",
+                            "text":"ORIGINAL ASSISTANT STOP TEXT"
+                        }]
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_model_reasoning_stop_text_projection",
+                        "name":"reasoningStop",
+                        "arguments":"{\"stopreason\":2,\"reason\":\"PRIVATE STOP ARGUMENT REASON\",\"current_goal\":\"prove V2 parity\",\"next_step\":\"continue with next round\"}"
+                    }
+                ]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["output"][0]["type"], "message");
+    assert_eq!(payload["output"][0]["role"], "assistant");
+    assert_eq!(
+        payload["output"][0]["content"][0],
+        json!({
+            "type": "output_text",
+            "text": "ORIGINAL ASSISTANT STOP TEXT"
+        }),
+        "V2 parity requires the original assistant stop text to be projected as ordinary CLI-visible text"
+    );
+    assert_eq!(stopless_projected_call(payload)["name"], "exec_command");
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(!serialized.contains("\"name\":\"reasoningStop\""));
+    assert!(!serialized.contains("call_model_reasoning_stop_text_projection"));
+    assert!(!serialized.contains("reasoning_text"));
+    assert!(!serialized.contains("reasoning_content"));
+}
+
+#[test]
 fn stopless_response_hook_terminal_reasoning_stop_tool_call_returns_visible_stop() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
@@ -786,6 +972,10 @@ fn stopless_response_hook_terminal_reasoning_stop_tool_call_returns_visible_stop
             json!({
                 "id":"resp_stopless_reasoning_stop_terminal",
                 "status":"requires_action",
+                "tools":[
+                    {"type":"function","name":"lookup","parameters":{"type":"object"}},
+                    {"type":"function","name":"reasoningStop","parameters":{"type":"object"}}
+                ],
                 "output":[{
                     "type":"function_call",
                     "call_id":"call_model_reasoning_stop_terminal",
@@ -812,6 +1002,8 @@ fn stopless_response_hook_terminal_reasoning_stop_tool_call_returns_visible_stop
     assert!(serialized.contains("live proof"));
     assert!(!serialized.contains("\"name\":\"reasoningStop\""));
     assert!(!serialized.contains("call_model_reasoning_stop_terminal"));
+    assert_eq!(payload["tools"][0]["name"], "lookup");
+    assert_eq!(payload["tools"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -1071,7 +1263,18 @@ fn stopless_response_hook_budget_exhausted_does_not_intercept_tool_call_response
     let resp04 = hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     let payload = resp04.finalized_payload();
-    assert_eq!(payload, &provider_payload);
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["finish_reason"], "tool_calls");
+    assert_eq!(payload["output"], provider_payload["output"]);
+    assert_eq!(
+        resp04.canonical_context_payload().unwrap(),
+        payload,
+        "Resp04 continuation context must save the same finalized non-terminal tool-call payload returned to the client"
+    );
+    assert!(
+        !resp04.canonical_context_shares_provider_payload(),
+        "Resp04 must not save the provider raw completed+tool_call payload as continuation truth"
+    );
     let serialized = serde_json::to_string(payload).unwrap();
     assert!(!serialized.contains("自动续轮已停止"));
     assert!(!serialized.contains("call_stopless_reasoning"));

@@ -75,7 +75,21 @@ const cases = [
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker: 'trace.push("V3HubRespChatProcess03Governed");',
     mutation: 'trace.push("V3HubRespOutbound05ClientSemantic");',
-    diagnostic: /missing V3HubRespChatProcess03Governed/,
+    diagnostic: /expected 2 occurrences.*V3HubRespChatProcess03Governed|missing V3HubRespChatProcess03Governed/,
+  },
+  {
+    name: 'responses relay SSE skips response hooks before client projection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'let (action, finalized_provider_value) = run_json_response_hooks(',
+    mutation: 'let (action, finalized_provider_value) = forbidden_skip_response_hooks(',
+    diagnostic: /expected 2 occurrences of let \(action, finalized_provider_value\) = run_json_response_hooks|missing ordered SSE response path phrase/,
+  },
+  {
+    name: 'responses relay SSE resurrects raw pass-through projector',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'use serde_json::{json, Value};',
+    mutation: 'use serde_json::{json, Value};\nfn project_sse_stream() {}',
+    diagnostic: /project_sse_stream|forbidden/,
   },
   {
     name: 'responses relay local continuation restore removed',
@@ -94,9 +108,9 @@ const cases = [
   {
     name: 'responses relay tools preservation assertion removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'assert_eq!(captures[1]["tools"], second_tools);',
+    marker: 'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
     mutation: '',
-    diagnostic: /missing assert_eq!\(captures\[1\]\["tools"\], second_tools\);/,
+    diagnostic: /missing assert_original_tools_preserved/,
   },
   {
     name: 'server dispatch runs responses direct before relay',

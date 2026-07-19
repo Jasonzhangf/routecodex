@@ -280,12 +280,13 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(sse_observability.transport, "sse");
     assert_eq!(
         sse_observability.response_status.as_deref(),
-        Some("completed")
+        Some("requires_action"),
+        "Hub response hooks must finalize tool-call SSE semantics before client SSE framing"
     );
     assert_eq!(
         sse_observability.finish_reason.as_deref(),
         Some("tool_calls"),
-        "Responses Relay SSE with local tool calls must keep tool_calls observability"
+        "Responses Relay must keep SSE as transport-only: Responses event payload codec builds Hub semantic, hooks run in Hub, and client event payload codec encodes finalized frames"
     );
     assert_eq!(sse_observability.provider_status, Some(200));
     let stream_observation = sse_output
@@ -296,11 +297,16 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
             while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk.expect("controlled SSE chunk must pass through unchanged"));
+                forwarded.extend(chunk.expect("controlled SSE chunk must project"));
             }
-            assert!(String::from_utf8(forwarded)
-                .unwrap()
-                .contains("\"input_tokens\":13"));
+            let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("event: response.output_item.done"));
+            assert!(text.contains("event: response.requires_action"));
+            assert!(text.contains("\"input_tokens\":13"));
+            assert!(
+                !text.contains("event: response.function_call_arguments.delta"),
+                "Responses Relay client SSE transport must not raw-pass provider argument event payloads around Hub: {text}"
+            );
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
     }
@@ -309,7 +315,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         .expect("SSE usage observation state must stay readable");
     assert_eq!(
         stream_snapshot.response_status.as_deref(),
-        Some("completed")
+        Some("requires_action")
     );
     assert_eq!(
         stream_snapshot.finish_reason.as_deref(),
@@ -414,11 +420,7 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
         .as_ref()
         .expect("Responses Relay SSE text output must carry console observability");
     assert_eq!(observability.response_status.as_deref(), Some("completed"));
-    assert_eq!(
-        observability.finish_reason.as_deref(),
-        Some("stop"),
-        "completed text SSE without provider finish_reason must infer stop for console observability"
-    );
+    assert_eq!(observability.finish_reason.as_deref(), Some("stop"));
     assert_eq!(
         observability
             .usage
@@ -440,6 +442,10 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
             assert!(text.contains("event: response.output_item.done"));
             assert!(text.contains("event: response.completed"));
             assert!(text.contains("data: [DONE]"));
+            assert!(
+                !text.contains("event: response.output_text.delta"),
+                "Responses Relay client SSE transport must not raw-pass provider text event payloads around Hub: {text}"
+            );
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
     }

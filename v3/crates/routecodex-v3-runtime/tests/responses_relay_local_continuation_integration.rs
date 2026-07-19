@@ -49,35 +49,224 @@ fn stopless_cli_input_from_client_body(body: &Value) -> Value {
 }
 
 fn provider_tool_names(body: &Value) -> Vec<String> {
-    body.get("tools")
+    let mut names = Vec::new();
+    collect_tool_names_from_array(body.get("tools"), &mut names);
+    for item in body
+        .get("input")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|tool| {
-            tool.get("name")
-                .or_else(|| {
-                    tool.get("function")
-                        .and_then(|function| function.get("name"))
-                })
-                .and_then(Value::as_str)
-                .map(str::to_string)
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            collect_tool_names_from_array(item.get("tools"), &mut names);
+        }
+    }
+    names
+}
+
+fn provider_reasoning_stop_tool(body: &Value) -> &Value {
+    let mut matches = Vec::new();
+    collect_reasoning_stop_tools_from_array(body.get("tools"), &mut matches);
+    for item in body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            collect_reasoning_stop_tools_from_array(item.get("tools"), &mut matches);
+        }
+    }
+    assert_eq!(
+        matches.len(),
+        1,
+        "provider request must expose exactly one internal reasoningStop tool across original tool JSON paths: {body}"
+    );
+    matches[0]
+}
+
+fn collect_reasoning_stop_tools_from_array<'a>(value: Option<&'a Value>, out: &mut Vec<&'a Value>) {
+    if let Some(tools) = value.and_then(Value::as_array) {
+        out.extend(
+            tools
+                .iter()
+                .filter(|tool| tool_name(tool) == Some("reasoningStop")),
+        );
+    }
+}
+
+fn collect_tool_names_from_array(value: Option<&Value>, names: &mut Vec<String>) {
+    if let Some(tools) = value.and_then(Value::as_array) {
+        names.extend(
+            tools
+                .iter()
+                .filter_map(|tool| tool_name(tool).map(str::to_string)),
+        );
+    }
+}
+
+fn tool_name(tool: &Value) -> Option<&str> {
+    tool.get("name")
+        .or_else(|| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
         })
-        .collect()
+        .and_then(Value::as_str)
 }
 
 fn assert_provider_stopless_guidance(body: &Value) {
     let names = provider_tool_names(body);
-    assert!(
-        names.iter().any(|name| name == "reasoningStop"),
-        "provider request must expose reasoningStop tool, got {names:?}"
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.as_str() == "reasoningStop")
+            .count(),
+        1,
+        "provider request must expose exactly one internal reasoningStop tool at the original tool JSON path, got {names:?}"
     );
+    let reasoning_stop_tool = provider_reasoning_stop_tool(body);
+    let reasoning_stop_description = reasoning_stop_tool["description"]
+        .as_str()
+        .expect("reasoningStop tool description");
+    for required in [
+        "Minimal continue sample",
+        "Minimal finished sample",
+        "Minimal blocked sample",
+        "Schema repair sample",
+        "stopreason=0",
+        "stopreason=1",
+        "stopreason=2",
+    ] {
+        assert!(
+            reasoning_stop_description.contains(required),
+            "reasoningStop tool description missing V2-parity sample token {required}: {reasoning_stop_description}"
+        );
+    }
     let instructions = body
         .get("instructions")
         .and_then(Value::as_str)
         .expect("stopless provider request must carry schema guidance instructions");
-    assert!(instructions.contains("reasoningStop"));
-    assert!(instructions.contains("stopreason"));
-    assert!(instructions.contains("<rcc_stop_schema>"));
+    for required in [
+        "reasoningStop",
+        "<rcc_stop_schema>",
+        "stopreason",
+        "has_evidence",
+        "evidence",
+        "current_goal",
+        "next_step",
+        "needs_user_input",
+    ] {
+        assert!(
+            instructions.contains(required),
+            "provider instructions missing full schema guidance token {required}: {instructions}"
+        );
+    }
+}
+
+fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Value]) {
+    let tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("original request path $.tools must still exist before provider send");
+    assert_eq!(
+        tools.len(),
+        expected_original_tools.len() + 1,
+        "original request path $.tools must preserve original tools and append exactly one internal reasoningStop tool: {tools:?}"
+    );
+    for (index, expected) in expected_original_tools.iter().enumerate() {
+        assert_eq!(
+            &tools[index], expected,
+            "original $.tools[{index}] changed before provider send"
+        );
+    }
+    assert_eq!(
+        tools[expected_original_tools.len()]
+            .get("name")
+            .or_else(|| {
+                tools[expected_original_tools.len()]
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+            })
+            .and_then(Value::as_str),
+        Some("reasoningStop"),
+        "provider request must append reasoningStop after original $.tools entries: {tools:?}"
+    );
+}
+
+fn assert_additional_tools_preserved_without_shape_rebuild(
+    body: &Value,
+    expected_original_tools: &[Value],
+) {
+    assert!(
+        body.get("tools").is_none(),
+        "request path $.tools must be absent because the original request did not contain $.tools: {body}"
+    );
+    let additional_tools_items = body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        additional_tools_items.len(),
+        1,
+        "provider request must keep the original $.input[].type=additional_tools item in place: {body}"
+    );
+    let tools = additional_tools_items[0]["tools"]
+        .as_array()
+        .expect("original additional_tools path $.input[].tools must stay an array");
+    assert_eq!(
+        tools.len(),
+        expected_original_tools.len() + 1,
+        "original additional_tools path $.input[].tools must stay unchanged except one appended reasoningStop: {tools:?}"
+    );
+    for (index, expected) in expected_original_tools.iter().enumerate() {
+        assert_eq!(
+            &tools[index], expected,
+            "original $.input[].tools[{index}] changed before provider send"
+        );
+    }
+    assert_eq!(
+        tools[expected_original_tools.len()]
+            .get("name")
+            .or_else(|| {
+                tools[expected_original_tools.len()]
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+            })
+            .and_then(Value::as_str),
+        Some("reasoningStop"),
+        "provider request must append reasoningStop after original $.input[].tools entries: {tools:?}"
+    );
+    assert!(
+        body.get("tools").is_none(),
+        "provider request created a sibling tool declaration surface that was not present in the original request path: {body}"
+    );
+}
+
+fn assert_no_schema_feedback_prompt(item: &Value) {
+    assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
+    let content = item
+        .get("content")
+        .and_then(Value::as_str)
+        .expect("no_schema feedback prompt");
+    assert!(content.contains("缺少 stop schema"));
+    assert!(content.contains("stopreason"));
+    assert!(content.contains("<rcc_stop_schema>"));
+    assert!(!content.trim().eq("继续。"));
+}
+
+fn assert_invalid_schema_feedback_prompt(item: &Value) {
+    assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
+    let content = item
+        .get("content")
+        .and_then(Value::as_str)
+        .expect("invalid_schema feedback prompt");
+    assert!(content.contains("stop schema 无效"));
+    assert!(content.contains("reasonCode"));
+    assert!(content.contains("0/1/2"));
+    assert!(!content.trim().eq("继续。"));
 }
 
 fn is_structured_stopless_shell_artifact(item: &Value) -> bool {
@@ -107,6 +296,43 @@ fn assert_no_stopless_shell_artifacts(body: &Value) {
             !is_structured_stopless_shell_artifact(item),
             "provider payload leaked structured stopless shell artifact: {item}"
         );
+        assert_no_structured_stopless_control_fields(item, "provider.input[]");
+    }
+}
+
+fn assert_no_structured_stopless_control_fields(value: &Value, path: &str) {
+    match value {
+        Value::Object(object) => {
+            for key in object.keys() {
+                assert!(
+                    !matches!(
+                        key.as_str(),
+                        "repeatCount"
+                            | "maxRepeats"
+                            | "triggerHint"
+                            | "schemaFeedback"
+                            | "reasonCode"
+                            | "missingFields"
+                    ),
+                    "provider normal input leaked structured stopless control field {path}.{key}: {value}"
+                );
+            }
+            for (key, child) in object {
+                assert_no_structured_stopless_control_fields(
+                    child,
+                    format!("{path}.{key}").as_str(),
+                );
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                assert_no_structured_stopless_control_fields(
+                    child,
+                    format!("{path}[{index}]").as_str(),
+                );
+            }
+        }
+        _ => {}
     }
 }
 
@@ -318,12 +544,13 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
         captures[1]["input"],
         json!([
             {"role":"user","content":"Trigger stopless"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"runtime missing stop schema"}]},
             {"role":"user","content":"continue from stopless runtime"}
         ])
     );
-    assert_provider_stopless_guidance(&captures[1]);
-    assert_no_stopless_shell_artifacts(&captures[1]);
+    for capture in captures.iter() {
+        assert_provider_stopless_guidance(capture);
+        assert_no_stopless_shell_artifacts(capture);
+    }
 }
 
 #[tokio::test]
@@ -352,6 +579,8 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         5555,
         "controlled",
     );
+    let original_tools =
+        json!([{"type":"function","name":"exec_command","description":"run command"}]);
 
     let first = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
@@ -360,12 +589,18 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
             request_id: "req-stopless-dry-run-1".into(),
             payload: json!({
                 "model":"client-responses",
-                "input":[{
-                    "type":"message",
-                    "role":"user",
-                    "tools":[{"type":"function","name":"exec_command","description":"run command"}],
-                    "content":[{"type":"input_text","text":"Trigger stopless with tools"}]
-                }],
+                "input":[
+                    {
+                        "type":"additional_tools",
+                        "role":"developer",
+                        "tools": original_tools.clone()
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"Trigger stopless with tools"}]
+                    }
+                ],
                 "stream":false
             }),
         },
@@ -394,7 +629,7 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
-                    "output":"{\"continuationPrompt\":\"continue and keep tools\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"non_terminal_schema\"}}"
+                    "output":"{\"current_goal\":\"preserve the original provider tool JSON path\",\"next_step\":\"continue and keep tools\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"non_terminal_schema\"}}"
                 }],
                 "stream":false
             }),
@@ -419,14 +654,166 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         .as_array()
         .expect("provider request input must be array");
     assert_eq!(
-        input[0]["content"][0]["text"],
+        input[1]["content"][0]["text"],
         "Trigger stopless with tools"
     );
-    assert_eq!(input[0]["tools"][0]["name"], "exec_command");
-    assert_eq!(input[1]["role"], "user");
-    assert_eq!(input[1]["content"], "continue and keep tools");
+    assert_eq!(input[2]["role"], "user");
+    assert_eq!(input[2]["content"], "continue and keep tools");
+    assert_additional_tools_preserved_without_shape_rebuild(
+        body,
+        original_tools.as_array().unwrap(),
+    );
     assert_provider_stopless_guidance(body);
     assert_no_stopless_shell_artifacts(body);
+}
+
+#[tokio::test]
+async fn json_stopless_preserves_codex_additional_tools_across_continuation() {
+    let original_tools = json!([
+        {
+            "type":"custom",
+            "name":"exec",
+            "description":"run javascript",
+            "format":{"type":"grammar","syntax":"lark","definition":"start: SOURCE\nSOURCE: /[\\s\\S]+/"}
+        },
+        {
+            "type":"function",
+            "name":"wait",
+            "description":"wait for exec",
+            "parameters":{
+                "type":"object",
+                "additionalProperties":false,
+                "properties":{"cell_id":{"type":"string"}},
+                "required":["cell_id"]
+            },
+            "strict":false
+        },
+        {
+            "type":"function",
+            "name":"request_user_input",
+            "description":"ask user",
+            "parameters":{
+                "type":"object",
+                "additionalProperties":false,
+                "properties":{"questions":{"type":"array"}},
+                "required":["questions"]
+            },
+            "strict":false
+        }
+    ]);
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "id":"resp_stopless_additional_tools_1",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{
+                        "type":"output_text",
+                        "text":"{\"stopreason\":2,\"reason\":\"round one\",\"current_goal\":\"verify tools\",\"next_step\":\"continue with original tools\"}"
+                    }]
+                }]
+            }),
+            json!({
+                "id":"resp_stopless_additional_tools_2",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"output_text",
+                    "text":"done {\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"additional tools preserved\"}"
+                }]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-additional-tools",
+        "conversation-stopless-additional-tools",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-additional-tools-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[
+                    {
+                        "type":"additional_tools",
+                        "role":"developer",
+                        "tools": original_tools.clone()
+                    },
+                    {"role":"user","content":"Trigger stopless with Codex additional tools"}
+                ],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        80_000,
+    )
+    .await
+    .unwrap();
+    let first_body = match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
+    };
+    assert_eq!(first_body["status"], "requires_action");
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-additional-tools-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"next_step\":\"continue with original tools\"}"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        81_000,
+    )
+    .await
+    .unwrap();
+    match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second stopless turn must be JSON"),
+    }
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    for capture in captures.iter() {
+        assert_additional_tools_preserved_without_shape_rebuild(
+            capture,
+            original_tools.as_array().unwrap(),
+        );
+        assert_provider_stopless_guidance(capture);
+        assert_no_stopless_shell_artifacts(capture);
+    }
+    assert_eq!(
+        captures[1]["input"]
+            .as_array()
+            .and_then(|items| items.last())
+            .and_then(|item| item.get("content"))
+            .and_then(Value::as_str),
+        Some("continue with original tools")
+    );
 }
 
 #[tokio::test]
@@ -592,7 +979,7 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
         captures[1]["input"],
         json!([{"role":"user","content":"continue round two"}])
     );
-    for capture in captures.iter().skip(1) {
+    for capture in captures.iter() {
         assert_provider_stopless_guidance(capture);
         assert_no_stopless_shell_artifacts(capture);
     }
@@ -683,7 +1070,7 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
-                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
                 }],
                 "stream":false
             }),
@@ -716,7 +1103,7 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
-                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}"
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}"
                 }],
                 "stream":false
             }),
@@ -749,25 +1136,20 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 3);
+    let round2_input = captures[1]["input"].as_array().unwrap();
     assert_eq!(
-        captures[1]["input"],
-        json!([
-            {"role":"user","content":"Trigger missing schema"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing schema round one"}]},
-            {"role":"user","content":"继续。"}
-        ])
+        round2_input[0],
+        json!({"role":"user","content":"Trigger missing schema"})
     );
+    assert_no_schema_feedback_prompt(&round2_input[1]);
+    let round3_input = captures[2]["input"].as_array().unwrap();
     assert_eq!(
-        captures[2]["input"],
-        json!([
-            {"role":"user","content":"Trigger missing schema"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing schema round one"}]},
-            {"role":"user","content":"继续。"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing schema round two"}]},
-            {"role":"user","content":"继续。"}
-        ])
+        round3_input[0],
+        json!({"role":"user","content":"Trigger missing schema"})
     );
-    for capture in captures.iter().skip(1) {
+    assert_no_schema_feedback_prompt(&round3_input[1]);
+    assert_no_schema_feedback_prompt(&round3_input[2]);
+    for capture in captures.iter() {
         assert_provider_stopless_guidance(capture);
         assert_no_stopless_shell_artifacts(capture);
     }
@@ -901,6 +1283,88 @@ async fn json_stopless_no_schema_budget_exhaustion_ignores_trailing_tool_errors(
 }
 
 #[tokio::test]
+async fn json_stopless_budget_exhausted_provider_tool_call_returns_requires_action() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "object":"response",
+            "id":"resp_stopless_budget_provider_tool_call",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"function_call",
+                "id":"fc_auto_1",
+                "call_id":"call_auto_1",
+                "name":"exec_command",
+                "arguments":"{}"
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-budget-tool-call",
+        "conversation-stopless-budget-tool-call",
+        5555,
+        "controlled",
+    );
+
+    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-budget-tool-call".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: stopless-budget\nOutput:\n{\"ok\":true,\"repeatCount\":2,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":2,\"maxRepeats\":3}}\n"
+                    }
+                ],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        53_000,
+    )
+    .await
+    .unwrap();
+
+    let observability = output.observability.as_ref().unwrap();
+    assert!(
+        !observability.stopless_activation,
+        "budget exhausted must not project another stopless CLI"
+    );
+    match output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(
+                body["status"], "requires_action",
+                "client semantic must not expose provider raw completed+tool_call"
+            );
+            assert_eq!(body["finish_reason"], "tool_calls");
+            assert_eq!(body["output"][0]["type"], "function_call");
+            assert_eq!(body["output"][0]["call_id"], "call_auto_1");
+            let body_text = serde_json::to_string(&body).unwrap();
+            assert!(!body_text.contains("call_stopless_reasoning"));
+            assert!(!body_text.contains("routecodex hook run reasoningStop"));
+        }
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("budget-exhausted provider tool-call turn must be JSON")
+        }
+    }
+}
+
+#[tokio::test]
 async fn json_stopless_invalid_schema_stops_after_three_cross_request_rounds() {
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
@@ -985,7 +1449,7 @@ async fn json_stopless_invalid_schema_stops_after_three_cross_request_rounds() {
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
-                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"invalid_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_stopreason_missing_or_non_numeric\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"invalid_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
                 }],
                 "stream":false
             }),
@@ -1018,7 +1482,7 @@ async fn json_stopless_invalid_schema_stops_after_three_cross_request_rounds() {
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
-                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"invalid_schema\",\"repeatCount\":2,\"maxRepeats\":3}}"
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_stopreason_missing_or_non_numeric\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"invalid_schema\",\"repeatCount\":2,\"maxRepeats\":3}}"
                 }],
                 "stream":false
             }),
@@ -1051,24 +1515,23 @@ async fn json_stopless_invalid_schema_stops_after_three_cross_request_rounds() {
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 3);
+    let round2_input = captures[1]["input"].as_array().unwrap();
     assert_eq!(
-        captures[1]["input"],
-        json!([
-            {"role":"user","content":"Trigger invalid schema"},
-            {"role":"user","content":"继续。"}
-        ])
+        round2_input[0],
+        json!({"role":"user","content":"Trigger invalid schema"})
     );
+    assert_invalid_schema_feedback_prompt(&round2_input[1]);
+    let round3_input = captures[2]["input"].as_array().unwrap();
     assert_eq!(
-        captures[2]["input"],
-        json!([
-            {"role":"user","content":"Trigger invalid schema"},
-            {"role":"user","content":"继续。"},
-            {"role":"user","content":"继续。"}
-        ])
+        round3_input[0],
+        json!({"role":"user","content":"Trigger invalid schema"})
     );
-    for capture in captures.iter().skip(1) {
+    assert_invalid_schema_feedback_prompt(&round3_input[1]);
+    assert_invalid_schema_feedback_prompt(&round3_input[2]);
+    for capture in captures.iter() {
         let provider_wire = serde_json::to_string(capture).unwrap();
         assert!(provider_wire.contains("stopreason"));
+        assert_provider_stopless_guidance(capture);
         for forbidden in [
             "call_stopless_reasoning",
             "function_call_output",
@@ -1083,7 +1546,7 @@ async fn json_stopless_invalid_schema_stops_after_three_cross_request_rounds() {
 }
 
 #[tokio::test]
-async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context() {
+async fn sse_runtime_runs_stopless_through_json_hub_pipeline_before_client_sse() {
     let transport = StoplessSseTransport {
         captures: Mutex::new(Vec::new()),
     };
@@ -1138,28 +1601,39 @@ async fn sse_runtime_materializes_stopless_before_client_frame_and_saves_context
             let text = String::from_utf8(forwarded).unwrap();
             assert!(
                 text.contains("event: response.output_item.done"),
-                "Codex-compatible SSE must project stopless function_call as output_item.done: {text}"
+                "Responses Relay client SSE must encode the Hub-finalized stopless tool item: {text}"
             );
             assert!(
-                text.contains("event: response.completed"),
-                "Codex-compatible SSE must still emit semantic completed terminal: {text}"
+                text.contains("event: response.requires_action"),
+                "Responses Relay client SSE must transport the Hub-finalized requires_action frame: {text}"
+            );
+            assert!(
+                !text.contains("event: response.completed"),
+                "Responses Relay client SSE must not relabel Hub-finalized requires_action as completed: {text}"
             );
             assert!(text.contains("\"status\":\"requires_action\""));
             assert!(text.contains("\"call_id\":\"call_stopless_reasoning\""));
             assert!(text.contains("routecodex hook run reasoningStop"));
             assert!(text.contains("[DONE]"));
+            assert!(
+                !text.contains("event: response.output_text.delta"),
+                "Relay client SSE transport must not raw-pass provider event payloads around Hub: {text}"
+            );
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "SSE Relay must save the Hub-finalized stopless continuation payload at Resp04"
+    );
     let snapshot = stream_observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("requires_action"));
     assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
 }
 
 #[tokio::test]
-async fn sse_runtime_projects_apply_patch_at_resp03_before_client_frame_and_commit() {
-    let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch";
+async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_sse() {
     let transport = ApplyPatchSseTransport {
         captures: Mutex::new(Vec::new()),
     };
@@ -1196,8 +1670,15 @@ async fn sse_runtime_projects_apply_patch_at_resp03_before_client_frame_and_comm
         .observability
         .as_ref()
         .expect("SSE apply_patch turn must expose observability");
-    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    assert_eq!(
+        observability.response_status.as_deref(),
+        Some("requires_action")
+    );
     assert_eq!(observability.finish_reason.as_deref(), Some("tool_calls"));
+    let stream_observation = output
+        .stream_observation
+        .clone()
+        .expect("SSE apply_patch output must expose stream observability");
     match output.client_body {
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
@@ -1207,22 +1688,37 @@ async fn sse_runtime_projects_apply_patch_at_resp03_before_client_frame_and_comm
             let text = String::from_utf8(forwarded).unwrap();
             assert!(
                 text.contains("event: response.output_item.done"),
-                "Codex-compatible SSE must project apply_patch custom_tool_call as output_item.done: {text}"
+                "Responses Relay client SSE must encode the Hub-finalized apply_patch tool item: {text}"
             );
             assert!(
-                text.contains("event: response.completed"),
-                "Codex-compatible SSE must still emit semantic completed terminal: {text}"
+                text.contains("event: response.requires_action"),
+                "Responses Relay client SSE must transport the Hub-finalized requires_action frame: {text}"
             );
+            assert!(
+                !text.contains("event: response.completed"),
+                "Responses Relay client SSE must not relabel Hub-finalized tool-call continuation as completed: {text}"
+            );
+            assert!(text.contains("\"status\":\"requires_action\""));
             assert!(text.contains("\"type\":\"custom_tool_call\""));
             assert!(text.contains("\"name\":\"apply_patch\""));
             assert!(text.contains("\"call_id\":\"call_apply_patch_sse\""));
-            assert!(text.contains(&serde_json::to_string(patch).unwrap()));
-            assert!(!text.contains("\"arguments\""));
+            assert!(text.contains("*** Begin Patch"));
+            assert!(
+                !text.contains("event: response.function_call_arguments.done"),
+                "Relay client SSE transport must not raw-pass provider argument event payloads around Hub: {text}"
+            );
             assert!(text.contains("[DONE]"));
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "SSE Relay must save the Hub-finalized apply_patch continuation payload at Resp04"
+    );
+    let snapshot = stream_observation.snapshot().unwrap();
+    assert_eq!(snapshot.response_status.as_deref(), Some("requires_action"));
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("tool_calls"));
 }
 
 #[tokio::test]
@@ -1334,10 +1830,7 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
             }
         ])
     );
-    assert_eq!(
-        captures[1]["tools"][0], second_tools[0],
-        "original client tool must survive stopless tool injection"
-    );
+    assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());
     assert_provider_stopless_guidance(&captures[1]);
     assert_no_stopless_shell_artifacts(&captures[1]);
     let provider_wire = serde_json::to_string(&captures[1]).unwrap();

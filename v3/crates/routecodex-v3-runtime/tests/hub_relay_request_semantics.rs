@@ -72,6 +72,18 @@ fn assert_no_structured_stopless_shell_artifacts(input: &[Value]) {
     }
 }
 
+fn assert_no_schema_feedback_user_prompt(item: &Value) {
+    assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
+    let content = item
+        .get("content")
+        .and_then(Value::as_str)
+        .expect("feedback prompt content");
+    assert!(content.contains("缺少 stop schema"));
+    assert!(content.contains("stopreason"));
+    assert!(content.contains("<rcc_stop_schema>"));
+    assert!(!content.trim().eq("继续。"));
+}
+
 #[test]
 fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let hooks = compile_v3_hub_relay_request_hooks();
@@ -522,10 +534,9 @@ fn stopless_request_hook_captures_repeat_state_from_current_cli_output() {
     assert_eq!(state.repeat_count(), 1);
     assert_eq!(state.max_repeats(), 3);
     assert_eq!(state.trigger_hint(), Some("no_schema"));
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"继续。"}])
-    );
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_no_schema_feedback_user_prompt(&input[0]);
     assert_eq!(governed.tool_output_count(), 0);
 }
 
@@ -623,9 +634,9 @@ fn stopless_request_hook_tool_errors_after_stopless_pair_do_not_reset_state() {
     assert_eq!(state.max_repeats(), 3);
     assert_eq!(state.trigger_hint(), Some("no_schema"));
     let input = governed.payload()["input"].as_array().unwrap();
-    assert_eq!(input[0], json!({"role":"user","content":"继续。"}));
+    assert_no_schema_feedback_user_prompt(&input[0]);
     assert_eq!(input.len(), 1);
-    assert_eq!(input[0], json!({"role":"user","content":"继续。"}));
+    assert_no_schema_feedback_user_prompt(&input[0]);
     assert_eq!(governed.tool_output_count(), 0);
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     for forbidden in [
@@ -728,7 +739,7 @@ fn stopless_request_hook_poisoned_later_repeat_one_does_not_reset_repeat_state()
     let input = governed.payload()["input"].as_array().unwrap();
     assert_eq!(input.len(), 2);
     assert_eq!(input[0]["role"], "user");
-    assert_eq!(input[1], json!({"role":"user","content":"继续。"}));
+    assert_no_schema_feedback_user_prompt(&input[1]);
     assert_eq!(governed.tool_output_count(), 0);
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     for forbidden in [
@@ -836,6 +847,62 @@ fn stopless_request_hook_without_cli_output_injects_schema_and_preserves_input()
 }
 
 #[test]
+fn stopless_request_hook_injects_into_additional_tools_without_rebuilding_shape() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let original_tools = json!([
+        {"type":"function","name":"exec","description":"run javascript"},
+        {"type":"function","name":"wait","description":"wait for exec"},
+        {"type":"function","name":"request_user_input","description":"ask user"}
+    ]);
+    let payload = json!({
+        "input":[
+            {
+                "type":"additional_tools",
+                "role":"developer",
+                "tools": original_tools.clone()
+            },
+            {"role":"user","content":"keep codex tool declarations"}
+        ]
+    });
+    let governed = hooks
+        .run(
+            raw(payload.clone()),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    assert!(
+        governed.payload().get("tools").is_none(),
+        "stopless must not rebuild Codex additional_tools into a new top-level tools surface"
+    );
+    assert_eq!(governed.payload()["input"][1], payload["input"][1]);
+    let tools = governed.payload()["input"][0]["tools"]
+        .as_array()
+        .expect("stopless must keep Codex tools inside the original additional_tools item");
+    assert_eq!(
+        &tools[..original_tools.as_array().unwrap().len()],
+        original_tools.as_array().unwrap().as_slice(),
+        "stopless must preserve original Codex additional_tools definitions in place"
+    );
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1,
+        "stopless must append exactly one internal reasoningStop tool"
+    );
+    assert_eq!(
+        tools
+            .last()
+            .and_then(|tool| tool.get("name"))
+            .and_then(Value::as_str),
+        Some("reasoningStop")
+    );
+}
+
+#[test]
 fn stopless_request_hook_malformed_tools_is_fail_fast_not_silent_replaced() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let error = hooks
@@ -853,7 +920,7 @@ fn stopless_request_hook_malformed_tools_is_fail_fast_not_silent_replaced() {
         error,
         V3HubRelayRequestError::MalformedStoplessToolSurface {
             field: "tools",
-            reason: "tools must be an array; refusing to replace client tool surface"
+            reason: "tools must be an array; refusing to rebuild original tool JSON path"
         }
     ));
 }
@@ -988,11 +1055,47 @@ fn stopless_request_hook_disabled_profile_keeps_codex_transcript_unparsed() {
 }
 
 #[test]
-fn stopless_request_hook_missing_next_step_uses_default_prompt() {
+fn stopless_request_hook_missing_next_step_without_feedback_fails_fast() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_default"), scope())
         .with_local_context(
             "rcc_stopless_default",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let err = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        V3HubRelayRequestError::MalformedStoplessCliOutput { .. }
+    ));
+}
+
+#[test]
+fn stopless_request_hook_no_schema_cli_output_builds_schema_feedback_prompt() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_no_schema_feedback"), scope())
+        .with_local_context(
+            "rcc_stopless_no_schema_feedback",
             scope(),
             json!({
                 "status":"requires_action",
@@ -1010,17 +1113,131 @@ fn stopless_request_hook_missing_next_step_uses_default_prompt() {
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_stopless_reasoning",
-                    "output":"{}"
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_missing\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"no_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
                 }]
             })),
             &lookup,
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
         )
         .unwrap();
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"Continue from the previous stopless hook result."}])
-    );
+    let content = governed.payload()["input"][0]["content"].as_str().unwrap();
+    assert!(content.contains("缺少 stop schema"));
+    assert!(content.contains("stopreason"));
+    assert!(content.contains("<rcc_stop_schema>"));
+    assert!(!content.trim().eq("继续。"));
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
+fn stopless_request_hook_invalid_schema_cli_output_builds_field_feedback_prompt() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_invalid_feedback"), scope())
+        .with_local_context(
+            "rcc_stopless_invalid_feedback",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"continuationPrompt\":\"继续。\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_stopreason_missing_or_non_numeric\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"invalid_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let content = governed.payload()["input"][0]["content"].as_str().unwrap();
+    assert!(content.contains("stop_schema_stopreason_missing_or_non_numeric"));
+    assert!(content.contains("stopreason"));
+    assert!(content.contains("0/1/2"));
+    assert!(!content.trim().eq("继续。"));
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
+fn stopless_request_hook_invalid_schema_feedback_overrides_cli_next_step() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup =
+        V3HubContinuationLookup::new(Some("rcc_stopless_invalid_feedback_next_step"), scope())
+            .with_local_context(
+                "rcc_stopless_invalid_feedback_next_step",
+                scope(),
+                json!({
+                    "status":"requires_action",
+                    "output":[{
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{}"
+                    }]
+                }),
+            );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"next_step\":\"wrong raw next step\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_stopreason_missing_or_non_numeric\",\"missingFields\":[\"stopreason\"]},\"input\":{\"triggerHint\":\"invalid_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let content = governed.payload()["input"][0]["content"].as_str().unwrap();
+    assert!(content.contains("stop_schema_stopreason_missing_or_non_numeric"));
+    assert!(content.contains("stopreason"));
+    assert!(!content.contains("wrong raw next step"));
+    assert_eq!(governed.tool_output_count(), 0);
+}
+
+#[test]
+fn stopless_request_hook_continue_missing_next_step_builds_field_feedback_prompt() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_continue_feedback"), scope())
+        .with_local_context(
+            "rcc_stopless_continue_feedback",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_next_step_missing\",\"missingFields\":[\"current_goal\",\"next_step\"]},\"input\":{\"triggerHint\":\"non_terminal_schema\",\"repeatCount\":1,\"maxRepeats\":3}}"
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let content = governed.payload()["input"][0]["content"].as_str().unwrap();
+    assert!(content.contains("next_step"));
+    assert!(content.contains("current_goal"));
+    assert!(content.contains("继续执行"));
     assert_eq!(governed.tool_output_count(), 0);
 }
 
@@ -1054,10 +1271,9 @@ fn stopless_request_hook_accepts_cli_continuation_prompt() {
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
         )
         .unwrap();
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"继续。"}])
-    );
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0], json!({"role":"user","content":"继续。"}));
     assert_eq!(governed.tool_output_count(), 0);
 }
 
@@ -1091,10 +1307,9 @@ fn stopless_request_hook_accepts_codex_exec_command_output_transcript() {
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
         )
         .unwrap();
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"继续。"}])
-    );
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_no_schema_feedback_user_prompt(&input[0]);
     assert_eq!(governed.tool_output_count(), 0);
 }
 
@@ -1244,10 +1459,7 @@ fn stopless_request_hook_rewrites_latest_real_5555_sample_pair_and_strips_stale_
         .as_array()
         .expect("governed input array");
     assert_eq!(governed_input.len(), 7);
-    assert_eq!(
-        governed_input.last().unwrap(),
-        &json!({"role":"user","content":"继续。"})
-    );
+    assert_no_schema_feedback_user_prompt(governed_input.last().unwrap());
     assert!(governed_input.iter().any(|item| {
         item.get("role").and_then(Value::as_str) == Some("user")
             && item
