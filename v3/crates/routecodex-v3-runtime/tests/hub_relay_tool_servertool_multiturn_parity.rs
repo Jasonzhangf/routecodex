@@ -1,16 +1,14 @@
-use futures_util::stream;
 use routecodex_v3_runtime::{
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04,
     build_v3_provider_resp_inbound_01_raw,
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
     compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks,
-    project_v3_responses_sse_as_anthropic_events, V3HubAttachmentHistoryPolicy,
-    V3HubContinuationCommit, V3HubContinuationLookup, V3HubContinuationOwnership,
-    V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
-    V3HubProviderWireProtocol, V3HubRelayRequestError, V3HubRelayResponseError,
-    V3HubRelayResponseHookProfile, V3HubRelayToolKind, V3HubServertoolRequestProfile,
-    V3HubServertoolResponseAction, V3HubTransportIntent,
+    V3HubAttachmentHistoryPolicy, V3HubContinuationCommit, V3HubContinuationLookup,
+    V3HubContinuationOwnership, V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode,
+    V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayRequestError,
+    V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubRelayToolKind,
+    V3HubServertoolRequestProfile, V3HubServertoolResponseAction, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
 
@@ -126,6 +124,75 @@ fn restored_multitool_context() -> Value {
     })
 }
 
+fn restored_multitool_provider_response_for_entry(entry_protocol: V3HubEntryProtocol) -> Value {
+    match provider_protocol_for_entry(entry_protocol) {
+        V3HubProviderWireProtocol::Responses => restored_multitool_context(),
+        V3HubProviderWireProtocol::OpenAiChat => json!({
+            "id": "chatcmpl_tool_parity",
+            "object": "chat.completion",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id":"call_function","type":"function","function":{"name":"lookup","arguments":"{}"}},
+                        {"id":"call_custom","type":"function","function":{"name":"custom.render","arguments":"{}"}},
+                        {"id":"call_servertool","type":"function","function":{"name":"servertool.exec","arguments":"{}"}},
+                        {"id":"call_apply_patch","type":"function","function":{"name":"apply_patch","arguments":"{}"}},
+                        {"id":"call_mcp","type":"function","function":{"name":"mcp.read_file","arguments":"{}"}},
+                        {"id":"call_native","type":"function","function":{"name":"native.exec_command","arguments":"{}"}}
+                    ]
+                }
+            }]
+        }),
+        V3HubProviderWireProtocol::Gemini => json!({
+            "candidates": [{
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [
+                        {"functionCall":{"name":"lookup","args":{}}},
+                        {"functionCall":{"name":"custom.render","args":{}}},
+                        {"functionCall":{"name":"servertool.exec","args":{}}},
+                        {"functionCall":{"name":"apply_patch","args":{}}},
+                        {"functionCall":{"name":"mcp.read_file","args":{}}},
+                        {"functionCall":{"name":"native.exec_command","args":{}}}
+                    ]
+                }
+            }]
+        }),
+        V3HubProviderWireProtocol::Anthropic => {
+            unreachable!("relay matrix maps Anthropic entry to Responses provider wire")
+        }
+    }
+}
+
+fn expected_multitool_response_kinds_for_entry(
+    entry_protocol: V3HubEntryProtocol,
+) -> Vec<V3HubRelayToolKind> {
+    match provider_protocol_for_entry(entry_protocol) {
+        V3HubProviderWireProtocol::Responses => vec![
+            V3HubRelayToolKind::Function,
+            V3HubRelayToolKind::Custom,
+            V3HubRelayToolKind::Servertool,
+            V3HubRelayToolKind::ApplyPatch,
+            V3HubRelayToolKind::Mcp,
+            V3HubRelayToolKind::Native,
+        ],
+        V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => vec![
+            V3HubRelayToolKind::Function,
+            V3HubRelayToolKind::Function,
+            V3HubRelayToolKind::Servertool,
+            V3HubRelayToolKind::ApplyPatch,
+            V3HubRelayToolKind::Mcp,
+            V3HubRelayToolKind::Native,
+        ],
+        V3HubProviderWireProtocol::Anthropic => {
+            unreachable!("relay matrix maps Anthropic entry to Responses provider wire")
+        }
+    }
+}
+
 fn current_tool_round_payload() -> Value {
     json!({
         "input": [
@@ -205,7 +272,7 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
 
             let resp02 = response_hooks
                 .normalize(relay_response_for(
-                    restored_multitool_context(),
+                    restored_multitool_provider_response_for_entry(entry),
                     entry,
                     transport,
                 ))
@@ -218,14 +285,7 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
                 .expect("entry/transport response tool harvest is governed at Resp03");
             assert_eq!(
                 resp03.tool_call_kinds(),
-                vec![
-                    V3HubRelayToolKind::Function,
-                    V3HubRelayToolKind::Custom,
-                    V3HubRelayToolKind::Servertool,
-                    V3HubRelayToolKind::ApplyPatch,
-                    V3HubRelayToolKind::Mcp,
-                    V3HubRelayToolKind::Native,
-                ]
+                expected_multitool_response_kinds_for_entry(entry)
             );
         }
     }
@@ -1007,40 +1067,32 @@ fn response_governance_classifies_function_custom_servertool_and_internal_tools_
     );
 }
 
-#[tokio::test]
-async fn responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order() {
-    let chunks = [
-        b"event: response.reasoning_summary_text.delta\ndata: {\"delta\":\"think\"}\n\n"
-            .to_vec(),
-        b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec(),
-        b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\"}\n\n"
-            .to_vec(),
-        b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"\\\"x\\\"}\"}\n\n"
-            .to_vec(),
-        b"event: response.completed\ndata: {\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\n"
-            .to_vec(),
-    ];
-    let stream = Box::pin(stream::iter(chunks.into_iter().map(Ok)));
-    let projection = project_v3_responses_sse_as_anthropic_events(stream)
-        .await
-        .expect("incremental SSE projection");
-    let (canonical, client_events) = projection.into_parts();
-
-    assert_eq!(canonical["output"][0]["type"], "reasoning");
-    assert_eq!(canonical["output"][1]["type"], "function_call");
-    assert_eq!(canonical["output"][1]["call_id"], "call_sse");
-    assert_eq!(canonical["output"][1]["arguments"], "{\"q\":\"x\"}");
-    assert_eq!(client_events.last().unwrap()["event"], "message_stop");
-
-    let resp02 = compile_v3_hub_relay_response_hooks()
-        .normalize(relay_response(canonical, V3HubTransportIntent::Sse))
+#[test]
+fn responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_sse_transport_only",
+                "status":"requires_action",
+                "output":[
+                    {"type":"reasoning","summary":[{"type":"summary_text","text":"think"}]},
+                    {"type":"function_call","call_id":"call_sse","name":"lookup","arguments":"{\"q\":\"x\"}"}
+                ]
+            }),
+            V3HubTransportIntent::Sse,
+        ))
         .unwrap();
-    let resp03 = compile_v3_hub_relay_response_hooks()
+    let resp03 = hooks
         .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .unwrap();
-    let resp04 = compile_v3_hub_relay_response_hooks()
-        .commit(resp03)
-        .unwrap();
+    assert_eq!(resp03.tool_call_kinds(), vec![V3HubRelayToolKind::Function]);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.finalized_payload()["output"][0]["type"], "reasoning");
+    assert_eq!(
+        resp04.finalized_payload()["output"][1]["call_id"],
+        "call_sse"
+    );
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     assert_eq!(

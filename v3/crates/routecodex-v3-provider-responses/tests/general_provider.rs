@@ -20,8 +20,6 @@ use tokio::sync::{mpsc, oneshot};
 #[derive(Debug)]
 struct Capture {
     authorization: Option<String>,
-    x_api_key: Option<String>,
-    anthropic_version: Option<String>,
     accept: Option<String>,
     body: Value,
 }
@@ -43,14 +41,6 @@ async fn upstream(
                 .get("authorization")
                 .and_then(|value| value.to_str().ok())
                 .map(ToOwned::to_owned),
-            x_api_key: headers
-                .get("x-api-key")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            anthropic_version: headers
-                .get("anthropic-version")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
             accept: headers
                 .get("accept")
                 .and_then(|value| value.to_str().ok())
@@ -58,16 +48,6 @@ async fn upstream(
             body: body.clone(),
         })
         .unwrap();
-
-    if headers.contains_key("x-api-key") {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "application/json")
-            .body(Body::from(
-                r#"{"id":"msg_anthropic_json","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":1}}"#,
-            ))
-            .unwrap();
-    }
 
     match body["case"].as_str().unwrap_or("json") {
         "sse" => Response::builder()
@@ -113,7 +93,6 @@ async fn start_upstream() -> (
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(upstream))
-        .route("/anthropic/v1/messages", post(upstream))
         .with_state(Arc::new(UpstreamState {
             captures: captures_tx,
         }));
@@ -164,80 +143,6 @@ fn target_with_auth(
         responses_transport: V3ResponsesTransportKind::Http,
         websocket_v2_url: None,
     }
-}
-
-#[tokio::test]
-async fn anthropic_provider_type_uses_messages_wire_auth_and_projects_responses_json() {
-    let (base_url, mut captures, shutdown) = start_upstream().await;
-    let anthropic_base_url = base_url.trim_end_matches("/v1").to_string() + "/anthropic";
-    std::env::set_var("V3_GENERAL_ANTHROPIC_KEY", "secret-anthropic");
-    let transport = ReqwestResponsesTransport::default();
-    let mut anthropic_target = target(
-        "anthropic-neutral",
-        &anthropic_base_url,
-        "MiniMax-M3",
-        "primary",
-        "V3_GENERAL_ANTHROPIC_KEY",
-    );
-    anthropic_target.provider_type = "anthropic".to_string();
-    let wire = build_v3_provider_12_responses_wire_payload(
-        "req-anthropic",
-        anthropic_target,
-        json!({
-            "model":"client-alias",
-            "instructions":"Answer briefly.",
-            "input":[{
-                "type":"message",
-                "role":"user",
-                "content":[{"type":"input_text","text":"Say OK"}]
-            }],
-            "tools":[
-                {"type":"function","name":"lookup","description":"Lookup","parameters":{"type":"object"}},
-                {"type":"web_search_preview"}
-            ],
-            "stream":false
-        }),
-    )
-    .unwrap();
-    let request = build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap();
-    assert_eq!(request.url(), format!("{anthropic_base_url}/v1/messages"));
-    let raw = transport.send(request).await.unwrap();
-    let projected = serde_json::from_slice::<Value>(&raw.into_body_bytes().await.unwrap()).unwrap();
-    assert_eq!(projected["object"], "response");
-    assert_eq!(projected["status"], "completed");
-    assert_eq!(projected["model"], "MiniMax-M3");
-    assert_eq!(projected["output"][0]["type"], "message");
-    assert_eq!(projected["output"][0]["content"][0]["type"], "output_text");
-    assert_eq!(projected["output"][0]["content"][0]["text"], "OK");
-
-    let capture = captures.recv().await.unwrap();
-    assert_eq!(capture.authorization, None);
-    assert_eq!(capture.x_api_key.as_deref(), Some("secret-anthropic"));
-    assert_eq!(capture.anthropic_version.as_deref(), Some("2023-06-01"));
-    assert_eq!(capture.accept.as_deref(), Some("application/json"));
-    assert_eq!(capture.body["model"], "MiniMax-M3");
-    assert_eq!(capture.body["system"], "Answer briefly.");
-    assert_eq!(capture.body["messages"][0]["role"], "user");
-    assert_eq!(capture.body["messages"][0]["content"][0]["type"], "text");
-    assert_eq!(capture.body["messages"][0]["content"][0]["text"], "Say OK");
-    assert_eq!(capture.body["tools"][0]["name"], "lookup");
-    assert_eq!(
-        capture.body["tools"][0]["input_schema"],
-        json!({"type":"object"})
-    );
-    assert_eq!(
-        capture.body["tools"][1],
-        json!({
-            "type":"web_search_20250305",
-            "name":"web_search",
-            "max_uses":2
-        })
-    );
-    assert!(capture.body.get("instructions").is_none());
-    assert!(capture.body.get("input").is_none());
-
-    std::env::remove_var("V3_GENERAL_ANTHROPIC_KEY");
-    shutdown.send(()).unwrap();
 }
 
 #[tokio::test]

@@ -827,6 +827,11 @@ pub enum V3HubRelayResponseError {
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
     UnsupportedStatus { status: String },
+    #[error("{protocol} provider response is malformed at Resp03: {reason}")]
+    ProviderProtocolResponseMalformed {
+        protocol: &'static str,
+        reason: &'static str,
+    },
     #[error("provider response compat failed: {reason}")]
     ProviderCompatFailed { reason: String },
     #[error("stopless response hook projection failed: {reason}")]
@@ -908,8 +913,61 @@ fn govern_v3_hub_relay_response(
 ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
     let input = apply_v3_stopless_response_hook_at_resp03(input, profile)?;
     let input = project_v3_apply_patch_freeform_calls_at_resp03(input);
-    let object = input
-        .provider_payload()
+    let governance = build_v3_resp03_protocol_governance(&input)?;
+    let terminality = if governance.tool_calls.is_empty() {
+        governance.status_terminality
+    } else {
+        V3HubResponseTerminality::NonTerminal
+    };
+    let servertool_action = if governance
+        .tool_calls
+        .iter()
+        .any(|tool_call| profile.servertool_names.contains(&tool_call.name))
+    {
+        V3HubServertoolResponseAction::FollowupRequired
+    } else {
+        V3HubServertoolResponseAction::None
+    };
+    Ok(V3HubRespChatProcess03Governed {
+        previous: input,
+        terminality,
+        tool_calls: governance.tool_calls,
+        servertool_action,
+    })
+}
+
+struct V3Resp03ProtocolGovernance {
+    status_terminality: V3HubResponseTerminality,
+    tool_calls: Vec<V3HubResponseToolCall>,
+}
+
+fn build_v3_resp03_protocol_governance(
+    input: &V3HubRespInbound02Normalized,
+) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
+    match input.provider_raw().provider_protocol {
+        V3HubProviderWireProtocol::Responses => {
+            build_v3_responses_resp03_protocol_governance(input.provider_payload().as_ref())
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            build_v3_openai_chat_resp03_protocol_governance(input.provider_payload().as_ref())
+        }
+        V3HubProviderWireProtocol::Gemini => build_v3_gemini_resp03_protocol_governance(
+            input.provider_payload().as_ref(),
+            input.provider_raw().transport_intent,
+        ),
+        V3HubProviderWireProtocol::Anthropic => {
+            Err(V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+                protocol: "anthropic",
+                reason: "Anthropic provider wire is not a Relay Chat Process response protocol",
+            })
+        }
+    }
+}
+
+fn build_v3_responses_resp03_protocol_governance(
+    payload: &Value,
+) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
+    let object = payload
         .as_object()
         .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
     let output = match object.get("output") {
@@ -917,6 +975,29 @@ fn govern_v3_hub_relay_response(
         Some(_) => return Err(V3HubRelayResponseError::ProviderResponseOutputNotArray),
         None => &[],
     };
+    let tool_calls = collect_v3_resp03_responses_tool_calls(output)?;
+    let status = object
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or(V3HubRelayResponseError::MissingStatus)?;
+    let status_terminality = match status {
+        "completed" => V3HubResponseTerminality::Terminal,
+        "requires_action" | "in_progress" | "queued" => V3HubResponseTerminality::NonTerminal,
+        _ => {
+            return Err(V3HubRelayResponseError::UnsupportedStatus {
+                status: status.to_owned(),
+            });
+        }
+    };
+    Ok(V3Resp03ProtocolGovernance {
+        status_terminality,
+        tool_calls,
+    })
+}
+
+fn collect_v3_resp03_responses_tool_calls(
+    output: &[Value],
+) -> Result<Vec<V3HubResponseToolCall>, V3HubRelayResponseError> {
     let mut tool_calls = Vec::new();
     let mut seen_call_ids = BTreeSet::new();
     for (index, item) in output.iter().enumerate() {
@@ -962,37 +1043,85 @@ fn govern_v3_hub_relay_response(
             kind: classify_v3_hub_relay_tool_kind(kind, name),
         });
     }
-    let status = object
-        .get("status")
-        .and_then(Value::as_str)
-        .ok_or(V3HubRelayResponseError::MissingStatus)?;
-    let status_terminality = match status {
-        "completed" => V3HubResponseTerminality::Terminal,
-        "requires_action" | "in_progress" | "queued" => V3HubResponseTerminality::NonTerminal,
-        _ => {
-            return Err(V3HubRelayResponseError::UnsupportedStatus {
-                status: status.to_owned(),
-            });
+    Ok(tool_calls)
+}
+
+fn build_v3_openai_chat_resp03_protocol_governance(
+    payload: &Value,
+) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
+    let choices = payload.get("choices").and_then(Value::as_array).ok_or(
+        V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+            protocol: "openai_chat",
+            reason: "choices must be an array",
+        },
+    )?;
+    let mut output = Vec::new();
+    for choice in choices {
+        for call in choice
+            .pointer("/message/tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            output.push(json!({
+                "type": "function_call",
+                "call_id": call.get("id").cloned().unwrap_or(Value::Null),
+                "name": call.pointer("/function/name").cloned().unwrap_or(Value::Null)
+            }));
         }
-    };
-    let terminality = if tool_calls.is_empty() {
-        status_terminality
-    } else {
+    }
+    Ok(V3Resp03ProtocolGovernance {
+        status_terminality: V3HubResponseTerminality::Terminal,
+        tool_calls: collect_v3_resp03_responses_tool_calls(&output)?,
+    })
+}
+
+fn build_v3_gemini_resp03_protocol_governance(
+    payload: &Value,
+    transport_intent: V3HubTransportIntent,
+) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
+    let candidates = payload.get("candidates").and_then(Value::as_array).ok_or(
+        V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+            protocol: "gemini",
+            reason: "candidates must be an array",
+        },
+    )?;
+    let mut output = Vec::new();
+    for candidate in candidates {
+        for part in candidate
+            .get("content")
+            .and_then(|content| content.get("parts"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(function_call) = part.get("functionCall") else {
+                continue;
+            };
+            let name = function_call
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or(V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+                    protocol: "gemini",
+                    reason: "functionCall.name is required",
+                })?;
+            output.push(json!({"type":"function_call","call_id":name,"name":name}));
+        }
+    }
+    let terminal = candidates.iter().any(|candidate| {
+        candidate
+            .get("finishReason")
+            .is_some_and(|value| !value.is_null())
+    });
+    let status_terminality = if transport_intent == V3HubTransportIntent::Sse && !terminal {
         V3HubResponseTerminality::NonTerminal
-    };
-    let servertool_action = if tool_calls
-        .iter()
-        .any(|tool_call| profile.servertool_names.contains(&tool_call.name))
-    {
-        V3HubServertoolResponseAction::FollowupRequired
     } else {
-        V3HubServertoolResponseAction::None
+        V3HubResponseTerminality::Terminal
     };
-    Ok(V3HubRespChatProcess03Governed {
-        previous: input,
-        terminality,
-        tool_calls,
-        servertool_action,
+    Ok(V3Resp03ProtocolGovernance {
+        status_terminality,
+        tool_calls: collect_v3_resp03_responses_tool_calls(&output)?,
     })
 }
 

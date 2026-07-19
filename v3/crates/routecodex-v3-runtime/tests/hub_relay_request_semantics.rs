@@ -427,15 +427,16 @@ fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governanc
             "output":[{"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{}"}]
         }),
     );
+    let original_request = json!({
+        "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{\"current_goal\":\"keep valid continuation semantics\",\"next_step\":\"continue with exact next step\",\"input\":{\"triggerHint\":\"non_terminal_schema\"}}"}],
+        "tools":[
+            {"type":"function","name":"exec_command","description":"run command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}},
+            {"type":"function","name":"request_user_input","description":"ask user","parameters":{"type":"object","properties":{"question":{"type":"string"}}}}
+        ]
+    });
     let governed = hooks
         .run(
-            raw(json!({
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{\"next_step\":\"continue with exact next step\"}"}],
-                "tools":[
-                    {"type":"function","name":"exec_command","description":"run command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}},
-                    {"type":"function","name":"request_user_input","description":"ask user","parameters":{"type":"object","properties":{"question":{"type":"string"}}}}
-                ]
-            })),
+            raw(original_request),
             &lookup,
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
         )
@@ -496,6 +497,60 @@ fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governanc
     assert!(rewrite < injected);
     assert!(injected < tool_governed);
     assert!(rewrite < tool_governed);
+}
+
+#[test]
+fn stopless_request_hook_valid_continue_uses_live_cli_continuation_prompt() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_live_continue"), scope())
+        .with_local_context(
+            "rcc_stopless_live_continue",
+            scope(),
+            json!({
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_stopless_reasoning",
+                    "name":"exec_command",
+                    "arguments":"{}"
+                }]
+            }),
+        );
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":"{\"ok\":true,\"kind\":\"stop_message_auto\",\"tool\":\"stop_message_auto\",\"summary\":\"继续\",\"toolName\":\"stop_message_auto\",\"flowId\":\"stop_message_flow\",\"routeHint\":\"thinking\",\"continuationPrompt\":\"PHASE2-stopless-live-probe\",\"repeatCount\":1,\"maxRepeats\":3,\"schemaFeedback\":{\"reasonCode\":\"stop_schema_continue_next_step\",\"missingFields\":[]},\"input\":{\"flowId\":\"stop_message_flow\",\"maxRepeats\":3,\"repeatCount\":1,\"triggerHint\":\"non_terminal_schema\"}}"
+                }],
+                "tools":[
+                    {"type":"function","name":"exec_command","description":"run command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}
+                ]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(
+        input[0],
+        json!({"role":"user","content":"PHASE2-stopless-live-probe"})
+    );
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(!serialized.contains("缺少可执行续跑字段"));
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+    let tools = governed.payload()["tools"].as_array().unwrap();
+    assert_eq!(tools[0]["name"], "exec_command");
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1
+    );
 }
 
 #[test]

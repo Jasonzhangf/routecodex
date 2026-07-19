@@ -193,6 +193,39 @@ fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Valu
     );
 }
 
+fn assert_no_original_tools_injects_single_top_level_reasoning_stop(body: &Value) {
+    let tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("provider request with no original tools must create the only legal Responses $.tools injection surface");
+    assert_eq!(
+        tools.len(),
+        1,
+        "no-original-tools provider request must contain exactly one injected reasoningStop tool: {tools:?}"
+    );
+    assert_eq!(
+        tools[0]
+            .get("name")
+            .or_else(|| tools[0]
+                .get("function")
+                .and_then(|function| function.get("name")))
+            .and_then(Value::as_str),
+        Some("reasoningStop"),
+        "no-original-tools provider request must inject only reasoningStop: {tools:?}"
+    );
+    let additional_tools_count = body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .count();
+    assert_eq!(
+        additional_tools_count, 0,
+        "no-original-tools request must not synthesize Responses input.additional_tools: {body}"
+    );
+}
+
 fn assert_additional_tools_preserved_without_shape_rebuild(
     body: &Value,
     expected_original_tools: &[Value],
@@ -554,6 +587,84 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
 }
 
 #[tokio::test]
+async fn json_runtime_preserves_responses_reasoning_and_visible_text_fields_to_client() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_reasoning_text_runtime",
+            "status":"completed",
+            "output":[
+                {
+                    "type":"reasoning",
+                    "summary":[{"type":"summary_text","text":"reasoning trace"}]
+                },
+                {
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"visible answer"}]
+                }
+            ]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-reasoning-text-runtime",
+        "conversation-reasoning-text-runtime",
+        5555,
+        "controlled",
+    );
+
+    let response = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-reasoning-text-runtime".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Return reasoning and visible text"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        32_000,
+    )
+    .await
+    .unwrap();
+    match response.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "completed");
+            assert_eq!(body["output"][0]["type"], "reasoning");
+            assert_eq!(
+                body["output"][0]["summary"][0]["text"], "reasoning trace",
+                "client projection must keep Responses reasoning.summary in the reasoning slot"
+            );
+            assert_eq!(body["output"][1]["type"], "message");
+            assert_eq!(
+                body["output"][1]["content"][0]["text"], "visible answer",
+                "client projection must keep Responses output_text as visible text"
+            );
+            assert!(
+                body["output"][1]["content"][0].get("summary").is_none(),
+                "visible text item must not absorb reasoning summary fields"
+            );
+        }
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("reasoning/text JSON response must project JSON client body")
+        }
+    }
+    assert!(state.is_empty().unwrap());
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_no_original_tools_injects_single_top_level_reasoning_stop(&captures[0]);
+    assert_provider_stopless_guidance(&captures[0]);
+    assert_no_stopless_shell_artifacts(&captures[0]);
+}
+
+#[tokio::test]
 async fn provider_request_dry_run_uses_live_local_continuation_state() {
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
@@ -581,28 +692,29 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     );
     let original_tools =
         json!([{"type":"function","name":"exec_command","description":"run command"}]);
+    let original_request = json!({
+        "model":"client-responses",
+        "input":[
+            {
+                "type":"additional_tools",
+                "role":"developer",
+                "tools": original_tools.clone()
+            },
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"Trigger stopless with tools"}]
+            }
+        ],
+        "stream":false
+    });
 
     let first = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
             request_id: "req-stopless-dry-run-1".into(),
-            payload: json!({
-                "model":"client-responses",
-                "input":[
-                    {
-                        "type":"additional_tools",
-                        "role":"developer",
-                        "tools": original_tools.clone()
-                    },
-                    {
-                        "type":"message",
-                        "role":"user",
-                        "content":[{"type":"input_text","text":"Trigger stopless with tools"}]
-                    }
-                ],
-                "stream":false
-            }),
+            payload: original_request.clone(),
         },
         &transport,
         &state,
@@ -618,27 +730,30 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     assert_eq!(first_body["status"], "requires_action");
     assert_eq!(state.len().unwrap(), 1);
 
-    let dry_run = routecodex_v3_runtime::execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
-        &manifest(),
-        V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
-            request_id: "req-stopless-dry-run-2".into(),
-            payload: json!({
-                "model":"client-responses",
-                "previous_response_id": first_body["id"].as_str().unwrap(),
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":"{\"current_goal\":\"preserve the original provider tool JSON path\",\"next_step\":\"continue and keep tools\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"non_terminal_schema\"}}"
-                }],
-                "stream":false
-            }),
-        },
-        &state,
-        scope,
-        71_000,
-    )
-    .await;
+    let submit_payload = json!({
+        "model":"client-responses",
+        "previous_response_id": first_body["id"].as_str().unwrap(),
+        "input":[{
+            "type":"function_call_output",
+            "call_id":"call_stopless_reasoning",
+            "output":"{\"current_goal\":\"preserve the original provider tool JSON path\",\"next_step\":\"continue and keep tools\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"non_terminal_schema\"}}"
+        }],
+        "stream":false
+    });
+
+    let dry_run =
+        routecodex_v3_runtime::execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+            &manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: "req-stopless-dry-run-2".into(),
+                payload: submit_payload.clone(),
+            },
+            &state,
+            scope.clone(),
+            71_000,
+        )
+        .await;
 
     assert_eq!(dry_run.status, 200);
     let provider_request = dry_run
@@ -663,6 +778,111 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         body,
         original_tools.as_array().unwrap(),
     );
+    assert_provider_stopless_guidance(body);
+    assert_no_stopless_shell_artifacts(body);
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "provider-request dry-run must not release or commit local continuation state"
+    );
+
+    let second_dry_run =
+        routecodex_v3_runtime::execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+            &manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: "req-stopless-dry-run-3".into(),
+                payload: submit_payload,
+            },
+            &state,
+            scope,
+            72_000,
+        )
+        .await;
+    assert_eq!(second_dry_run.status, 200);
+    let second_provider_request = second_dry_run
+        .body
+        .get("providerRequest")
+        .expect("second dry-run provider request");
+    let second_body = second_provider_request
+        .get("body")
+        .or_else(|| second_provider_request.get("payload"))
+        .or(Some(second_provider_request))
+        .unwrap();
+    assert_eq!(
+        second_body["input"], body["input"],
+        "provider-request dry-run must be observational only and must not accumulate repeated stopless prompts"
+    );
+    assert_additional_tools_preserved_without_shape_rebuild(
+        second_body,
+        original_tools.as_array().unwrap(),
+    );
+    assert_provider_stopless_guidance(second_body);
+    assert_no_stopless_shell_artifacts(second_body);
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "repeated provider-request dry-run must leave local continuation state unchanged"
+    );
+}
+
+#[tokio::test]
+async fn json_stopless_no_original_tools_injects_single_top_level_tool_before_provider_send() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_stopless_no_original_tools",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"output_text",
+                "text":"done {\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"no original tools still got stop schema guidance\"}"
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-no-original-tools",
+        "conversation-stopless-no-original-tools",
+        5555,
+        "controlled",
+    );
+    let original_request = json!({
+        "model":"client-responses",
+        "input":[{"role":"user","content":"Trigger stopless without original tools"}],
+        "stream":false
+    });
+
+    let response = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-no-original-tools".into(),
+            payload: original_request.clone(),
+        },
+        &transport,
+        &state,
+        scope,
+        72_000,
+    )
+    .await
+    .unwrap();
+    match response.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("no-tools terminal stopless turn must be JSON")
+        }
+    }
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = &captures[0];
+    assert!(
+        original_request.get("tools").is_none(),
+        "test setup must represent a real no-original-tools request"
+    );
+    assert_no_original_tools_injects_single_top_level_reasoning_stop(body);
     assert_provider_stopless_guidance(body);
     assert_no_stopless_shell_artifacts(body);
 }
@@ -737,23 +957,25 @@ async fn json_stopless_preserves_codex_additional_tools_across_continuation() {
         "controlled",
     );
 
+    let original_request = json!({
+        "model":"client-responses",
+        "input":[
+            {
+                "type":"additional_tools",
+                "role":"developer",
+                "tools": original_tools.clone()
+            },
+            {"role":"user","content":"Trigger stopless with Codex additional tools"}
+        ],
+        "stream":false
+    });
+
     let first = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
             request_id: "req-stopless-additional-tools-1".into(),
-            payload: json!({
-                "model":"client-responses",
-                "input":[
-                    {
-                        "type":"additional_tools",
-                        "role":"developer",
-                        "tools": original_tools.clone()
-                    },
-                    {"role":"user","content":"Trigger stopless with Codex additional tools"}
-                ],
-                "stream":false
-            }),
+            payload: original_request.clone(),
         },
         &transport,
         &state,
@@ -1837,6 +2059,166 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
     for forbidden in [
         "session-local",
         "conversation-local",
+        "routecodex_local",
+        "continuation_owner",
+        "metadata_center",
+        "store_key",
+    ] {
+        assert!(
+            !provider_wire.contains(forbidden),
+            "provider payload leaked {forbidden}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs() {
+    let original_tools = json!([{
+        "type":"function",
+        "name":"lookup",
+        "description":"lookup beta",
+        "parameters":{"type":"object","properties":{"q":{"type":"string"}}},
+        "strict":false
+    }]);
+    let original_additional_tools_item = json!({
+        "type":"additional_tools",
+        "role":"developer",
+        "tools": original_tools.clone()
+    });
+    let original_user_item = json!({"role":"user","content":"Lookup beta"});
+    let provider_function_call = json!({
+        "type":"function_call",
+        "call_id":"call_lookup_additional",
+        "name":"lookup",
+        "arguments":"{\"q\":\"beta\"}"
+    });
+    let provider_function_output = json!({
+        "type":"function_call_output",
+        "call_id":"call_lookup_additional",
+        "output":"beta"
+    });
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "id":"resp_local_additional_tools_1",
+                "status":"requires_action",
+                "output":[provider_function_call.clone()]
+            }),
+            json!({
+                "id":"resp_local_additional_tools_2",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"beta result"}]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-additional-tools-normal",
+        "conversation-additional-tools-normal",
+        5555,
+        "controlled",
+    );
+    let original_request = json!({
+        "model":"client-responses",
+        "input":[original_additional_tools_item.clone(), original_user_item.clone()],
+        "stream":false
+    });
+
+    let first = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-additional-tools-normal-1".into(),
+            payload: original_request.clone(),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        2_100,
+    )
+    .await
+    .unwrap();
+    match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first additional-tools turn must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-additional-tools-normal-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[provider_function_output.clone()],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        2_200,
+    )
+    .await
+    .unwrap();
+    match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second additional-tools turn must be JSON"),
+    }
+    assert!(state.is_empty().unwrap());
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    for capture in captures.iter() {
+        assert_additional_tools_preserved_without_shape_rebuild(
+            capture,
+            original_tools.as_array().unwrap(),
+        );
+        assert_provider_stopless_guidance(capture);
+        assert_no_stopless_shell_artifacts(capture);
+    }
+    assert!(
+        captures[0].get("tools").is_none(),
+        "round-1 provider request must not synthesize a sibling top-level tools surface: {}",
+        captures[0]
+    );
+    assert!(
+        captures[1].get("tools").is_none(),
+        "round-2 provider request must not synthesize a sibling top-level tools surface: {}",
+        captures[1]
+    );
+    let round2_input = captures[1]["input"]
+        .as_array()
+        .expect("round-2 provider input must be array");
+    assert_eq!(
+        round2_input.len(),
+        4,
+        "round-2 provider input must be original additional_tools + original user + restored tool call + current tool output: {round2_input:?}"
+    );
+    assert_eq!(
+        round2_input[0]["type"], original_additional_tools_item["type"],
+        "original additional_tools item must stay at the original input path"
+    );
+    assert_eq!(
+        round2_input[0]["role"], original_additional_tools_item["role"],
+        "original additional_tools role must stay at the original input path"
+    );
+    for (index, expected_tool) in original_tools.as_array().unwrap().iter().enumerate() {
+        assert_eq!(
+            &round2_input[0]["tools"][index], expected_tool,
+            "round-2 provider request changed original input[0].tools[{index}]"
+        );
+    }
+    assert_eq!(round2_input[1], original_user_item);
+    assert_eq!(round2_input[2], provider_function_call);
+    assert_eq!(round2_input[3], provider_function_output);
+    let provider_wire = serde_json::to_string(&captures[1]).unwrap();
+    for forbidden in [
+        "session-additional-tools-normal",
+        "conversation-additional-tools-normal",
         "routecodex_local",
         "continuation_owner",
         "metadata_center",

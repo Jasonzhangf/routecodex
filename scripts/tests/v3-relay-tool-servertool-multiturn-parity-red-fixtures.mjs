@@ -153,6 +153,14 @@ const cases = [
     diagnostic: /responses_http_provider_request_preserves_additional_tools_surface|Responses HTTP additional_tools global lift/,
   },
   {
+    name: 'provider transport Anthropic protocol conversion revived',
+    file: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
+    marker: 'pub fn build_v3_transport_13_responses_request_from_v3_provider_12(',
+    mutation:
+      'fn build_anthropic_messages_body() {}\npub fn build_v3_transport_13_responses_request_from_v3_provider_12(',
+    diagnostic: /non-ChatProcess protocol conversion in provider transport|build_anthropic_messages_body/,
+  },
+  {
     name: 'mainline edge owner drift',
     file: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
     marker: 'owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout',

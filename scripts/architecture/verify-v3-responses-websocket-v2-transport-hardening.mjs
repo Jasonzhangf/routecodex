@@ -116,7 +116,7 @@ for (const script of [
 }
 
 const wsStart = transport.indexOf('async fn send_websocket_v2(');
-const wsJsonEnd = transport.indexOf('fn anthropic_messages_url', wsStart);
+const wsJsonEnd = transport.indexOf('struct V3ResponsesWebSocketProtocolAggregate', wsStart);
 const wsSseStart = transport.indexOf('fn websocket_sse_stream(');
 const wsEnd = transport.indexOf('async fn read_response_body_bytes(');
 if (wsStart < 0 || wsJsonEnd <= wsStart || wsSseStart <= wsJsonEnd || wsEnd <= wsSseStart) {

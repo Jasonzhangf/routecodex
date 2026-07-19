@@ -17,7 +17,7 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::pin::Pin;
 
 pub type V3OpenAiChatClientStream =
@@ -110,17 +110,7 @@ pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
         transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
-    let semantic = characterize_v3_openai_chat_client_input_to_hub_semantic(
-        req01.payload.0,
-        V3HubEntryProtocol::OpenAiChat,
-        transport_intent,
-    )?;
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        semantic.payload().clone(),
-        V3HubEntryProtocol::OpenAiChat,
-        V3HubInvocationSource::Client,
-        transport_intent,
-    );
+    validate_v3_openai_chat_client_input_payload(&req01.payload.0, V3HubEntryProtocol::OpenAiChat)?;
     let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
     trace.push("V3HubReqInbound02Normalized");
     let lookup = V3HubContinuationLookup::new(
@@ -167,10 +157,8 @@ pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
     trace.push("ProviderReqCompat06ProviderCompat");
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-    let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-    let provider_semantic = characterize_v3_openai_chat_hub_semantic_to_provider_wire(semantic)?
-        .payload()
-        .clone();
+    let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
+    let provider_semantic = req09.into_provider_semantic_payload();
     let wire =
         build_v3_provider_12_responses_wire_payload(&input.request_id, target, provider_semantic)?;
     trace.push("V3ProviderReqOutbound08WirePayload");
@@ -262,14 +250,13 @@ fn project_json_response(
     trace: &mut Vec<&'static str>,
     compatibility_profile: Option<&str>,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
-    let semantic = characterize_v3_openai_chat_provider_raw_to_hub_response_semantic(
-        provider_value,
+    validate_v3_openai_chat_provider_response_payload(
+        &provider_value,
         V3HubProviderWireProtocol::OpenAiChat,
         transport_intent,
     )?;
-    let governance = build_openai_chat_json_governance_response(semantic.payload())?;
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-        governance,
+        provider_value,
         V3HubEntryProtocol::OpenAiChat,
         V3HubProviderWireProtocol::OpenAiChat,
         V3HubContinuationOwnership::New,
@@ -287,19 +274,18 @@ fn project_json_response(
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
-    let client = characterize_v3_openai_chat_hub_response_semantic_to_client_projection(semantic)?;
+    let client = resp04.finalized_payload().clone();
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(client.payload().clone())
+    Ok(client)
 }
 
 struct V3OpenAiChatSseState {
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     decoder: routecodex_v3_sse::SseIncrementalDecoder,
     pending: VecDeque<Result<Vec<u8>, String>>,
-    tool_calls: BTreeMap<u64, (String, String)>,
     terminal: bool,
     seen_done: bool,
     done: bool,
@@ -315,7 +301,6 @@ fn project_sse_stream(
             routecodex_v3_sse::SseTransportLimits::default(),
         ),
         pending: VecDeque::new(),
-        tool_calls: BTreeMap::new(),
         terminal: false,
         seen_done: false,
         done: false,
@@ -388,31 +373,13 @@ fn enqueue_sse_client_chunks(
             continue;
         }
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
-        characterize_v3_openai_chat_provider_raw_to_hub_response_semantic(
-            payload.clone(),
+        validate_v3_openai_chat_provider_response_payload(
+            &payload,
             V3HubProviderWireProtocol::OpenAiChat,
             V3HubTransportIntent::Sse,
         )
         .map_err(|error| error.to_string())?;
-        let was_terminal = state.terminal;
-        observe_openai_chat_sse_governance(&payload, &mut state.tool_calls, &mut state.terminal)?;
-        if !was_terminal && state.terminal {
-            let output = state
-                .tool_calls
-                .values()
-                .map(
-                    |(call_id, name)| json!({"type":"function_call","call_id":call_id,"name":name}),
-                )
-                .collect::<Vec<_>>();
-            let status = if output.is_empty() {
-                "completed"
-            } else {
-                "requires_action"
-            };
-            let mut trace = Vec::new();
-            project_sse_response(json!({"status":status,"output":output}), &mut trace)
-                .map_err(|error| error.to_string())?;
-        }
+        state.terminal = openai_chat_sse_payload_has_terminal_finish_reason(&payload)?;
         state
             .pending
             .push_back(Ok(format!("data: {payload}\n\n").into_bytes()));
@@ -420,107 +387,21 @@ fn enqueue_sse_client_chunks(
     Ok(())
 }
 
-fn project_sse_response(
-    canonical_response: Value,
-    trace: &mut Vec<&'static str>,
-) -> Result<(), V3OpenAiChatRelayRuntimeError> {
-    let resp01 = build_v3_provider_resp_inbound_01_raw(
-        canonical_response,
-        V3HubEntryProtocol::OpenAiChat,
-        V3HubProviderWireProtocol::OpenAiChat,
-        V3HubContinuationOwnership::New,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Sse,
-    );
-    trace.push("V3ProviderRespInbound01Raw");
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks.normalize(resp01)?;
-    trace.push("ProviderRespCompat02ProviderCompat");
-    trace.push("V3HubRespInbound02Normalized");
-    let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
-    trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    trace.push("V3HubRespContinuation04Committed");
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
-    trace.push("V3HubRespOutbound05ClientSemantic");
-    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
-    trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(())
-}
-
-fn build_openai_chat_json_governance_response(
-    payload: &Value,
-) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
-    let choices = payload
-        .get("choices")
-        .and_then(Value::as_array)
-        .ok_or(V3OpenAiChatCodecError::ChoicesNotArray)?;
-    let mut output = Vec::new();
-    for choice in choices {
-        for call in choice
-            .pointer("/message/tool_calls")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            output.push(json!({
-                "type": "function_call",
-                "call_id": call.get("id").cloned().unwrap_or(Value::Null),
-                "name": call.pointer("/function/name").cloned().unwrap_or(Value::Null)
-            }));
-        }
-    }
-    let status = if output.is_empty() {
-        "completed"
-    } else {
-        "requires_action"
-    };
-    Ok(json!({"status":status,"output":output}))
-}
-
-fn observe_openai_chat_sse_governance(
-    payload: &Value,
-    tool_calls: &mut BTreeMap<u64, (String, String)>,
-    terminal: &mut bool,
-) -> Result<(), String> {
+fn openai_chat_sse_payload_has_terminal_finish_reason(payload: &Value) -> Result<bool, String> {
     let choices = payload
         .get("choices")
         .and_then(Value::as_array)
         .ok_or_else(|| "OpenAI Chat SSE choices are missing".to_string())?;
+    let mut terminal = false;
     for choice in choices {
         if choice
             .get("finish_reason")
             .is_some_and(|value| !value.is_null())
         {
-            *terminal = true;
-        }
-        for call in choice
-            .pointer("/delta/tool_calls")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
-            let entry = tool_calls
-                .entry(index)
-                .or_insert_with(|| (String::new(), String::new()));
-            if let Some(call_id) = call.get("id").and_then(Value::as_str) {
-                entry.0 = call_id.to_string();
-            }
-            if let Some(name) = call.pointer("/function/name").and_then(Value::as_str) {
-                entry.1 = name.to_string();
-            }
+            terminal = true;
         }
     }
-    if tool_calls
-        .values()
-        .any(|(call_id, name)| call_id.is_empty() || name.is_empty())
-        && *terminal
-    {
-        return Err("OpenAI Chat SSE terminal tool call is missing id or name".to_string());
-    }
-    Ok(())
+    Ok(terminal)
 }
 
 fn server_routing_group<'a>(

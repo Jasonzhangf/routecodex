@@ -69,7 +69,7 @@ fn real_5555_sample_json(sample_dir_name: &str, file_name: &str) -> Option<Value
 }
 
 #[test]
-fn minimax_profile_is_loaded_at_resp02_before_chat_process_governance() {
+fn provider_resp_compat_profile_loads_before_chat_process_tool_governance() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let raw = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         json!({
@@ -96,21 +96,18 @@ fn minimax_profile_is_loaded_at_resp02_before_chat_process_governance() {
         Some("chat:minimax"),
     );
 
-    let resp02 = hooks.normalize(raw).unwrap();
+    let resp02 = hooks
+        .normalize(raw)
+        .expect("provider compat profile should normalize provider-specific text tools");
     let resp03 = hooks
         .govern(resp02, &V3HubRelayResponseHookProfile::empty())
-        .unwrap();
+        .expect("chat process should harvest compat-normalized function call");
     assert_eq!(resp03.tool_call_count(), 1);
-
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    let payload = resp04.finalized_payload();
-    assert_eq!(payload["output"][0]["type"], "function_call");
-    assert_eq!(payload["output"][0]["name"], "exec_command");
-    assert_eq!(payload["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
-    let serialized = serde_json::to_string(payload).unwrap();
-    assert!(!serialized.contains("<function_calls>"));
-    assert!(!serialized.contains("</function_calls>"));
+    assert_eq!(
+        resp03.tool_call_kinds(),
+        vec![routecodex_v3_runtime::V3HubRelayToolKind::Function]
+    );
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
 }
 
 #[test]
@@ -201,6 +198,54 @@ fn terminal_response_commits_no_continuation() {
     let resp04 = hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
     assert_eq!(resp04.canonical_context_count(), 0);
+}
+
+#[test]
+fn response_reasoning_summary_and_text_stay_separate_through_chat_process() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let provider_payload = json!({
+        "id":"resp_reasoning_text_contract",
+        "status":"completed",
+        "output":[
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"reasoning trace"}]
+            },
+            {
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"visible answer"}]
+            }
+        ]
+    });
+    let resp02 = hooks
+        .normalize(relay_raw(
+            provider_payload.clone(),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let payload = resp04.finalized_payload();
+    assert_eq!(
+        payload["output"][0],
+        provider_payload["output"][0],
+        "RespChatProcess must preserve Responses reasoning.summary as reasoning, not convert it to visible text"
+    );
+    assert_eq!(
+        payload["output"][1]["content"][0]["text"], "visible answer",
+        "RespChatProcess must preserve Responses message.output_text as visible text"
+    );
+    assert_eq!(
+        payload["output"][0]["summary"][0]["text"], "reasoning trace",
+        "Responses reasoning summary text must not be dropped before client projection"
+    );
 }
 
 #[test]
@@ -907,31 +952,38 @@ fn stopless_response_hook_intercepts_reasoning_stop_tool_call_before_client_proj
 #[test]
 fn stopless_response_hook_projects_original_assistant_text_not_reasoning_stop_arguments() {
     let hooks = compile_v3_hub_relay_response_hooks();
+    let provider_payload = json!({
+        "id":"resp_stopless_reasoning_stop_text_projection",
+        "status":"requires_action",
+        "output":[
+            {
+                "type":"message",
+                "role":"assistant",
+                "status":"completed",
+                "content":[{
+                    "type":"output_text",
+                    "text":"ORIGINAL ASSISTANT STOP TEXT"
+                }]
+            },
+            {
+                "type":"function_call",
+                "call_id":"call_model_reasoning_stop_text_projection",
+                "name":"reasoningStop",
+                "arguments":"{\"stopreason\":2,\"reason\":\"PRIVATE STOP ARGUMENT REASON\",\"current_goal\":\"prove V2 parity\",\"next_step\":\"continue with next round\"}"
+            }
+        ]
+    });
+    assert_eq!(
+        provider_payload["output"][0]["content"][0]["text"],
+        "ORIGINAL ASSISTANT STOP TEXT",
+        "provider Responses message.output_text is the only user-visible assistant stop text source"
+    );
+    assert_eq!(
+        provider_payload["output"][1]["name"], "reasoningStop",
+        "provider Responses function_call is the internal stopless control source"
+    );
     let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_reasoning_stop_text_projection",
-                "status":"requires_action",
-                "output":[
-                    {
-                        "type":"message",
-                        "role":"assistant",
-                        "status":"completed",
-                        "content":[{
-                            "type":"output_text",
-                            "text":"ORIGINAL ASSISTANT STOP TEXT"
-                        }]
-                    },
-                    {
-                        "type":"function_call",
-                        "call_id":"call_model_reasoning_stop_text_projection",
-                        "name":"reasoningStop",
-                        "arguments":"{\"stopreason\":2,\"reason\":\"PRIVATE STOP ARGUMENT REASON\",\"current_goal\":\"prove V2 parity\",\"next_step\":\"continue with next round\"}"
-                    }
-                ]
-            }),
-            V3HubTransportIntent::Json,
-        ))
+        .normalize(relay_raw(provider_payload, V3HubTransportIntent::Json))
         .unwrap();
     let resp03 = hooks
         .govern(
@@ -957,6 +1009,14 @@ fn stopless_response_hook_projects_original_assistant_text_not_reasoning_stop_ar
         "V2 parity requires the original assistant stop text to be projected as ordinary CLI-visible text"
     );
     assert_eq!(stopless_projected_call(payload)["name"], "exec_command");
+    assert_eq!(
+        payload["output"][0]["content"][0]["text"], "ORIGINAL ASSISTANT STOP TEXT",
+        "RespChatProcess must preserve provider assistant text through the client projection"
+    );
+    assert_eq!(
+        payload["output"][1]["name"], "exec_command",
+        "RespChatProcess must replace only the internal reasoningStop call with the client-executable CLI call"
+    );
     let serialized = serde_json::to_string(payload).unwrap();
     assert!(!serialized.contains("\"name\":\"reasoningStop\""));
     assert!(!serialized.contains("call_model_reasoning_stop_text_projection"));

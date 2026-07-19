@@ -3,70 +3,7 @@ use futures_util::StreamExt;
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
 };
-use serde_json::{json, Map, Value};
-
-pub fn encode_v3_anthropic_request_as_responses_semantic(
-    input: Value,
-) -> Result<Value, V3AnthropicCodecError> {
-    let transport_intent = match input.get("stream").and_then(Value::as_bool) {
-        Some(true) => super::V3HubTransportIntent::Sse,
-        _ => super::V3HubTransportIntent::Json,
-    };
-    let input = super::characterize_v3_anthropic_client_input_to_hub_semantic(
-        input,
-        super::V3HubEntryProtocol::Anthropic,
-        transport_intent,
-    )?
-    .into_payload();
-    let object = input
-        .as_object()
-        .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
-    let mut output = Map::new();
-    output.insert(
-        "model".to_string(),
-        object.get("model").cloned().unwrap_or(Value::Null),
-    );
-    output.insert(
-        "input".to_string(),
-        Value::Array(encode_messages(
-            object
-                .get("messages")
-                .and_then(Value::as_array)
-                .ok_or(V3AnthropicCodecError::MessagesNotArray)?,
-        )),
-    );
-    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        output.insert(
-            "tools".to_string(),
-            Value::Array(
-                tools
-                    .iter()
-                    .filter_map(Value::as_object)
-                    .map(|tool| {
-                        json!({
-                            "type": "function",
-                            "name": tool.get("name").cloned().unwrap_or(Value::Null),
-                            "parameters": tool.get("input_schema").cloned().unwrap_or_else(|| json!({"type":"object"}))
-                        })
-                    })
-                    .collect(),
-            ),
-        );
-    }
-    if object.get("thinking").is_some() {
-        output.insert("reasoning".to_string(), json!({"effort":"medium"}));
-    }
-    output.insert(
-        "stream".to_string(),
-        Value::Bool(
-            object
-                .get("stream")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        ),
-    );
-    Ok(Value::Object(output))
-}
+use serde_json::{json, Value};
 
 pub fn project_v3_responses_json_as_anthropic_message(
     response: &Value,
@@ -355,54 +292,4 @@ fn ensure_text_content_block(
     *active_text_index = Some(index);
     *next_index = index + 1;
     index
-}
-
-fn encode_messages(messages: &[Value]) -> Vec<Value> {
-    let mut encoded = Vec::new();
-    for message in messages {
-        let role = message.get("role").cloned().unwrap_or(Value::Null);
-        let mut content = match message.get("content") {
-                Some(Value::String(text)) => vec![json!({"type":"input_text","text":text})],
-                Some(Value::Array(parts)) => parts
-                    .iter()
-                    .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
-                    .map(|part| {
-                        json!({"type":"input_text","text":part.get("text").cloned().unwrap_or(Value::Null)})
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-        if !content.is_empty() {
-            encoded.push(json!({"role":role,"content":std::mem::take(&mut content)}));
-        }
-        if let Some(parts) = message.get("content").and_then(Value::as_array) {
-            for part in parts {
-                match part.get("type").and_then(Value::as_str) {
-                        Some("tool_use") => encoded.push(json!({
-                            "type":"function_call",
-                            "call_id":part.get("id").cloned().unwrap_or(Value::Null),
-                            "name":part.get("name").cloned().unwrap_or(Value::Null),
-                            "arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).unwrap_or_else(|_| "null".to_string())
-                        })),
-                        Some("tool_result") => encoded.push(json!({
-                            "type":"function_call_output",
-                            "call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),
-                            "output":anthropic_tool_result_output(part.get("content"))
-                        })),
-                        _ => {}
-                    }
-            }
-        }
-    }
-    encoded
-}
-
-fn anthropic_tool_result_output(content: Option<&Value>) -> Value {
-    match content {
-        Some(Value::String(text)) => Value::String(text.clone()),
-        Some(value) => {
-            Value::String(serde_json::to_string(value).unwrap_or_else(|_| "null".into()))
-        }
-        None => Value::String(String::new()),
-    }
 }

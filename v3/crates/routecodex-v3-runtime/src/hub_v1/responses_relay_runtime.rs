@@ -409,6 +409,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_an
             state,
             scope,
             now_epoch_ms,
+            commit_resp04_effects: true,
         }),
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
@@ -485,6 +486,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
             state,
             scope,
             now_epoch_ms,
+            commit_resp04_effects: true,
         }),
         provider_health.store,
         V3ResponsesRelayRetryPolicy::default(),
@@ -496,6 +498,7 @@ struct V3ResponsesRelayLocalContinuationExecution<'state> {
     state: &'state V3ResponsesRelayLocalContinuationState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
+    commit_resp04_effects: bool,
 }
 
 async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
@@ -966,6 +969,9 @@ fn commit_or_release_responses_local_continuation(
     let Some(local) = local else {
         return Ok(());
     };
+    if !local.commit_resp04_effects {
+        return Ok(());
+    }
     let canonical_context = if action == V3HubContinuationCommit::LocalContext {
         build_v3_relay_local_continuation_context_at_resp04(canonical_request, canonical_response)?
     } else {
@@ -1041,6 +1047,7 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
             state,
             scope,
             now_epoch_ms,
+            commit_resp04_effects: false,
         }),
     )
     .await

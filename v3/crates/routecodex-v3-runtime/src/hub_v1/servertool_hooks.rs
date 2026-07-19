@@ -1107,12 +1107,6 @@ fn build_stopless_provider_prompt_from_cli_output(
         return Ok(prompt);
     }
 
-    if trigger_hint.as_deref() == Some("non_terminal_schema") {
-        return Ok(build_stopless_continue_missing_next_step_prompt(
-            schema_feedback.as_ref(),
-        ));
-    }
-
     if let Some(next_step) = read_stopless_nested_string(parsed, &["next_step", "nextStep"]) {
         return Ok(next_step);
     }
@@ -1126,6 +1120,12 @@ fn build_stopless_provider_prompt_from_cli_output(
             index,
             reason: "valid continue requires next_step or continuationPrompt",
         });
+    }
+
+    if trigger_hint.as_deref() == Some("non_terminal_schema") {
+        return Ok(build_stopless_continue_missing_next_step_prompt(
+            schema_feedback.as_ref(),
+        ));
     }
 
     if trigger_hint.is_none() {
@@ -1447,7 +1447,7 @@ fn build_reasoning_stop_tool() -> Value {
             "{\"stopreason\":0,\"reason\":\"stopreason=0 条件成立\",\"has_evidence\":1,\"evidence\":\"列出日志/测试/文件证据\",\"needs_user_input\":false}. ",
             "Minimal blocked sample: ",
             "{\"stopreason\":1,\"reason\":\"缺少生产只读权限\",\"current_goal\":\"完成在线验证\",\"has_evidence\":1,\"evidence\":\"provider 返回 403 权限错误日志\",\"issue_cause\":\"权限不足\",\"excluded_factors\":\"本地测试已通过\",\"diagnostic_order\":\"本地 gate -> 在线请求\",\"done_steps\":\"已完成源码修复\",\"next_step\":\"请授权生产只读访问\",\"needs_user_input\":true}. ",
-            "Schema repair sample: if the previous turn missed schema, call reasoningStop with {\"stopreason\":2,\"reason\":\"补齐 stop schema\",\"current_goal\":\"继续当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"继续执行并在下一轮提交完整 schema\",\"needs_user_input\":false}; if a field is invalid, keep the same task and repair only the invalid field."
+            "Schema correction sample: if the previous turn missed schema, call reasoningStop with {\"stopreason\":2,\"reason\":\"补齐 stop schema\",\"current_goal\":\"继续当前目标\",\"has_evidence\":0,\"evidence\":\"\",\"next_step\":\"继续执行并在下一轮提交完整 schema\",\"needs_user_input\":false}; if a field is invalid, keep the same task and correct only the invalid field."
         ),
         "parameters": {
             "type": "object",

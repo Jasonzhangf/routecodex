@@ -44,7 +44,7 @@ const fixtures = [
   },
   {
     name: 'Anthropic protocol mapping is allowed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
     from: 'pub fn encode_v3_anthropic_request_as_responses_semantic(',
     to: '// protocol mapping may mention messages/tools without tool identity governance\npub fn encode_v3_anthropic_request_as_responses_semantic(',
     expectPass: true,
@@ -105,6 +105,20 @@ const fixtures = [
     from: 'let local_context = restore_local_context_at_req04(ownership, lookup)?;\n        if local_context.is_some()',
     to: 'run_servertool_profile(profile, &mut events)?;\n        let local_context = restore_local_context_at_req04(ownership, lookup)?;\n        if local_context.is_some()',
     diagnostic: /servertool hook must run after context restore/,
+  },
+  {
+    name: 'Req04 protocol conversion resurrected',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+    from: '        if let Some(context) = local_context.as_deref() {',
+    to: '        let _converted = encode_v3_anthropic_request_as_responses_semantic(payload.clone());\n        if let Some(context) = local_context.as_deref() {',
+    diagnostic: /ReqChatProcess protocol conversion boundary/,
+  },
+  {
+    name: 'Anthropic Relay inbound codec removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
+    from: 'let semantic = encode_v3_anthropic_request_as_responses_semantic(payload)?;',
+    to: 'let semantic = payload;',
+    diagnostic: /Anthropic Relay request protocol codec boundary|missing encode_v3_anthropic_request_as_responses_semantic/,
   },
 ];
 

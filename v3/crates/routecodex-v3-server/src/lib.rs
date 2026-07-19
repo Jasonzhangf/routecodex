@@ -8,7 +8,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
+    resolve_routecodex_package_version_from_executable, V3Config05ManifestPublished,
+    V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
@@ -51,6 +52,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Read as _;
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -143,7 +145,14 @@ impl V3RequestIdCounter {
             self.loaded = true;
             return Ok(());
         }
-        let bytes = fs::read(&self.state_file).map_err(|error| {
+        let mut file = fs::File::open(&self.state_file).map_err(|error| {
+            format!(
+                "failed to read V3 request id counter {}: {error}",
+                self.state_file.display()
+            )
+        })?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|error| {
             format!(
                 "failed to read V3 request id counter {}: {error}",
                 self.state_file.display()
@@ -1968,7 +1977,7 @@ fn persist_v3_codex_sample_payload(
         ))
         .join("ports")
         .join(state.server.port.to_string())
-        .join(sanitize_v3_codex_sample_path_segment(request_id));
+        .join(encode_v3_codex_sample_path_segment(request_id));
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let path = dir.join(file_name);
     let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
@@ -1983,14 +1992,14 @@ fn format_v3_codex_sample_endpoint_dir(entry_protocol: &str, endpoint: &str) -> 
         ("openai_chat", "/v1/chat/completions") => "openai-chat-completions".to_string(),
         ("anthropic", "/v1/messages") => "anthropic-messages".to_string(),
         ("gemini", _) => "gemini-generate-content".to_string(),
-        _ => sanitize_v3_codex_sample_path_segment(
+        _ => encode_v3_codex_sample_path_segment(
             endpoint.trim_start_matches('/').replace('/', "-").as_str(),
         ),
     }
 }
 
-fn sanitize_v3_codex_sample_path_segment(value: &str) -> String {
-    let sanitized = value
+fn encode_v3_codex_sample_path_segment(value: &str) -> String {
+    let path_safe = value
         .chars()
         .map(|character| {
             if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
@@ -2002,10 +2011,10 @@ fn sanitize_v3_codex_sample_path_segment(value: &str) -> String {
         .collect::<String>()
         .trim_matches('_')
         .to_string();
-    if sanitized.is_empty() {
+    if path_safe.is_empty() {
         "unknown".to_string()
     } else {
-        sanitized
+        path_safe
     }
 }
 
@@ -2788,43 +2797,11 @@ fn emit_v3_startup_console_line(listeners: &[V3ListenerHandle]) {
         "[RouteCodexV3] Server started version={} crate={} binary={} on {addresses}",
         executable
             .as_deref()
-            .and_then(resolve_routecodex_package_version)
+            .and_then(resolve_routecodex_package_version_from_executable)
             .unwrap_or_else(|| "unknown".to_string()),
         env!("CARGO_PKG_VERSION"),
         binary
     );
-}
-
-fn resolve_routecodex_package_version(executable: &std::path::Path) -> Option<String> {
-    std::env::var("ROUTECODEX_VERSION")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| read_nearest_package_version(executable))
-}
-
-fn read_nearest_package_version(executable: &std::path::Path) -> Option<String> {
-    for ancestor in executable.ancestors() {
-        let package_json = ancestor.join("package.json");
-        let Ok(raw) = std::fs::read_to_string(package_json) else {
-            continue;
-        };
-        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
-            continue;
-        };
-        if parsed
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| value == "routecodex")
-            .unwrap_or(false)
-        {
-            return parsed
-                .get("version")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-        }
-    }
-    None
 }
 
 const ANSI_RESET: &str = "\x1b[0m";

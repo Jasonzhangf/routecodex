@@ -1478,12 +1478,11 @@ features:
   - feature_id: v3.apply_patch_guidance_provider_compat
     status: live_verified
     change_risk: high
-    owner_kind: rust_v3_req04_chatprocess_and_provider_compat
-    owner_scope: "Minimal apply_patch request guidance at Responses Req04 plus Anthropic custom-tool schema compatibility at provider request compat."
+    owner_kind: rust_v3_req04_chatprocess
+    owner_scope: "Minimal apply_patch request guidance at Responses Req04; provider transport is forbidden from applying apply_patch schema compatibility or protocol reshape."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
     contract:
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
@@ -1491,13 +1490,8 @@ features:
       - Responses requests declaring apply_patch receive exactly one canonical Codex Tool Guidance block at Req04
       - Requests without apply_patch receive no guidance mutation
       - Existing Codex Tool Guidance is not duplicated
-      - Anthropic custom apply_patch receives patch string schema with workspace-relative canonical grammar guidance
-      - Anthropic custom tools unrelated to apply_patch never receive apply_patch schema
-      - Anthropic apply_patch input schema permits provider-compatible extra fields while retaining required patch
     required_gates:
       - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics apply_patch_guidance -- --test-threads=1 --nocapture
-      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses anthropic_messages_body_preserves_responses_role_items_and_custom_tools -- --test-threads=1 --nocapture
-      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses anthropic_custom_tools_without_schema_do_not_receive_apply_patch_schema -- --test-threads=1 --nocapture
       - npm run verify:v3-relay-request-semantics
       - npm run verify:v3-module-boundaries
       - npm run verify:v3-cargo-fmt

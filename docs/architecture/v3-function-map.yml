@@ -2071,30 +2071,24 @@ features:
   - feature_id: v3.apply_patch_guidance_provider_compat
     status: live_verified
     change_risk: high
-    owner_kind: rust_v3_req04_chatprocess_and_provider_compat
-    owner_scope: "Responses Req04 injects minimal Codex apply_patch guidance only when the request declares apply_patch; Anthropic provider compat maps custom apply_patch to patch schema without applying that schema to unrelated custom tools."
+    owner_kind: rust_v3_req04_chatprocess
+    owner_scope: "Responses Req04 injects minimal Codex apply_patch guidance only when the request declares apply_patch; provider transport must not map apply_patch schema or reshape protocol payloads."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
     resource_bindings:
       - v3.request.normal_payload
       - v3.hub.tool_governance_truth
-      - v3.provider.transport_request
     mainline_bindings:
       - binding pending
     entry_symbols:
       - govern_apply_patch_guidance_at_req04
       - declares_apply_patch_tool
-      - anthropic_custom_tool_input_schema
       - apply_patch_guidance_is_injected_once_at_req04_for_responses_requests
       - apply_patch_guidance_is_idempotent_and_skips_requests_without_apply_patch_tool
-      - anthropic_messages_body_preserves_responses_role_items_and_custom_tools
-      - anthropic_custom_tools_without_schema_do_not_receive_apply_patch_schema
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-      - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
       - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
@@ -2106,8 +2100,6 @@ features:
       - fallback
     required_tests:
       - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics apply_patch_guidance -- --test-threads=1 --nocapture
-      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses anthropic_messages_body_preserves_responses_role_items_and_custom_tools -- --test-threads=1 --nocapture
-      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses anthropic_custom_tools_without_schema_do_not_receive_apply_patch_schema -- --test-threads=1 --nocapture
       - npm run verify:v3-relay-request-semantics
       - npm run verify:v3-module-boundaries
       - npm run verify:v3-cargo-fmt

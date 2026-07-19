@@ -49,7 +49,7 @@ requireAll(source, sourcePath, [
   'V3HubRespOutbound05ClientSemantic',
   'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
-  'characterize_v3_anthropic_client_input_to_hub_semantic',
+  'encode_v3_anthropic_request_as_responses_semantic',
   'validate_v3_anthropic_hub_response_payload_for_client_projection',
   'entry_protocol != V3HubEntryProtocol::Anthropic',
   'execution != V3HubExecutionMode::Relay',
@@ -78,7 +78,7 @@ requireAll(hub, 'fixed Hub v1 module registry', [
   'pub use anthropic_relay_hooks::*;',
 ]);
 requireAll(tests, 'focused Anthropic Relay hook tests', [
-  'anthropic_entry_req_inbound_hook_is_static_relay_and_keeps_responses_wire_independent',
+  'anthropic_entry_req_inbound_hook_encodes_to_responses_chat_semantic_before_req04',
   'anthropic_client_projection_hook_preserves_responses_wire_axis',
   'wrong_entry_execution_and_provider_wire_combinations_fail_explicitly',
   'side_channel_fields_fail_at_both_protocol_hook_boundaries',

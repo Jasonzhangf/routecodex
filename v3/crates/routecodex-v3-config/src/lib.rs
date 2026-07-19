@@ -76,6 +76,38 @@ pub fn looks_like_secret_literal(value: &str) -> bool {
         || trimmed.len() > 128
 }
 
+pub fn resolve_routecodex_package_version_from_executable(executable: &Path) -> Option<String> {
+    std::env::var("ROUTECODEX_VERSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| read_nearest_routecodex_package_version(executable))
+}
+
+fn read_nearest_routecodex_package_version(executable: &Path) -> Option<String> {
+    for ancestor in executable.ancestors() {
+        let package_json = ancestor.join("package.json");
+        let Ok(raw) = std::fs::read_to_string(package_json) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if parsed
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| value == "routecodex")
+            .unwrap_or(false)
+        {
+            return parsed
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+        }
+    }
+    None
+}
+
 pub(crate) fn validation(message: impl Into<String>) -> V3ConfigError {
     V3ConfigError::Validation(message.into())
 }

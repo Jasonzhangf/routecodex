@@ -1,7 +1,7 @@
 use super::{
+    anthropic_codec::encode_v3_anthropic_request_as_responses_semantic,
     build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
     build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04,
-    characterize_v3_anthropic_client_input_to_hub_semantic,
     validate_v3_anthropic_hub_response_payload_for_client_projection, V3AnthropicCodecError,
     V3HubEntryProtocol, V3HubExecutionMode, V3HubOpaquePayload, V3HubProviderWireProtocol,
     V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRespContinuation04Committed,
@@ -118,7 +118,7 @@ pub fn run_v3_anthropic_relay_runtime_req_inbound(
         transport_intent,
     } = raw;
     let V3HubOpaquePayload(payload) = payload;
-    let payload = super::encode_v3_anthropic_request_as_responses_semantic(payload)?;
+    let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;
     Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
         build_v3_hub_req_inbound_01_client_raw(
             payload,
@@ -160,13 +160,9 @@ fn run_v3_anthropic_relay_req_inbound_hook(
         transport_intent,
     } = raw;
     let V3HubOpaquePayload(payload) = payload;
-    let semantic = characterize_v3_anthropic_client_input_to_hub_semantic(
-        payload,
-        entry_protocol,
-        transport_intent,
-    )?;
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(payload)?;
     let raw = build_v3_hub_req_inbound_01_client_raw(
-        semantic.into_payload(),
+        semantic,
         entry_protocol,
         invocation_source,
         transport_intent,

@@ -88,7 +88,6 @@ requireAll(text.servertoolHooks, files.servertoolHooks, [
 forbid(text.servertoolHooks, files.servertoolHooks, /lift_additional_tools_into_provider_tool_surface|collect_additional_tools_from_responses_input|provider_tool_surface_contains_equivalent_tool/, 'tool declaration shape rebuild helper');
 requireAll(text.providerResponsesTransport, files.providerResponsesTransport, [
   'responses_http_provider_request_preserves_additional_tools_surface',
-  'lift_responses_additional_tools_for_anthropic_messages_body',
   'request path $.tools must be absent because the original request did not contain $.tools',
 ]);
 forbid(
@@ -97,35 +96,12 @@ forbid(
   /normalize_responses_additional_tools_for_provider_request|responses_http_provider_request_lifts_additional_tools_to_protocol_tools/,
   'Responses HTTP additional_tools global lift',
 );
-const transportBuildStart = text.providerResponsesTransport.indexOf(
-  'pub fn build_v3_transport_13_responses_request_from_v3_provider_12',
+forbid(
+  text.providerResponsesTransport,
+  files.providerResponsesTransport,
+  /AnthropicMessagesHttp|build_anthropic_messages_body|build_anthropic_messages\(|project_anthropic_message_json_to_responses|project_anthropic_sse_to_responses|lift_responses_additional_tools_for_anthropic_messages_body|target\.provider_type\.eq_ignore_ascii_case\("anthropic"\)|anthropic-version|x-api-key/,
+  'non-ChatProcess protocol conversion in provider transport',
 );
-const transportBuildEnd = text.providerResponsesTransport.indexOf(
-  'fn lift_responses_additional_tools_for_anthropic_messages_body',
-  transportBuildStart,
-);
-if (transportBuildStart < 0 || transportBuildEnd < 0) {
-  fail(`${files.providerResponsesTransport}: unable to isolate Responses provider transport builder`);
-} else {
-  const transportBuildBody = text.providerResponsesTransport.slice(transportBuildStart, transportBuildEnd);
-  requireOrdered(transportBuildBody, files.providerResponsesTransport, [
-    'if target.provider_type.eq_ignore_ascii_case("anthropic")',
-    'lift_responses_additional_tools_for_anthropic_messages_body',
-    'build_anthropic_messages_body',
-  ]);
-  const liftCalls = [
-    ...transportBuildBody.matchAll(/lift_responses_additional_tools_for_anthropic_messages_body/g),
-  ];
-  if (liftCalls.length !== 1) {
-    fail(`${files.providerResponsesTransport}: additional_tools lift must be called exactly once inside the Anthropic Messages codec branch`);
-  }
-  const anthropicBranchStart = transportBuildBody.indexOf(
-    'if target.provider_type.eq_ignore_ascii_case("anthropic")',
-  );
-  if (anthropicBranchStart < 0 || liftCalls[0]?.index < anthropicBranchStart) {
-    fail(`${files.providerResponsesTransport}: additional_tools lift must stay inside the Anthropic Messages codec branch`);
-  }
-}
 const injectStart = text.servertoolHooks.indexOf('fn inject_reasoning_stop_tool(payload: &mut Value)');
 const injectEnd = text.servertoolHooks.indexOf('fn inject_reasoning_stop_tool_into_array', injectStart);
 if (injectStart < 0 || injectEnd < 0) {

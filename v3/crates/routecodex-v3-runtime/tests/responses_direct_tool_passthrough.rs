@@ -369,15 +369,16 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
         }]
     }));
 
+    let original_request = json!({
+        "model": "client-model",
+        "input": "direct must not use stopless",
+        "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
+        "stream": false
+    });
     let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &V3ResponsesDirectContinuationState::default(),
         &manifest,
-        request(json!({
-            "model": "client-model",
-            "input": "direct must not use stopless",
-            "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
-            "stream": false
-        })),
+        request(original_request.clone()),
         scope(),
         register_responses_direct_hooks(),
         &transport,
@@ -392,6 +393,11 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
         .take()
         .expect("direct provider wire payload captured");
     let wire_serialized = serde_json::to_string(&wire).unwrap();
+    assert_eq!(
+        wire.get("tools"),
+        original_request.get("tools"),
+        "direct provider request must preserve the original Responses $.tools field exactly and must not run relay stopless injection"
+    );
     assert_eq!(
         wire["tools"].as_array().map(|items| items.len()),
         Some(1),

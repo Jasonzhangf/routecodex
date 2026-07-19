@@ -101,8 +101,8 @@ const fixtures = [
   {
     name: 'additional provider transport terminal output reconstruction',
     file: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
-    marker: 'use serde_json::{json, Map, Value};',
-    mutation: 'use serde_json::{json, Map, Value};\nfn forbidden_provider_terminal_output_reconstruction(response: &Value) { let mut projected = response.clone(); let object = projected.as_object_mut().unwrap(); object.insert("output".to_string(), Value::Array(vec![])); }',
+    marker: 'use serde_json::{json, Value};',
+    mutation: 'use serde_json::{json, Value};\nfn forbidden_provider_terminal_output_reconstruction(response: &Value) { let mut projected = response.clone(); let object = projected.as_object_mut().unwrap(); object.insert("output".to_string(), Value::Array(vec![])); }',
     diagnostic: /additional provider transport terminal response output reconstruction/,
   },
   {

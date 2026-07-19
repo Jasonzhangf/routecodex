@@ -6,12 +6,14 @@ const root = process.cwd();
 const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
 const relayRequestPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs';
 const responsesRelayRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
+const anthropicRelayHooksPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const openaiChatCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs';
 const geminiCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs';
 const protocolBoundaryManifestPath = 'docs/architecture/manifests/v3.protocol_normalization_tool_governance_boundary.mainline.yml';
 const hub = readFileSync(resolve(root, hubPath), 'utf8');
 const relayRequest = readFileSync(resolve(root, relayRequestPath), 'utf8');
 const responsesRelayRuntime = readFileSync(resolve(root, responsesRelayRuntimePath), 'utf8');
+const anthropicRelayHooks = readFileSync(resolve(root, anthropicRelayHooksPath), 'utf8');
 const openaiChatCodec = readFileSync(resolve(root, openaiChatCodecPath), 'utf8');
 const geminiCodec = readFileSync(resolve(root, geminiCodecPath), 'utf8');
 const protocolBoundaryManifest = readFileSync(resolve(root, protocolBoundaryManifestPath), 'utf8');
@@ -153,7 +155,7 @@ const protocolMappingBoundaries = [
   {
     owner: 'OpenAI Chat request inbound protocol mapping',
     text: functionBody(openaiChatCodec, 'pub fn characterize_v3_openai_chat_client_input_to_hub_semantic'),
-    required: ['EntryProtocolNotOpenAiChat', 'validate_request'],
+    required: ['validate_v3_openai_chat_client_input_payload'],
   },
   {
     owner: 'OpenAI Chat request shape validation',
@@ -163,7 +165,7 @@ const protocolMappingBoundaries = [
   {
     owner: 'OpenAI Chat response inbound protocol mapping',
     text: functionBody(openaiChatCodec, 'pub fn characterize_v3_openai_chat_provider_raw_to_hub_response_semantic'),
-    required: ['ProviderProtocolNotOpenAiChat', 'validate_response'],
+    required: ['validate_v3_openai_chat_provider_response_payload'],
   },
   {
     owner: 'OpenAI Chat JSON response shape validation',
@@ -173,7 +175,7 @@ const protocolMappingBoundaries = [
   {
     owner: 'Gemini request inbound protocol mapping',
     text: functionBody(geminiCodec, 'pub fn characterize_v3_gemini_client_input_to_hub_semantic'),
-    required: ['EntryProtocolNotGemini', 'validate_request'],
+    required: ['validate_v3_gemini_client_input_payload'],
   },
   {
     owner: 'Gemini request shape validation',
@@ -200,13 +202,24 @@ requireAll(requestRun, 'ReqChatProcess tool governance owner', [
   'run_servertool_profile',
   'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
 ]);
+forbidAll(relayRequest, 'ReqChatProcess protocol conversion boundary', [
+  /\bReq04ProtocolSemanticConverted\b/,
+  /\bProtocolSemanticConversionInvalid\b/,
+  /\bconvert_entry_protocol_request_semantics_at_req04\b/,
+]);
+forbidAll(requestRun, 'ReqChatProcess protocol conversion boundary', [
+  /\bencode_v3_anthropic_request_as_responses_semantic\b/,
+  /\bcharacterize_v3_anthropic_client_input_to_hub_semantic\b/,
+  /\bpayload\.clone\s*\(\)/,
+  /\*\s*payload\s*=/,
+]);
 if (requestRun.indexOf('restore_local_context_at_req04') > requestRun.indexOf('run_servertool_profile')) {
   fail('ReqChatProcess tool governance owner: servertool hook must run after context restore');
 }
 
 const responseGovern = functionBody(hub, 'fn govern_v3_hub_relay_response');
 requireAll(responseGovern, 'RespChatProcess tool governance owner', [
-  'tool_calls.push',
+  'build_v3_resp03_protocol_governance',
   'V3HubServertoolResponseAction::FollowupRequired',
   'V3HubResponseTerminality::NonTerminal',
 ]);
@@ -214,6 +227,23 @@ forbidAll(responseGovern, 'RespChatProcess tool governance owner', [
   /\bV3HubContinuationCommit\b/,
   /\bbuild_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03\b/,
   /\bbuild_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04\b/,
+]);
+const responseToolCollector = functionBody(hub, 'fn collect_v3_resp03_responses_tool_calls');
+requireAll(responseToolCollector, 'RespChatProcess tool governance collector', [
+  'tool_calls.push',
+  'duplicate call_id/id',
+  'classify_v3_hub_relay_tool_kind',
+]);
+
+const anthropicRelayReqInbound = functionBody(anthropicRelayHooks, 'pub fn run_v3_anthropic_relay_runtime_req_inbound');
+requireAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec boundary', [
+  'encode_v3_anthropic_request_as_responses_semantic',
+  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
+]);
+const anthropicRelayStaticReqInbound = functionBody(anthropicRelayHooks, 'fn run_v3_anthropic_relay_req_inbound_hook');
+requireAll(anthropicRelayStaticReqInbound, 'Anthropic Relay static request protocol codec boundary', [
+  'encode_v3_anthropic_request_as_responses_semantic',
+  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
 ]);
 
 const responseRuntime = functionBody(responsesRelayRuntime, 'fn run_json_response_hooks');

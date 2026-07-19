@@ -34,6 +34,13 @@ const fixtures = [
     /missing validate_v3_anthropic_hub_response_payload_for_client_projection/,
   ],
   [
+    'request inbound responses semantic codec removed',
+    source,
+    'encode_v3_anthropic_request_as_responses_semantic',
+    'characterize_v3_anthropic_client_input_to_hub_semantic',
+    /missing encode_v3_anthropic_request_as_responses_semantic/,
+  ],
+  [
     'entry protocol guard inverted',
     source,
     'entry_protocol != V3HubEntryProtocol::Anthropic',

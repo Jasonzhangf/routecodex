@@ -97,6 +97,8 @@ Conversion bugs must be fixed where the adjacent semantic conversion is owned:
 - Hub governed response -> client semantic body/SSE: `RespOutbound` Rust projection.
 - Continuation save/restore: only stores/restores canonical truth; it does not convert content.
 
+Protocol conversion here means one adjacent codec/builder doing semantic-equivalent shape mapping. Request shape may only change on the entry-protocol -> Chat Process codec path or the Chat Process -> target-protocol codec path. Response shape may only change on the provider/client raw -> Chat Process codec path or the Chat Process -> client/provider projection path. Server handlers, SSE transport, provider transport, continuation store, debug/sample writers, and non-owner hooks must not add, remove, lift, collapse, or rebuild normal payload fields.
+
 If the conversion requires business judgment, it belongs in Chat Process, not inbound/outbound, SSE, or handler code.
 
 ## MetadataCenter Rule

@@ -1,5 +1,5 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3AnthropicCodecStage {
@@ -59,6 +59,91 @@ pub enum V3AnthropicCodecError {
     MalformedSseEvent,
     #[error("Anthropic provider error requires error.type and error.message")]
     MalformedProviderError,
+}
+
+pub fn validate_v3_anthropic_client_input_payload(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<(), V3AnthropicCodecError> {
+    if entry_protocol != V3HubEntryProtocol::Anthropic {
+        return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
+    }
+    reject_side_channel_fields(payload)?;
+    require_object(payload)?;
+    require_messages_array(payload)
+}
+
+pub fn validate_v3_anthropic_provider_response_payload(
+    payload: &Value,
+    provider_protocol: V3HubProviderWireProtocol,
+    transport_intent: V3HubTransportIntent,
+) -> Result<(), V3AnthropicCodecError> {
+    if provider_protocol != V3HubProviderWireProtocol::Anthropic {
+        return Err(V3AnthropicCodecError::ProviderProtocolNotAnthropic);
+    }
+    reject_side_channel_fields(payload)?;
+    require_object(payload)?;
+    match transport_intent {
+        V3HubTransportIntent::Json => validate_json_response(payload),
+        V3HubTransportIntent::Sse => validate_sse_event(payload),
+    }
+}
+
+pub fn encode_v3_anthropic_request_as_responses_semantic(
+    input: Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    let transport_intent = match input.get("stream").and_then(Value::as_bool) {
+        Some(true) => V3HubTransportIntent::Sse,
+        _ => V3HubTransportIntent::Json,
+    };
+    let input = characterize_v3_anthropic_client_input_to_hub_semantic(
+        input,
+        V3HubEntryProtocol::Anthropic,
+        transport_intent,
+    )?
+    .into_payload();
+    let object = input
+        .as_object()
+        .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
+    let mut output = Map::new();
+    output.insert(
+        "model".to_string(),
+        object.get("model").cloned().unwrap_or(Value::Null),
+    );
+    output.insert(
+        "input".to_string(),
+        Value::Array(encode_anthropic_messages_as_responses_semantic(
+            object
+                .get("messages")
+                .and_then(Value::as_array)
+                .ok_or(V3AnthropicCodecError::MessagesNotArray)?,
+        )),
+    );
+    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
+        output.insert(
+            "tools".to_string(),
+            Value::Array(tools.iter().filter_map(Value::as_object).map(|tool| {
+                json!({
+                    "type":"function",
+                    "name":tool.get("name").cloned().unwrap_or(Value::Null),
+                    "parameters":tool.get("input_schema").cloned().unwrap_or_else(|| json!({"type":"object"}))
+                })
+            }).collect::<Vec<_>>()),
+        );
+    }
+    if object.get("thinking").is_some() {
+        output.insert("reasoning".to_string(), json!({"effort":"medium"}));
+    }
+    output.insert(
+        "stream".to_string(),
+        Value::Bool(
+            object
+                .get("stream")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
+    );
+    Ok(Value::Object(output))
 }
 
 pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
@@ -318,5 +403,40 @@ fn side_channel_label(key: &str) -> &'static str {
         "provider_protocol" => "provider_protocol",
         "resource_handle" => "resource_handle",
         _ => "unknown",
+    }
+}
+
+fn encode_anthropic_messages_as_responses_semantic(messages: &[Value]) -> Vec<Value> {
+    let mut encoded = Vec::new();
+    for message in messages {
+        let role = message.get("role").cloned().unwrap_or(Value::Null);
+        let mut content = match message.get("content") {
+            Some(Value::String(text)) => vec![json!({"type":"input_text","text":text})],
+            Some(Value::Array(parts)) => parts.iter().filter(|part| part.get("type").and_then(Value::as_str) == Some("text")).map(|part| json!({"type":"input_text","text":part.get("text").cloned().unwrap_or(Value::Null)})).collect(),
+            _ => Vec::new(),
+        };
+        if !content.is_empty() {
+            encoded.push(json!({"role":role,"content":std::mem::take(&mut content)}));
+        }
+        if let Some(parts) = message.get("content").and_then(Value::as_array) {
+            for part in parts {
+                match part.get("type").and_then(Value::as_str) {
+                    Some("tool_use") => encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).unwrap_or_else(|_| "null".to_string())})),
+                    Some("tool_result") => encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))})),
+                    _ => {}
+                }
+            }
+        }
+    }
+    encoded
+}
+
+fn anthropic_tool_result_output_as_responses_semantic(content: Option<&Value>) -> Value {
+    match content {
+        Some(Value::String(text)) => Value::String(text.clone()),
+        Some(value) => {
+            Value::String(serde_json::to_string(value).unwrap_or_else(|_| "null".into()))
+        }
+        None => Value::String(String::new()),
     }
 }

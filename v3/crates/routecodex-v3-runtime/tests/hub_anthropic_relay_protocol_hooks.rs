@@ -50,7 +50,7 @@ fn response04(
 }
 
 #[test]
-fn anthropic_entry_req_inbound_hook_is_static_relay_and_keeps_responses_wire_independent() {
+fn anthropic_entry_req_inbound_hook_encodes_to_responses_chat_semantic_before_req04() {
     let hooks = compile_v3_anthropic_relay_protocol_hooks();
     let payload = anthropic_request();
     let raw = build_v3_hub_req_inbound_01_client_raw(
@@ -68,7 +68,19 @@ fn anthropic_entry_req_inbound_hook_is_static_relay_and_keeps_responses_wire_ind
         )
         .expect("Anthropic Relay req_inbound hook");
 
-    assert_eq!(normalized.payload(), &payload);
+    assert_eq!(normalized.payload()["model"], payload["model"]);
+    assert!(normalized.payload().get("input").is_some());
+    assert!(normalized.payload().get("messages").is_none());
+    assert_eq!(normalized.payload()["input"][0]["role"], "user");
+    assert_eq!(normalized.payload()["input"][1]["type"], "function_call");
+    assert_eq!(
+        normalized.payload()["input"][2]["type"],
+        "function_call_output"
+    );
+    assert_eq!(
+        normalized.payload()["reasoning"],
+        json!({"effort":"medium"})
+    );
     assert_eq!(normalized.entry_protocol(), V3HubEntryProtocol::Anthropic);
     assert_eq!(normalized.node_id(), "V3HubReqInbound02Normalized");
 }

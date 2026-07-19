@@ -113,17 +113,7 @@ pub async fn execute_v3_gemini_relay_runtime<T: ResponsesTransport>(
         transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
-    let semantic = characterize_v3_gemini_client_input_to_hub_semantic(
-        req01.payload.0,
-        V3HubEntryProtocol::Gemini,
-        transport_intent,
-    )?;
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        semantic.payload().clone(),
-        V3HubEntryProtocol::Gemini,
-        V3HubInvocationSource::Client,
-        transport_intent,
-    );
+    validate_v3_gemini_client_input_payload(&req01.payload.0, V3HubEntryProtocol::Gemini)?;
     let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
     trace.push("V3HubReqInbound02Normalized");
     let lookup = V3HubContinuationLookup::new(
@@ -175,10 +165,8 @@ pub async fn execute_v3_gemini_relay_runtime<T: ResponsesTransport>(
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
     trace.push("ProviderReqCompat06ProviderCompat");
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-    let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-    let provider_semantic = characterize_v3_gemini_hub_semantic_to_provider_wire(semantic)?
-        .payload()
-        .clone();
+    let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
+    let provider_semantic = req09.into_provider_semantic_payload();
     trace.push("V3ProviderReqOutbound08WirePayload");
     let transport_request = build_v3_gemini_transport_09(
         &input.request_id,
@@ -280,14 +268,12 @@ fn project_json_response(
     trace: &mut Vec<&'static str>,
     compatibility_profile: Option<&str>,
 ) -> Result<Value, V3GeminiRelayRuntimeError> {
-    let semantic = characterize_v3_gemini_provider_raw_to_hub_response_semantic(
-        provider_value,
+    validate_v3_gemini_provider_response_payload(
+        &provider_value,
         V3HubProviderWireProtocol::Gemini,
-        transport_intent,
     )?;
-    let governance = build_gemini_governance_response(semantic.payload(), transport_intent)?;
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-        governance,
+        provider_value,
         V3HubEntryProtocol::Gemini,
         V3HubProviderWireProtocol::Gemini,
         V3HubContinuationOwnership::New,
@@ -305,12 +291,12 @@ fn project_json_response(
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
-    let client = characterize_v3_gemini_hub_response_semantic_to_client_projection(semantic)?;
+    let client = resp04.finalized_payload().clone();
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(client.payload().clone())
+    Ok(client)
 }
 
 struct V3GeminiSseState {
@@ -388,97 +374,14 @@ fn enqueue_sse_client_chunks(
             return Err("Gemini SSE emitted a frame after terminal finishReason".into());
         }
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
-        characterize_v3_gemini_provider_raw_to_hub_response_semantic(
-            payload.clone(),
-            V3HubProviderWireProtocol::Gemini,
-            V3HubTransportIntent::Sse,
-        )
-        .map_err(|error| error.to_string())?;
+        validate_v3_gemini_provider_response_payload(&payload, V3HubProviderWireProtocol::Gemini)
+            .map_err(|error| error.to_string())?;
         state.terminal = gemini_payload_has_terminal_finish_reason(&payload);
-        let mut trace = Vec::new();
-        project_sse_response(
-            build_gemini_governance_response(&payload, V3HubTransportIntent::Sse)
-                .map_err(|error| error.to_string())?,
-            &mut trace,
-        )
-        .map_err(|error| error.to_string())?;
         state
             .pending
             .push_back(Ok(format!("data: {payload}\n\n").into_bytes()));
     }
     Ok(())
-}
-
-fn project_sse_response(
-    canonical_response: Value,
-    trace: &mut Vec<&'static str>,
-) -> Result<(), V3GeminiRelayRuntimeError> {
-    let resp01 = build_v3_provider_resp_inbound_01_raw(
-        canonical_response,
-        V3HubEntryProtocol::Gemini,
-        V3HubProviderWireProtocol::Gemini,
-        V3HubContinuationOwnership::New,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Sse,
-    );
-    trace.push("V3ProviderRespInbound01Raw");
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks.normalize(resp01)?;
-    trace.push("ProviderRespCompat02ProviderCompat");
-    trace.push("V3HubRespInbound02Normalized");
-    let resp03 = hooks.govern(resp02, &V3HubRelayResponseHookProfile::empty())?;
-    trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    trace.push("V3HubRespContinuation04Committed");
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
-    trace.push("V3HubRespOutbound05ClientSemantic");
-    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
-    trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(())
-}
-
-fn build_gemini_governance_response(
-    payload: &Value,
-    transport_intent: V3HubTransportIntent,
-) -> Result<Value, V3GeminiRelayRuntimeError> {
-    let candidates = payload
-        .get("candidates")
-        .and_then(Value::as_array)
-        .ok_or(V3GeminiCodecError::CandidatesNotArray)?;
-    let mut output = Vec::new();
-    for candidate in candidates {
-        for part in candidate
-            .get("content")
-            .and_then(|content| content.get("parts"))
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let Some(function_call) = part.get("functionCall") else {
-                continue;
-            };
-            let name = function_call
-                .get("name")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    V3GeminiRelayRuntimeError::StructuredSse(
-                        "Gemini functionCall.name is required for Relay governance".to_string(),
-                    )
-                })?;
-            output.push(json!({"type":"function_call","call_id":name,"name":name}));
-        }
-    }
-    let terminal = gemini_payload_has_terminal_finish_reason(payload);
-    let status = if !output.is_empty() {
-        "requires_action"
-    } else if transport_intent == V3HubTransportIntent::Sse && !terminal {
-        "in_progress"
-    } else {
-        "completed"
-    };
-    Ok(json!({"status":status,"output":output}))
 }
 
 fn gemini_payload_has_terminal_finish_reason(payload: &Value) -> bool {

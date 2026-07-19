@@ -61,15 +61,33 @@ pub enum V3OpenAiChatCodecError {
     MalformedProviderError,
 }
 
+pub fn validate_v3_openai_chat_client_input_payload(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<(), V3OpenAiChatCodecError> {
+    if entry_protocol != V3HubEntryProtocol::OpenAiChat {
+        return Err(V3OpenAiChatCodecError::EntryProtocolNotOpenAiChat);
+    }
+    validate_request(payload)
+}
+
+pub fn validate_v3_openai_chat_provider_response_payload(
+    payload: &Value,
+    provider_protocol: V3HubProviderWireProtocol,
+    transport_intent: V3HubTransportIntent,
+) -> Result<(), V3OpenAiChatCodecError> {
+    if provider_protocol != V3HubProviderWireProtocol::OpenAiChat {
+        return Err(V3OpenAiChatCodecError::ProviderProtocolNotOpenAiChat);
+    }
+    validate_response(payload, transport_intent)
+}
+
 pub fn characterize_v3_openai_chat_client_input_to_hub_semantic(
     payload: Value,
     entry_protocol: V3HubEntryProtocol,
     transport_intent: V3HubTransportIntent,
 ) -> Result<V3OpenAiChatHubRequestSemantic, V3OpenAiChatCodecError> {
-    if entry_protocol != V3HubEntryProtocol::OpenAiChat {
-        return Err(V3OpenAiChatCodecError::EntryProtocolNotOpenAiChat);
-    }
-    validate_request(&payload)?;
+    validate_v3_openai_chat_client_input_payload(&payload, entry_protocol)?;
     Ok(V3OpenAiChatHubRequestSemantic {
         payload,
         trace: trace(
@@ -97,10 +115,11 @@ pub fn characterize_v3_openai_chat_provider_raw_to_hub_response_semantic(
     provider_protocol: V3HubProviderWireProtocol,
     transport_intent: V3HubTransportIntent,
 ) -> Result<V3OpenAiChatHubResponseSemantic, V3OpenAiChatCodecError> {
-    if provider_protocol != V3HubProviderWireProtocol::OpenAiChat {
-        return Err(V3OpenAiChatCodecError::ProviderProtocolNotOpenAiChat);
-    }
-    validate_response(&payload, transport_intent)?;
+    validate_v3_openai_chat_provider_response_payload(
+        &payload,
+        provider_protocol,
+        transport_intent,
+    )?;
     Ok(V3OpenAiChatHubResponseSemantic {
         payload,
         trace: trace(
