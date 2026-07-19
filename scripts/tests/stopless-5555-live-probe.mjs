@@ -19,12 +19,47 @@ const probeTag = `stopless-live-probe-${Date.now()}`;
 const sessionId = `stopless-live-${Date.now()}`;
 
 function buildFirstBody(model) {
+  const terminalSchema = JSON.stringify({
+    stopreason: 0,
+    current_goal: '验证 V3 stopless 连续两轮恢复',
+    reason: '已完成两轮停止检查恢复验证',
+    has_evidence: 1,
+    evidence: '5555 live submit_tool_outputs',
+    issue_cause: '无',
+    excluded_factors: '已排除一轮即停回归',
+    diagnostic_order: '首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出',
+    done_steps: '完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop',
+    next_step: '',
+    next_suggested_path: '',
+    needs_user_input: false,
+    learned: 'summary must be markdown'
+  });
+  const finalInstruction = `继续最终核对：只输出以下 JSON，不要解释：${terminalSchema}`;
+  const secondSchema = JSON.stringify({
+    stopreason: 2,
+    current_goal: '验证 V3 stopless 连续两轮恢复',
+    reason: '第二轮还没做完',
+    has_evidence: 0,
+    evidence: '',
+    next_step: finalInstruction,
+    needs_user_input: false
+  });
+  const secondInstruction = `继续第二轮 stopless 验证：只输出以下 JSON，不要解释：${secondSchema}`;
+  const firstSchema = JSON.stringify({
+    stopreason: 2,
+    current_goal: '验证 V3 stopless 连续两轮恢复',
+    reason: '第一轮还没做完',
+    has_evidence: 0,
+    evidence: '',
+    next_step: secondInstruction,
+    needs_user_input: false
+  });
   const firstTurnText = [
     `这是停止检查在线验证。probeTag=${probeTag}`,
     '禁止调用工具，禁止解释。',
-    '如果当前没有任何 function_call_output 工具结果，就只输出 stop schema JSON：stopreason=2，current_goal="验证 V3 stopless 连续两轮恢复"，reason="第一轮还没做完"，next_step="继续第二轮 stopless 验证：只输出 stop schema JSON，stopreason=2，current_goal=\\"验证 V3 stopless 连续两轮恢复\\"，reason=\\"第二轮还没做完\\"，next_step=\\"继续最终核对：只输出 stop schema JSON，stopreason=0，current_goal=验证 V3 stopless 连续两轮恢复，reason=已完成两轮停止检查恢复验证，has_evidence=1，evidence=5555 live submit_tool_outputs，issue_cause=无，excluded_factors=已排除一轮即停回归，diagnostic_order=首轮请求 -> 提交第一次工具输出 -> 提交第二次工具输出，done_steps=完成首轮 continue、恢复轮次 continue、第二次恢复 allow-stop，next_step=，next_suggested_path=，learned=summary must be markdown\\""。',
-    '如果你收到的用户指令以"继续第二轮 stopless 验证"开头，就严格按其中要求只输出 stopreason=2 的 schema。',
-    '如果你收到的用户指令以"继续最终核对"开头，就严格按其中要求只输出 stopreason=0 的 schema。'
+    `如果当前没有任何 function_call_output 工具结果，就只输出以下 JSON，不要解释：${firstSchema}`,
+    '如果你收到的用户指令以"继续第二轮 stopless 验证"开头，就严格输出该指令里的 JSON，不要解释。',
+    '如果你收到的用户指令以"继续最终核对"开头，就严格输出该指令里的 JSON，不要解释。'
   ].join('\n');
 
   if (probeMode === 'continuation') {
@@ -448,6 +483,7 @@ async function main() {
         && firstResume?.hasExecCommand === true
         && firstResume?.isStopMessageAutoExecCommand === true
         && finalResume?.responseStatus === 'completed'
+        && finalResume?.leakedStopSchema !== true
         && !finalResume?.errorCode;
       report.finalStatus = completedTwoRoundLoop
         ? 'completed'

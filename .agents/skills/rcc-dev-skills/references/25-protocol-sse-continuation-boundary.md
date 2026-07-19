@@ -94,6 +94,8 @@ If the conversion requires business judgment, it belongs in Chat Process, not in
 
 Control plane goes to MetadataCenter. Data plane stays in request/response/store truth.
 
+Any RouteCodex-created field that is not itself part of the client request protocol or provider/client response protocol is a control signal. It must live in the owning control center or side-channel resource, not in normal payload/history.
+
 Request protocol data stays data-plane. HTTP headers, request body protocol fields, `metadata`, `client_metadata`, and `x-*` / `x-codex-*` client fields are not RouteCodex control signals by default and must not be moved into MetadataCenter. They may be parsed only by the owning protocol/request stage, and they must not be used to rebuild RouteCodex control state.
 
 Allowed in MetadataCenter:

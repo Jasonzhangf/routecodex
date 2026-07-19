@@ -198,6 +198,11 @@ pub enum V3HubRelayRequestError {
     UnknownStaticHook { hook_id: &'static str },
     #[error("malformed stopless CLI output at input index {index}: {reason}")]
     MalformedStoplessCliOutput { index: usize, reason: &'static str },
+    #[error("malformed stopless tool surface at request field {field}: {reason}")]
+    MalformedStoplessToolSurface {
+        field: &'static str,
+        reason: &'static str,
+    },
     #[error("{protocol} tool identity is invalid at item {index}: {reason}")]
     ProtocolToolIdentityInvalid {
         protocol: &'static str,

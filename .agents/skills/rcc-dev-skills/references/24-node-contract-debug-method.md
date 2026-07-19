@@ -139,8 +139,8 @@ Blackbox observable:
 
 ```text
 Round 1 Request
-  注入完整 system schema + normal tools
-  不注入 provider-facing stopless tool
+  managed relay 注入完整 system schema + normal tools + exactly-one internal reasoningStop tool
+  direct/provider-direct 不注入 stopless guidance/tool
 
 Round 1 Response
   拦截 stop/tool_call
@@ -163,7 +163,7 @@ Round 3 Guard
 ### stopless 节点级白盒最小集
 
 1. Request inject stop guidance
-2. Request does not inject provider-facing `reasoningStop`
+2. Managed relay injects provider-facing/internal `reasoningStop` exactly once
 3. Request preserve normal tools (`exec_command` 不丢)
 4. Response intercept `finish_reason=stop`
 5. Response stop schema judgment reads assistant text/fence
@@ -181,7 +181,8 @@ Round 3 Guard
 
 1. Provider-facing round 1
 - request 带 stop guidance
-- request 不带 `reasoningStop`
+- managed relay request 带 exactly-one internal `reasoningStop`
+- direct/provider-direct request 不带 stop guidance / `reasoningStop`
 - request 保留正常工具面
 
 2. Client-facing round 1

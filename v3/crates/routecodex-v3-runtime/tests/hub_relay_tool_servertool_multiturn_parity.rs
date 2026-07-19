@@ -73,6 +73,15 @@ fn relay_response_for(
     )
 }
 
+fn stopless_projected_call(payload: &Value) -> &Value {
+    payload["output"]
+        .as_array()
+        .expect("stopless projected output")
+        .iter()
+        .find(|item| item["call_id"] == json!("call_stopless_reasoning"))
+        .expect("projected stopless exec_command call")
+}
+
 fn provider_protocol_for_entry(entry_protocol: V3HubEntryProtocol) -> V3HubProviderWireProtocol {
     match entry_protocol {
         V3HubEntryProtocol::Responses => V3HubProviderWireProtocol::Responses,
@@ -377,9 +386,10 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
         .unwrap();
     let resp04 = response_hooks.commit(resp03).unwrap();
     let projected = resp04.canonical_context_payload().unwrap().clone();
-    assert_eq!(projected["output"][0]["name"], "exec_command");
-    assert_eq!(projected["output"][0]["call_id"], "call_stopless_reasoning");
-    assert!(projected["output"][0]["arguments"]
+    let projected_call = stopless_projected_call(&projected);
+    assert_eq!(projected_call["name"], "exec_command");
+    assert_eq!(projected_call["call_id"], "call_stopless_reasoning");
+    assert!(projected_call["arguments"]
         .as_str()
         .unwrap()
         .contains("routecodex hook run reasoningStop"));
@@ -402,7 +412,10 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
     assert_eq!(outcome.tool_output_count(), 0);
     assert_eq!(
         outcome.payload()["input"],
-        json!([{"role":"user","content":"blackbox next request text"}])
+        json!([
+            {"type":"output_text","text":"stopping without schema"},
+            {"role":"user","content":"blackbox next request text"}
+        ])
     );
     assert!(outcome.payload()["instructions"]
         .as_str()
@@ -413,7 +426,6 @@ fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_pr
         "function_call_output",
         "call_stopless_reasoning",
         "routecodex hook run reasoningStop",
-        "exec_command",
     ] {
         assert!(
             !serialized.contains(forbidden),
@@ -566,8 +578,9 @@ fn stopless_hook_blackbox_real_progress_after_cli_resets_repeat_budget() {
     assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     let projected = resp04.canonical_context_payload().unwrap();
     assert_eq!(projected["status"], "requires_action");
-    assert_eq!(projected["output"][0]["call_id"], "call_stopless_reasoning");
-    let arguments = projected["output"][0]["arguments"].as_str().unwrap();
+    let projected_call = stopless_projected_call(projected);
+    assert_eq!(projected_call["call_id"], "call_stopless_reasoning");
+    let arguments = projected_call["arguments"].as_str().unwrap();
     assert!(
         arguments.contains("\\\"repeatCount\\\":1"),
         "reset state must make the next missing-schema stop project round 1, not pass through budget: {arguments}"
@@ -649,13 +662,25 @@ fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_outp
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
-    assert_eq!(outcome.payload()["input"][0]["type"], "function_call");
+    let input = outcome.payload()["input"].as_array().expect("input array");
+    assert!(input
+        .iter()
+        .any(|item| item.get("text").and_then(Value::as_str) == Some("missing stop schema")));
+    let kept_call = input
+        .iter()
+        .find(|item| {
+            item["call_id"] == "call_stopless_reasoning" && item["type"] == "function_call"
+        })
+        .expect("disabled request profile must keep stopless call as normal tool history");
+    assert_eq!(kept_call["name"], "exec_command");
+    let kept_output = input
+        .iter()
+        .find(|item| {
+            item["call_id"] == "call_stopless_reasoning" && item["type"] == "function_call_output"
+        })
+        .expect("disabled request profile must keep stopless output as normal tool output");
     assert_eq!(
-        outcome.payload()["input"][1]["type"],
-        "function_call_output"
-    );
-    assert_eq!(
-        outcome.payload()["input"][1]["output"],
+        kept_output["output"],
         "{\"next_step\":\"must remain a tool output\"}"
     );
     assert!(outcome.payload().get("instructions").is_none());

@@ -26,8 +26,17 @@ struct ApplyPatchSseTransport {
     captures: Mutex<Vec<Value>>,
 }
 
+fn stopless_projected_call(body: &Value) -> &Value {
+    body["output"]
+        .as_array()
+        .expect("stopless response output array")
+        .iter()
+        .find(|item| item["call_id"] == json!("call_stopless_reasoning"))
+        .expect("projected stopless exec_command call")
+}
+
 fn stopless_cli_input_from_client_body(body: &Value) -> Value {
-    let arguments = body["output"][0]["arguments"]
+    let arguments = stopless_projected_call(body)["arguments"]
         .as_str()
         .expect("stopless projection arguments");
     let parsed: Value = serde_json::from_str(arguments).expect("arguments JSON");
@@ -37,6 +46,68 @@ fn stopless_cli_input_from_client_body(body: &Value) -> Value {
     let rest = &cmd[start..];
     let end = rest.find('\'').expect("closing input-json quote");
     serde_json::from_str(&rest[..end]).expect("stopless CLI input JSON")
+}
+
+fn provider_tool_names(body: &Value) -> Vec<String> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            tool.get("name")
+                .or_else(|| {
+                    tool.get("function")
+                        .and_then(|function| function.get("name"))
+                })
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn assert_provider_stopless_guidance(body: &Value) {
+    let names = provider_tool_names(body);
+    assert!(
+        names.iter().any(|name| name == "reasoningStop"),
+        "provider request must expose reasoningStop tool, got {names:?}"
+    );
+    let instructions = body
+        .get("instructions")
+        .and_then(Value::as_str)
+        .expect("stopless provider request must carry schema guidance instructions");
+    assert!(instructions.contains("reasoningStop"));
+    assert!(instructions.contains("stopreason"));
+    assert!(instructions.contains("<rcc_stop_schema>"));
+}
+
+fn is_structured_stopless_shell_artifact(item: &Value) -> bool {
+    if item.get("call_id").and_then(Value::as_str) == Some("call_stopless_reasoning") {
+        return true;
+    }
+    if !matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call" | "tool_call")
+    ) {
+        return false;
+    }
+    item.get("arguments")
+        .or_else(|| item.get("input"))
+        .and_then(Value::as_str)
+        .is_some_and(|arguments| arguments.contains("routecodex hook run reasoningStop"))
+}
+
+fn assert_no_stopless_shell_artifacts(body: &Value) {
+    for item in body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        assert!(
+            !is_structured_stopless_shell_artifact(item),
+            "provider payload leaked structured stopless shell artifact: {item}"
+        );
+    }
 }
 
 #[async_trait]
@@ -205,8 +276,9 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
-            assert_eq!(body["output"][0]["name"], "exec_command");
-            assert_eq!(body["output"][0]["call_id"], "call_stopless_reasoning");
+            let call = stopless_projected_call(&body);
+            assert_eq!(call["name"], "exec_command");
+            assert_eq!(call["call_id"], "call_stopless_reasoning");
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
     }
@@ -246,21 +318,12 @@ async fn json_runtime_enables_stopless_response_projection_and_next_request_rewr
         captures[1]["input"],
         json!([
             {"role":"user","content":"Trigger stopless"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"runtime missing stop schema"}]},
             {"role":"user","content":"continue from stopless runtime"}
         ])
     );
-    let provider_wire = serde_json::to_string(&captures[1]).unwrap();
-    assert!(provider_wire.contains("stopreason"));
-    for forbidden in [
-        "call_stopless_reasoning",
-        "function_call_output",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !provider_wire.contains(forbidden),
-            "provider payload leaked stopless artifact: {forbidden}"
-        );
-    }
+    assert_provider_stopless_guidance(&captures[1]);
+    assert_no_stopless_shell_artifacts(&captures[1]);
 }
 
 #[tokio::test]
@@ -362,18 +425,8 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     assert_eq!(input[0]["tools"][0]["name"], "exec_command");
     assert_eq!(input[1]["role"], "user");
     assert_eq!(input[1]["content"], "continue and keep tools");
-    let provider_wire = serde_json::to_string(body).unwrap();
-    assert!(provider_wire.contains("stopreason"));
-    for forbidden in [
-        "call_stopless_reasoning",
-        "function_call_output",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !provider_wire.contains(forbidden),
-            "provider-request dry-run leaked stopless artifact: {forbidden}"
-        );
-    }
+    assert_provider_stopless_guidance(body);
+    assert_no_stopless_shell_artifacts(body);
 }
 
 #[tokio::test]
@@ -445,7 +498,10 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
-            assert_eq!(body["output"][0]["call_id"], "call_stopless_reasoning");
+            assert_eq!(
+                stopless_projected_call(&body)["call_id"],
+                "call_stopless_reasoning"
+            );
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless repeat turn must be JSON"),
     }
@@ -493,7 +549,10 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
     match second.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
-            assert_eq!(body["output"][0]["call_id"], "call_stopless_reasoning");
+            assert_eq!(
+                stopless_projected_call(&body)["call_id"],
+                "call_stopless_reasoning"
+            );
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("second stopless repeat turn must be JSON"),
     }
@@ -534,18 +593,8 @@ async fn json_stopless_repeat_releases_consumed_context_before_next_projection()
         json!([{"role":"user","content":"continue round two"}])
     );
     for capture in captures.iter().skip(1) {
-        let provider_wire = serde_json::to_string(capture).unwrap();
-        assert!(provider_wire.contains("stopreason"));
-        for forbidden in [
-            "call_stopless_reasoning",
-            "function_call_output",
-            "routecodex hook run reasoningStop",
-        ] {
-            assert!(
-                !provider_wire.contains(forbidden),
-                "provider payload leaked stopless artifact: {forbidden}"
-            );
-        }
+        assert_provider_stopless_guidance(capture);
+        assert_no_stopless_shell_artifacts(capture);
     }
 }
 
@@ -704,6 +753,7 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
         captures[1]["input"],
         json!([
             {"role":"user","content":"Trigger missing schema"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing schema round one"}]},
             {"role":"user","content":"继续。"}
         ])
     );
@@ -711,23 +761,15 @@ async fn json_stopless_no_schema_stops_after_three_cross_request_rounds() {
         captures[2]["input"],
         json!([
             {"role":"user","content":"Trigger missing schema"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing schema round one"}]},
             {"role":"user","content":"继续。"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing schema round two"}]},
             {"role":"user","content":"继续。"}
         ])
     );
     for capture in captures.iter().skip(1) {
-        let provider_wire = serde_json::to_string(capture).unwrap();
-        assert!(provider_wire.contains("stopreason"));
-        for forbidden in [
-            "call_stopless_reasoning",
-            "function_call_output",
-            "routecodex hook run reasoningStop",
-        ] {
-            assert!(
-                !provider_wire.contains(forbidden),
-                "provider payload leaked stopless artifact: {forbidden}"
-            );
-        }
+        assert_provider_stopless_guidance(capture);
+        assert_no_stopless_shell_artifacts(capture);
     }
 }
 
@@ -1292,7 +1334,12 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
             }
         ])
     );
-    assert_eq!(captures[1]["tools"], second_tools);
+    assert_eq!(
+        captures[1]["tools"][0], second_tools[0],
+        "original client tool must survive stopless tool injection"
+    );
+    assert_provider_stopless_guidance(&captures[1]);
+    assert_no_stopless_shell_artifacts(&captures[1]);
     let provider_wire = serde_json::to_string(&captures[1]).unwrap();
     for forbidden in [
         "session-local",

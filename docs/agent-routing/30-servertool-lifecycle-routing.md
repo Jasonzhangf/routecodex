@@ -26,7 +26,7 @@ servertool / stopless / followup / schema gate 改动前，先查：
 1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
 2. 被迁移的 servertool 一律投影成客户端可见的 `exec_command` CLI 调用，不再走私有 server-side followup/reenter。
 3. 客户端执行 `routecodex servertool run <toolName> --input-json <json>` 后，通过正常 `submit_tool_outputs` 回传；RouteCodex 按普通 exec_command 工具结果进入正常请求链。
-4. stop summary / hook explanation 必须映射到 reasoning；stopless CLI command/stdout 只承载 status/control，schema guidance 只允许出现在 provider-facing system prompt。
+4. stop summary / hook explanation 必须映射到 reasoning；stopless CLI command/stdout 只承载 status/control。managed relay 的 schema guidance 必须同时出现在 provider-facing system prompt 与内部 `reasoningStop` tool schema；direct/provider-direct 不得注入。
 5. `apply_patch` 不属于 servertool CLI migration；保持原生/freeform 客户端工具链。
 
 ## stopless 生命周期
@@ -40,10 +40,10 @@ servertool / stopless / followup / schema gate 改动前，先查：
 8. `stopreason=2` 是继续条件；必须填写 `next_step`，followup 给模型的续跑文本就是 `next_step` 本身。缺 `next_step` 时按 invalid schema 返回缺失字段反馈。
 9. budget 真源是 stop schema state 的 `stopMessageUsed`，不是 `serverToolLoopState.repeatCount`。当前 Rust 真相是 no schema / invalid schema 连续第 1、2 次拦截并投影 CLI；第 3 次达到上限后不再拦截，直接放行原始 `finish_reason=stop` 给客户端。`stopreason=2 + next_step` 是有效进展控制，不计入连续错误预算。非 stop 响应、工具调用或正常进展必须 reset budget。
 10. stopless 不得走 server-side `reenterPipeline`。非 terminal stop_message_flow 只能向客户端投影 CLI；下一轮由 ReqChatProcess 把自动 CLI call/result 转成普通 user prompt。
-11. `reasoningStop` 只允许作为客户端执行的公共 CLI alias，不得作为 provider-facing tool 或 tool history。schema guidance 只允许存在于 system prompt。
+11. `reasoningStop` 有双面合同：managed relay provider request 必须注入 model-visible/internal `reasoningStop` tool schema；client-visible continuation 仍只能是公共 CLI alias `exec_command(routecodex hook run reasoningStop ...)`。raw internal `reasoningStop` tool call/history 不得泄漏给客户端；direct/provider-direct 不得注入或激发。
 12. 任何 stopless 系统提示词若要求主模型做 summary、最终总结、停止说明、完成/阻塞汇报，必须同时要求输出 stop schema JSON；禁止只要求 summary 而不带 schema。旧 AI followup 分支已删除，禁止恢复。
 13. 注入失败必须清理状态，防止循环。
-14. `verify:stopless-contract-blackbox` 必须检查 dry-run 返回的最终 `providerRequest.body`：完整 system schema、透明/next_step user prompt、无内部 marker、且 `stoppedBeforeProviderSend=true`。
+14. `verify:stopless-contract-blackbox` 必须检查 dry-run 返回的最终 `providerRequest.body`：完整 system schema、`reasoningStop` tool exactly once、原普通工具保留、透明/next_step user prompt、无 stopless shell artifact、且 `stoppedBeforeProviderSend=true`。
 
 ## followup 边界
 0. CLI projection 已迁移的 servertool 不得再进入 followup；stopless 也属于 CLI projection，旧 followup 规则只适用于尚未迁移的 legacy servertool flow。

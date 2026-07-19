@@ -178,3 +178,95 @@ This task is done only when all of the following are true:
 - Live 5555 replay on the same payloads matches the expected V2 result set.
 - The final evidence is written into the repo notes / memory if it is durable enough to keep.
 
+## 10. 2026-07-18 corrected closeout contract
+
+This section overrides any stale statement above that conflicts with the current V2 parity target. The task is to match the old production/V2 black-box result, not to preserve a V3-invented interpretation.
+
+### Corrected target
+
+- On managed V3 relay requests, when stopless is enabled and the stopless budget is not exhausted, the final provider request must:
+  - preserve the original client tool declarations in the same order and shape;
+  - append or otherwise expose the V2-compatible `reasoningStop` tool expected by the provider/model;
+  - inject the V2-compatible schema guidance into the provider-facing system/instructions channel;
+  - preserve normal conversation history and ordinary client tools such as `exec_command`;
+  - remove only stopless shell artifacts from the next provider request (`call_stopless_reasoning`, `routecodex hook run reasoningStop`, `function_call_output` for the stopless shell).
+- The wording, tool schema, and schema guidance must be derived from the V2 production implementation / tests. Do not invent a new prompt, a new tool schema, new field requirements, or a new lifecycle.
+- If current V3 docs say that managed relay must not declare provider-facing `reasoningStop`, treat those docs as stale for this task after verifying the V2 source. Update docs/maps/tests together with the implementation.
+- Direct / same-protocol passthrough remains a negative case: direct must not activate stopless and must not inject stopless guidance/tooling.
+
+### Budget and counter contract
+
+- Stopless budget exhaustion means the stopless hook does not intercept. It must return the original provider response unchanged.
+- Budget exhaustion must not synthesize a terminal response, must not strip or repair provider output, must not remove ordinary tool calls, and must not project another `exec_command(routecodex hook run reasoningStop ...)`.
+- The consecutive counter increases only for consecutive stop responses that fail the stop schema contract (`no_schema`, `invalid_schema`, or equivalent V2 schema-error trigger).
+- Any non-stop progress must reset the stopless counter to zero:
+  - ordinary tool calls;
+  - valid terminal schema;
+  - valid continue schema with progress semantics;
+  - normal assistant progress;
+  - session/conversation change;
+  - direct-path response because stopless is not active there.
+- If a test produces two consecutive stops, the test must also prove that the second provider request still contains the original tools, the injected `reasoningStop` tool, and schema instructions. Without that provider-wire proof, repeated stop is likely a tool/schema-injection failure, not a valid loop-counter test.
+
+### Required implementation shape
+
+- Keep stopless/servertool as Chat Process hooks only:
+  - request side after continuation/context restore and before provider outbound governance finalization;
+  - response side before continuation save.
+- Do not add a standalone lifecycle, background executor, fallback path, SSE/handler patch, provider-runtime patch, or resp_outbound repair.
+- Do not change production ports for validation. Use 5555 only.
+- Do not modify user/provider config to mask a code bug.
+
+### Required tests
+
+White-box:
+
+- Request hook, no prior CLI output:
+  - original tools preserved exactly;
+  - `reasoningStop` injected once;
+  - schema guidance instructions present;
+  - input/history unchanged.
+- Request hook after current stopless CLI output:
+  - stopless shell pair is replaced by one ordinary user continuation;
+  - original tools are still present;
+  - `reasoningStop` is still present exactly once;
+  - schema guidance remains present.
+- Response hook, budget not exhausted:
+  - missing/invalid stop projects client-visible `exec_command(routecodex hook run reasoningStop ...)`;
+  - provider visible text is preserved where V2 preserved it;
+  - raw provider `reasoningStop` does not leak to the client.
+- Response hook, budget exhausted:
+  - original provider response is byte/JSON-semantic passthrough from the stopless hook;
+  - ordinary tool calls remain ordinary tool calls for the normal response governance path.
+- Counter reset:
+  - consecutive no-schema/invalid stops advance 1 -> 2;
+  - non-stop progress resets to the next projection being repeatCount 1;
+  - valid terminal and direct path do not consume the schema-error budget.
+
+Black-box:
+
+- Cross-request `/v1/responses` relay on controlled runtime:
+  - first provider request has original tools + `reasoningStop` + schema instructions;
+  - first client response projects stopless CLI when schema is missing/invalid;
+  - second provider request preserves original tools + `reasoningStop` + schema instructions and contains only ordinary user continuation, not stopless shell artifacts;
+  - third consecutive schema-error stop passes through unchanged when budget is exhausted.
+- Direct negative:
+  - direct `/v1/responses` never emits stopless CLI and never injects stopless tool/guidance.
+- Live 5555:
+  - provider-request dry-run proves final provider body shape;
+  - real JSON/SSE replay proves client-visible behavior;
+  - repeated stop samples include provider-wire evidence for tool preservation and schema guidance before interpreting repeatCount.
+
+### Required live closeout
+
+Completion requires all of:
+
+1. source tests red before the fix or failing sample captured before the fix;
+2. focused white-box and controlled black-box tests green;
+3. V3 build succeeds;
+4. global install updates the `rccv3` binary actually used by 5555;
+5. only 5555 is restarted;
+6. 5555 `/health` passes;
+7. provider-request dry-run on the old failing payload proves tools/guidance shape;
+8. real 5555 replay proves no silent stop, no tool loss, no direct activation, and budget-exhausted passthrough;
+9. final changes are committed and pushed.

@@ -5,7 +5,7 @@
 ## 1. 默认行为
 
 - 默认开启，默认最大连续 stop 次数为 `3`。
-- stopless 管理回合必须无条件注入完整 system stop schema；不得向 provider 声明 `reasoningStop` function tool。
+- stopless managed relay 回合必须无条件注入完整 system stop schema，并声明 exactly-one provider-facing/model-visible internal `reasoningStop` function tool；direct/provider-direct 不得注入 stopless guidance 或 `reasoningStop`。
 - 状态 key 只能是 `session:<sessionId>`；若调用方缺失稳定 `sessionId`，stopless/CLI/runtime 必须 fail-fast，禁止自行补会话身份后继续伪闭环。
 - 禁止用 `tmuxSessionId`、`conversationId`、`default`、`stopMessageClientInject*` 作为 stopless 状态 fallback。
 - 当 stopless 触发时，服务端必须投影一个客户端可见 `exec_command`；不得直接 `reenterPipeline`。
@@ -57,11 +57,11 @@ Provider response
 
 - `StoplessOrchestrationAction` 只能是 `terminal_final` 或 `cli_projection`。
 - TS `engine.ts` 只能消费 Rust plan，并调用 CLI projection 或 terminal side effect；不得重建 scope、fallback、reenter、projection seed 或 stop schema 判断。
-- stop schema guidance 只能存在于 system prompt，不得存在于 CLI 命令、CLI stdout 或 provider-facing tool history。
+- stop schema guidance 只能存在于 system prompt 和 managed relay 的 fresh internal `reasoningStop` tool schema；不得存在于 CLI 命令、CLI stdout 或 provider-facing shell/tool history。
 - missing/invalid schema 时，下一轮 provider user prompt 使用固定透明提示；`stopreason=2 + next_step` 时使用 `next_step` 原文。
 - 自动 stopless CLI 的 call/result pair 必须在下一轮 provider projection 前物理移除，不得恢复成内部工具配对。
 - 最新真实 user turn 是硬清零边界：如果真实 user 位于历史 stopless pair 之后，所有 inbound normalization、continuation-history collapse 和 provider codec 都必须保留该 user 原文，删除更早的 stopless pair，且不得重建透明续轮提示。
-- `/v1/responses` bridge 使用 embedded `responsesContext.toolsNormalized` 时必须剥离 `reasoningStop`、`reasoning_stop`、`stop_message_auto` 内部工具声明，同时保留 `exec_command` 等正常客户端工具。
+- `/v1/responses` bridge 使用 embedded `responsesContext.toolsNormalized` 时必须剥离旧的 `reasoningStop`、`reasoning_stop`、`stop_message_auto` 内部工具声明，同时保留 `exec_command` 等正常客户端工具；managed relay 的 fresh internal `reasoningStop` 只能由 ReqChatProcess 本轮重新注入 exactly once。
 
 ## 5. Stop Schema
 
@@ -121,6 +121,6 @@ Live probe 必须证明：
 
 - 请求带稳定 `sessionId`。
 - 客户端响应含 `exec_command(routecodex hook run reasoningStop ...)`，但命令参数/stdout 不含 provider-facing continuationPrompt/schemaGuidance/raw prompt text。
-- dry-run 最终 `providerRequest.body` 含完整 system stop schema 和普通 user prompt，且不含 stopless 内部工具/控制 marker。
+- dry-run 最终 `providerRequest.body` 含完整 system stop schema、普通 user prompt、以及 managed relay fresh internal `reasoningStop` tool exactly once；不含 stopless shell artifact、旧工具历史或控制 marker。
 - 服务端日志不再出现 stopless `reenterPipeline`。
 - 不同 `sessionId` 不共享 stopless state。

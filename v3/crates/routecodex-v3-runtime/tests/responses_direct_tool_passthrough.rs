@@ -310,6 +310,7 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
         request(json!({
             "model": "client-model",
             "input": "direct must not use stopless",
+            "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
         scope(),
@@ -319,6 +320,37 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
+    let wire = transport
+        .request
+        .lock()
+        .unwrap()
+        .take()
+        .expect("direct provider wire payload captured");
+    let wire_serialized = serde_json::to_string(&wire).unwrap();
+    assert_eq!(
+        wire["tools"].as_array().map(|items| items.len()),
+        Some(1),
+        "direct path must preserve only client tools without injecting stopless: {wire}"
+    );
+    assert_eq!(wire["tools"][0]["name"], "exec_command");
+    assert!(
+        wire.get("instructions").is_none()
+            || !wire["instructions"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("reasoningStop"),
+        "direct provider request must not get stopless guidance: {wire}"
+    );
+    for forbidden in [
+        "reasoningStop",
+        "<rcc_stop_schema>",
+        "call_stopless_reasoning",
+    ] {
+        assert!(
+            !wire_serialized.contains(forbidden),
+            "direct provider wire leaked stopless artifact: {forbidden}"
+        );
+    }
     assert!(
         !output
             .node_trace

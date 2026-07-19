@@ -47,6 +47,31 @@ fn real_5555_sample_json(sample_dir_name: &str, file_name: &str) -> Option<Value
     None
 }
 
+fn is_structured_stopless_shell_artifact(item: &Value) -> bool {
+    if item.get("call_id").and_then(Value::as_str) == Some("call_stopless_reasoning") {
+        return true;
+    }
+    if !matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call" | "tool_call")
+    ) {
+        return false;
+    }
+    item.get("arguments")
+        .or_else(|| item.get("input"))
+        .and_then(Value::as_str)
+        .is_some_and(|arguments| arguments.contains("routecodex hook run reasoningStop"))
+}
+
+fn assert_no_structured_stopless_shell_artifacts(input: &[Value]) {
+    for item in input {
+        assert!(
+            !is_structured_stopless_shell_artifact(item),
+            "provider-visible request kept structured stopless shell artifact: {item}"
+        );
+    }
+}
+
 #[test]
 fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let hooks = compile_v3_hub_relay_request_hooks();
@@ -393,7 +418,11 @@ fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governanc
     let governed = hooks
         .run(
             raw(json!({
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{\"next_step\":\"continue with exact next step\"}"}]
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{\"next_step\":\"continue with exact next step\"}"}],
+                "tools":[
+                    {"type":"function","name":"exec_command","description":"run command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}},
+                    {"type":"function","name":"request_user_input","description":"ask user","parameters":{"type":"object","properties":{"question":{"type":"string"}}}}
+                ]
             })),
             &lookup,
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
@@ -406,10 +435,28 @@ fn stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governanc
         governed.payload()["input"][0]["content"],
         "continue with exact next step"
     );
-    assert!(governed.payload()["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("stopreason"));
+    let tools = governed.payload()["tools"]
+        .as_array()
+        .expect("stopless restore must preserve original tools and append reasoningStop");
+    assert_eq!(tools.len(), 3);
+    assert_eq!(tools[0]["name"], "exec_command");
+    assert_eq!(tools[0]["description"], "run command");
+    assert_eq!(tools[1]["name"], "request_user_input");
+    assert_eq!(tools[1]["description"], "ask user");
+    assert_eq!(tools[2]["name"], "reasoningStop");
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1
+    );
+    let instructions = governed.payload()["instructions"].as_str().unwrap();
+    assert!(instructions.contains("stopreason"));
+    assert!(instructions.contains("reasoningStop"));
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
     let events = governed.hook_events();
     let restore = events
         .iter()
@@ -726,7 +773,11 @@ fn stopless_request_hook_malformed_cli_output_is_fail_fast() {
 fn stopless_request_hook_without_cli_output_injects_schema_and_preserves_input() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let payload = json!({
-        "input":[{"role":"user","content":"keep this user turn"}]
+        "input":[{"role":"user","content":"keep this user turn"}],
+        "tools":[
+            {"type":"function","name":"exec_command","description":"run command","parameters":{"type":"object"}},
+            {"type":"function","name":"request_user_input","description":"ask","parameters":{"type":"object"}}
+        ]
     });
     let governed = hooks
         .run(
@@ -736,11 +787,43 @@ fn stopless_request_hook_without_cli_output_injects_schema_and_preserves_input()
         )
         .unwrap();
     assert_eq!(governed.payload()["input"], payload["input"]);
+    let tools = governed.payload()["tools"]
+        .as_array()
+        .expect("stopless-managed request must preserve and extend provider tools");
+    assert_eq!(tools.len(), 3);
+    assert_eq!(tools[0]["name"], "exec_command");
+    assert_eq!(tools[1]["name"], "request_user_input");
+    assert_eq!(tools[2]["name"], "reasoningStop");
+    assert_eq!(tools[2]["type"], "function");
+    assert!(tools[2]["description"]
+        .as_str()
+        .unwrap()
+        .contains("Use this tool when you stop, pause, or need another turn."));
+    assert!(tools[2]["description"]
+        .as_str()
+        .unwrap()
+        .contains("Provide stop schema as JSON arguments"));
+    assert!(tools[2]["parameters"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key("stopreason"));
+    assert!(!tools[2]["parameters"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key("simple_question"));
     assert_eq!(governed.tool_output_count(), 0);
     assert!(governed.payload()["instructions"]
         .as_str()
         .unwrap()
         .contains("stopreason"));
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("reasoningStop"));
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("最小可复制样本"));
     assert!(governed
         .hook_events()
         .contains(&V3HubRelayRequestHookEvent::Req04StoplessToolInjected));
@@ -753,21 +836,56 @@ fn stopless_request_hook_without_cli_output_injects_schema_and_preserves_input()
 }
 
 #[test]
+fn stopless_request_hook_malformed_tools_is_fail_fast_not_silent_replaced() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let error = hooks
+        .run(
+            raw(json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"malformed tools must not be replaced"}],
+                "tools":{"type":"function","name":"exec_command"}
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .expect_err("stopless injection must fail fast instead of replacing malformed tools");
+    assert!(matches!(
+        error,
+        V3HubRelayRequestError::MalformedStoplessToolSurface {
+            field: "tools",
+            reason: "tools must be an array; refusing to replace client tool surface"
+        }
+    ));
+}
+
+#[test]
 fn stopless_request_hook_existing_instruction_is_idempotent() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks
         .run(
             raw(json!({
-                "instructions":"existing stopreason contract",
-                "input":[{"role":"user","content":"keep"}]
+                "instructions":"existing stopreason contract with reasoningStop and <rcc_stop_schema>",
+                "input":[{"role":"user","content":"keep"}],
+                "tools":[{"type":"function","name":"reasoningStop","parameters":{"type":"object"}}]
             })),
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
         )
         .unwrap();
     let instructions = governed.payload()["instructions"].as_str().unwrap();
-    assert_eq!(instructions, "existing stopreason contract");
+    assert_eq!(
+        instructions,
+        "existing stopreason contract with reasoningStop and <rcc_stop_schema>"
+    );
     assert_eq!(instructions.matches("stopreason").count(), 1);
+    let tools = governed.payload()["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -811,6 +929,7 @@ fn stopless_request_hook_is_disabled_without_stopless_profile() {
         "{\"next_step\":\"must not be rewritten\"}"
     );
     assert!(governed.payload().get("instructions").is_none());
+    assert!(governed.payload().get("tools").is_none());
     assert!(!governed
         .hook_events()
         .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));
@@ -980,6 +1099,69 @@ fn stopless_request_hook_accepts_codex_exec_command_output_transcript() {
 }
 
 #[test]
+fn stopless_request_hook_strips_structured_shell_pair_without_removing_user_text_mentions() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[
+                    {
+                        "role":"user",
+                        "content":"请检查这段文档文字：routecodex hook run reasoningStop 只是文本，不是本轮 shell artifact。"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":"Chunk ID: text\nOutput:\n{\"ok\":true,\"continuationPrompt\":\"继续结构化清理。\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_regular_output",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"printf ordinary\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_regular_output",
+                        "output":"ordinary function_call_output must stay"
+                    }
+                ],
+                "tools":[{"type":"function","name":"exec_command","parameters":{"type":"object"}}]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    let input = governed.payload()["input"].as_array().expect("input array");
+    assert_no_structured_stopless_shell_artifacts(input);
+    assert!(input.iter().any(|item| {
+        item.get("role").and_then(Value::as_str) == Some("user")
+            && item
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|content| content.contains("routecodex hook run reasoningStop"))
+    }));
+    assert!(input.iter().any(|item| {
+        item.get("call_id").and_then(Value::as_str) == Some("call_regular_output")
+            && item.get("type").and_then(Value::as_str) == Some("function_call_output")
+    }));
+    let tools = governed.payload()["tools"].as_array().expect("tools array");
+    assert!(tools
+        .iter()
+        .any(|tool| tool.get("name").and_then(Value::as_str) == Some("exec_command")));
+    assert!(tools
+        .iter()
+        .any(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop")));
+}
+
+#[test]
 fn stopless_request_hook_output_string_is_required() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("rcc_stopless_bad_output"), scope())
@@ -1086,19 +1268,7 @@ fn stopless_request_hook_rewrites_latest_real_5555_sample_pair_and_strips_stale_
         .as_str()
         .expect("instructions")
         .contains("stopreason"));
-    for item in governed_input {
-        assert!(
-            item.get("call_id").and_then(Value::as_str) != Some("call_stopless_reasoning"),
-            "rewritten active-pair request kept stopless call_id item: {item}"
-        );
-        assert!(
-            !item
-                .get("arguments")
-                .and_then(Value::as_str)
-                .is_some_and(|arguments| arguments.contains("routecodex hook run reasoningStop")),
-            "rewritten active-pair request kept stopless CLI call item: {item}"
-        );
-    }
+    assert_no_structured_stopless_shell_artifacts(governed_input);
 }
 
 #[test]

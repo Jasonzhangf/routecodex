@@ -693,7 +693,7 @@ flowchart LR
 
 ## stopless.session.mainline
 
-Stopless three-round contract inside Chat Process boundary: every managed request injects the stop schema as a system instruction without a provider-facing stopless tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the system schema, and Round-3 passes the original finish_reason=stop through.
+Stopless three-round contract inside Chat Process boundary: every managed relay request injects the stop schema as a system instruction plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the fresh schema/tool contract, and Round-3 passes the original finish_reason=stop through.
 
 Entry contract: `StoplessResp01StopDetected` via `docs/architecture/wiki/stopless-session-mainline-source.md`
 

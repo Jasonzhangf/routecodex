@@ -293,7 +293,7 @@ chains:
           side_channel_reads: [servertool.followup_state]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Anchored by Rust stop gateway inspection inside the Chat Process response hook skeleton. Stopless schema judgment reads assistant output; `reasoningStop` is only the client-visible CLI alias and is never declared to the provider."
+        note: "Anchored by Rust stop gateway inspection inside the Chat Process response hook skeleton. Stopless schema judgment reads assistant output or internal `reasoningStop` arguments; managed relay declares a fresh provider-facing/model-visible `reasoningStop` tool on request side exactly once, while client-visible continuation still uses the public CLI alias."
       - step_id: sth-resp-03
         from_node: ServertoolRespHook02SchemaValidated
         to_node: ServertoolRespHook03HookResponseInjected
@@ -1608,7 +1608,7 @@ chains:
         status: anchored
 
   - chain_id: stopless.session.mainline
-    summary: "Stopless three-round contract inside Chat Process boundary: every managed request injects the stop schema as a system instruction without a provider-facing stopless tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the system schema, and Round-3 passes the original finish_reason=stop through."
+    summary: "Stopless three-round contract inside Chat Process boundary: every managed relay request injects the stop schema as a system instruction plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the fresh schema/tool contract, and Round-3 passes the original finish_reason=stop through."
     entry_contract:
       node: StoplessResp01StopDetected
       owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
@@ -1629,7 +1629,7 @@ chains:
           side_channel_reads: [metadata.runtime_control]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "Response-side Chat Process exit stage. Same-round provider request must already contain the complete stop schema system instruction and must not contain a `reasoningStop` tool declaration."
+        note: "Response-side Chat Process exit stage. Same-round managed relay provider request must already contain the complete stop schema system instruction plus exactly one fresh internal `reasoningStop` tool declaration; direct/provider-direct must contain neither."
       - step_id: stl-02
         from_node: StoplessResp02SchemaGateEvaluated
         to_node: StoplessState03RuntimeSnapshotResolved
