@@ -512,13 +512,21 @@ impl VirtualRouterEngineCore {
                 let excluded_keys: HashSet<String> = extract_excluded_provider_keys(metadata)
                     .into_iter()
                     .collect();
-                let available: Vec<String> = self.apply_standard_filters(
-                    env,
-                    &eligible,
-                    &direct_routing_state,
-                    &excluded_keys,
-                    false,
-                );
+                // Explicit provider.model requests are diagnostics/pins for the named provider.
+                // Do not let stale in-process health cooldown synthesize a local 502 before
+                // probing that provider; still honor explicit request exclusions and disabled
+                // provider config because those are not health observations.
+                let available: Vec<String> = eligible
+                    .iter()
+                    .filter(|key| !excluded_keys.contains(*key))
+                    .filter(|key| {
+                        self.provider_registry
+                            .get(key)
+                            .map(|profile| profile.enabled)
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect();
                 if available.is_empty() {
                     return Err(build_provider_not_available_error(
                         self,
@@ -732,6 +740,7 @@ impl VirtualRouterEngineCore {
 mod tests {
     use super::*;
     use crate::virtual_router_engine::instructions::{InstructionTarget, RoutingInstructionState};
+    use crate::virtual_router_engine::time_utils::now_ms;
 
     fn build_route_test_core() -> VirtualRouterEngineCore {
         let mut core = VirtualRouterEngineCore::new();
@@ -1278,6 +1287,55 @@ mod tests {
             decision["reasoning"].as_str(),
             Some("direct_model:openai.gpt-4o")
         );
+    }
+
+    #[test]
+    fn router_direct_provider_model_ignores_stale_health_cooldown_for_explicit_provider_probe() {
+        let mut core = build_route_test_core();
+        for index in 0..3 {
+            core.handle_provider_error(&json!({
+                "code": "HTTP_502",
+                "message": format!("transient upstream bad gateway #{index}"),
+                "stage": "provider.send",
+                "status": 502,
+                "errorClassification": "recoverable",
+                "runtime": {
+                    "requestId": format!("direct-provider-transient-{index}"),
+                    "providerKey": "openai.key1.gpt-4o",
+                    "runtimeKey": "openai.key1.gpt-4o"
+                },
+                "timestamp": now_ms()
+            }));
+        }
+        let tripped = core
+            .health_manager
+            .describe_state("openai.key1.gpt-4o")
+            .expect("provider health state");
+        assert_eq!(tripped["state"].as_str(), Some("tripped"));
+
+        let request = json!({
+            "model": "openai.gpt-4o",
+            "messages": [
+                { "role": "user", "content": "probe the explicitly requested provider" }
+            ]
+        });
+        let metadata = json!({
+            "metadataCenterSnapshot": {
+                "endpoint": "/v1/chat/completions",
+                "requestId": "test-router-direct-model-health-probe"
+            }
+        });
+
+        let result = core
+            .route(
+                unsafe { Env::from_raw(std::ptr::null_mut()) },
+                &request,
+                &metadata,
+            )
+            .expect("explicit provider.model direct route must probe the requested provider instead of projecting stale local health as 502");
+        let decision = result.get("decision").expect("should have decision");
+        assert_eq!(decision["routeName"].as_str(), Some("direct"));
+        assert_eq!(decision["providerKey"].as_str(), Some("openai.key1.gpt-4o"));
     }
 
     #[test]
