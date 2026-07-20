@@ -302,6 +302,53 @@ function takeNextSseBlock(buffer: string): {
   };
 }
 
+function normalizeDirectResponsesSseReadError(error: unknown): Error {
+  if (error && typeof error === 'object') {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && code.trim().startsWith('UPSTREAM_STREAM_')) {
+      return error instanceof Error ? error : Object.assign(new Error(String(code)), { code });
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  const normalizedCode = typeof code === 'string' ? code.trim().toLowerCase() : '';
+  const normalizedMessage = message.trim().toLowerCase();
+  if (
+    normalizedMessage.includes('terminated')
+    || normalizedCode.includes('terminated')
+    || normalizedCode === 'und_err_socket'
+    || normalizedCode === 'econnreset'
+  ) {
+    return buildResponsesSseTerminatedError(message || 'stream terminated before response.completed');
+  }
+  return error instanceof Error ? error : new Error(String(error ?? 'unknown direct Responses SSE stream error'));
+}
+
+function isClientDisconnectStreamError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const record = error as { code?: unknown; name?: unknown; message?: unknown };
+  const code = typeof record.code === 'string' ? record.code.trim().toUpperCase() : '';
+  const name = typeof record.name === 'string' ? record.name.trim().toUpperCase() : '';
+  const message = typeof record.message === 'string' ? record.message.trim().toUpperCase() : '';
+  return code === 'CLIENT_DISCONNECTED'
+    || code === 'ABORT_ERR'
+    || name === 'ABORTERROR'
+    || message === 'CLIENT_RESPONSE_CLOSED'
+    || message === 'CLIENT_DISCONNECTED';
+}
+
+function shouldReportDirectResponsesSseStreamError(error: Error): boolean {
+  const code = typeof (error as { code?: unknown }).code === 'string'
+    ? String((error as { code?: unknown }).code).trim().toUpperCase()
+    : '';
+  if (code.startsWith('UPSTREAM_STREAM_')) {
+    return true;
+  }
+  return error.message.trim().toLowerCase().includes('terminated');
+}
+
 async function prepareDirectResponsesSsePassthroughStream(
   stream: NodeJS.ReadableStream,
   options?: {
@@ -343,28 +390,6 @@ async function prepareDirectResponsesSsePassthroughStream(
     sawSemanticFrame = true;
     lastSemanticActivityAt = Date.now();
     return true;
-  };
-
-  const normalizeStreamReadError = (error: unknown): Error => {
-    if (error && typeof error === 'object') {
-      const code = (error as { code?: unknown }).code;
-      if (typeof code === 'string' && code.trim().startsWith('UPSTREAM_STREAM_')) {
-        return error instanceof Error ? error : Object.assign(new Error(String(code)), { code });
-      }
-    }
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
-    const normalizedCode = typeof code === 'string' ? code.trim().toLowerCase() : '';
-    const normalizedMessage = message.trim().toLowerCase();
-    if (
-      normalizedMessage.includes('terminated')
-      || normalizedCode.includes('terminated')
-      || normalizedCode === 'und_err_socket'
-      || normalizedCode === 'econnreset'
-    ) {
-      return buildResponsesSseTerminatedError(message || 'stream terminated before response.completed');
-    }
-    return error instanceof Error ? error : new Error(String(error ?? 'unknown direct Responses SSE stream error'));
   };
 
   const startStreamingRemainder = (output: PassThrough): void => {
@@ -416,7 +441,7 @@ async function prepareDirectResponsesSsePassthroughStream(
           output.end();
         }
       } catch (error) {
-        output.destroy(normalizeStreamReadError(error));
+        output.destroy(normalizeDirectResponsesSseReadError(error));
       }
     })();
   };
@@ -473,7 +498,7 @@ async function prepareDirectResponsesSsePassthroughStream(
       }
     }
   } catch (error) {
-    throw normalizeStreamReadError(error);
+    throw normalizeDirectResponsesSseReadError(error);
   }
   throw buildResponsesSseIncompleteError();
 }
@@ -514,6 +539,46 @@ export class ResponsesProvider extends HttpTransportProvider {
       statusCode
     });
     return normalizedError;
+  }
+
+  private attachDirectPassthroughStreamErrorReporter(
+    stream: NodeJS.ReadableStream,
+    context: ProviderContext
+  ): NodeJS.ReadableStream {
+    let reported = false;
+    stream.on?.('error', (error: unknown) => {
+      if (reported || isClientDisconnectStreamError(error)) {
+        return;
+      }
+      const normalized = normalizeDirectResponsesSseReadError(error);
+      if (!shouldReportDirectResponsesSseStreamError(normalized)) {
+        return;
+      }
+      reported = true;
+      const statusCode = (normalized as { statusCode?: number; status?: number }).statusCode
+        ?? (normalized as { status?: number }).status
+        ?? 502;
+      void emitProviderErrorAndWait({
+        error: normalized,
+        stage: 'provider.responses.stream',
+        runtime: buildRuntimeFromProviderContext(context),
+        dependencies: this.dependencies,
+        statusCode,
+        recoverable: true,
+        affectsHealth: true,
+        details: {
+          code: (normalized as { code?: unknown }).code ?? null,
+          error: normalized.message,
+          streamPhase: 'direct_passthrough_after_provider_return'
+        }
+      }).catch((reportError) => {
+        this.dependencies.logger?.logModule?.(this.id, 'responses-direct-stream-error-report.failed', {
+          requestId: context.requestId,
+          message: reportError instanceof Error ? reportError.message : String(reportError ?? 'unknown report error')
+        });
+      });
+    });
+    return stream;
   }
 
   /**
@@ -824,7 +889,10 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
     const stream = upstreamResult.stream;
 
-    const preparedStream = await prepareDirectResponsesSsePassthroughStream(stream, semanticTimeouts);
+    const preparedStream = this.attachDirectPassthroughStreamErrorReporter(
+      await prepareDirectResponsesSsePassthroughStream(stream, semanticTimeouts),
+      context
+    );
 
     const streamForHost = shouldCaptureProviderStreamSnapshots()
       ? attachProviderSseSnapshotStream(preparedStream, {

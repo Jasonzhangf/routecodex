@@ -1,13 +1,17 @@
 import { PassThrough, Readable } from 'node:stream';
 
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { buildLlmswitchNativeExportsFake } from '../../helpers/llmswitch-native-exports-fake.js';
 
+const mockProviderErrorEvents: unknown[] = [];
+
 jest.unstable_mockModule('../../../../src/modules/llmswitch/bridge/runtime-integrations.js', () => ({
-  reportProviderErrorToRouterPolicy: async () => undefined,
+  reportProviderErrorToRouterPolicy: async (event: unknown) => {
+    mockProviderErrorEvents.push(event);
+  },
   reportProviderSuccessToRouterPolicy: async () => undefined,
   buildResponsesJsonFromSseStreamWithNative: async () => ({ status: 'completed', output: [] }),
 }));
@@ -61,6 +65,10 @@ async function readSseStreamText(stream: AsyncIterable<unknown>): Promise<string
 }
 
 describe('ResponsesProvider direct SSE terminal validation', () => {
+  beforeEach(() => {
+    mockProviderErrorEvents.length = 0;
+  });
+
   it('rejects direct passthrough upstream SSE that terminates after lifecycle preamble only', async () => {
     const provider = createProvider();
     provider.httpClient = {
@@ -120,6 +128,89 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
       retryable: true,
       requestExecutorProviderErrorStage: 'provider.responses',
     });
+  });
+
+  it('reports provider health when direct passthrough upstream SSE terminates after client streaming starts', async () => {
+    const provider = createProvider();
+    provider.httpClient = {
+      postStream: async () => {
+        const stream = new PassThrough();
+        setImmediate(() => {
+          stream.write(
+            'event: response.created\n'
+              + 'data: {"type":"response.created","response":{"id":"resp_stream_error_after_delta","status":"in_progress"}}\n\n'
+          );
+          stream.write(
+            'event: response.output_text.delta\n'
+              + 'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
+          );
+          setTimeout(() => {
+            stream.destroy(Object.assign(new Error('terminated'), { code: 'UND_ERR_SOCKET' }));
+          }, 5).unref?.();
+        });
+        return stream;
+      },
+    };
+
+    const response = await provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true,
+    });
+
+    await expect(readSseStreamText(response.sseStream)).rejects.toMatchObject({
+      code: 'UPSTREAM_STREAM_TERMINATED',
+      statusCode: 502,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.responses',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(mockProviderErrorEvents).toHaveLength(1);
+    expect(mockProviderErrorEvents[0]).toMatchObject({
+      code: 'UPSTREAM_STREAM_TERMINATED',
+      stage: 'provider.responses.stream',
+      status: 502,
+      recoverable: true,
+      affectsHealth: true,
+      details: {
+        streamPhase: 'direct_passthrough_after_provider_return',
+      },
+    });
+  });
+
+  it('does not report provider health when client destroys direct passthrough SSE stream', async () => {
+    const provider = createProvider();
+    provider.httpClient = {
+      postStream: async () => {
+        const stream = new PassThrough();
+        setImmediate(() => {
+          stream.write(
+            'event: response.created\n'
+              + 'data: {"type":"response.created","response":{"id":"resp_client_close","status":"in_progress"}}\n\n'
+          );
+          stream.write(
+            'event: response.output_text.delta\n'
+              + 'data: {"type":"response.output_text.delta","delta":"partial"}\n\n'
+          );
+        });
+        return stream;
+      },
+    };
+
+    const response = await provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true,
+    });
+    response.sseStream.on('error', () => undefined);
+    response.sseStream.destroy(Object.assign(new Error('CLIENT_RESPONSE_CLOSED'), {
+      code: 'CLIENT_DISCONNECTED',
+      name: 'AbortError',
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(mockProviderErrorEvents).toEqual([]);
   });
 
   it('rejects direct passthrough upstream SSE that ends with response.incomplete', async () => {
