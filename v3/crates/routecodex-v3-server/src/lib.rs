@@ -23,9 +23,10 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation,
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
     execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
@@ -38,8 +39,8 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
-    V3ResponsesRelayRuntimeOutput, V3RuntimeObservability, V3RuntimeStreamObservation,
-    V3RuntimeUsageSummary,
+    V3ResponsesRelayRuntimeOutput, V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
+    V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -74,6 +75,7 @@ struct V3ListenerState {
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
+    responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
 }
 
@@ -418,6 +420,8 @@ pub async fn spawn_v3_server_aggregate(
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
     let responses_relay_local_continuation =
         Arc::new(V3ResponsesRelayLocalContinuationState::default());
+    let responses_relay_stopless_control =
+        Arc::new(V3ResponsesRelayStoplessControlState::default());
     let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
         &manifest,
     ));
@@ -443,6 +447,7 @@ pub async fn spawn_v3_server_aggregate(
             request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
             responses_direct_continuation: responses_direct_continuation.clone(),
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
+            responses_relay_stopless_control: responses_relay_stopless_control.clone(),
             provider_health: provider_health.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -865,7 +870,7 @@ async fn pending_endpoint(
                 ));
             }
         };
-        let output = execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+        let output = execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
             &state.manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: state.server.id.clone(),
@@ -873,6 +878,7 @@ async fn pending_endpoint(
                 payload: payload.clone(),
             },
             &state.responses_relay_local_continuation,
+            &state.responses_relay_stopless_control,
             continuation_scope,
             now_epoch_ms,
         )
@@ -1036,16 +1042,41 @@ async fn pending_endpoint(
             }
         };
         let console_payload = payload.clone();
-        let output =
-            match execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation(
+        let runtime_input = V3ResponsesRelayRuntimeInput {
+            server_id: state.server.id.clone(),
+            request_id: request_id.clone(),
+            payload,
+        };
+        let capture_provider_request = state
+            .debug
+            .should_capture_snapshot_stage("provider-request");
+        let capture_provider_response = state
+            .debug
+            .should_capture_snapshot_stage("provider-response");
+        let mut output = if capture_provider_request || capture_provider_response {
+            match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
                 &state.manifest,
-                V3ResponsesRelayRuntimeInput {
-                    server_id: state.server.id.clone(),
-                    request_id: request_id.clone(),
-                    payload,
-                },
+                runtime_input,
                 &state.provider_health,
                 &state.responses_relay_local_continuation,
+                &state.responses_relay_stopless_control,
+                continuation_scope,
+                now_epoch_ms,
+                capture_provider_request,
+                capture_provider_response,
+            )
+            .await
+            {
+                Ok(output) => output,
+                Err(error) => project_v3_responses_relay_runtime_failure(error),
+            }
+        } else {
+            match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
+                &state.manifest,
+                runtime_input,
+                &state.provider_health,
+                &state.responses_relay_local_continuation,
+                &state.responses_relay_stopless_control,
                 continuation_scope,
                 now_epoch_ms,
             )
@@ -1053,14 +1084,24 @@ async fn pending_endpoint(
             {
                 Ok(output) => output,
                 Err(error) => project_v3_responses_relay_runtime_failure(error),
-            };
+            }
+        };
+        if let Some(response) = capture_v3_responses_relay_provider_snapshots(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &output,
+        ) {
+            return response;
+        }
         if let Some(response) = capture_v3_responses_relay_response(
             &state,
             &trace_scope,
             &entry_protocol,
             &path,
             &request_id,
-            &output,
+            &mut output,
         ) {
             return response;
         }
@@ -1768,6 +1809,114 @@ fn record_and_emit_v3_error_projection(
     None
 }
 
+#[derive(Clone)]
+struct V3LiveSnapClientResponseSseRecorder {
+    state: Arc<V3ListenerState>,
+    entry_protocol: String,
+    endpoint: String,
+    request_id: String,
+    status: u16,
+    node_trace: Vec<&'static str>,
+    error_chain: Option<Vec<&'static str>>,
+    observability: Option<Value>,
+    raw_sse: Arc<Mutex<String>>,
+    stream_error: Arc<Mutex<Option<String>>>,
+}
+
+impl V3LiveSnapClientResponseSseRecorder {
+    fn new(
+        state: Arc<V3ListenerState>,
+        entry_protocol: String,
+        endpoint: String,
+        request_id: String,
+        output: &V3ResponsesRelayRuntimeOutput,
+    ) -> Self {
+        Self {
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            status: output.status,
+            node_trace: output.node_trace.clone(),
+            error_chain: output.error_chain.clone(),
+            observability: output
+                .observability
+                .as_ref()
+                .map(project_v3_runtime_observability_debug),
+            raw_sse: Arc::new(Mutex::new(String::new())),
+            stream_error: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn wrap(&self, stream: V3ResponsesRelayClientStream) -> V3ResponsesRelayClientStream {
+        let recorder = self.clone();
+        Box::pin(stream.map(move |chunk| match chunk {
+            Ok(bytes) => recorder.append_chunk(&bytes).map(|_| bytes),
+            Err(error) => recorder.record_stream_error(&error).and(Err(error)),
+        }))
+    }
+
+    fn persist_initial(&self) -> Result<(), String> {
+        self.persist_current()
+    }
+
+    fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
+        {
+            let mut raw_sse = self.raw_sse.lock().map_err(|error| error.to_string())?;
+            raw_sse.push_str(&String::from_utf8_lossy(bytes));
+        }
+        self.persist_current()
+    }
+
+    fn record_stream_error(&self, error: &str) -> Result<(), String> {
+        {
+            let mut stream_error = self
+                .stream_error
+                .lock()
+                .map_err(|lock_error| lock_error.to_string())?;
+            *stream_error = Some(error.to_string());
+        }
+        self.persist_current()
+    }
+
+    fn persist_current(&self) -> Result<(), String> {
+        let raw_sse = self
+            .raw_sse
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone();
+        let stream_error = self
+            .stream_error
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone();
+        let mut payload = json!({
+            "object": "routecodex.v3.client_response_snapshot",
+            "stage": "client-response",
+            "source": "live_server_response_stream",
+            "status": self.status,
+            "bodyKind": "sse",
+            "rawSse": raw_sse,
+            "node_trace": self.node_trace.clone(),
+            "error_chain": self.error_chain.clone(),
+            "observability": self.observability.clone(),
+        });
+        if let Some(stream_error) = stream_error {
+            if let Some(object) = payload.as_object_mut() {
+                object.insert("streamError".to_string(), Value::String(stream_error));
+            }
+        }
+        persist_v3_codex_sample_payload(
+            &self.state,
+            &self.entry_protocol,
+            &self.endpoint,
+            &self.request_id,
+            "response.json",
+            &payload,
+        )
+    }
+}
+
 fn capture_v3_live_raw_request(
     state: &V3ListenerState,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
@@ -1777,6 +1926,9 @@ fn capture_v3_live_raw_request(
     request_id: &str,
     payload: &Value,
 ) -> Option<Response<Body>> {
+    if !state.debug.should_capture_snapshot_stage("client-request") {
+        return None;
+    }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         let payload = state.debug.redact_payload_for_side_channel(payload.clone());
         if let Err(error) = persist_v3_codex_sample_payload(
@@ -1825,22 +1977,80 @@ fn capture_v3_live_raw_request(
 }
 
 fn capture_v3_responses_relay_response(
-    state: &V3ListenerState,
+    state: &Arc<V3ListenerState>,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
     entry_protocol: &str,
     endpoint: &str,
     request_id: &str,
-    output: &V3ResponsesRelayRuntimeOutput,
+    output: &mut V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
+    if !state.debug.should_capture_snapshot_stage("client-response") {
+        return None;
+    }
     let payload = match &output.client_body {
         V3ResponsesRelayClientBody::Json(value) => value.clone(),
-        V3ResponsesRelayClientBody::Sse(_) => json!({
-            "stream": true,
-            "status": output.status,
-            "node_trace": output.node_trace,
-            "error_chain": output.error_chain,
-            "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
-        }),
+        V3ResponsesRelayClientBody::Sse(_) => {
+            let payload = json!({
+                "object": "routecodex.v3.client_response_snapshot",
+                "stage": "client-response",
+                "source": "live_server_response_stream",
+                "bodyKind": "sse",
+                "rawSse": "",
+                "stream": true,
+                "status": output.status,
+                "node_trace": output.node_trace.clone(),
+                "error_chain": output.error_chain.clone(),
+                "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+            });
+            let projection = match state
+                .debug
+                .capture_raw_response(trace_scope, payload.clone())
+            {
+                Ok(projection) => projection,
+                Err(error) => {
+                    return Some(foundation_output_response(project_v3_debug_failure(
+                        "V3Debug03RawResponseCaptured",
+                        error,
+                    )));
+                }
+            };
+            if let Some(projection) = projection {
+                if let Err(error) = persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "response.json",
+                    &projection.payload,
+                ) {
+                    return Some(foundation_output_response(project_v3_debug_failure(
+                        "V3Debug03RawResponseCaptured",
+                        V3DebugError::Sink(error),
+                    )));
+                }
+            }
+            let V3ResponsesRelayClientBody::Sse(stream) = std::mem::replace(
+                &mut output.client_body,
+                V3ResponsesRelayClientBody::Json(Value::Null),
+            ) else {
+                unreachable!("matched SSE client body");
+            };
+            let recorder = V3LiveSnapClientResponseSseRecorder::new(
+                Arc::clone(state),
+                entry_protocol.to_string(),
+                endpoint.to_string(),
+                request_id.to_string(),
+                output,
+            );
+            if let Err(error) = recorder.persist_initial() {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3Debug03RawResponseCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+            output.client_body = V3ResponsesRelayClientBody::Sse(recorder.wrap(stream));
+            return None;
+        }
     };
     let projection = match state.debug.capture_raw_response(trace_scope, payload) {
         Ok(projection) => projection,
@@ -1869,6 +2079,68 @@ fn capture_v3_responses_relay_response(
     None
 }
 
+fn capture_v3_responses_relay_provider_snapshots(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &V3ResponsesRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    if !state
+        .debug
+        .should_capture_snapshot_stage("provider-request")
+        && !state
+            .debug
+            .should_capture_snapshot_stage("provider-response")
+    {
+        return None;
+    }
+    let Some(snapshots) = output.provider_snapshots.as_ref() else {
+        return None;
+    };
+    if let Some(provider_request) = snapshots.provider_request.as_ref() {
+        if state
+            .debug
+            .should_capture_snapshot_stage("provider-request")
+        {
+            if let Err(error) = persist_v3_codex_sample_payload(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                "provider-request.json",
+                &provider_request,
+            ) {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3DebugProviderRequestCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+        }
+    }
+    if let Some(provider_response) = snapshots.provider_response.as_ref() {
+        if state
+            .debug
+            .should_capture_snapshot_stage("provider-response")
+        {
+            if let Err(error) = persist_v3_codex_sample_payload(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                "provider-response.json",
+                &provider_response,
+            ) {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3DebugProviderResponseCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+        }
+    }
+    None
+}
+
 fn capture_v3_foundation_runtime_response(
     state: &V3ListenerState,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
@@ -1878,6 +2150,9 @@ fn capture_v3_foundation_runtime_response(
     request_id: &str,
     output: &V3FoundationRuntimeOutput,
 ) -> Option<Response<Body>> {
+    if !state.debug.should_capture_snapshot_stage("client-response") {
+        return None;
+    }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         let payload = state
             .debug
@@ -3650,7 +3925,9 @@ fn v3_sse_console_terminal_from_frame(
             .and_then(Value::as_str)
     });
     match semantic_event_type {
-        Some("response.completed" | "response.done") => Some(V3SseConsoleStreamTerminal::Completed),
+        Some("response.completed" | "response.done" | "response.requires_action") => {
+            Some(V3SseConsoleStreamTerminal::Completed)
+        }
         Some("response.failed" | "response.incomplete" | "response.error") => {
             Some(V3SseConsoleStreamTerminal::Failed(
                 parsed
@@ -4276,6 +4553,7 @@ fn build_v3_debug_runtime_from_manifest(
         log_console: manifest.log_console,
         log_file: manifest.log_file.clone(),
         snapshots_enabled: manifest.snapshots,
+        snapshot_stages: manifest.snapshot_stages.clone(),
         dry_run_enabled: manifest.dry_run,
         raw_request_retention: manifest
             .retention
@@ -4525,6 +4803,30 @@ mod tests {
             b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec()
         );
         assert!(stream.next().await.is_none());
+        drop(stream);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![V3SseConsoleStreamTerminal::Completed]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_closeout_treats_requires_action_as_terminal_end() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&events);
+        let mut stream = wrap_v3_relay_sse_closeout_stream(
+            Box::pin(futures_util::stream::iter(vec![
+                Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"status\":\"requires_action\"}}\n\n".to_vec()),
+                Ok(b"event: response.requires_action\ndata: {\"type\":\"response.requires_action\",\"response\":{\"status\":\"requires_action\",\"output\":[{\"type\":\"custom_tool_call\",\"call_id\":\"call_1\",\"name\":\"exec\",\"input\":\"{}\"}]}}\n\n".to_vec()),
+                Ok(b"data: [DONE]\n\n".to_vec()),
+            ])),
+            move |terminal| recorded.lock().unwrap().push(terminal),
+        );
+
+        let chunks = stream.by_ref().collect::<Vec<_>>().await;
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks.iter().all(Result::is_ok));
         drop(stream);
 
         assert_eq!(

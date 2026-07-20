@@ -2284,20 +2284,26 @@ features:
     status: controlled_runtime_slice_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_hook
-    owner_scope: "V3 servertool hook skeleton first slice: stopless response hook runs inside Resp03 before Resp04 continuation commit; stopless request hook runs inside Req04 after continuation/context restore and before request tool output governance. Req/Resp inbound/outbound normalization stages remain logic-free."
+    owner_scope: "V3 StoplessCenter lifecycle inside Rust Chat Process only: response hook runs in Resp03 before Resp04 continuation commit, request hook runs in Req04 after local continuation/context restore and before request tool output governance. CLI is a no-op client roundtrip; StoplessCenter state is MetadataCenter/runtime_control side-channel state, not continuation context, CLI stdout, or normal payload."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_stopless_live_shapes.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_stopless_center_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
       - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
     resource_bindings:
       - v3.request.normal_payload
       - v3.hub.tool_governance_truth
       - v3.hub.response_semantic
+      - v3.metadata.runtime_control_stopless
       - v3.continuation.local_context_truth
       - v3.response.client_payload
     mainline_bindings:
@@ -2312,19 +2318,32 @@ features:
     entry_symbols:
       - apply_v3_stopless_response_hook_at_resp03
       - apply_v3_stopless_request_hook_at_req04
+      - V3StoplessCenterState
+      - V3StoplessCenterSteering
       - V3HubServertoolRequestProfile::stopless_reasoning_stop
       - V3HubRelayResponseHookProfile::with_stopless_reasoning_stop
-      - stopless_response_hook_projects_cli_before_continuation_commit
-      - stopless_request_hook_rewrites_cli_result_after_restore_before_tool_governance
-      - stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_process
+      - V3HubRelayResponseHookProfile::with_stopless_center_state
+      - V3ResponsesRelayStoplessControlState
+      - V3ResponsesRelayStoplessControlState::load_for_scope
+      - V3ResponsesRelayStoplessControlState::store_for_scope
+      - V3ResponsesRelayStoplessControlState::clear_for_scope
+      - build_v3_relay_local_continuation_context_at_resp04
+      - natural_stop_projects_noop_cli_without_cli_state_json
+      - request_consumes_noop_cli_and_uses_runtime_control_not_stdout
+      - feature_toggle_false_disables_relay_stopless_injection_and_projection
       - verify-v3-normalization-payload-logic-boundary
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_stopless_live_shapes.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_stopless_center_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
       - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
@@ -2341,9 +2360,13 @@ features:
     required_gates:
       - npm run verify:v3-normalization-payload-logic-boundary
       - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_stopless_live_shapes -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
       - npm run verify:v3-relay-response-semantics
       - npm run verify:v3-relay-request-semantics
       - npm run verify:v3-architecture-docs
@@ -2351,6 +2374,15 @@ features:
       - npm run verify:v3-rust-only
       - npm run verify:v3-cargo-fmt
       - git diff --check
+    notes:
+      - "V3 StoplessCenter is enabled by default and can be disabled only via `[features].stopless_center = false`; disabled relay does not inject stopless guidance/tool and does not project stopless CLI."
+      - "Provider-facing guidance is short and positive: continue the current goal, reason with existing context, call tools as needed, and call `reasoningStop` only to report complete/blocked/continue."
+      - "The internal `reasoningStop` tool-call arguments are the only model-originated stop state. Assistant visible text, fenced JSON, `<rcc_stop_schema>`, `next_step`, schemaFeedback, repeatCount/maxRepeats/triggerHint, and CLI stdout JSON are not StoplessCenter state sources."
+      - "Natural `finish_reason=stop` without a reasoningStop state update increments only `natural_stop_count`; before the guard it projects a no-op `routecodex hook run reasoningStop` client command, and at the guard it passes the cleaned original visible text through."
+      - "The no-op CLI command has no args and no JSON state. Req04 consumes the current stopless call/output as current-turn evidence; StoplessCenter state is loaded from runtime_control, and missing control state strips the no-op pair without synthesizing persistent state."
+      - "StoplessCenter side-channel state is stored only in MetadataCenter/runtime_control equivalent V3 relay control state, bound by entry endpoint + session + conversation + port + routing group. Local continuation context must never carry stopless control fields."
+      - "Tool injection preserves the original declaration surface: top-level `tools` stays top-level, Responses `input[].type=additional_tools.tools` stays embedded, and stopless only appends exactly one internal `reasoningStop` declaration."
+      - "Direct/provider-direct remains exactly-zero relay stopless: no schema/tool injection, no no-op CLI projection, and no relay stopless response hook activation."
     runtime_status: controlled_runtime_slice_only
 
   - feature_id: v3.protocol_normalization_tool_governance_boundary

@@ -45,22 +45,22 @@ const fixtures = [
   {
     name: 'Responses Relay stream collector resurrected',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'use serde_json::{json, Value};',
-    mutation: 'use serde_json::{json, Value};\nfn forbidden_responses_relay_collector_resurrected() { let _ = "collect_v3_responses_relay_sse_response"; }',
+    marker: 'use serde_json::{json, Map, Value};',
+    mutation: 'use serde_json::{json, Map, Value};\nfn forbidden_responses_relay_collector_resurrected() { let _ = "collect_v3_responses_relay_sse_response"; }',
     diagnostic: /Responses Relay provider stream collection/,
   },
   {
     name: 'Responses Relay terminal shape materialization resurrected',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'use serde_json::{json, Value};',
-    mutation: 'use serde_json::{json, Value};\nfn forbidden_responses_relay_terminal_materialize_resurrected() { let _ = "complete_v3_runtime_sse_materialized_response"; }',
+    marker: 'use serde_json::{json, Map, Value};',
+    mutation: 'use serde_json::{json, Map, Value};\nfn forbidden_responses_relay_terminal_materialize_resurrected() { let _ = "complete_v3_runtime_sse_materialized_response"; }',
     diagnostic: /terminal response shape materialization/,
   },
   {
     name: 'Responses Relay synthetic SSE projection resurrected',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'use serde_json::{json, Value};',
-    mutation: 'use serde_json::{json, Value};\nfn forbidden_responses_relay_synthetic_projection_resurrected() { let _ = "project_finalized_response_sse_stream"; }',
+    marker: 'use serde_json::{json, Map, Value};',
+    mutation: 'use serde_json::{json, Map, Value};\nfn forbidden_responses_relay_synthetic_projection_resurrected() { let _ = "project_finalized_response_sse_stream"; }',
     diagnostic: /synthetic SSE re-emission/,
   },
   {
@@ -80,8 +80,8 @@ const fixtures = [
   {
     name: 'Responses Relay raw SSE pass-through projector resurrected',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'use serde_json::{json, Value};',
-    mutation: 'use serde_json::{json, Value};\nfn project_sse_stream() {}',
+    marker: 'use serde_json::{json, Map, Value};',
+    mutation: 'use serde_json::{json, Map, Value};\nfn project_sse_stream() {}',
     diagnostic: /raw SSE transport pass-through/,
   },
   {
@@ -94,8 +94,8 @@ const fixtures = [
   {
     name: 'Responses Relay raw SSE passthrough hook resurrected',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'use serde_json::{json, Value};',
-    mutation: 'use serde_json::{json, Value};\nfn run_sse_response_passthrough_hooks() {}',
+    marker: 'use serde_json::{json, Map, Value};',
+    mutation: 'use serde_json::{json, Map, Value};\nfn run_sse_response_passthrough_hooks() {}',
     diagnostic: /raw SSE passthrough branch/,
   },
   {

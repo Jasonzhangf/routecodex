@@ -112,6 +112,20 @@ fn top_level_start_help_exposes_snap_and_optional_config() {
 }
 
 #[test]
+fn top_level_restart_help_exposes_snap_and_optional_config() {
+    let help = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .args(["restart", "--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let stdout = String::from_utf8(help.stdout).unwrap();
+    assert!(stdout.contains("--snap"), "{stdout}");
+    assert!(stdout.contains("--snap-stages"), "{stdout}");
+    assert!(stdout.contains("--config"), "{stdout}");
+    assert!(stdout.contains("-c"), "{stdout}");
+}
+
+#[test]
 fn cli_defaults_to_home_rcc_config_v3_toml() {
     let source = write_config();
     let home = source.parent().unwrap().join("home");

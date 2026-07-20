@@ -577,6 +577,18 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.metadata.runtime_control_stopless
+    resource_kind: runtime_control_truth
+    lifecycle: v3.servertool_hook_skeleton_lifecycle
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ResponsesRelayStoplessControlState
+    identity: [entryEndpoint, sessionId, conversationId, port, routingGroup]
+    allowed_writers: [V3ResponsesRelayStoplessControlState::store_for_scope, V3ResponsesRelayStoplessControlState::clear_for_scope, apply_v3_responses_relay_stopless_control_transition]
+    allowed_readers: [V3ResponsesRelayStoplessControlState::load_for_scope, load_v3_responses_relay_stopless_control_state, V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed]
+    forbidden_writers: [V3HubRespContinuation04Committed, V3LocalContinuationStore, V3RemoteContinuationStore, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, response_projector, sse_framer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.hub.tool_governance_truth
     resource_kind: side_channel
     lifecycle: v3.hub_relay.tool_servertool_multiturn_parity

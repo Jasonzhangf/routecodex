@@ -150,6 +150,7 @@ fn published_manifest() -> V3Config05ManifestPublished {
             log_console: false,
             log_file: None,
             snapshots: false,
+            snapshot_stages: None,
             dry_run: false,
             retention: BTreeMap::new(),
         },

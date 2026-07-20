@@ -13,6 +13,10 @@ const cliStart = read('src/cli/commands/start.ts');
 const contractDoc = read('docs/architecture/snapshot-stage-contract.md');
 const routeDoc = read('docs/agent-routing/10-runtime-ssot-routing.md');
 const archReadme = read('docs/architecture/README.md');
+const v3DebugRuntime = read('v3/crates/routecodex-v3-debug/src/lib.rs');
+const v3Cli = read('v3/crates/routecodex-v3-cli/src/main.rs');
+const v3Server = read('v3/crates/routecodex-v3-server/src/lib.rs');
+const v3ResponsesRelayRuntime = read('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs');
 const providerWriter = read('src/debug/snapshot/provider-writer.ts');
 const httpRequestExecutor = read('src/providers/core/runtime/http-request-executor.ts');
 const responsesProvider = read('src/providers/core/runtime/responses-provider.ts');
@@ -44,16 +48,47 @@ for (const token of ['client-request', 'provider-response', 'client-response']) 
 }
 
 if (stagePolicy.includes("'provider-request'")) {
-  failures.push('default snapshot selector must not include provider-request body snapshots');
+  failures.push('legacy TS default snapshot selector must not include provider-request body snapshots');
 }
 for (const token of [
-  '`provider-request` 不属于默认集',
+  'V3 live `rccv3 start --snap` 默认必须打开四类真实边界快照',
+  '`provider-request` 在 V3 live 中不是手工构造、dry-run 构造或 Hub 重建样本',
+  '唯一 owner 是 live provider transport cutpoint recorder',
+  'SSE 情况下 `response.json.rawSse` 至少能对账',
+  'V2/legacy `provider-request` 不属于默认集',
   '显式 `--snap-stages provider-request`',
   'force-local debug 捕获',
-  'provider-request replay artifact 的唯一 owner 是 provider/debug snapshot writer',
 ]) {
   if (!contractDoc.includes(token)) {
-    failures.push(`snapshot contract doc missing provider-request replay boundary: ${token}`);
+    failures.push(`snapshot contract doc missing provider-request live/legacy boundary: ${token}`);
+  }
+}
+for (const token of ['client-request', 'provider-request', 'provider-response', 'client-response']) {
+  if (!v3DebugRuntime.includes(token)) {
+    failures.push(`V3 default snapshot selector missing live edge stage: ${token}`);
+  }
+}
+if (!v3DebugRuntime.includes('V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR')) {
+  failures.push('V3 debug runtime must expose a V3-specific default snapshot stage selector');
+}
+if (!v3DebugRuntime.includes('should_capture_v3_snapshot_stage')) {
+  failures.push('V3 debug runtime must expose a local snapshot stage selector helper');
+}
+if (!v3Cli.includes('snap_stages')) {
+  failures.push('V3 CLI must accept --snap-stages and propagate it to managed lifecycle');
+}
+for (const token of [
+  'V3LiveSnapResponsesTransport',
+  'V3LiveSnapClientResponseSseRecorder',
+  'capture_v3_responses_relay_provider_snapshots',
+  'live_server_response_stream',
+  '"provider-request.json"',
+  '"provider-response.json"',
+  '"response.json"',
+  '"rawSse"',
+]) {
+  if (!`${v3Server}\n${v3ResponsesRelayRuntime}`.includes(token)) {
+    failures.push(`V3 live server must capture real provider cutpoint samples: ${token}`);
   }
 }
 if (!providerWriter.includes('forceLocalDiskWriteWhenDisabled: options.forceLocalDiskWriteWhenDisabled')) {

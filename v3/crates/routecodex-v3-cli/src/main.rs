@@ -25,6 +25,8 @@ enum Command {
         config: Option<String>,
         #[arg(long, default_value_t = false)]
         snap: bool,
+        #[arg(long)]
+        snap_stages: Option<String>,
     },
     Status {
         #[arg(short, long)]
@@ -35,6 +37,10 @@ enum Command {
         config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
+        #[arg(long, default_value_t = false)]
+        snap: bool,
+        #[arg(long)]
+        snap_stages: Option<String>,
     },
     Stop {
         #[arg(short, long)]
@@ -66,6 +72,8 @@ enum ServerCommand {
         foreground: bool,
         #[arg(long, default_value_t = false)]
         snap: bool,
+        #[arg(long)]
+        snap_stages: Option<String>,
     },
     Status {
         #[arg(short, long)]
@@ -76,6 +84,10 @@ enum ServerCommand {
         config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
+        #[arg(long, default_value_t = false)]
+        snap: bool,
+        #[arg(long)]
+        snap_stages: Option<String>,
     },
     Stop {
         #[arg(short, long)]
@@ -89,6 +101,8 @@ enum ServerCommand {
         config: Option<String>,
         #[arg(long, default_value_t = false)]
         snap: bool,
+        #[arg(long)]
+        snap_stages: Option<String>,
     },
 }
 
@@ -116,12 +130,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 manifest.servers.len()
             );
         }
-        Command::Start { config, snap } => {
+        Command::Start {
+            config,
+            snap,
+            snap_stages,
+        } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
-            emit_v3_cli_start_console_line("start", &config, &executable, snap);
+            emit_v3_cli_start_console_line(
+                "start",
+                &config,
+                &executable,
+                snap,
+                snap_stages.as_deref(),
+            );
             V3ManagedLifecycle::new(config)?
                 .with_snapshots_enabled(snap)
+                .with_snapshot_stages(snap_stages)
                 .with_console_enabled(true)
                 .start_foreground(&executable)
                 .await?;
@@ -132,6 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config,
                     foreground,
                     snap,
+                    snap_stages,
                 },
         } => {
             let config = resolve_config_path(config)?;
@@ -142,9 +168,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &config,
                     &executable,
                     snap,
+                    snap_stages.as_deref(),
                 );
                 V3ManagedLifecycle::new(config)?
                     .with_snapshots_enabled(snap)
+                    .with_snapshot_stages(snap_stages)
                     .with_console_enabled(true)
                     .start_foreground(&executable)
                     .await?;
@@ -152,6 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let executable = std::env::current_exe()?;
                 V3ManagedLifecycle::new(config)?
                     .with_snapshots_enabled(snap)
+                    .with_snapshot_stages(snap_stages)
                     .start(&executable, Duration::from_secs(15))
                     .await?;
             }
@@ -173,12 +202,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Server {
-            command: ServerCommand::Restart { config, timeout_ms },
+            command:
+                ServerCommand::Restart {
+                    config,
+                    timeout_ms,
+                    snap,
+                    snap_stages,
+                },
         }
-        | Command::Restart { config, timeout_ms } => {
+        | Command::Restart {
+            config,
+            timeout_ms,
+            snap,
+            snap_stages,
+        } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
             let status = V3ManagedLifecycle::new(config)?
+                .with_snapshots_enabled(snap)
+                .with_snapshot_stages(snap_stages)
                 .restart(&executable, Duration::from_millis(timeout_ms))
                 .await?;
             println!("{}", serde_json::to_string(&status)?);
@@ -195,12 +237,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Server {
-            command: ServerCommand::RunManagedChild { config, snap },
+            command:
+                ServerCommand::RunManagedChild {
+                    config,
+                    snap,
+                    snap_stages,
+                },
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
             V3ManagedLifecycle::new(config)?
                 .with_snapshots_enabled(snap)
+                .with_snapshot_stages(snap_stages)
                 .run_managed_child(&executable)
                 .await?;
         }
@@ -235,14 +283,21 @@ fn should_print_version() -> bool {
     args.next().is_none() && matches!(first.as_str(), "--version" | "-V" | "version")
 }
 
-fn emit_v3_cli_start_console_line(command: &str, config: &Path, executable: &Path, snap: bool) {
+fn emit_v3_cli_start_console_line(
+    command: &str,
+    config: &Path,
+    executable: &Path,
+    snap: bool,
+    snap_stages: Option<&str>,
+) {
     println!(
-        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={}",
+        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={} snap_stages={}",
         resolve_routecodex_package_version_from_executable(executable)
             .unwrap_or_else(|| "unknown".to_string()),
         env!("CARGO_PKG_VERSION"),
         executable.display(),
         config.display(),
-        snap
+        snap,
+        snap_stages.unwrap_or("")
     );
 }

@@ -17,6 +17,7 @@ debug_events = true
 log_console = true
 log_file = "/tmp/routecodex-v3.log"
 snapshots = true
+snapshot_stages = "client-request,provider-request"
 dry_run = true
 retention = { raw_requests = 10, raw_responses = 10 }
 
@@ -146,6 +147,10 @@ fn parses_full_config_v3_without_interpreting_targets() {
         Some("fwd.gpt-5.6")
     );
     assert!(manifest.debug.dry_run);
+    assert_eq!(
+        manifest.debug.snapshot_stages.as_deref(),
+        Some("client-request,provider-request")
+    );
     assert_eq!(
         manifest.error.policies["provider_unavailable"].max_attempts,
         Some(3)

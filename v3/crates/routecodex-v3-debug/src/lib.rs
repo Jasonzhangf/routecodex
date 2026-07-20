@@ -6,6 +6,9 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =
+    "client-request,provider-request,provider-response,client-response";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3Debug01NodeEventRegistered {
     pub server_id: String,
@@ -32,6 +35,7 @@ pub struct V3DebugRuntimeConfig {
     pub log_console: bool,
     pub log_file: Option<String>,
     pub snapshots_enabled: bool,
+    pub snapshot_stages: Option<String>,
     pub dry_run_enabled: bool,
     pub raw_request_retention: usize,
     pub raw_response_retention: usize,
@@ -45,6 +49,7 @@ impl Default for V3DebugRuntimeConfig {
             log_console: false,
             log_file: None,
             snapshots_enabled: false,
+            snapshot_stages: None,
             dry_run_enabled: false,
             raw_request_retention: 16,
             raw_response_retention: 16,
@@ -131,6 +136,7 @@ pub struct V3DebugStatusProjection {
     pub log_console: bool,
     pub log_file: Option<String>,
     pub snapshots_enabled: bool,
+    pub snapshot_stages: String,
     pub dry_run_enabled: bool,
     pub event_count: usize,
     pub raw_request_count: usize,
@@ -382,6 +388,13 @@ impl V3DebugRuntime {
         Ok(session_id)
     }
 
+    pub fn should_capture_snapshot_stage(&self, stage: &str) -> bool {
+        if !self.config.snapshots_enabled {
+            return false;
+        }
+        should_capture_v3_snapshot_stage(self.config.snapshot_stages.as_deref(), stage)
+    }
+
     pub fn record_snapshot(
         &self,
         scope: &V3DebugTraceScope,
@@ -509,6 +522,10 @@ impl V3DebugRuntime {
             log_console: self.config.log_console,
             log_file: self.config.log_file.clone(),
             snapshots_enabled: self.config.snapshots_enabled,
+            snapshot_stages: effective_v3_snapshot_stage_selector(
+                self.config.snapshot_stages.as_deref(),
+            )
+            .to_string(),
             dry_run_enabled: self.config.dry_run_enabled,
             event_count: state.events.len(),
             raw_request_count: state.raw_requests.len(),
@@ -566,6 +583,46 @@ impl V3DebugRuntime {
         }
         Ok(())
     }
+}
+
+pub fn effective_v3_snapshot_stage_selector(selector: Option<&str>) -> &str {
+    selector
+        .map(str::trim)
+        .filter(|selector| !selector.is_empty())
+        .unwrap_or(V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR)
+}
+
+pub fn should_capture_v3_snapshot_stage(selector: Option<&str>, stage: &str) -> bool {
+    let normalized_stage = stage.trim().to_ascii_lowercase();
+    if normalized_stage.is_empty() {
+        return false;
+    }
+    let selector = effective_v3_snapshot_stage_selector(selector);
+    let mut has_token = false;
+    for token in selector
+        .split(|character: char| character == ',' || character.is_ascii_whitespace())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        has_token = true;
+        let token = token.to_ascii_lowercase();
+        if token == "*" || token == "all" {
+            return true;
+        }
+        if let Some(prefix) = token.strip_suffix('*') {
+            if !prefix.is_empty() && normalized_stage.starts_with(prefix) {
+                return true;
+            }
+            continue;
+        }
+        if normalized_stage == token {
+            return true;
+        }
+    }
+    if !has_token {
+        return should_capture_v3_snapshot_stage(None, &normalized_stage);
+    }
+    false
 }
 
 fn retain_latest<T>(values: &mut VecDeque<T>, limit: usize) {

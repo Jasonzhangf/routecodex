@@ -1640,11 +1640,12 @@ features:
     status: controlled_runtime_slice_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_hook
-    owner_scope: "V3 servertool hook skeleton first slice with stopless as the first built-in hook. Tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
+    owner_scope: "V3 StoplessCenter first built-in servertool hook. Stopless state lives in MetadataCenter/runtime_control side-channel state owned by Chat Process runtime; CLI is no-op; continuation stores only protocol context; tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
     design:
@@ -1655,18 +1656,27 @@ features:
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/v3-mainline-call-map.yml
     required_unit:
-      - response stopless hook projects client-visible exec_command before continuation commit
-      - terminal stop schema does not project CLI
-      - request stopless hook rewrites CLI result after continuation/context restore and before request tool governance
-      - malformed stopless CLI output fails fast
-      - blackbox response projection then next request rewrite keeps stopless inside Chat Process
+      - natural stop projects client-visible no-op exec_command before continuation commit
+      - assistant text/fenced schema is visible text only and is not a StoplessCenter state source
+      - reasoningStop tool-call arguments are the only model-originated stop state
+      - terminal reasoningStop with evidence returns cleaned visible terminal text and no CLI
+      - request stopless hook consumes no-op CLI only as current-turn evidence and reads StoplessCenter state from runtime_control side-channel
+      - local continuation context never carries StoplessCenter control fields
+      - no-op CLI stdout is never parsed for prompt/state
+      - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
+      - direct negative stays exactly-zero relay stopless for the same payload matrix
+      - "`[features].stopless_center = false` disables relay stopless injection and projection"
       - normalization boundary gate rejects tool governance hook schema and tool-result payload logic in ReqInbound RespInbound ReqOutbound RespOutbound
     required_gates:
       - npm run verify:v3-normalization-payload-logic-boundary
       - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity stopless_hook_blackbox -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_stopless_live_shapes -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
       - npm run verify:v3-relay-response-semantics
       - npm run verify:v3-relay-request-semantics
       - npm run verify:v3-architecture-docs
@@ -1679,6 +1689,9 @@ features:
       live_cutover: false
       servertool_followup_reenter: false
       global_install_restart: false
+    notes:
+      - "Old V3 stop schema/fence/CLI JSON continuation is not an allowed runtime source. `<rcc_stop_schema>`, `schemaFeedback`, `repeatCount`, `maxRepeats`, `triggerHint`, `continuationPrompt`, and `next_step` must not appear in provider/client normal payload."
+      - "StoplessCenter state changes only at Resp03 and is read at Req04 from MetadataCenter/runtime_control side-channel state; local continuation context must never carry stopless control."
 
   - feature_id: v3.protocol_normalization_tool_governance_boundary
     status: source_controlled_runtime_boundary_verified

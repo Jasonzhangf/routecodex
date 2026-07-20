@@ -407,17 +407,22 @@ function summarizeProviderDryRun(response, expectedPrompt) {
     ?? dryBody?.dry_run?.provider_request?.body
     ?? null;
   const input = Array.isArray(providerBody?.input) ? providerBody.input : [];
-  const lastUser = extractLastProviderUserText(input);
+  const conversationItems = extractProviderConversationItems(providerBody);
+  const lastUser = extractLastProviderUserText(conversationItems);
   const toolNames = collectProviderToolNames(providerBody);
   const additionalToolsInputCount = input.filter((item) => item?.type === 'additional_tools').length;
   const topLevelToolCount = Array.isArray(providerBody?.tools) ? providerBody.tools.length : 0;
+  const providerHasResponsesInput = Array.isArray(providerBody?.input);
+  const providerHasChatMessages = Array.isArray(providerBody?.messages);
   const originalToolNamesPreserved = PROBE_ORIGINAL_TOOL_NAMES
     .every((name) => toolNames.includes(name));
-  const noSiblingToolSurfaceForAdditionalTools = additionalToolsInputCount === 0
-    || topLevelToolCount === 0;
+  const noSiblingToolSurfaceForAdditionalTools = providerHasResponsesInput
+    ? (additionalToolsInputCount === 0 || topLevelToolCount === 0)
+    : true;
   const structuredStoplessLeaks = collectStructuredStoplessLeaks(providerBody);
   const structuredControlLeaks = collectStructuredControlLeaks(providerBody);
-  const guidance = typeof providerBody?.instructions === 'string'
+  const guidanceText = extractProviderGuidanceText(providerBody);
+  const guidance = typeof guidanceText === 'string'
     && [
       'reasoningStop',
       '<rcc_stop_schema>',
@@ -427,7 +432,7 @@ function summarizeProviderDryRun(response, expectedPrompt) {
       'current_goal',
       'next_step',
       'needs_user_input'
-    ].every((token) => providerBody.instructions.includes(token));
+    ].every((token) => guidanceText.includes(token));
   const stoppedBeforeProviderSend = dryBody?.stoppedBeforeProviderSend === true
     || dryBody?.dry_run?.stopped_before_provider_send === true
     || dryBody?.dry_run?.provider_network_send === false;
@@ -436,6 +441,9 @@ function summarizeProviderDryRun(response, expectedPrompt) {
     || dryBody?.dry_run?.fixture_id === 'responses_relay_provider_request';
   const lastUserMatchesExpected = expectedPrompt == null || lastUser === expectedPrompt;
   const reasoningStopCount = toolNames.filter((name) => name === 'reasoningStop').length;
+  const providerShapeOk = providerHasResponsesInput
+    ? additionalToolsInputCount === 1
+    : providerHasChatMessages;
   return {
     status: response.status,
     object: dryBody?.object ?? null,
@@ -443,6 +451,12 @@ function summarizeProviderDryRun(response, expectedPrompt) {
     stoppedBeforeProviderSend,
     providerBodyPresent: Boolean(providerBody),
     inputLen: input.length,
+    conversationLen: conversationItems.length,
+    providerShape: providerHasResponsesInput
+      ? 'responses'
+      : providerHasChatMessages
+        ? 'openai_chat'
+        : 'unknown',
     toolNames,
     additionalToolsInputCount,
     topLevelToolCount,
@@ -461,7 +475,7 @@ function summarizeProviderDryRun(response, expectedPrompt) {
       && stoppedBeforeProviderSend
       && Boolean(providerBody)
       && reasoningStopCount === 1
-      && additionalToolsInputCount === 1
+      && providerShapeOk
       && originalToolNamesPreserved
       && noSiblingToolSurfaceForAdditionalTools
       && guidance
@@ -469,6 +483,37 @@ function summarizeProviderDryRun(response, expectedPrompt) {
       && structuredStoplessLeaks.length === 0
       && structuredControlLeaks.length === 0
   };
+}
+
+function extractProviderConversationItems(providerBody) {
+  if (Array.isArray(providerBody?.input)) {
+    return providerBody.input;
+  }
+  if (Array.isArray(providerBody?.messages)) {
+    return providerBody.messages;
+  }
+  return [];
+}
+
+function extractProviderGuidanceText(providerBody) {
+  const chunks = [];
+  if (typeof providerBody?.instructions === 'string') {
+    chunks.push(providerBody.instructions);
+  }
+  const messages = Array.isArray(providerBody?.messages) ? providerBody.messages : [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+    if (message.role !== 'system' && message.role !== 'developer') {
+      continue;
+    }
+    const content = normalizeProviderUserContent(message.content);
+    if (typeof content === 'string' && content.trim()) {
+      chunks.push(content);
+    }
+  }
+  return chunks.length > 0 ? chunks.join('\n') : null;
 }
 
 function collectProviderToolNames(providerBody) {

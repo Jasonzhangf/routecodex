@@ -6,7 +6,7 @@ use super::{
     drop_v3_client_tool_error_pairs_at_req04, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
-    V3StoplessHookState,
+    V3StoplessCenterState,
 };
 use serde_json::Value;
 use std::{
@@ -107,6 +107,7 @@ pub enum V3HubServertoolRequestProfile {
     Enabled {
         hook_ids: Vec<&'static str>,
         stopless_reasoning_stop: bool,
+        stopless_center_state: Option<V3StoplessCenterState>,
     },
     RequiredFailure(&'static str),
 }
@@ -118,13 +119,25 @@ impl V3HubServertoolRequestProfile {
         Self::Enabled {
             hook_ids: hook_ids.into(),
             stopless_reasoning_stop: false,
+            stopless_center_state: None,
         }
     }
     pub fn stopless_reasoning_stop() -> Self {
         Self::Enabled {
             hook_ids: vec!["stop_message_auto"],
             stopless_reasoning_stop: true,
+            stopless_center_state: None,
         }
+    }
+    pub fn with_stopless_center_state(mut self, state: V3StoplessCenterState) -> Self {
+        if let Self::Enabled {
+            stopless_center_state,
+            ..
+        } = &mut self
+        {
+            *stopless_center_state = Some(state);
+        }
+        self
     }
     pub fn required_failure(hook_id: &'static str) -> Self {
         Self::RequiredFailure(hook_id)
@@ -137,6 +150,15 @@ impl V3HubServertoolRequestProfile {
                 ..
             }
         )
+    }
+    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
+        match self {
+            Self::Enabled {
+                stopless_center_state,
+                ..
+            } => stopless_center_state.as_ref(),
+            _ => None,
+        }
     }
 }
 
@@ -217,7 +239,7 @@ pub struct V3HubRelayRequestOutcome {
     local_context: Option<Arc<Value>>,
     tool_output_count: usize,
     events: Vec<V3HubRelayRequestHookEvent>,
-    stopless_state: Option<V3StoplessHookState>,
+    stopless_state: Option<V3StoplessCenterState>,
 }
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
@@ -241,7 +263,7 @@ impl V3HubRelayRequestOutcome {
     pub fn tool_output_count(&self) -> usize {
         self.tool_output_count
     }
-    pub fn stopless_state(&self) -> Option<&V3StoplessHookState> {
+    pub fn stopless_state(&self) -> Option<&V3StoplessCenterState> {
         self.stopless_state.as_ref()
     }
     pub fn into_governed(self) -> V3HubReqChatProcess04Governed {
@@ -333,6 +355,11 @@ impl V3HubRelayRequestHooks {
             events.push(V3HubRelayRequestHookEvent::Req04LocalContextRestored);
         }
         if let Some(context) = local_context.as_deref() {
+            if let Some(key) = find_v3_hub_side_channel_key(context) {
+                return Err(V3HubRelayRequestError::RestoredLocalContextInvalid {
+                    reason: format!("restored local continuation context leaked {key}"),
+                });
+            }
             merge_v3_relay_restored_local_context_at_req04(
                 &mut classified.previous.previous.payload.0,
                 context,
@@ -350,6 +377,7 @@ impl V3HubRelayRequestHooks {
             apply_v3_stopless_request_hook_at_req04(
                 &mut classified.previous.previous.payload.0,
                 &mut events,
+                profile.stopless_center_state(),
             )?
         } else {
             None
@@ -894,6 +922,7 @@ fn run_servertool_profile(
         V3HubServertoolRequestProfile::Enabled {
             hook_ids,
             stopless_reasoning_stop,
+            ..
         } => {
             for hook_id in hook_ids {
                 if *stopless_reasoning_stop && *hook_id == "stop_message_auto" {

@@ -157,9 +157,9 @@ for (const phrase of [
   'build_v3_provider_12_responses_wire_payload',
   'build_v3_transport_13_responses_http_request_from_v3_provider_12',
   'run_json_response_hooks',
-  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
+  'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
   'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
-  'let (action, finalized_provider_value) = run_json_response_hooks(',
+  'let (action, finalized_provider_value, response_stopless_state) =',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
@@ -173,13 +173,14 @@ for (const node of expectedNodes.slice(10)) {
 requireCount(
   responsesRuntime,
   responsesRuntimePath,
-  'let (action, finalized_provider_value) = run_json_response_hooks(',
+  'let (action, finalized_provider_value, response_stopless_state) =',
   2,
 );
 requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
   'V3ProviderResponseBody::Sse(stream) => {',
-  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
-  'let (action, finalized_provider_value) = run_json_response_hooks(',
+  'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
+  'let (action, finalized_provider_value, response_stopless_state) =',
+  'run_json_response_hooks(',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
 ]);
@@ -194,8 +195,10 @@ forbid(responsesRuntime, responsesRuntimePath, [
 for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots',
   'responses_relay_local_continuation',
+  'responses_relay_stopless_control',
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
   'execute_v3_responses_relay_dry_run_runtime',

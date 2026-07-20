@@ -131,6 +131,7 @@ pub struct V3ManagedLifecycle {
     config_path: PathBuf,
     state_root: PathBuf,
     force_snapshots: bool,
+    force_snapshot_stages: Option<String>,
     force_console: bool,
 }
 
@@ -163,6 +164,7 @@ impl V3ManagedLifecycle {
             config_path: config_path.into(),
             state_root,
             force_snapshots: false,
+            force_snapshot_stages: None,
             force_console: false,
         })
     }
@@ -175,12 +177,23 @@ impl V3ManagedLifecycle {
             config_path: config_path.into(),
             state_root: state_root.into(),
             force_snapshots: false,
+            force_snapshot_stages: None,
             force_console: false,
         }
     }
 
     pub fn with_snapshots_enabled(mut self, enabled: bool) -> Self {
         self.force_snapshots = enabled;
+        self
+    }
+
+    pub fn with_snapshot_stages(mut self, stages: Option<String>) -> Self {
+        self.force_snapshot_stages = stages
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if self.force_snapshot_stages.is_some() {
+            self.force_snapshots = true;
+        }
         self
     }
 
@@ -206,6 +219,10 @@ impl V3ManagedLifecycle {
         let mut manifest = snapshot.manifest;
         if self.force_snapshots {
             manifest.debug.snapshots = true;
+        }
+        if let Some(stages) = self.force_snapshot_stages.as_ref() {
+            manifest.debug.snapshots = true;
+            manifest.debug.snapshot_stages = Some(stages.clone());
         }
         if self.force_console {
             manifest.debug.log_console = true;
@@ -282,6 +299,9 @@ impl V3ManagedLifecycle {
             .arg(&declaration.config_path);
         if self.force_snapshots {
             command.arg("--snap");
+        }
+        if let Some(stages) = self.force_snapshot_stages.as_ref() {
+            command.arg("--snap-stages").arg(stages);
         }
         command
             .stdin(Stdio::null())

@@ -237,6 +237,8 @@ pub struct V3DebugAuthoringConfig {
     #[serde(default)]
     pub snapshots: bool,
     #[serde(default)]
+    pub snapshot_stages: Option<String>,
+    #[serde(default)]
     pub dry_run: bool,
     #[serde(default)]
     pub retention: BTreeMap<String, u64>,
@@ -732,6 +734,7 @@ pub struct V3DebugManifest {
     pub log_console: bool,
     pub log_file: Option<String>,
     pub snapshots: bool,
+    pub snapshot_stages: Option<String>,
     pub dry_run: bool,
     pub retention: BTreeMap<String, u64>,
 }

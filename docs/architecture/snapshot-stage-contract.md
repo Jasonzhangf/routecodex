@@ -4,7 +4,29 @@
 
 ## 1. 默认 `--snap` contract
 
-`--snap` 默认只打开三类边界快照：
+### 1.1 V3 live `rccv3 --snap`
+
+V3 live `rccv3 start --snap` 默认必须打开四类真实边界快照：
+
+- `client-request`
+- `provider-request`
+- `provider-response`
+- `client-response`
+
+说明：
+
+- 这是 V3 live 在线闭环的最小审计合同，必须能从 client request → provider request → provider response → client response 还原真实链路。
+- `provider-request` 在 V3 live 中不是手工构造、dry-run 构造或 Hub 重建样本；唯一 owner 是 live provider transport cutpoint recorder，在真实 provider send 前记录已经构造好的 provider transport request。
+- `provider-response` 在 V3 live 中记录真实 provider JSON body / SSE chunk / provider error response 经过 transport 时的原始观测，不消费 stream，不拥有 SSE 或响应语义。
+- `client-response` 在 V3 live 中必须记录实际回客户端的 JSON body 或 raw SSE frame；SSE 情况下 `response.json.rawSse` 至少能对账 `response.*` 事件和 `[DONE]`，不得只写 `stream:true/status/node_trace` 这类 metadata 占位样本。
+- Hub/module snapshot hooks 仍必须拒绝 `provider-request` body；provider-request replay artifact 不得从 Hub、SSE、handler、RespOutbound、ReqInbound 或 MetadataCenter 重建。
+- V3 `--snap-stages "<selector>"` 可以局部选择上述 stage；显式 selector 覆盖默认四件套。
+- `provider-error`、`*.retry`、`*.contract`、`chat_process.*`、`hub_followup.*`、`servertool.*` 不属于默认最小集。
+- `--mode analysis` 可强制 `*`，但普通 V3 `--snap` 不能默认膨胀成全量模块快照。
+
+### 1.2 V2 / legacy TS snapshot policy
+
+V2 / legacy TS `src/utils/snapshot-stage-policy.ts` 的默认 `--snap` 仍保持三类边界快照：
 
 - `client-request`
 - `provider-response`
@@ -12,11 +34,8 @@
 
 说明：
 
-- 这是最小审计闭环，保证能从 client → provider response → client 还原真实链路。
-- `provider-request` 不属于默认集：完整 provider 出站 body 只允许在显式 `--snap-stages provider-request` 或失败复现的 force-local debug 捕获中写入；不得由普通 `--snap` 默认记录。
-- Hub/module snapshot hooks 仍必须拒绝 `provider-request` body；provider-request replay artifact 的唯一 owner 是 provider/debug snapshot writer，不得从 Hub、SSE、handler 或 MetadataCenter 重建。
-- `provider-error`、`*.retry`、`*.contract`、`chat_process.*`、`hub_followup.*`、`servertool.*` 不属于默认最小集。
-- `--mode analysis` 可强制 `*`，但普通 `--snap` 不能默认膨胀成全量模块快照。
+- V2/legacy `provider-request` 不属于默认集：完整 provider 出站 body 只允许在显式 `--snap-stages provider-request`、provider-request contract/debug writer，或失败复现的 force-local debug 捕获中写入。
+- 这条 legacy policy 不得反向限制 V3 live `rccv3 --snap` 的四段样本合同。
 
 ## 2. 命名族
 

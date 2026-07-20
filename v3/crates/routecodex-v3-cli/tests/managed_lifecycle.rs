@@ -877,6 +877,104 @@ fn top_level_start_snap_forces_debug_snapshots() {
 }
 
 #[test]
+fn top_level_restart_snap_forces_debug_snapshots() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_snapshots(&root, ports, false);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = run(binary, &state_root, &config, "start");
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let before = http_get_json(ports[0], "/_routecodex/debug/status");
+    assert_eq!(before["debug"]["snapshots_enabled"], false);
+
+    let restart = Command::new(binary)
+        .args(["restart", "--config"])
+        .arg(&config)
+        .arg("--snap")
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(&state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .output()
+        .unwrap();
+    assert!(
+        restart.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let after = http_get_json(ports[0], "/_routecodex/debug/status");
+    assert_eq!(after["debug"]["snapshots_enabled"], true);
+
+    let stop = run_top_level(binary, &state_root, &config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
+fn top_level_start_snap_stages_enable_local_stage_selector() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_snapshots(&root, ports, false);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = spawn_top_level_start_with_args_and_home(
+        binary,
+        &state_root,
+        &config,
+        &["--snap-stages", "client-request,provider-request"],
+        &home,
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let debug = http_get_json(ports[0], "/_routecodex/debug/status");
+    assert_eq!(debug["debug"]["snapshots_enabled"], true);
+    assert_eq!(
+        debug["debug"]["snapshot_stages"],
+        "client-request,provider-request"
+    );
+
+    let stop = run_top_level(binary, &state_root, &config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    let start_output = start.wait_with_output().unwrap();
+    assert!(
+        start_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+}
+
+#[test]
 fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");

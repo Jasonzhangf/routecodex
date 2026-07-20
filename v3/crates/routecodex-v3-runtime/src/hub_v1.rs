@@ -195,6 +195,7 @@ pub struct V3HubRespChatProcess03Governed {
     terminality: V3HubResponseTerminality,
     tool_calls: Vec<V3HubResponseToolCall>,
     servertool_action: V3HubServertoolResponseAction,
+    stopless_center_state: Option<V3StoplessCenterState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,34 +216,62 @@ pub enum V3HubServertoolResponseAction {
     FollowupRequired,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3StoplessHookState {
-    repeat_count: u32,
-    max_repeats: u32,
-    trigger_hint: Option<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3StoplessCenterSteering {
+    Continue,
+    NaturalStopWithoutReasoningStop,
+    ReasoningStopNeedsEvidence,
 }
 
-impl V3StoplessHookState {
-    pub fn new(repeat_count: u32, max_repeats: u32, trigger_hint: Option<String>) -> Self {
-        Self {
-            repeat_count,
-            max_repeats: max_repeats.max(1),
-            trigger_hint: trigger_hint
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+impl V3StoplessCenterSteering {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Continue => "continue",
+            Self::NaturalStopWithoutReasoningStop => "natural_stop_without_reasoning_stop",
+            Self::ReasoningStopNeedsEvidence => "reasoning_stop_needs_evidence",
         }
     }
 
-    pub fn repeat_count(&self) -> u32 {
-        self.repeat_count
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim() {
+            "continue" => Some(Self::Continue),
+            "natural_stop_without_reasoning_stop" => Some(Self::NaturalStopWithoutReasoningStop),
+            "reasoning_stop_needs_evidence" => Some(Self::ReasoningStopNeedsEvidence),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3StoplessCenterState {
+    natural_stop_count: u32,
+    max_natural_stops: u32,
+    steering: V3StoplessCenterSteering,
+}
+
+impl V3StoplessCenterState {
+    pub fn new(
+        natural_stop_count: u32,
+        max_natural_stops: u32,
+        steering: V3StoplessCenterSteering,
+    ) -> Self {
+        Self {
+            natural_stop_count,
+            max_natural_stops: max_natural_stops.max(1),
+            steering,
+        }
     }
 
-    pub fn max_repeats(&self) -> u32 {
-        self.max_repeats
+    pub fn natural_stop_count(&self) -> u32 {
+        self.natural_stop_count
     }
 
-    pub fn trigger_hint(&self) -> Option<&str> {
-        self.trigger_hint.as_deref()
+    pub fn max_natural_stops(&self) -> u32 {
+        self.max_natural_stops
+    }
+
+    pub fn steering(&self) -> V3StoplessCenterSteering {
+        self.steering
     }
 }
 
@@ -276,6 +305,7 @@ pub struct V3HubRespContinuation04Committed {
     action: V3HubContinuationCommit,
     finalized_payload: Arc<Value>,
     canonical_context: Option<V3HubRelayCanonicalResponseContext>,
+    stopless_center_state: Option<V3StoplessCenterState>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -399,6 +429,16 @@ impl V3HubReqOutbound07ProviderSemantic {
         &self.previous.selected_target
     }
 
+    fn entry_protocol(&self) -> V3HubEntryProtocol {
+        self.previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .entry_protocol
+    }
+
     fn provider_semantic_payload(&self) -> &Value {
         &self
             .previous
@@ -476,7 +516,13 @@ fn apply_v3_provider_req_compat(
         selected.provider_id, selected.auth_alias, selected.model_id
     );
     run_req_outbound_stage3_compat(ReqOutboundCompatInput {
-        payload: input.provider_semantic_payload().clone(),
+        payload: build_v3_provider_protocol_payload_from_req07(input).map_err(|reason| {
+            V3ProviderCompatError {
+                stage: "request_protocol",
+                profile: profile.as_str().to_string(),
+                reason,
+            }
+        })?,
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
             provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
@@ -495,6 +541,394 @@ fn apply_v3_provider_req_compat(
         profile: profile.as_str().to_string(),
         reason,
     })
+}
+
+fn build_v3_provider_protocol_payload_from_req07(
+    input: &V3HubReqOutbound07ProviderSemantic,
+) -> Result<Value, String> {
+    match (input.entry_protocol(), input.provider_protocol) {
+        (V3HubEntryProtocol::Responses, V3HubProviderWireProtocol::OpenAiChat) => {
+            build_v3_openai_chat_provider_payload_from_responses_payload(
+                input.provider_semantic_payload(),
+            )
+        }
+        (_, V3HubProviderWireProtocol::OpenAiChat) => {
+            let payload = input.provider_semantic_payload().clone();
+            if payload.get("messages").and_then(Value::as_array).is_some() {
+                Ok(payload)
+            } else {
+                Err(
+                    "OpenAI Chat provider wire requires messages after request protocol encoding"
+                        .to_string(),
+                )
+            }
+        }
+        _ => Ok(input.provider_semantic_payload().clone()),
+    }
+}
+
+fn build_v3_openai_chat_provider_payload_from_responses_payload(
+    payload: &Value,
+) -> Result<Value, String> {
+    let root = payload.as_object().ok_or_else(|| {
+        "Responses request payload must be an object before OpenAI Chat encoding".to_string()
+    })?;
+    let input = root.get("input").and_then(Value::as_array).ok_or_else(|| {
+        "Responses request payload must contain input array before OpenAI Chat encoding".to_string()
+    })?;
+    let mut messages = Vec::new();
+    if let Some(instructions) = root
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        messages.push(json!({"role":"system","content":instructions}));
+    }
+    let mut tools = Vec::new();
+    if let Some(top_tools) = root.get("tools").and_then(Value::as_array) {
+        for tool in top_tools {
+            tools.push(build_v3_openai_chat_tool_from_responses_tool(tool)?);
+        }
+    }
+    for item in input {
+        let item = item.as_object().ok_or_else(|| {
+            "Responses input item must be an object before OpenAI Chat encoding".to_string()
+        })?;
+        let item_type = item
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("message");
+        match item_type {
+            "additional_tools" => {
+                let embedded = item.get("tools").and_then(Value::as_array).ok_or_else(|| {
+                    "Responses additional_tools.tools must be an array before OpenAI Chat encoding"
+                        .to_string()
+                })?;
+                for tool in embedded {
+                    tools.push(build_v3_openai_chat_tool_from_responses_tool(tool)?);
+                }
+            }
+            "message" => messages.push(build_v3_openai_chat_message_from_responses_message(item)?),
+            "function_call" | "tool_call" | "custom_tool_call" => {
+                messages.push(build_v3_openai_chat_assistant_tool_call_message(item)?);
+            }
+            "function_call_output"
+            | "tool_call_output"
+            | "custom_tool_call_output"
+            | "tool_result"
+            | "tool_message" => {
+                messages.push(build_v3_openai_chat_tool_result_message(item)?);
+            }
+            other => {
+                return Err(format!(
+                    "unsupported Responses input item type for OpenAI Chat provider encoding: {other}"
+                ));
+            }
+        }
+    }
+    if messages.is_empty() {
+        return Err("OpenAI Chat provider encoding produced no messages".to_string());
+    }
+    let mut request = Map::new();
+    if let Some(model) = root.get("model") {
+        request.insert("model".to_string(), model.clone());
+    }
+    request.insert("messages".to_string(), Value::Array(messages));
+    if !tools.is_empty() {
+        request.insert("tools".to_string(), Value::Array(tools));
+    }
+    for key in [
+        "tool_choice",
+        "parallel_tool_calls",
+        "user",
+        "temperature",
+        "top_p",
+        "logit_bias",
+        "seed",
+        "stream",
+        "response_format",
+        "max_tokens",
+        "max_output_tokens",
+    ] {
+        if let Some(value) = root.get(key) {
+            request.insert(key.to_string(), value.clone());
+        }
+    }
+    Ok(Value::Object(request))
+}
+
+fn build_v3_openai_chat_tool_from_responses_tool(tool: &Value) -> Result<Value, String> {
+    let object = tool.as_object().ok_or_else(|| {
+        "Responses tool definition must be an object before OpenAI Chat encoding".to_string()
+    })?;
+    if let Some(function) = object.get("function").and_then(Value::as_object) {
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "OpenAI Chat function tool is missing function.name".to_string())?;
+        let mut next_function = function.clone();
+        next_function.insert("name".to_string(), Value::String(name.to_string()));
+        return Ok(json!({"type":"function","function":Value::Object(next_function)}));
+    }
+    let tool_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("function");
+    if tool_type == "custom" {
+        return build_v3_openai_chat_function_tool_from_responses_custom_tool(object);
+    }
+    if tool_type != "function" {
+        return Err(format!(
+            "unsupported Responses tool type for OpenAI Chat provider encoding: {tool_type}"
+        ));
+    }
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "Responses function tool is missing name before OpenAI Chat encoding".to_string()
+        })?;
+    let mut function = Map::new();
+    function.insert("name".to_string(), Value::String(name.to_string()));
+    for key in ["description", "parameters", "strict"] {
+        if let Some(value) = object.get(key) {
+            function.insert(key.to_string(), value.clone());
+        }
+    }
+    Ok(json!({"type":"function","function":Value::Object(function)}))
+}
+
+fn build_v3_openai_chat_function_tool_from_responses_custom_tool(
+    object: &Map<String, Value>,
+) -> Result<Value, String> {
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "Responses custom tool is missing name before OpenAI Chat encoding".to_string()
+        })?;
+    let mut function = Map::new();
+    function.insert("name".to_string(), Value::String(name.to_string()));
+    let description = build_v3_openai_chat_description_for_responses_custom_tool(object);
+    if !description.is_empty() {
+        function.insert("description".to_string(), Value::String(description));
+    }
+    function.insert(
+        "parameters".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Raw freeform input for the original Responses custom tool."
+                }
+            },
+            "required": ["input"]
+        }),
+    );
+    Ok(json!({"type":"function","function":Value::Object(function)}))
+}
+
+fn build_v3_openai_chat_description_for_responses_custom_tool(
+    object: &Map<String, Value>,
+) -> String {
+    let mut sections = Vec::new();
+    if let Some(description) = object
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        sections.push(description.to_string());
+    }
+    if let Some(format) = object.get("format") {
+        if let Ok(serialized) = serde_json::to_string(format) {
+            sections.push(format!(
+                "Original Responses custom tool format: {serialized}. Put the exact raw tool input string in the JSON argument field `input`."
+            ));
+        }
+    } else {
+        sections.push(
+            "Original Responses custom tool. Put the exact raw tool input string in the JSON argument field `input`."
+                .to_string(),
+        );
+    }
+    sections.join("\n\n")
+}
+
+fn build_v3_openai_chat_message_from_responses_message(
+    item: &Map<String, Value>,
+) -> Result<Value, String> {
+    let role = item
+        .get("role")
+        .and_then(Value::as_str)
+        .map(v3_openai_chat_wire_role)
+        .unwrap_or("user");
+    let content = build_v3_openai_chat_content_from_responses_content(item.get("content"))?;
+    Ok(json!({"role":role,"content":content}))
+}
+
+fn build_v3_openai_chat_assistant_tool_call_message(
+    item: &Map<String, Value>,
+) -> Result<Value, String> {
+    let call_id = read_v3_non_empty_str(item.get("call_id"))
+        .or_else(|| read_v3_non_empty_str(item.get("tool_call_id")))
+        .or_else(|| read_v3_non_empty_str(item.get("id")))
+        .ok_or_else(|| {
+            "Responses function_call is missing call_id/id before OpenAI Chat encoding".to_string()
+        })?;
+    let name = read_v3_non_empty_str(item.get("name"))
+        .or_else(|| {
+            item.get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| read_v3_non_empty_str(function.get("name")))
+        })
+        .ok_or_else(|| {
+            "Responses function_call is missing name before OpenAI Chat encoding".to_string()
+        })?;
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    let arguments = if item_type == "custom_tool_call" {
+        let input = item.get("input").ok_or_else(|| {
+            "Responses custom_tool_call is missing input before OpenAI Chat encoding".to_string()
+        })?;
+        let input = match input {
+            Value::String(text) => Value::String(text.clone()),
+            other => {
+                Value::String(serde_json::to_string(other).map_err(|error| error.to_string())?)
+            }
+        };
+        serde_json::to_string(&json!({ "input": input })).map_err(|error| error.to_string())?
+    } else {
+        let arguments = item
+            .get("arguments")
+            .or_else(|| {
+                item.get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("arguments"))
+            })
+            .ok_or_else(|| {
+                "Responses function_call is missing arguments before OpenAI Chat encoding"
+            })?;
+        match arguments {
+            Value::String(text) => text.clone(),
+            other => serde_json::to_string(other).map_err(|error| error.to_string())?,
+        }
+    };
+    Ok(json!({
+        "role":"assistant",
+        "content":"",
+        "tool_calls":[{
+            "id":call_id,
+            "type":"function",
+            "function":{"name":name,"arguments":arguments}
+        }]
+    }))
+}
+
+fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result<Value, String> {
+    let call_id = read_v3_non_empty_str(item.get("tool_call_id"))
+        .or_else(|| read_v3_non_empty_str(item.get("call_id")))
+        .or_else(|| read_v3_non_empty_str(item.get("tool_use_id")))
+        .or_else(|| read_v3_non_empty_str(item.get("id")))
+        .ok_or_else(|| {
+            "Responses tool output is missing call_id/tool_call_id before OpenAI Chat encoding"
+                .to_string()
+        })?;
+    let output = item
+        .get("output")
+        .or_else(|| item.get("content"))
+        .ok_or_else(|| {
+            "Responses tool output is missing output/content before OpenAI Chat encoding"
+        })?;
+    let content = match output {
+        Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).map_err(|error| error.to_string())?,
+    };
+    Ok(json!({"role":"tool","tool_call_id":call_id,"content":content}))
+}
+
+fn build_v3_openai_chat_content_from_responses_content(
+    content: Option<&Value>,
+) -> Result<Value, String> {
+    let Some(content) = content else {
+        return Ok(Value::String(String::new()));
+    };
+    if let Some(text) = content.as_str() {
+        return Ok(Value::String(text.to_string()));
+    }
+    let Some(parts) = content.as_array() else {
+        return Ok(Value::String(content.to_string()));
+    };
+    let mut text_segments = Vec::new();
+    let mut converted_parts = Vec::new();
+    let mut text_only = true;
+    for part in parts {
+        let object = part.as_object().ok_or_else(|| {
+            "Responses message content part must be an object before OpenAI Chat encoding"
+                .to_string()
+        })?;
+        match object.get("type").and_then(Value::as_str) {
+            Some("input_text" | "output_text" | "text") => {
+                let text = object
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                text_segments.push(text.to_string());
+                converted_parts.push(json!({"type":"text","text":text}));
+            }
+            Some("input_image" | "image_url") => {
+                text_only = false;
+                converted_parts.push(convert_v3_responses_image_part_to_openai_chat_part(object));
+            }
+            Some(other) => {
+                return Err(format!(
+                    "unsupported Responses message content part for OpenAI Chat provider encoding: {other}"
+                ));
+            }
+            None => {
+                return Err(
+                    "Responses message content part is missing type before OpenAI Chat encoding"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    if text_only {
+        Ok(Value::String(text_segments.join("")))
+    } else {
+        Ok(Value::Array(converted_parts))
+    }
+}
+
+fn convert_v3_responses_image_part_to_openai_chat_part(part: &Map<String, Value>) -> Value {
+    if part.get("type").and_then(Value::as_str) == Some("image_url") {
+        return Value::Object(part.clone());
+    }
+    let image_url = part
+        .get("image_url")
+        .cloned()
+        .or_else(|| part.get("url").cloned())
+        .unwrap_or(Value::Null);
+    json!({"type":"image_url","image_url":image_url})
+}
+
+fn v3_openai_chat_wire_role(role: &str) -> &str {
+    match role {
+        "developer" => "system",
+        other => other,
+    }
+}
+
+fn read_v3_non_empty_str(value: Option<&Value>) -> Option<&str> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn apply_v3_provider_resp_compat(
@@ -640,6 +1074,7 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
         terminality: V3HubResponseTerminality::Terminal,
         tool_calls: Vec::new(),
         servertool_action: V3HubServertoolResponseAction::None,
+        stopless_center_state: None,
     }
 }
 
@@ -663,6 +1098,7 @@ pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
         action,
         finalized_payload,
         canonical_context,
+        stopless_center_state: None,
     }
 }
 
@@ -695,6 +1131,10 @@ impl V3HubRespChatProcess03Governed {
 
     pub fn servertool_action(&self) -> V3HubServertoolResponseAction {
         self.servertool_action
+    }
+
+    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
+        self.stopless_center_state.as_ref()
     }
 
     pub fn tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
@@ -748,6 +1188,10 @@ impl V3HubRespContinuation04Committed {
     pub fn finalized_payload(&self) -> &Value {
         self.finalized_payload.as_ref()
     }
+
+    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
+        self.stopless_center_state.as_ref()
+    }
 }
 
 impl V3ServerRespOutbound06ClientFrame {
@@ -769,7 +1213,7 @@ impl V3ServerRespOutbound06ClientFrame {
 pub struct V3HubRelayResponseHookProfile {
     servertool_names: BTreeSet<String>,
     stopless_reasoning_stop: bool,
-    stopless_request_state: Option<V3StoplessHookState>,
+    stopless_center_state: Option<V3StoplessCenterState>,
 }
 
 impl V3HubRelayResponseHookProfile {
@@ -784,7 +1228,7 @@ impl V3HubRelayResponseHookProfile {
                 .map(|name| name.as_ref().to_owned())
                 .collect(),
             stopless_reasoning_stop: false,
-            stopless_request_state: None,
+            stopless_center_state: None,
         }
     }
 
@@ -797,8 +1241,8 @@ impl V3HubRelayResponseHookProfile {
         self
     }
 
-    pub fn with_stopless_request_state(mut self, state: V3StoplessHookState) -> Self {
-        self.stopless_request_state = Some(state);
+    pub fn with_stopless_center_state(mut self, state: V3StoplessCenterState) -> Self {
+        self.stopless_center_state = Some(state);
         self
     }
 
@@ -806,8 +1250,8 @@ impl V3HubRelayResponseHookProfile {
         self.stopless_reasoning_stop
     }
 
-    pub fn stopless_request_state(&self) -> Option<&V3StoplessHookState> {
-        self.stopless_request_state.as_ref()
+    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
+        self.stopless_center_state.as_ref()
     }
 }
 
@@ -911,8 +1355,9 @@ fn govern_v3_hub_relay_response(
     input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
-    let input = apply_v3_stopless_response_hook_at_resp03(input, profile)?;
-    let input = project_v3_apply_patch_freeform_calls_at_resp03(input);
+    let stopless_outcome = apply_v3_stopless_response_hook_at_resp03(input, profile)?;
+    let stopless_center_state = stopless_outcome.center_state;
+    let input = project_v3_apply_patch_freeform_calls_at_resp03(stopless_outcome.input);
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let terminality = if governance.tool_calls.is_empty() {
         governance.status_terminality
@@ -933,6 +1378,7 @@ fn govern_v3_hub_relay_response(
         terminality,
         tool_calls: governance.tool_calls,
         servertool_action,
+        stopless_center_state,
     })
 }
 
@@ -1261,7 +1707,7 @@ fn normalize_v3_apply_patch_freeform_input_for_client(arguments_text: &str) -> S
 }
 
 pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str> {
-    const FORBIDDEN: [&str; 42] = [
+    const FORBIDDEN: [&str; 45] = [
         "routecodex_internal",
         "routecodexInternal",
         "metadata_center",
@@ -1293,6 +1739,9 @@ pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str
         "servertoolState",
         "stopless_state",
         "stoplessState",
+        "stopless_center",
+        "stoplessCenter",
+        "__routecodex_stopless_center",
         "error_chain",
         "errorChain",
         "node_trace",
@@ -1323,6 +1772,7 @@ fn commit_v3_hub_relay_response(
     input: V3HubRespChatProcess03Governed,
 ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
     let finalized_payload = canonicalize_v3_hub_resp04_finalized_payload(&input);
+    let stopless_center_state = input.stopless_center_state.clone();
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
         V3HubResponseTerminality::NonTerminal => (
@@ -1340,6 +1790,7 @@ fn commit_v3_hub_relay_response(
         action,
         finalized_payload,
         canonical_context,
+        stopless_center_state,
     })
 }
 
@@ -1799,7 +2250,7 @@ mod tests {
                 "type": "function_call",
                 "call_id": "call_stopless_reasoning",
                 "name": "exec_command",
-                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
             }]
         });
         let context = build_v3_relay_local_continuation_context_at_resp04(
@@ -1815,7 +2266,7 @@ mod tests {
                     "type": "function_call",
                     "call_id": "call_stopless_reasoning",
                     "name": "exec_command",
-                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
                 }
             ])
         );
@@ -1826,7 +2277,7 @@ mod tests {
             "input": [{
                 "type": "function_call_output",
                 "call_id": "call_stopless_reasoning",
-                "output": "{\"ok\":true,\"continuationPrompt\":\"继续。\"}"
+                "output": ""
             }]
         });
         merge_v3_relay_restored_local_context_at_req04(&mut current, &context).unwrap();
@@ -1838,16 +2289,52 @@ mod tests {
                     "type": "function_call",
                     "call_id": "call_stopless_reasoning",
                     "name": "exec_command",
-                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
+                    "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
                 },
                 {
                     "type": "function_call_output",
                     "call_id": "call_stopless_reasoning",
-                    "output": "{\"ok\":true,\"continuationPrompt\":\"继续。\"}"
+                    "output": ""
                 }
             ])
         );
         assert_eq!(current["tools"], canonical_request["tools"]);
         assert_eq!(current["instructions"], canonical_request["instructions"]);
+    }
+
+    #[test]
+    fn local_continuation_context_never_carries_stopless_center_state() {
+        let canonical_request = json!({
+            "input": [{"role": "user", "content": "original task"}],
+            "tools": [{"type": "function", "name": "exec_command"}],
+            "instructions": "base instructions"
+        });
+        let finalized_response = json!({
+            "status": "requires_action",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_stopless_reasoning",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+            }]
+        });
+        let context = build_v3_relay_local_continuation_context_at_resp04(
+            &canonical_request,
+            &finalized_response,
+        )
+        .unwrap();
+        let serialized = serde_json::to_string(&context).unwrap();
+        for forbidden in [
+            "__routecodex_stopless_center",
+            "stopless_center",
+            "stoplessCenter",
+            "natural_stop_count",
+            "max_natural_stops",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "relay local continuation context leaked stopless control field {forbidden}: {serialized}"
+            );
+        }
     }
 }

@@ -3,8 +3,8 @@ import path from 'node:path';
 
 const root = process.cwd();
 const failures = [];
-const scanRoots = ['src', 'sharedmodule/llmswitch-core/src', 'tests'];
-const exts = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs']);
+const scanRoots = ['src', 'sharedmodule/llmswitch-core/src', 'tests', 'v3/crates'];
+const exts = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.rs']);
 
 const exactStages = new Set([
   'client-request',
@@ -31,12 +31,13 @@ const prefixStages = [
 
 const candidatePatterns = [
   /shouldCaptureSnapshotStage\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
+  /should_capture_snapshot_stage\(\s*['"`]([^'"`]+)['"`]\s*\)/g,
   /\brecord\(\s*['"`]([^'"`]+)['"`]\s*,/g,
   /\bphase:\s*['"`]([^'"`]+)['"`]/g,
 ];
 
 const fileInterestPattern =
-  /shouldCaptureSnapshotStage\(|writeProviderSnapshot\(|writeServerSnapshot\(|\brecord\(\s*['"`](?:chat_process|hub_followup|servertool)|\bphase:\s*['"`](?:client-|provider-|repair-feedback)/;
+  /shouldCaptureSnapshotStage\(|should_capture_snapshot_stage\(|writeProviderSnapshot\(|writeServerSnapshot\(|\brecord\(\s*['"`](?:chat_process|hub_followup|servertool)|\bphase:\s*['"`](?:client-|provider-|repair-feedback)/;
 
 function read(relPath) {
   return fs.readFileSync(path.join(root, relPath), 'utf8');

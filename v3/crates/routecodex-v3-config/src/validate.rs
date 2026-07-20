@@ -1320,10 +1320,15 @@ fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V
     {
         return Err(validation("debug log_file cannot be empty"));
     }
+    let snapshot_stages = authoring
+        .snapshot_stages
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     Ok(V3DebugManifest {
         log_console: authoring.log_console,
         log_file: authoring.log_file,
         snapshots: authoring.snapshots,
+        snapshot_stages,
         dry_run: authoring.dry_run,
         retention: authoring.retention,
     })

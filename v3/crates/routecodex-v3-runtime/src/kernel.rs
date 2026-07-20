@@ -356,8 +356,13 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
         .and_then(|captured| captured.clone())
         .map(|request| debug.redact_projection(request))
         .unwrap_or_else(|| json!(null));
+    let dry_run_status = if provider_request.is_null() {
+        output.client_payload.status
+    } else {
+        200
+    };
     crate::V3FoundationRuntimeOutput {
-        status: output.client_payload.status,
+        status: dry_run_status,
         body: json!({
             "object": "routecodex.pipeline_dry_run",
             "kind": "provider_request",

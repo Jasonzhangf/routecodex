@@ -9,6 +9,7 @@ use routecodex_v3_runtime::{
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayRequestError,
     V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubRelayToolKind,
     V3HubServertoolRequestProfile, V3HubServertoolResponseAction, V3HubTransportIntent,
+    V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
 
@@ -79,27 +80,6 @@ fn stopless_projected_call(payload: &Value) -> &Value {
         .find(|item| item["call_id"] == json!("call_stopless_reasoning"))
         .expect("projected stopless exec_command call")
 }
-
-fn assert_no_schema_feedback_user_prompt(item: &Value) {
-    assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
-    let content = item
-        .get("content")
-        .and_then(Value::as_str)
-        .expect("no_schema feedback prompt");
-    assert!(
-        content.contains("缺少 stop schema"),
-        "no_schema prompt must explain the missing stop schema: {content}"
-    );
-    assert!(
-        content.contains("stopreason") && content.contains("<rcc_stop_schema>"),
-        "no_schema prompt must carry schema guidance: {content}"
-    );
-    assert!(
-        !content.trim().eq("继续。"),
-        "no_schema prompt must not collapse to legacy continue text"
-    );
-}
-
 fn provider_protocol_for_entry(entry_protocol: V3HubEntryProtocol) -> V3HubProviderWireProtocol {
     match entry_protocol {
         V3HubEntryProtocol::Responses => V3HubProviderWireProtocol::Responses,
@@ -443,316 +423,26 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
         .starts_with("APPLY_PATCH_ERROR:"));
 }
 
+fn stopless_noop_context(input: Value, output: Value) -> Value {
+    json!({
+        "input": input,
+        "output": output
+    })
+}
+
 #[test]
-fn stopless_hook_blackbox_projects_cli_then_rewrites_next_request_inside_chat_process() {
+fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state() {
     let response_hooks = compile_v3_hub_relay_response_hooks();
-    let request_hooks = compile_v3_hub_relay_request_hooks();
     let resp02 = response_hooks
         .normalize(relay_response(
             json!({
-                "id":"resp_stopless_blackbox",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"stopping without schema"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = response_hooks
-        .govern(
-            resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
-        )
-        .unwrap();
-    let resp04 = response_hooks.commit(resp03).unwrap();
-    let projected = resp04.canonical_context_payload().unwrap().clone();
-    let projected_call = stopless_projected_call(&projected);
-    assert_eq!(projected_call["name"], "exec_command");
-    assert_eq!(projected_call["call_id"], "call_stopless_reasoning");
-    assert!(projected_call["arguments"]
-        .as_str()
-        .unwrap()
-        .contains("routecodex hook run reasoningStop"));
-
-    let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_blackbox"), scope())
-        .with_local_context("ctx_stopless_blackbox", scope(), projected);
-    let outcome = request_hooks
-        .run(
-            raw_request(json!({
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":"{\"next_step\":\"blackbox next request text\"}"
-                }]
-            })),
-            &lookup,
-            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
-        )
-        .unwrap();
-    assert_eq!(outcome.tool_output_count(), 0);
-    assert_eq!(
-        outcome.payload()["input"],
-        json!([{"role":"user","content":"blackbox next request text"}])
-    );
-    assert!(outcome.payload()["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("stopreason"));
-    let serialized = serde_json::to_string(outcome.payload()).unwrap();
-    for forbidden in [
-        "function_call_output",
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "rewritten request leaked stopless CLI artifact: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn stopless_hook_blackbox_rewrites_codex_transcript_from_full_history() {
-    let request_hooks = compile_v3_hub_relay_request_hooks();
-    let mut input = Vec::new();
-    for index in 0..240 {
-        input.push(json!({
-            "type":"function_call",
-            "call_id":format!("call_unrelated_{index}"),
-            "name":"exec_command",
-            "arguments":"{}"
-        }));
-        input.push(json!({
-            "type":"function_call_output",
-            "call_id":format!("call_unrelated_{index}"),
-            "output":"ok"
-        }));
-    }
-    input.push(json!({
-        "type":"function_call",
-        "call_id":"call_stopless_reasoning",
-        "name":"exec_command",
-        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{}'\"}"
-    }));
-    input.push(json!({
-        "type":"function_call_output",
-        "call_id":"call_stopless_reasoning",
-        "output":"Chunk ID: 2c3627\nWall time: 0.1169 seconds\nProcess exited with code 0\nOriginal token count: 82\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"继续。\",\"input\":{\"triggerHint\":\"no_schema\"}}\n"
-    }));
-
-    let outcome = request_hooks
-        .run(
-            raw_request(json!({
-                "model":"gpt-5.5",
-                "input":input,
-                "stream":true
-            })),
-            &V3HubContinuationLookup::new(None, scope()),
-            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
-        )
-        .unwrap();
-
-    assert_eq!(outcome.tool_output_count(), 240);
-    let input = outcome.payload()["input"].as_array().expect("input array");
-    assert_eq!(input.len(), 481);
-    assert_eq!(input.first().unwrap()["call_id"], "call_unrelated_0");
-    assert_no_schema_feedback_user_prompt(input.last().unwrap());
-    assert!(outcome.payload()["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("stopreason"));
-    let serialized = serde_json::to_string(outcome.payload()).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "Chunk ID:",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "rewritten full-history request leaked stopless CLI artifact: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn stopless_hook_blackbox_strips_accumulated_cli_projection_messages_from_full_history() {
-    let request_hooks = compile_v3_hub_relay_request_hooks();
-    let input = vec![
-        json!({"role":"user","content":"先保留的真实用户问题"}),
-        json!({
-            "type":"message",
-            "role":"assistant",
-            "status":"completed",
-            "content":[{"type":"output_text","text":"old visible stop text one"}]
-        }),
-        json!({
-            "type":"function_call",
-            "call_id":"call_stopless_reasoning",
-            "name":"exec_command",
-            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}'\"}"
-        }),
-        json!({
-            "type":"function_call_output",
-            "call_id":"call_stopless_reasoning",
-            "output":"Chunk ID: old-one\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"old prompt one\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
-        }),
-        json!({
-            "type":"function_call",
-            "call_id":"call_bad_local_tool",
-            "name":"exec_command",
-            "arguments":"{}"
-        }),
-        json!({
-            "type":"function_call_output",
-            "call_id":"call_bad_local_tool",
-            "output":"failed to parse function arguments: missing field `cmd` at line 1 column 2"
-        }),
-        json!({"role":"user","content":"1. direct 是否锁住不走 stopless？\n2. 全局是否有 stopless 停止的 schema 引导？"}),
-        json!({
-            "type":"message",
-            "role":"assistant",
-            "status":"completed",
-            "content":[{"type":"output_text","text":"latest visible stop text repeat one"}]
-        }),
-        json!({
-            "type":"function_call",
-            "call_id":"call_stopless_reasoning",
-            "name":"exec_command",
-            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":1,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '1' --max-repeats '3'\"}"
-        }),
-        json!({
-            "type":"function_call_output",
-            "call_id":"call_stopless_reasoning",
-            "output":"Chunk ID: latest-one\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"latest prompt one\",\"repeatCount\":1,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
-        }),
-        json!({
-            "type":"message",
-            "role":"assistant",
-            "status":"completed",
-            "content":[{"type":"output_text","text":"latest visible stop text repeat two"}]
-        }),
-        json!({
-            "type":"function_call",
-            "call_id":"call_stopless_reasoning",
-            "name":"exec_command",
-            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
-        }),
-        json!({
-            "type":"function_call_output",
-            "call_id":"call_stopless_reasoning",
-            "output":"Chunk ID: latest-two\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"latest repeat two prompt\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
-        }),
-    ];
-
-    let outcome = request_hooks
-        .run(
-            raw_request(json!({
-                "model":"gpt-5.5",
-                "input":input,
-                "stream":true
-            })),
-            &V3HubContinuationLookup::new(None, scope()),
-            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
-        )
-        .unwrap();
-
-    assert_eq!(
-        outcome.stopless_state().map(|state| state.repeat_count()),
-        Some(2),
-        "request-side hook must use the latest active stopless evidence instead of resetting the loop"
-    );
-    let output = outcome.payload()["input"].as_array().expect("input array");
-    assert!(
-        output
-            .iter()
-            .any(|item| item["content"] == json!("1. direct 是否锁住不走 stopless？\n2. 全局是否有 stopless 停止的 schema 引导？")),
-        "real user reset-boundary text must stay in the provider-visible request"
-    );
-    assert_no_schema_feedback_user_prompt(output.last().unwrap());
-    let serialized = serde_json::to_string(outcome.payload()).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "Chunk ID:",
-        "old prompt one",
-        "latest prompt one",
-        "latest repeat two prompt",
-        "old visible stop text one",
-        "latest visible stop text repeat one",
-        "latest visible stop text repeat two",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "rewritten full-history request leaked accumulated stopless CLI projection artifact: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn stopless_hook_blackbox_real_progress_after_cli_resets_repeat_budget() {
-    let request_hooks = compile_v3_hub_relay_request_hooks();
-    let response_hooks = compile_v3_hub_relay_response_hooks();
-    let request_outcome = request_hooks
-        .run(
-            raw_request(json!({
-                "model":"gpt-5.5",
-                "stream":true,
-                "input":[
-                    {
-                        "type":"function_call",
-                        "call_id":"call_stopless_reasoning",
-                        "name":"exec_command",
-                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop --input-json '{\\\"flowId\\\":\\\"stop_message_flow\\\",\\\"repeatCount\\\":2,\\\"maxRepeats\\\":3,\\\"triggerHint\\\":\\\"no_schema\\\"}' --repeat-count '2' --max-repeats '3'\"}"
-                    },
-                    {
-                        "type":"function_call_output",
-                        "call_id":"call_stopless_reasoning",
-                        "output":"Chunk ID: stale\nWall time: 0.1 seconds\nOutput:\n{\"ok\":true,\"kind\":\"stop_message_auto\",\"continuationPrompt\":\"继续。\",\"repeatCount\":2,\"maxRepeats\":3,\"input\":{\"triggerHint\":\"no_schema\"}}\n"
-                    },
-                    {"role":"user","content":"继续检查"},
-                    {
-                        "type":"function_call",
-                        "call_id":"call_real_exec",
-                        "name":"exec_command",
-                        "arguments":"{\"cmd\":\"git log --oneline -10\"}"
-                    },
-                    {
-                        "type":"function_call_output",
-                        "call_id":"call_real_exec",
-                        "output":"real tool progress"
-                    }
-                ]
-            })),
-            &V3HubContinuationLookup::new(None, scope()),
-            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
-        )
-        .unwrap();
-
-    assert!(
-        request_outcome.stopless_state().is_none(),
-        "stale stopless shell output followed by real progress must not carry repeatCount=2"
-    );
-    let serialized_request = serde_json::to_string(request_outcome.payload()).unwrap();
-    assert!(serialized_request.contains("call_real_exec"));
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !serialized_request.contains(forbidden),
-            "request side leaked stale stopless history after reset boundary: {forbidden}"
-        );
-    }
-
-    let resp02 = response_hooks
-        .normalize(relay_response(
-            json!({
-                "id":"resp_stopless_after_real_progress",
+                "id":"resp_blackbox_stopless_noop",
                 "object":"response",
                 "status":"completed",
-                "output":[{"type":"output_text","text":"好继续检查，我已经补了一些测试了"}]
+                "finish_reason":"stop",
+                "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"blackbox visible natural stop"}]}]
             }),
-            V3HubTransportIntent::Sse,
+            V3HubTransportIntent::Json,
         ))
         .unwrap();
     let resp03 = response_hooks
@@ -761,32 +451,143 @@ fn stopless_hook_blackbox_real_progress_after_cli_resets_repeat_budget() {
             &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
         )
         .unwrap();
-    assert_eq!(resp03.tool_call_count(), 1);
     let resp04 = response_hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    assert_eq!(
+        resp04.stopless_center_state().unwrap().natural_stop_count(),
+        1
+    );
     let projected = resp04.canonical_context_payload().unwrap();
-    assert_eq!(projected["status"], "requires_action");
-    let projected_call = stopless_projected_call(projected);
-    assert_eq!(projected_call["call_id"], "call_stopless_reasoning");
-    let arguments = projected_call["arguments"].as_str().unwrap();
-    assert!(
-        arguments.contains("\\\"repeatCount\\\":1"),
-        "reset state must make the next missing-schema stop project round 1, not pass through budget: {arguments}"
+    let arguments = stopless_projected_call(projected)["arguments"]
+        .as_str()
+        .unwrap();
+    assert!(arguments.contains("routecodex hook run reasoningStop"));
+    for forbidden in [
+        "--input-json",
+        "repeatCount",
+        "schemaFeedback",
+        "next_step",
+        "<rcc_stop_schema>",
+    ] {
+        assert!(
+            !arguments.contains(forbidden),
+            "response projected old stopless state {forbidden}: {arguments}"
+        );
+    }
+
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("ctx-blackbox-stopless"), scope())
+        .with_local_context(
+            "ctx-blackbox-stopless",
+            scope(),
+            stopless_noop_context(
+                json!([
+                    {"role":"user","content":"original task"},
+                    projected["output"][0].clone(),
+                    projected["output"][1].clone()
+                ]),
+                json!([projected["output"][1].clone()]),
+            ),
+        );
+    let governed = request_hooks
+        .run(
+            raw_request(json!({
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
+                "tools":[{"type":"function","name":"exec","description":"original"}]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop().with_stopless_center_state(
+                V3StoplessCenterState::new(
+                    1,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                ),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        governed.payload()["input"],
+        json!([{"role":"user","content":"original task"}])
+    );
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "--input-json",
+        "repeatCount",
+        "schemaFeedback",
+        "<rcc_stop_schema>",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "provider request leaked stopless shell/control {forbidden}: {serialized}"
+        );
+    }
+    assert!(governed.payload()["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("继续完成当前目标"));
+    assert_eq!(
+        governed.payload()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1
     );
 }
 
 #[test]
-fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
+fn stopless_hook_blackbox_preserves_unrelated_tool_history_while_stripping_stopless_pair() {
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let context = stopless_noop_context(
+        json!([
+            {"role":"user","content":"original task"},
+            {"type":"function_call","call_id":"call_unrelated","name":"lookup","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_unrelated","output":"ok"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible stop"}]},
+            {"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"}
+        ]),
+        json!([{"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"}]),
+    );
+    let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-history"), scope())
+        .with_local_context("ctx-stopless-history", scope(), context);
+    let governed = request_hooks
+        .run(
+            raw_request(json!({
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop().with_stopless_center_state(
+                V3StoplessCenterState::new(
+                    1,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                ),
+            ),
+        )
+        .unwrap();
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(serialized.contains("call_unrelated"));
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+}
+
+#[test]
+fn stopless_hook_blackbox_terminal_reasoning_stop_skips_cli_roundtrip() {
     let response_hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = response_hooks
         .normalize(relay_response(
             json!({
-                "id":"resp_stopless_terminal_blackbox",
-                "status":"completed",
-                "finish_reason":"stop",
+                "id":"resp_blackbox_stopless_terminal",
+                "object":"response",
+                "status":"requires_action",
                 "output":[{
-                    "type":"output_text",
-                    "text":"{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"done\"}"
+                    "type":"function_call",
+                    "call_id":"call_model_reasoning_stop_terminal",
+                    "name":"reasoningStop",
+                    "arguments":"{\"stopreason\":0,\"evidence\":\"blackbox proof\"}"
                 }]
             }),
             V3HubTransportIntent::Json,
@@ -798,129 +599,69 @@ fn stopless_hook_blackbox_terminal_schema_does_not_enter_cli_roundtrip() {
             &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
         )
         .unwrap();
+    assert_eq!(
+        resp03.terminality(),
+        routecodex_v3_runtime::V3HubResponseTerminality::Terminal
+    );
     assert_eq!(resp03.tool_call_count(), 0);
     let resp04 = response_hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.canonical_context_count(), 0);
-    let visible = resp04.finalized_payload()["output"][0]["text"]
-        .as_str()
-        .expect("terminal visible text");
-    assert!(visible.contains("## 完成内容"));
-    assert!(visible.contains("done"));
-    assert!(!visible.contains("stopreason"));
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(serialized.contains("blackbox proof"));
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!serialized.contains("reasoningStop"));
 }
 
 #[test]
 fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_output() {
-    let response_hooks = compile_v3_hub_relay_response_hooks();
     let request_hooks = compile_v3_hub_relay_request_hooks();
-    let resp02 = response_hooks
-        .normalize(relay_response(
-            json!({
-                "id":"resp_stopless_disabled_request_blackbox",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"missing stop schema"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = response_hooks
-        .govern(
-            resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
-        )
-        .unwrap();
-    let resp04 = response_hooks.commit(resp03).unwrap();
-    let projected = resp04.canonical_context_payload().unwrap().clone();
-
-    let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_disabled_request"), scope())
-        .with_local_context("ctx_stopless_disabled_request", scope(), projected);
-    let outcome = request_hooks
+    let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-disabled"), scope()).with_local_context(
+        "ctx-stopless-disabled",
+        scope(),
+        stopless_noop_context(
+            json!([{"role":"user","content":"original task"}]),
+            json!([{ "type":"function_call", "call_id":"call_stopless_reasoning", "name":"exec_command", "arguments":"{}" }]),
+        ),
+    );
+    let governed = request_hooks
         .run(
             raw_request(json!({
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":"{\"next_step\":\"must remain a tool output\"}"
-                }]
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}]
             })),
             &lookup,
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
-    assert_eq!(outcome.tool_output_count(), 1);
-    let input = outcome.payload()["input"].as_array().expect("input array");
-    assert!(input.iter().any(|item| {
-        item.get("content")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .any(|part| part.get("text").and_then(Value::as_str) == Some("missing stop schema"))
-    }));
-    let kept_call = input
-        .iter()
-        .find(|item| {
-            item["call_id"] == "call_stopless_reasoning" && item["type"] == "function_call"
-        })
-        .expect("disabled request profile must keep stopless call as normal tool history");
-    assert_eq!(kept_call["name"], "exec_command");
-    let kept_output = input
-        .iter()
-        .find(|item| {
-            item["call_id"] == "call_stopless_reasoning" && item["type"] == "function_call_output"
-        })
-        .expect("disabled request profile must keep stopless output as normal tool output");
-    assert_eq!(
-        kept_output["output"],
-        "{\"next_step\":\"must remain a tool output\"}"
-    );
-    assert!(outcome.payload().get("instructions").is_none());
+    assert_eq!(governed.tool_output_count(), 1);
+    assert!(governed.payload().get("instructions").is_none());
+    assert!(governed.payload().get("tools").is_none());
 }
 
 #[test]
-fn stopless_hook_blackbox_malformed_cli_result_fails_before_next_turn_governance() {
-    let response_hooks = compile_v3_hub_relay_response_hooks();
+fn stopless_hook_blackbox_noop_cli_without_runtime_control_state_is_stripped_not_failed() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
-    let resp02 = response_hooks
-        .normalize(relay_response(
-            json!({
-                "id":"resp_stopless_malformed_blackbox",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"missing stop schema"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = response_hooks
-        .govern(
-            resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
-        )
-        .unwrap();
-    let resp04 = response_hooks.commit(resp03).unwrap();
-    let projected = resp04.canonical_context_payload().unwrap().clone();
-
-    let lookup = V3HubContinuationLookup::new(Some("ctx_stopless_malformed"), scope())
-        .with_local_context("ctx_stopless_malformed", scope(), projected);
-    assert!(matches!(
-        request_hooks.run(
+    let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-missing-state"), scope()).with_local_context(
+        "ctx-stopless-missing-state",
+        scope(),
+        json!({
+            "input":[{"role":"user","content":"original task"}],
+            "output":[{"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"}]
+        }),
+    );
+    let governed = request_hooks
+        .run(
             raw_request(json!({
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":"not json"
-                }]
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}]
             })),
             &lookup,
             &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
-        ),
-        Err(V3HubRelayRequestError::MalformedStoplessCliOutput {
-            reason: "output must be JSON",
-            ..
-        })
-    ));
+        )
+        .unwrap();
+    assert!(governed.stopless_state().is_none());
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
 }
 
 #[test]
