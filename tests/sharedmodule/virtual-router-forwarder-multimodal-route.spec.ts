@@ -124,4 +124,145 @@ describe('VirtualRouter multimodal forwarder routing', () => {
     expect(result.target.routeThinking).toBe('medium');
     expect(result.decision.routeName).toBe('multimodal');
   });
+
+  it('does not route placeholder-image Responses tool continuations to text-only gpt-5.6 thinking targets', async () => {
+    const root = await createTempDir('vr-forwarder-image-tool-continuation-');
+    for (const provider of [
+      {
+        providerId: 'cc',
+        models: {
+          'gpt-5.5': {
+            capabilities: ['text', 'reasoning', 'thinking', 'tools', 'multimodal'],
+            direct: { semantics: 'passthrough' }
+          }
+        }
+      },
+      {
+        providerId: 'cc-sol',
+        models: {
+          'gpt-5.6-sol': {
+            capabilities: ['text', 'reasoning', 'thinking', 'tools'],
+            direct: { semantics: 'passthrough' }
+          }
+        }
+      }
+    ]) {
+      const providerDir = path.join(root, provider.providerId);
+      await fs.mkdir(providerDir, { recursive: true });
+      await fs.writeFile(
+        path.join(providerDir, 'config.v2.toml'),
+        `${serializeTomlRecord({
+          version: '2.0.0',
+          providerId: provider.providerId,
+          provider: {
+            id: provider.providerId,
+            type: 'openai',
+            baseURL: `https://${provider.providerId}.example.test/v1`,
+            auth: {
+              entries: [{ alias: 'key1', apiKey: 'test-key' }]
+            },
+            models: provider.models
+          }
+        })}\n`,
+        'utf8'
+      );
+    }
+
+    const input = await compileVirtualRouterInput({
+      virtualrouter: {
+        forwarders: {
+          'fwd.free.gpt-5.5': {
+            protocol: 'openai',
+            model: 'gpt-5.5',
+            resolutionMode: 'model-first',
+            strategy: 'priority',
+            stickyKey: 'none',
+            targets: [{ providerId: 'cc', priority: 1 }]
+          },
+          'fwd.free.gpt-5.6-sol': {
+            protocol: 'openai',
+            model: 'gpt-5.6-sol',
+            resolutionMode: 'model-first',
+            strategy: 'priority',
+            stickyKey: 'none',
+            targets: [{ providerId: 'cc-sol', priority: 1 }]
+          }
+        },
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              thinking: [
+                {
+                  id: 'thinking-sol-first',
+                  mode: 'priority',
+                  targets: ['fwd.free.gpt-5.6-sol', 'fwd.free.gpt-5.5'],
+                  thinking: 'xhigh'
+                }
+              ],
+              multimodal: [
+                {
+                  id: 'multimodal-gpt-5.5',
+                  mode: 'priority',
+                  targets: ['fwd.free.gpt-5.5'],
+                  thinking: 'medium'
+                }
+              ],
+              default: [
+                {
+                  id: 'default-gpt-5.5',
+                  mode: 'priority',
+                  targets: ['fwd.free.gpt-5.5']
+                }
+              ]
+            }
+          }
+        }
+      }
+    }, root);
+
+    const { config } = bootstrapVirtualRouterConfig({ virtualrouter: input } as any);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config);
+    const result = engine.route(
+      {
+        model: 'router',
+        input: [
+          {
+            type: 'message',
+            role: 'user',
+            content: [
+              { type: 'input_text', text: '[Image #1] 继续分析这张截图。' }
+            ]
+          },
+          {
+            type: 'function_call',
+            name: 'exec_command',
+            call_id: 'call_read',
+            arguments: '{"cmd":"cat README.md"}'
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_read',
+            output: 'ok'
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'exec_command', parameters: { type: 'object' } }
+          }
+        ]
+      },
+      {
+        requestId: 'req-image-tool-continuation-no-gpt-56',
+        metadataCenterSnapshot: {},
+        entryEndpoint: '/v1/responses',
+        routecodexRoutingPolicyGroup: 'default'
+      }
+    );
+
+    expect(result.decision.routeName).toBe('multimodal');
+    expect(result.target.providerKey).toBe('cc.key1.gpt-5.5');
+    expect(result.target.providerKey).not.toBe('cc-sol.key1.gpt-5.6-sol');
+  });
 });

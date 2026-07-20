@@ -42,6 +42,8 @@ type VirtualRouterRouteHostEffectsPlan = AnyRecord & {
   cleanedRequest?: unknown;
 };
 
+const VIRTUAL_ROUTER_ERROR_MARKER = 'VIRTUAL_ROUTER_ERROR:';
+
 let cachedNativeHubPipelineOrchestrationSemantics:
   | NativeHubPipelineOrchestrationSemantics
   | null = null;
@@ -71,6 +73,76 @@ function parseNativeObjectResult(name: string, raw: unknown): AnyRecord {
     parseSharedNativeJsonResult(name, raw, { label: 'llmswitch-bridge' }),
     { label: 'llmswitch-bridge' }
   );
+}
+
+function readRecord(value: unknown): AnyRecord | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as AnyRecord;
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function parseVirtualRouterErrorEnvelope(message: string): {
+  code: string;
+  payload?: AnyRecord;
+  details?: AnyRecord;
+} | undefined {
+  const markerIndex = message.indexOf(VIRTUAL_ROUTER_ERROR_MARKER);
+  if (markerIndex < 0) {
+    return undefined;
+  }
+  const rest = message.slice(markerIndex + VIRTUAL_ROUTER_ERROR_MARKER.length);
+  const codeEnd = rest.indexOf(':');
+  if (codeEnd <= 0) {
+    return undefined;
+  }
+  const code = rest.slice(0, codeEnd).trim();
+  if (!code) {
+    return undefined;
+  }
+  const payloadText = rest.slice(codeEnd + 1).trim();
+  const payload = payloadText ? readRecord(JSON.parse(payloadText)) : undefined;
+  const details = readRecord(payload?.details);
+  return { code, payload, details };
+}
+
+function enrichVirtualRouterRouteError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error ?? 'Unknown virtual-router error');
+  let parsed: ReturnType<typeof parseVirtualRouterErrorEnvelope>;
+  try {
+    parsed = parseVirtualRouterErrorEnvelope(message);
+  } catch {
+    return error;
+  }
+  if (!parsed) {
+    return error;
+  }
+  const enriched = (error instanceof Error ? error : new Error(message)) as Error & AnyRecord;
+  enriched.code = parsed.code;
+  const statusCode =
+    readFiniteNumber(parsed.details?.statusCode)
+    ?? readFiniteNumber(parsed.details?.status)
+    ?? readFiniteNumber(parsed.payload?.statusCode)
+    ?? readFiniteNumber(parsed.payload?.status)
+    ?? (parsed.code === 'HTTP_429' ? 429 : undefined);
+  if (statusCode !== undefined) {
+    enriched.statusCode = statusCode;
+    enriched.status = statusCode;
+  }
+  if (parsed.details) {
+    enriched.details = parsed.details;
+  }
+  const retryAfterMs =
+    readFiniteNumber(parsed.details?.retryAfterMs)
+    ?? readFiniteNumber(parsed.payload?.retryAfterMs);
+  if (retryAfterMs !== undefined) {
+    enriched.retryAfterMs = retryAfterMs;
+  }
+  return enriched;
 }
 
 function resolveRccUserDirForNativeRouting(): string | undefined {
@@ -192,12 +264,22 @@ export function routeHubPipelineVirtualRouterNative(handle: string, request: Any
   >('hubPipelineVirtualRouterRouteJson');
   const routeHostEffectsPlan = planVirtualRouterRouteHostEffectsNative(request, metadata);
   const nativeMetadata = injectVirtualRouterRuntimeMetadataLocal(metadata);
-  const raw = hubPipelineVirtualRouterRouteJson(
-    handle,
-    stringifyNativeJsonArg('routeHubPipelineVirtualRouterNative', request, { label: 'llmswitch-bridge' }) ?? 'null',
-    stringifyNativeJsonArg('routeHubPipelineVirtualRouterNative', nativeMetadata, { label: 'llmswitch-bridge' }) ?? 'null'
-  );
-  const parsed = parseNativeObjectResult('routeHubPipelineVirtualRouterNative', raw);
+  let raw: string;
+  try {
+    raw = hubPipelineVirtualRouterRouteJson(
+      handle,
+      stringifyNativeJsonArg('routeHubPipelineVirtualRouterNative', request, { label: 'llmswitch-bridge' }) ?? 'null',
+      stringifyNativeJsonArg('routeHubPipelineVirtualRouterNative', nativeMetadata, { label: 'llmswitch-bridge' }) ?? 'null'
+    );
+  } catch (error) {
+    throw enrichVirtualRouterRouteError(error);
+  }
+  let parsed: AnyRecord;
+  try {
+    parsed = parseNativeObjectResult('routeHubPipelineVirtualRouterNative', raw);
+  } catch (error) {
+    throw enrichVirtualRouterRouteError(error);
+  }
   finalizeVirtualRouterRouteHostEffectsNative(parsed, routeHostEffectsPlan);
   const cleanedRequest = routeHostEffectsPlan.cleanedRequest;
   if (cleanedRequest && typeof cleanedRequest === 'object' && !Array.isArray(cleanedRequest)) {

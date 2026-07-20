@@ -63,6 +63,7 @@ fn get_message_turn_state(
 ) -> (
     Option<String>,
     Option<Value>,
+    Option<Value>,
     bool,
     Option<tools::ToolClassification>,
 ) {
@@ -77,6 +78,7 @@ fn get_message_turn_state(
             .map(|v| v.trim().eq_ignore_ascii_case("user"))
             .unwrap_or(false)
     });
+    let active_user_message = latest_user_index.and_then(|idx| messages.get(idx).cloned());
     let (segment_start, segment_end) = if let Some(user_index) = latest_user_index {
         if latest_role.as_deref() == Some("user") {
             let previous_user_index = messages[..user_index].iter().rposition(|message| {
@@ -124,6 +126,7 @@ fn get_message_turn_state(
     (
         latest_role,
         latest_message,
+        active_user_message,
         has_tool_call_responses,
         last_assistant_tool,
     )
@@ -150,6 +153,14 @@ fn is_responses_message_with_role(entry: &Value, target_role: &str) -> bool {
         .and_then(|v| v.as_str())
         .map(|v| v.trim().eq_ignore_ascii_case(target_role))
         .unwrap_or(false)
+}
+
+fn is_responses_user_turn_carrier(entry: &Value) -> bool {
+    let entry_type = get_responses_entry_type(entry);
+    if entry_type == "message" {
+        return is_responses_message_with_role(entry, "user");
+    }
+    entry_type == "input_text" || entry_type == "text"
 }
 
 fn get_responses_message_role(entry: &Value) -> Option<String> {
@@ -282,6 +293,7 @@ fn get_responses_context_turn_state(
 ) -> (
     Option<String>,
     Option<Value>,
+    Option<Value>,
     bool,
     Option<tools::ToolClassification>,
 ) {
@@ -297,14 +309,15 @@ fn get_responses_context_turn_state(
         break;
     }
 
-    let latest_user_index = input
-        .iter()
-        .rposition(|entry| is_responses_message_with_role(entry, "user"));
+    let latest_user_index = input.iter().rposition(is_responses_user_turn_carrier);
+    let active_user_message = latest_user_index
+        .and_then(|idx| input.get(idx))
+        .and_then(|entry| get_responses_context_message(entry, "user"));
     let (segment_start, segment_end) = if let Some(user_index) = latest_user_index {
         if latest_role.as_deref() == Some("user") {
             let previous_user_index = input[..user_index]
                 .iter()
-                .rposition(|entry| is_responses_message_with_role(entry, "user"));
+                .rposition(is_responses_user_turn_carrier);
             (
                 previous_user_index.map(|idx| idx + 1).unwrap_or(0),
                 user_index,
@@ -321,6 +334,7 @@ fn get_responses_context_turn_state(
     (
         latest_role,
         latest_message,
+        active_user_message,
         has_tool_call_responses,
         last_assistant_tool,
     )
@@ -359,6 +373,7 @@ pub(crate) struct RoutingFeatures {
 struct TurnSegmentState {
     latest_role: Option<String>,
     latest_message: Option<Value>,
+    active_user_message: Option<Value>,
     has_tool_call_responses: bool,
     last_assistant_tool: Option<tools::ToolClassification>,
 }
@@ -384,10 +399,11 @@ fn extract_turn_state(request: &Value) -> TurnSegmentState {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        let (role, msg, has_tool, tool) = get_message_turn_state(&messages);
+        let (role, msg, active_user_message, has_tool, tool) = get_message_turn_state(&messages);
         TurnSegmentState {
             latest_role: role,
             latest_message: msg,
+            active_user_message,
             has_tool_call_responses: has_tool,
             last_assistant_tool: tool,
         }
@@ -398,10 +414,12 @@ fn extract_turn_state(request: &Value) -> TurnSegmentState {
         return message_state;
     }
 
-    let (role, msg, has_tool, tool) = get_responses_context_turn_state(request);
+    let (role, msg, active_user_message, has_tool, tool) =
+        get_responses_context_turn_state(request);
     TurnSegmentState {
         latest_role: role,
         latest_message: msg,
+        active_user_message,
         has_tool_call_responses: has_tool,
         last_assistant_tool: tool,
     }
@@ -432,11 +450,12 @@ pub(crate) fn build_routing_features(request: &Value, metadata: &Value) -> Routi
     let estimated_tokens = estimate_request_tokens(request);
     let has_thinking = detect_keyword(&normalized_user_text, &THINKING_KEYWORDS);
     let has_vision_tool = detect_vision_tool(request.get("tools"));
-    let media_signals = if latest_message_role == "user" {
-        analyze_media_attachments(turn_state.latest_message.as_ref())
+    let media_source = if latest_message_role == "user" {
+        turn_state.latest_message.as_ref()
     } else {
-        analyze_media_attachments(None)
+        turn_state.active_user_message.as_ref()
     };
+    let media_signals = analyze_media_attachments(media_source);
     let has_image_attachment = media_signals.has_any_media;
     let has_provider_wire_media_attachment = contains_provider_wire_media_attachment(request);
     let has_coding_tool = detect_coding_tool(request.get("tools"));
@@ -1587,6 +1606,117 @@ mod tests {
         let features = build_routing_features(&request, &json!({}));
 
         assert!(features.has_image_attachment);
+        assert!(!features.has_provider_wire_media_attachment);
+    }
+
+    #[test]
+    fn responses_wire_current_user_image_placeholder_survives_trailing_tool_output() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "[Image #1] 继续分析这张图里的报错。" }
+                    ]
+                },
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "call_read",
+                    "arguments": "{\"cmd\":\"cat README.md\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_read",
+                    "output": "ok"
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "function": { "name": "exec_command", "parameters": { "type": "object" } }
+            }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+
+        assert!(!features.latest_message_from_user);
+        assert!(features.has_tool_call_responses);
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("thinking")
+        );
+        assert!(
+            features.has_image_attachment,
+            "active user image intent must survive trailing Responses tool output"
+        );
+        assert!(
+            !features.has_provider_wire_media_attachment,
+            "placeholder-only image intent is not provider-wire media"
+        );
+    }
+
+    #[test]
+    fn responses_wire_historical_image_placeholder_does_not_leak_after_new_text_tool_output() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "[Image #1] 旧图问题。" }
+                    ]
+                },
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "call_old",
+                    "arguments": "{\"cmd\":\"cat OLD.md\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_old",
+                    "output": "old"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "现在只分析这个纯文本问题。" }
+                    ]
+                },
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "call_new",
+                    "arguments": "{\"cmd\":\"cat NEW.md\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_new",
+                    "output": "new"
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "function": { "name": "exec_command", "parameters": { "type": "object" } }
+            }]
+        });
+
+        let features = build_routing_features(&request, &json!({}));
+
+        assert!(!features.latest_message_from_user);
+        assert!(features.has_tool_call_responses);
+        assert_eq!(
+            features.last_assistant_tool_category.as_deref(),
+            Some("thinking")
+        );
+        assert!(
+            !features.has_image_attachment,
+            "older image placeholders must not leak past a newer user boundary"
+        );
         assert!(!features.has_provider_wire_media_attachment);
     }
 
