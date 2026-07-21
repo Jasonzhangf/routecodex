@@ -1,7 +1,9 @@
 export const ANSI_HTTP_LOG_RESET = '\x1b[0m';
 export const ANSI_HTTP_LOG_WHITE = '\x1b[97m';
+export const ANSI_HTTP_LOG_RED = '\x1b[31m';
 
 const IMPORTANT_LOG_KEYS = new Set([
+  'catalogCode',
   'catalogKey',
   'code',
   'errorCode',
@@ -22,9 +24,61 @@ const IMPORTANT_LOG_KEYS = new Set([
   'upstreamStatus'
 ]);
 
+const STATUS_LOG_KEYS = new Set([
+  'httpStatus',
+  'httpStatusCode',
+  'status',
+  'statusCode',
+  'upstreamStatus'
+]);
+
+const ERROR_CODE_LOG_KEYS = new Set([
+  'catalogKey',
+  'code',
+  'errorCode',
+  'internalCode',
+  'upstreamCode'
+]);
+
 const LOG_KEY_VALUE_PATTERN = /(\x1b\[[0-9;]*m)?([A-Za-z][A-Za-z0-9_.]*)=([^ \x1b,)\]]+)([,\)])?/g;
 const STANDALONE_HTTP_CODE_PATTERN = /(\x1b\[[0-9;]*m)?(?<!=)\bHTTP_[1-5]\d{2}(?:_[A-Za-z0-9]+)*\b/gi;
 const VIRTUAL_ROUTER_HIT_TARGET_PATTERN = /(\x1b\[[0-9;]*m)?\b([A-Za-z][A-Za-z0-9_.:-]*\/[A-Za-z0-9_.:-]+)\s+->\s+([^ \x1b]+)(?=\s|$)/g;
+
+function normalizeLogValue(value: string): string {
+  return value.trim().replace(/^["']|["']$/g, '');
+}
+
+function parseHttpStatusLikeValue(value: string): number | undefined {
+  const normalized = normalizeLogValue(value);
+  const httpCodeMatch = /^HTTP_([1-5]\d{2})(?:\b|_)/i.exec(normalized);
+  if (httpCodeMatch?.[1]) {
+    return Number(httpCodeMatch[1]);
+  }
+  const numericMatch = /^([1-5]\d{2})(?:\.\d+)?$/.exec(normalized);
+  if (numericMatch?.[1]) {
+    return Number(numericMatch[1]);
+  }
+  return undefined;
+}
+
+function isErrorHttpStatus(value: string): boolean {
+  const status = parseHttpStatusLikeValue(value);
+  return typeof status === 'number' && status >= 400;
+}
+
+function isErrorLogKeyValue(key: string, value: string): boolean {
+  if (STATUS_LOG_KEYS.has(key) || key === 'catalogCode') {
+    return isErrorHttpStatus(value);
+  }
+  if (ERROR_CODE_LOG_KEYS.has(key)) {
+    const status = parseHttpStatusLikeValue(value);
+    if (typeof status === 'number') {
+      return status >= 400;
+    }
+    return key === 'catalogKey' || key === 'code' || key === 'errorCode' || key === 'internalCode';
+  }
+  return /^HTTP_[45]\d{2}(?:\b|_)/i.test(normalizeLogValue(value));
+}
 
 function isImportantLogKeyValue(key: string, value: string): boolean {
   if (IMPORTANT_LOG_KEYS.has(key)) {
@@ -42,7 +96,8 @@ export function colorizeImportantLogKeyValue(
   if (!isImportantLogKeyValue(key, value)) {
     return undefined;
   }
-  return `${ANSI_HTTP_LOG_WHITE}${key}=${value}${ANSI_HTTP_LOG_RESET}${baseColor}${suffix}`;
+  const color = isErrorLogKeyValue(key, value) ? ANSI_HTTP_LOG_RED : ANSI_HTTP_LOG_WHITE;
+  return `${color}${key}=${value}${ANSI_HTTP_LOG_RESET}${baseColor}${suffix}`;
 }
 
 export function highlightStandaloneHttpCodeTokens(text: string, baseColor: string): string {
@@ -50,7 +105,8 @@ export function highlightStandaloneHttpCodeTokens(text: string, baseColor: strin
     if (ansiPrefix) {
       return match;
     }
-    return `${ANSI_HTTP_LOG_WHITE}${match}${ANSI_HTTP_LOG_RESET}${baseColor}`;
+    const color = isErrorHttpStatus(match) ? ANSI_HTTP_LOG_RED : ANSI_HTTP_LOG_WHITE;
+    return `${color}${match}${ANSI_HTTP_LOG_RESET}${baseColor}`;
   });
 }
 

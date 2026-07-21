@@ -56,9 +56,9 @@ describe('request-executor-runtime-blocks', () => {
       expect(plainLine).toContain('status=500');
       expect(plainLine).toContain('code=HTTP_500');
       expect(plainLine).toContain('upstreamCode=HTTP_500');
-      expect(line).toContain('\x1b[97mstatus=500\x1b[0m');
-      expect(line).toContain('\x1b[97mcode=HTTP_500\x1b[0m');
-      expect(line).toContain('\x1b[97mupstreamCode=HTTP_500\x1b[0m');
+      expect(line).toContain('\x1b[31mstatus=500\x1b[0m');
+      expect(line).toContain('\x1b[31mcode=HTTP_500\x1b[0m');
+      expect(line).toContain('\x1b[31mupstreamCode=HTTP_500\x1b[0m');
       expect(lines.some((line) => line.includes('3/2'))).toBe(false);
       expect(lines.some((line) => line.includes('4/2'))).toBe(false);
     } finally {

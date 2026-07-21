@@ -373,11 +373,11 @@ describe('request log color registry', () => {
     expect(stripAnsiCodes(line)).toContain('finish_reason=tool_calls');
   });
 
-  it('highlights important error fields white while preserving request session color', () => {
+  it('highlights error status and error codes red while preserving request session color', () => {
     const sessionId = 'session-http-code-highlight';
     const outerColor = resolveSessionAnsiColor(sessionId);
     const line = colorizeRequestLog(
-      '❌ [/v1/responses] request req-http-code failed: upstream error (status=429 code=HTTP_429 upstreamCode=HTTP_200)',
+      '❌ [/v1/responses] request req-http-code failed: upstream error (status=429 code=HTTP_429 catalogCode=429.1000 catalogKey=HTTP_429 upstreamCode=HTTP_200)',
       'req-http-code',
       { sessionId },
       { isError: true }
@@ -385,21 +385,25 @@ describe('request log color registry', () => {
 
     expect(line.startsWith(String(outerColor))).toBe(true);
     expect(line.startsWith('\x1b[31m')).toBe(false);
-    expect(line).toContain(`\x1b[97mstatus=429\x1b[0m${outerColor}`);
-    expect(line).toContain(`\x1b[97mcode=HTTP_429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[31mstatus=429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[31mcode=HTTP_429\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[31mcatalogCode=429.1000\x1b[0m${outerColor}`);
+    expect(line).toContain(`\x1b[31mcatalogKey=HTTP_429\x1b[0m${outerColor}`);
     expect(line).toContain(`\x1b[97mupstreamCode=HTTP_200\x1b[0m${outerColor}`);
-    expect(stripAnsiCodes(line)).toContain('status=429 code=HTTP_429 upstreamCode=HTTP_200');
+    expect(stripAnsiCodes(line)).toContain('status=429 code=HTTP_429 catalogCode=429.1000 catalogKey=HTTP_429 upstreamCode=HTTP_200');
   });
 
-  it('highlights important fields in scoped console lines without request color context', () => {
+  it('highlights error fields red in scoped console lines without request color context', () => {
     const line = colorizeRequestScopedLogLine(
-      '[provider-switch] req=req-no-session status=500 code=HTTP_500 upstreamCode=HTTP_302'
+      '[provider-switch] req=req-no-session status=500 code=HTTP_500 catalogCode=502.1000 catalogKey=HTTP_502 upstreamCode=HTTP_302'
     );
 
-    expect(line).toContain('\x1b[97mstatus=500\x1b[0m');
-    expect(line).toContain('\x1b[97mcode=HTTP_500\x1b[0m');
+    expect(line).toContain('\x1b[31mstatus=500\x1b[0m');
+    expect(line).toContain('\x1b[31mcode=HTTP_500\x1b[0m');
+    expect(line).toContain('\x1b[31mcatalogCode=502.1000\x1b[0m');
+    expect(line).toContain('\x1b[31mcatalogKey=HTTP_502\x1b[0m');
     expect(line).toContain('\x1b[97mupstreamCode=HTTP_302\x1b[0m');
-    expect(stripAnsiCodes(line)).toContain('status=500 code=HTTP_500 upstreamCode=HTTP_302');
+    expect(stripAnsiCodes(line)).toContain('status=500 code=HTTP_500 catalogCode=502.1000 catalogKey=HTTP_502 upstreamCode=HTTP_302');
   });
 
   it('highlights model, route, and virtual-router target fields white', () => {
