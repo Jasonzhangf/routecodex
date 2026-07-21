@@ -246,7 +246,7 @@ max_tokens = 4096
 max_context_tokens = 128000
 [providers.test.models."gpt-5.6-sol"]
 wire_name = "gpt-5.6-sol"
-capabilities = ["text", "reasoning", "tools", "streaming"]
+capabilities = ["text", "reasoning", "tools"]
 supports_streaming = true
 supports_thinking = true
 thinking = "ultra"
@@ -1082,8 +1082,10 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["support_verbosity"], true);
     assert_eq!(model["supports_reasoning_summaries"], true);
     assert_eq!(model["supports_parallel_tool_calls"], true);
-    assert_eq!(model["supports_search_tool"], true);
-    assert_eq!(model["input_modalities"], json!(["text", "image"]));
+    assert_eq!(model["supports_search_tool"], false);
+    assert_eq!(model["input_modalities"], json!(["text"]));
+    assert_eq!(model["supports_image_detail_original"], false);
+    assert_eq!(model["experimental_supported_tools"], json!([]));
     assert_eq!(model["context_window"], 128000);
     assert_eq!(model["max_context_window"], 128000);
     let gpt55 = response["data"]
@@ -1098,24 +1100,26 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(gpt55["context_window"], 272000);
     assert_eq!(gpt55["max_context_window"], 272000);
     assert_eq!(gpt55["supports_search_tool"], true);
-    assert_eq!(gpt55["use_responses_lite"], true);
-    assert_eq!(gpt55["tool_mode"], "code_mode_only");
+    assert_eq!(gpt55["experimental_supported_tools"], json!([]));
+    assert!(
+        gpt55.get("use_responses_lite").is_none(),
+        "gpt-5.5 must not enable Responses Lite; Codex uses this as a request/tool-surface selector"
+    );
+    assert!(
+        gpt55.get("tool_mode").is_none(),
+        "gpt-5.5 must not force code_mode_only; Codex hides first-class tools behind exec/wait when this is set"
+    );
     assert_eq!(gpt55["input_modalities"], json!(["text", "image"]));
-    let sol = response["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|model| model["id"] == "gpt-5.6-sol")
-        .expect("gpt-5.6-sol must expose Codex model metadata");
-    assert_eq!(sol["supports_reasoning_summaries"], true);
-    assert_eq!(sol["support_verbosity"], true);
-    assert_eq!(sol["supports_parallel_tool_calls"], true);
-    assert_eq!(sol["context_window"], 372000);
-    assert_eq!(sol["max_context_window"], 372000);
-    assert_eq!(sol["supports_search_tool"], true);
-    assert_eq!(sol["use_responses_lite"], true);
-    assert_eq!(sol["tool_mode"], "code_mode_only");
-    assert_eq!(sol["input_modalities"], json!(["text", "image"]));
+    for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        assert!(
+            response["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|model| model["id"] != id),
+            "{id} must not be exposed before the gpt-5.6 client surface is enabled"
+        );
+    }
     assert!(
         !serde_json::to_string(&response)
             .unwrap()
@@ -1127,7 +1131,7 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
 }
 
 #[tokio::test]
-async fn p6_models_endpoint_always_lists_builtin_codex_catalog() {
+async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
     let handle =
@@ -1144,10 +1148,14 @@ async fn p6_models_endpoint_always_lists_builtin_codex_catalog() {
         .await
         .unwrap();
     let data = response["data"].as_array().unwrap();
-    for id in ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+    assert!(
+        data.iter().any(|model| model["id"] == "gpt-5.5"),
+        "gpt-5.5 must be listed as the built-in Codex catalog entry"
+    );
+    for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
         assert!(
-            data.iter().any(|model| model["id"] == id),
-            "{id} must be listed as a built-in Codex catalog entry"
+            data.iter().all(|model| model["id"] != id),
+            "{id} must not be listed before the gpt-5.6 client surface is enabled"
         );
     }
     let client_test = data
@@ -1155,14 +1163,6 @@ async fn p6_models_endpoint_always_lists_builtin_codex_catalog() {
         .find(|model| model["id"] == "client-test")
         .expect("configured alias must remain listed");
     assert_eq!(client_test["minimal_client_version"], "0.98.0");
-    let sol_count = data
-        .iter()
-        .filter(|model| model["id"] == "gpt-5.6-sol")
-        .count();
-    assert_eq!(
-        sol_count, 1,
-        "built-in and provider catalog entries must dedupe"
-    );
     assert_eq!(response["models"], response["data"]);
     handle.shutdown().await;
     shutdown.send(()).unwrap();

@@ -162,16 +162,6 @@ const DEFAULT_REASONING_LEVELS = [
   { effort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
 ] as const;
 
-const GPT56_REASONING_LEVELS = [
-  ...DEFAULT_REASONING_LEVELS,
-  { effort: 'max', description: 'Maximum reasoning depth for the hardest tasks' }
-] as const;
-
-const GPT56_REASONING_LEVELS_WITH_ULTRA = [
-  ...GPT56_REASONING_LEVELS,
-  { effort: 'ultra', description: 'Ultra reasoning depth for frontier-grade tasks' }
-] as const;
-
 const CODEX_ADVANCED_MODEL_METADATA: Record<string, unknown> = {
   description: 'RouteCodex advanced agentic coding model compatible with gpt-5.5 capabilities.',
   prefer_websockets: false,
@@ -206,42 +196,6 @@ const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
     minimal_client_version: '0.124.0',
     context_window: 272000,
     max_context_window: 272000
-  },
-  'gpt-5.6-sol': {
-    ...CODEX_ADVANCED_MODEL_METADATA,
-    description: 'Latest frontier agentic coding model.',
-    experimental_supported_tools: [],
-    minimal_client_version: '0.144.0',
-    context_window: 372000,
-    max_context_window: 372000,
-    default_reasoning_level: 'low',
-    supported_reasoning_levels: GPT56_REASONING_LEVELS_WITH_ULTRA,
-    tool_mode: 'code_mode_only',
-    use_responses_lite: true
-  },
-  'gpt-5.6-terra': {
-    ...CODEX_ADVANCED_MODEL_METADATA,
-    description: 'Balanced agentic coding model for everyday work.',
-    experimental_supported_tools: [],
-    minimal_client_version: '0.144.0',
-    context_window: 372000,
-    max_context_window: 372000,
-    default_reasoning_level: 'medium',
-    supported_reasoning_levels: GPT56_REASONING_LEVELS_WITH_ULTRA,
-    tool_mode: 'code_mode_only',
-    use_responses_lite: true
-  },
-  'gpt-5.6-luna': {
-    ...CODEX_ADVANCED_MODEL_METADATA,
-    description: 'Fast and affordable agentic coding model.',
-    experimental_supported_tools: [],
-    minimal_client_version: '0.144.0',
-    context_window: 372000,
-    max_context_window: 372000,
-    default_reasoning_level: 'medium',
-    supported_reasoning_levels: GPT56_REASONING_LEVELS,
-    tool_mode: 'code_mode_only',
-    use_responses_lite: true
   },
   'gpt-5.4': {
     ...CODEX_ADVANCED_MODEL_METADATA,
@@ -320,7 +274,11 @@ function buildCodexModelMetadata(
   return item;
 }
 
-const BUILTIN_CODEX_MODEL_IDS = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const;
+const BUILTIN_CODEX_MODEL_IDS = ['gpt-5.5'] as const;
+
+function isHiddenCodexFutureModel(modelId: string): boolean {
+  return /^gpt-5\.6(?:$|-)/.test(modelId.trim());
+}
 
 function buildBuiltinCodexModelMetadata(allowedModelIds?: ReadonlySet<string>): ModelListItem[] {
   return BUILTIN_CODEX_MODEL_IDS.filter((modelId) => !allowedModelIds || allowedModelIds.has(modelId)).map((modelId) =>
@@ -380,6 +338,9 @@ async function collectConfiguredModelItems(): Promise<ModelListItem[]> {
     for (const [modelId, modelRaw] of Object.entries(modelsNode)) {
       const trimmedModelId = modelId.trim();
       if (!trimmedModelId) {
+        continue;
+      }
+      if (isHiddenCodexFutureModel(trimmedModelId)) {
         continue;
       }
       const modelNode = isPlainRecord(modelRaw) ? modelRaw : {};
@@ -549,6 +510,9 @@ async function collectPortScopedModelItems(args: {
   const refs = collectPortVisibleModelRefsFromRouteSurface(args);
   const items: ModelListItem[] = [];
   for (const ref of refs) {
+    if (isHiddenCodexFutureModel(ref.modelId)) {
+      continue;
+    }
     const cfg = providerConfigs[ref.providerId];
     const providerNode = isRecord(cfg?.provider) ? cfg.provider : null;
     if (!providerNode || readBoolean(providerNode.enabled) === false) {

@@ -3523,8 +3523,8 @@ verification:
     build:
       - npm run build:base
     notes:
-      - "`/v1/models` must keep visible bare `gpt-5.5` and `gpt-5.6-*` Codex contract fields stable while allowing provider aliases to project runtime `context_window` / `supports_streaming`."
-      - "Port-scoped `/v1/models` must derive built-in Codex alias visibility from that port's routingPolicyGroup targets: `gpt-5.5`-only ports do not advertise `gpt-5.6-*` Responses Lite capabilities; `gpt-5.6-sol` ports still advertise `use_responses_lite=true`."
+      - "`/v1/models` must keep visible bare `gpt-5.5` Codex contract fields stable while allowing non-gpt-5.6 provider aliases to project runtime `context_window` / `supports_streaming`."
+      - "Port-scoped `/v1/models` must not advertise `gpt-5.6-*` Responses Lite/code_mode_only capabilities until the gpt-5.6 client surface is explicitly enabled."
       - "Runtime-status authority and source-config projection are separate cases, not a fallback chain; a conflict test must prove compiled runtime status wins when present."
       - "RouteCodex proxy models must advertise `prefer_websockets=false`; Codex provider-level `supports_websockets` is the actual WebSocket trigger, and model metadata must not encourage unsupported proxy WebSocket mode."
 

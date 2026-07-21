@@ -527,7 +527,9 @@ features:
     entry_symbols:
       - models_endpoint
       - build_v3_models_catalog
+      - build_v3_model_capability_index
       - build_v3_codex_model_metadata
+      - build_v3_model_capability_projection
     allowed_paths:
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
@@ -536,7 +538,9 @@ features:
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/wiki/v3-live-provider-compat-parity.md
+      - docs/design/codex-model-capability-contract.md
       - docs/goals/v3-models-capability-catalog-test-design.md
+      - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
       - scripts/architecture/verify-v3-architecture-docs.mjs
       - note.md
       - MEMORY.md
@@ -557,6 +561,11 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
       - git diff --check
+    required_contract:
+      - "input_modalities, supports_image_detail_original, supports_search_tool, and web_search_tool_type derive from manifest model capabilities when a provider declares the visible/canonical model id."
+      - "gpt-5.6-* model ids and aliases must not be exposed through /v1/models until the gpt-5.6 client surface is explicitly enabled."
+      - "gpt-5.5 must not publish tool_mode=code_mode_only or use_responses_lite=true; Codex treats those fields as request/tool-surface selectors."
+      - "experimental_supported_tools must not be used as the apply_patch/web_search/tool_search surface; current Codex source only consumes recognized experimental names such as test_sync_tool."
     runtime_status: live_5555_verified
 
   - feature_id: v3.entry_protocol_endpoint_binding

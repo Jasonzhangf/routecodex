@@ -49,6 +49,7 @@ use routecodex_v3_sse::{
     SseTransportLimits,
 };
 use serde_json::{json, Map, Value};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -4329,8 +4330,19 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
 fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json::Value {
     let mut data = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    for builtin_model_id in ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
-        let mut item = build_v3_codex_model_metadata(builtin_model_id, builtin_model_id, None);
+    let model_capabilities = build_v3_model_capability_index(manifest);
+    {
+        let builtin_model_id = "gpt-5.5";
+        let capabilities = model_capabilities
+            .get(builtin_model_id)
+            .cloned()
+            .unwrap_or_else(|| default_builtin_v3_model_capabilities(builtin_model_id));
+        let mut item = build_v3_codex_model_metadata(
+            builtin_model_id,
+            builtin_model_id,
+            None,
+            Some(&capabilities),
+        );
         item.insert("owned_by".to_string(), json!("openai"));
         seen.insert(builtin_model_id.to_string());
         data.push(Value::Object(item));
@@ -4341,17 +4353,28 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
         .filter(|provider| provider.enabled)
     {
         for model in provider.models.values() {
+            if is_v3_hidden_codex_future_model(&model.id) {
+                continue;
+            }
             let visible_ids = if model.aliases.is_empty() {
                 vec![model.id.clone()]
             } else {
                 model.aliases.clone()
             };
             for visible_id in visible_ids {
+                if is_v3_hidden_codex_future_model(&visible_id) {
+                    continue;
+                }
                 if seen.contains(&visible_id) {
                     continue;
                 }
-                let mut item =
-                    build_v3_codex_model_metadata(&visible_id, &model.id, model.max_context_tokens);
+                let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
+                let mut item = build_v3_codex_model_metadata(
+                    &visible_id,
+                    &model.id,
+                    model.max_context_tokens,
+                    Some(&capabilities),
+                );
                 item.insert(
                     "owned_by".to_string(),
                     json!(format!("provider:{}", provider.id)),
@@ -4389,10 +4412,97 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
     })
 }
 
+fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
+    let trimmed = model_id.trim();
+    trimmed == "gpt-5.6" || trimmed.starts_with("gpt-5.6-")
+}
+
+struct V3ModelCapabilityProjection {
+    input_modalities: Vec<&'static str>,
+    supports_image_detail_original: bool,
+    supports_search_tool: bool,
+    web_search_tool_type: &'static str,
+}
+
+fn build_v3_model_capability_index(
+    manifest: &V3Config05ManifestPublished,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut index = BTreeMap::new();
+    for provider in manifest
+        .providers
+        .values()
+        .filter(|provider| provider.enabled)
+    {
+        for model in provider.models.values() {
+            let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
+            for visible_id in std::iter::once(&model.id).chain(model.aliases.iter()) {
+                index
+                    .entry(visible_id.clone())
+                    .or_insert_with(BTreeSet::new)
+                    .extend(capabilities.iter().cloned());
+            }
+        }
+    }
+    index
+}
+
+fn default_builtin_v3_model_capabilities(model_id: &str) -> BTreeSet<String> {
+    let capabilities = match model_id {
+        "gpt-5.5" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
+            ["text", "reasoning", "tools", "web_search", "multimodal"]
+                .into_iter()
+                .collect::<Vec<_>>()
+        }
+        _ => vec!["text"],
+    };
+    capabilities
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+}
+
+fn build_v3_model_capability_projection(
+    capabilities: Option<&BTreeSet<String>>,
+    is_gpt_55: bool,
+    is_gpt_56: bool,
+) -> V3ModelCapabilityProjection {
+    let owned_default;
+    let capabilities = match capabilities {
+        Some(capabilities) => capabilities,
+        None => {
+            owned_default = if is_gpt_55 {
+                default_builtin_v3_model_capabilities("gpt-5.5")
+            } else if is_gpt_56 {
+                default_builtin_v3_model_capabilities("gpt-5.6-sol")
+            } else {
+                ["text"].into_iter().map(str::to_string).collect()
+            };
+            &owned_default
+        }
+    };
+    let image_capable = capabilities.contains("multimodal") || capabilities.contains("vision");
+    let supports_search_tool = capabilities.contains("web_search");
+    let mut input_modalities = vec!["text"];
+    if image_capable {
+        input_modalities.push("image");
+    }
+    V3ModelCapabilityProjection {
+        input_modalities,
+        supports_image_detail_original: image_capable,
+        supports_search_tool,
+        web_search_tool_type: if image_capable {
+            "text_and_image"
+        } else {
+            "text"
+        },
+    }
+}
+
 fn build_v3_codex_model_metadata(
     visible_id: &str,
     canonical_model_id: &str,
     max_context_tokens: Option<u64>,
+    capabilities: Option<&BTreeSet<String>>,
 ) -> Map<String, Value> {
     let is_gpt_55 = canonical_model_id == "gpt-5.5";
     let is_gpt_56_sol = canonical_model_id == "gpt-5.6-sol";
@@ -4450,6 +4560,8 @@ fn build_v3_codex_model_metadata(
             {"effort":"xhigh","description":"Extra high reasoning depth for complex problems"}
         ])
     };
+    let capability_projection =
+        build_v3_model_capability_projection(capabilities, is_gpt_55, is_gpt_56);
     let mut item = Map::from_iter([
         ("id".to_string(), json!(visible_id)),
         ("object".to_string(), json!("model")),
@@ -4462,10 +4574,22 @@ fn build_v3_codex_model_metadata(
         ("support_verbosity".to_string(), json!(true)),
         ("default_verbosity".to_string(), json!("low")),
         ("apply_patch_tool_type".to_string(), json!("freeform")),
-        ("web_search_tool_type".to_string(), json!("text_and_image")),
-        ("supports_search_tool".to_string(), json!(true)),
-        ("input_modalities".to_string(), json!(["text", "image"])),
-        ("supports_image_detail_original".to_string(), json!(true)),
+        (
+            "web_search_tool_type".to_string(),
+            json!(capability_projection.web_search_tool_type),
+        ),
+        (
+            "supports_search_tool".to_string(),
+            json!(capability_projection.supports_search_tool),
+        ),
+        (
+            "input_modalities".to_string(),
+            json!(capability_projection.input_modalities),
+        ),
+        (
+            "supports_image_detail_original".to_string(),
+            json!(capability_projection.supports_image_detail_original),
+        ),
         (
             "truncation_policy".to_string(),
             json!({"mode":"tokens","limit":10000}),
@@ -4501,17 +4625,19 @@ fn build_v3_codex_model_metadata(
         ("priority".to_string(), json!(0)),
         (
             "experimental_supported_tools".to_string(),
-            json!(if is_gpt_56 {
-                Vec::<&str>::new()
-            } else {
-                vec!["apply_patch", "web_search"]
-            }),
+            // Codex currently consumes this field for recognized experimental tool names such as
+            // `test_sync_tool`; `apply_patch` and search are controlled by `apply_patch_tool_type`
+            // and `supports_search_tool`, not by this vector.
+            json!(Vec::<&str>::new()),
         ),
         ("effective_context_window_percent".to_string(), json!(95)),
         ("context_window".to_string(), json!(context_window)),
         ("max_context_window".to_string(), json!(context_window)),
     ]);
-    if is_gpt_55 || is_gpt_56 {
+    // Codex treats `tool_mode` and `use_responses_lite` as request/tool-surface selectors.
+    // `gpt-5.5` must not advertise them: current Codex then keeps first-class tools such as
+    // tool_search instead of forcing nested code-mode `exec`/`wait` entrypoints.
+    if is_gpt_56 {
         item.insert("tool_mode".to_string(), json!("code_mode_only"));
         item.insert("use_responses_lite".to_string(), json!(true));
     }

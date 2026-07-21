@@ -54,40 +54,6 @@ function expectGpt55CodexContract(model: any): void {
   ]);
 }
 
-function expectGpt56CodexContract(
-  model: any,
-  expected: { description: string; defaultReasoningLevel: string; includesUltra: boolean }
-): void {
-  expect(model).toMatchObject({
-    apply_patch_tool_type: 'freeform',
-    default_reasoning_level: expected.defaultReasoningLevel,
-    default_reasoning_summary: 'none',
-    default_verbosity: 'low',
-    description: expected.description,
-    experimental_supported_tools: [],
-    input_modalities: ['text', 'image'],
-    minimal_client_version: '0.144.0',
-    prefer_websockets: false,
-    shell_type: 'shell_command',
-    support_verbosity: true,
-    supported_in_api: true,
-    supports_image_detail_original: true,
-    supports_parallel_tool_calls: true,
-    supports_search_tool: true,
-    tool_mode: 'code_mode_only',
-    use_responses_lite: true,
-    visibility: 'list',
-    web_search_tool_type: 'text_and_image'
-  });
-  expect(model.context_window).toBe(372000);
-  expect(model.max_context_window).toBe(372000);
-  expect(model.supported_reasoning_levels.map((entry: any) => entry.effort)).toEqual(
-    expected.includesUltra
-      ? ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
-      : ['low', 'medium', 'high', 'xhigh', 'max']
-  );
-}
-
 function readModelsPayload(body: any): any[] {
   expect(Array.isArray(body?.models)).toBe(true);
   expect(Array.isArray(body?.data)).toBe(true);
@@ -247,31 +213,13 @@ describe('http routes invalid json handling', () => {
         const minimax = data.find((item: any) => item?.id === 'minimax.MiniMax-M3');
         const advanced = data.find((item: any) => item?.id === 'minimax.gpt-5.5');
         expect(bareAdvanced).toBeTruthy();
-        expect(sol).toBeTruthy();
-        expect(terra).toBeTruthy();
-        expect(luna).toBeTruthy();
+        expect(sol).toBeUndefined();
+        expect(terra).toBeUndefined();
+        expect(luna).toBeUndefined();
         expect(minimax).toBeTruthy();
         expect(advanced).toBeTruthy();
         expectGpt55CodexContract(bareAdvanced);
-        expectGpt56CodexContract(sol, {
-          description: 'Latest frontier agentic coding model.',
-          defaultReasoningLevel: 'low',
-          includesUltra: true
-        });
-        expectGpt56CodexContract(terra, {
-          description: 'Balanced agentic coding model for everyday work.',
-          defaultReasoningLevel: 'medium',
-          includesUltra: true
-        });
-        expectGpt56CodexContract(luna, {
-          description: 'Fast and affordable agentic coding model.',
-          defaultReasoningLevel: 'medium',
-          includesUltra: false
-        });
         expect(bareAdvanced.owned_by).toBe('openai');
-        expect(sol.owned_by).toBe('openai');
-        expect(terra.owned_by).toBe('openai');
-        expect(luna.owned_by).toBe('openai');
         expect(bareAdvanced.context_window).toBe(272000);
         expect(bareAdvanced.max_context_window).toBe(272000);
         expect(minimax.apply_patch_tool_type).toBe('freeform');
@@ -522,7 +470,7 @@ describe('http routes invalid json handling', () => {
     }
   });
 
-  it('keeps gpt-5.6 lite metadata visible when the current port routes to a gpt-5.6 model', async () => {
+  it('does not expose gpt-5.6 lite metadata even when the current port routes to a gpt-5.6 model', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-models-port-codex-56-'));
     const providerRoot = path.join(tmp, 'provider');
     const providerDir = path.join(providerRoot, 'cc-sol');
@@ -581,16 +529,11 @@ describe('http routes invalid json handling', () => {
         expect(response.status).toBe(200);
         const data = readModelsPayload(await response.json());
         const ids = data.map((item: any) => item.id).sort();
-        expect(ids).toContain('gpt-5.6-sol');
+        expect(ids).not.toContain('gpt-5.6-sol');
+        expect(ids).not.toContain('cc-sol.gpt-5.6-sol');
         expect(ids).not.toContain('gpt-5.5');
         expect(ids).not.toContain('gpt-5.6-terra');
         expect(ids).not.toContain('gpt-5.6-luna');
-        const sol = data.find((item: any) => item.id === 'gpt-5.6-sol');
-        expectGpt56CodexContract(sol, {
-          description: 'Latest frontier agentic coding model.',
-          defaultReasoningLevel: 'low',
-          includesUltra: true
-        });
       });
     } finally {
       if (restoreRccHome === undefined) {
@@ -706,13 +649,8 @@ describe('http routes invalid json handling', () => {
         expect(response.status).toBe(200);
         const data = readModelsPayload(await response.json());
         const ids = data.map((item: any) => item.id).sort();
-        expect(ids).toEqual(['gpt-5.5', 'gpt-5.6-sol']);
+        expect(ids).toEqual(['gpt-5.5']);
         expectGpt55CodexContract(data.find((item: any) => item.id === 'gpt-5.5'));
-        expectGpt56CodexContract(data.find((item: any) => item.id === 'gpt-5.6-sol'), {
-          description: 'Latest frontier agentic coding model.',
-          defaultReasoningLevel: 'low',
-          includesUltra: true
-        });
       });
     } finally {
       if (restoreRccHome === undefined) {

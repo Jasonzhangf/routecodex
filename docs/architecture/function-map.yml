@@ -6942,8 +6942,8 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: ts
     notes:
-      - "Bare `gpt-5.5` and `gpt-5.6-*` aliases must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets=false`, `minimal_client_version`, modalities, reasoning, and tool metadata when they are visible."
-      - "When `/v1/models` resolves a current port routingPolicyGroup, built-in Codex aliases are visible only if that port's route targets include the same model id; a `gpt-5.5`-only port must not advertise `gpt-5.6-*` Responses Lite capabilities."
+      - "Bare `gpt-5.5` must preserve the Codex catalog contract for capability-signaling fields such as `context_window`, `prefer_websockets=false`, `minimal_client_version`, modalities, reasoning, and tool metadata."
+      - "When `/v1/models` resolves a current port routingPolicyGroup, it must not advertise `gpt-5.6-*` Responses Lite/code_mode_only capabilities until the gpt-5.6 client surface is explicitly enabled."
       - "Authority selection is explicit: installed/live servers use compiled Virtual Router runtime status as route-surface truth; source-config projection is only for construction/test contexts without runtime status and must not recover a malformed runtime status."
       - "Provider-prefixed aliases may override runtime-derived fields like `context_window` and `supports_streaming`, but must not drift on Codex capability-signaling fields."
   - feature_id: server.responses_handler_family

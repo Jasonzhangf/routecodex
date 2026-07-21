@@ -55,9 +55,11 @@ const requiredCapabilityFields = [
   'context_window',
   'max_context_window',
   'supports_search_tool',
+  'input_modalities',
+];
+const requiredSelectorAbsenceFields = [
   'use_responses_lite',
   'tool_mode',
-  'input_modalities',
 ];
 
 if (manifest.lifecycle_id !== 'v3.live_provider_compat.parity') {
@@ -168,6 +170,11 @@ else {
   for (const field of requiredCapabilityFields) {
     if (!(codexCapability.required_fields ?? []).includes(field)) {
       failures.push(manifestPath + ': /v1/models capability field missing ' + field);
+    }
+  }
+  for (const field of requiredSelectorAbsenceFields) {
+    if (!(codexCapability.selector_absence_fields ?? []).includes(field)) {
+      failures.push(manifestPath + ': /v1/models selector absence field missing ' + field);
     }
   }
   validateEvidence(codexCapability.controlled_evidence, 'controlled_evidence', codexCapability.id);

@@ -218,7 +218,8 @@ capability_cases:
     owner_feature_id: v3.models_capability_catalog
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-models-capability-catalog-test-design.md, docs/design/codex-model-capability-contract.md, MEMORY.md], gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_models_endpoint -- --nocapture, npm run verify:models-capability-contract] }
     live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/evidence.jsonl, .agent-collab/runs/20260716T121255Z-Macstudio.local-15204-6ffb1ba1/logs/relay-restored-live-20260716T122141Z/summary.json, .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json, MEMORY.md], blockers: [] }
-    required_fields: [supports_reasoning_summaries, support_verbosity, supports_parallel_tool_calls, context_window, max_context_window, supports_search_tool, use_responses_lite, tool_mode, input_modalities]
+    required_fields: [supports_reasoning_summaries, support_verbosity, supports_parallel_tool_calls, context_window, max_context_window, supports_search_tool, input_modalities]
+    selector_absence_fields: [use_responses_lite, tool_mode]
 production_blockers:
   - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
   - { blocker_id: anthropic_messages_live_replay_pending, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: MEMORY.md }

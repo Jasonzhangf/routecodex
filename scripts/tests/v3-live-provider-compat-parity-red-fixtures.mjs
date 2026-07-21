@@ -77,6 +77,15 @@ const cases = [
     diagnostic: /capability field missing input_modalities/,
   },
   {
+    name: 'codex selector absence field removed',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      const target = doc.capability_cases.find((entry) => entry.id === 'codex_models_capability_catalog');
+      target.selector_absence_fields = target.selector_absence_fields.filter((field) => field !== 'tool_mode');
+    },
+    diagnostic: /selector absence field missing tool_mode/,
+  },
+  {
     name: 'Hub VR provider-specific ban removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
     mutateYaml: (doc) => {
