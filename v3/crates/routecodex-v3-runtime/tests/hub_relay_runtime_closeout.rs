@@ -670,6 +670,85 @@ async fn responses_relay_openai_chat_target_projects_responses_builtin_tools_to_
 }
 
 #[tokio::test]
+async fn responses_relay_openai_chat_target_normalizes_redacted_tool_schema_placeholders() {
+    let transport = SingleJsonCaptureTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"chatcmpl_redacted_schema",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{"role":"assistant","content":"ok"},
+                "finish_reason":"stop"
+            }],
+            "usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-openai-chat-redacted-tool-schema".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "tools":[{
+                    "type":"function",
+                    "name":"exec_command",
+                    "description":"Runs a command.",
+                    "parameters":{
+                        "type":"object",
+                        "properties":{
+                            "cmd":{"type":"string"},
+                            "max_output_tokens":"[REDACTED]",
+                            "token_budget":"[REDACTED]"
+                        },
+                        "required":["cmd"],
+                        "additionalProperties":false
+                    },
+                    "strict":false
+                }],
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"continue"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    let body = captures.first().expect("provider request body");
+    let exec_tool = body["tools"]
+        .as_array()
+        .expect("provider tools")
+        .iter()
+        .find(|tool| tool["function"]["name"] == "exec_command")
+        .expect("exec_command tool");
+    assert_eq!(
+        exec_tool["function"]["parameters"]["properties"]["max_output_tokens"],
+        json!(true),
+        "OpenAI Chat provider wire must not send a scalar JSON Schema placeholder"
+    );
+    assert_eq!(
+        exec_tool["function"]["parameters"]["properties"]["token_budget"],
+        json!(true),
+        "all redacted JSON Schema placeholders inside properties must remain valid boolean schemas"
+    );
+    assert_eq!(
+        exec_tool["function"]["parameters"]["properties"]["cmd"],
+        json!({"type":"string"}),
+        "valid sibling schema must not be loosened"
+    );
+    assert_eq!(exec_tool["function"]["strict"], json!(false));
+}
+
+#[tokio::test]
 async fn responses_relay_openai_chat_target_keeps_tool_result_immediately_after_tool_call() {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),

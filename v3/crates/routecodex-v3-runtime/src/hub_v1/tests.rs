@@ -8,6 +8,48 @@ fn build_v3_openai_chat_provider_payload_from_responses_payload(
 }
 
 #[test]
+fn openai_chat_function_tool_redacted_schema_placeholders_remain_valid_json_schema() {
+    let payload = json!({
+        "model": "glm-5.2",
+        "messages": [{"role": "user", "content": "continue the coding task"}],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "description": "Runs a command.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "cmd": {"type": "string"},
+                        "max_output_tokens": "[REDACTED]"
+                    },
+                    "required": ["cmd"],
+                    "additionalProperties": false
+                },
+                "strict": false
+            }
+        }]
+    });
+
+    let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&payload).unwrap();
+    assert_eq!(
+        provider["tools"][0]["function"]["parameters"]["properties"]["max_output_tokens"],
+        json!(true),
+        "OpenAI Chat JSON Schema positions may only contain an object or boolean; a client-side redaction placeholder must retain the property as an unconstrained boolean schema"
+    );
+    assert_eq!(
+        provider["tools"][0]["function"]["parameters"]["properties"]["cmd"],
+        json!({"type":"string"}),
+        "valid sibling tool schema must stay byte-semantic-equivalent"
+    );
+    assert_eq!(
+        provider["tools"][0]["function"]["strict"],
+        json!(false),
+        "tool strictness must be preserved"
+    );
+}
+
+#[test]
 fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         json!({"messages":[{"role":"user","content":"x"}]}),

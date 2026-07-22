@@ -595,7 +595,14 @@ fn normalize_openai_chat_provider_tool(tool: &Value) -> Value {
 
 fn normalize_openai_chat_function_tool(row: &Map<String, Value>) -> Value {
     if row.get("function").and_then(Value::as_object).is_some() {
-        return Value::Object(row.clone());
+        let mut normalized = row.clone();
+        if let Some(function) = normalized
+            .get_mut("function")
+            .and_then(Value::as_object_mut)
+        {
+            normalize_openai_chat_function_schema_object(function);
+        }
+        return Value::Object(normalized);
     }
     let mut function = Map::new();
     for key in ["name", "description", "parameters", "strict"] {
@@ -603,10 +610,77 @@ fn normalize_openai_chat_function_tool(row: &Map<String, Value>) -> Value {
             function.insert(key.to_string(), value.clone());
         }
     }
+    normalize_openai_chat_function_schema_object(&mut function);
     Value::Object(Map::from_iter([
         ("type".to_string(), Value::String("function".to_string())),
         ("function".to_string(), Value::Object(function)),
     ]))
+}
+
+fn normalize_openai_chat_function_schema_object(function: &mut Map<String, Value>) {
+    if let Some(parameters) = function.get_mut("parameters") {
+        *parameters = normalize_redacted_json_schema_placeholders(parameters, true);
+    }
+}
+
+fn normalize_redacted_json_schema_placeholders(value: &Value, schema_position: bool) -> Value {
+    match value {
+        Value::String(text) if schema_position && text == "[REDACTED]" => Value::Bool(true),
+        Value::Object(map) if schema_position => {
+            let mut normalized = Map::new();
+            for (key, child) in map {
+                normalized.insert(
+                    key.clone(),
+                    normalize_redacted_json_schema_object_member(key, child),
+                );
+            }
+            Value::Object(normalized)
+        }
+        other => other.clone(),
+    }
+}
+
+fn normalize_redacted_json_schema_object_member(key: &str, value: &Value) -> Value {
+    match key {
+        "properties" | "patternProperties" | "dependentSchemas" => {
+            let Some(map) = value.as_object() else {
+                return value.clone();
+            };
+            Value::Object(
+                map.iter()
+                    .map(|(property, schema)| {
+                        (
+                            property.clone(),
+                            normalize_redacted_json_schema_placeholders(schema, true),
+                        )
+                    })
+                    .collect(),
+            )
+        }
+        "items"
+        | "additionalProperties"
+        | "additionalItems"
+        | "contains"
+        | "propertyNames"
+        | "not"
+        | "if"
+        | "then"
+        | "else"
+        | "unevaluatedItems"
+        | "unevaluatedProperties" => normalize_redacted_json_schema_placeholders(value, true),
+        "oneOf" | "anyOf" | "allOf" | "prefixItems" => {
+            let Some(items) = value.as_array() else {
+                return value.clone();
+            };
+            Value::Array(
+                items
+                    .iter()
+                    .map(|schema| normalize_redacted_json_schema_placeholders(schema, true))
+                    .collect(),
+            )
+        }
+        _ => value.clone(),
+    }
 }
 
 fn normalize_openai_chat_custom_tool(row: &Map<String, Value>) -> Value {
