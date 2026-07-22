@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { Command } from 'commander';
 
 import { createRestartCommand } from '../../src/cli/commands/restart.js';
@@ -731,5 +731,273 @@ describe('cli restart command', () => {
     }
 
     expect(signals).toEqual([{ pid: 71641, signal: 'SIGUSR2' }]);
+  });
+
+  it('accepts native V3 health body for restart readiness', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const nativeRestarts: Array<{ configPath: string; timeoutMs: number }> = [];
+    let restarted = false;
+    let fakeNow = 1_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+    try {
+      createRestartCommand(program, {
+        isDevPackage: true,
+        isWindows: false,
+        defaultDevPort: 5555,
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, error: () => {} },
+        findListeningPids: (port) => {
+          if (port !== 5555) {
+            return [];
+          }
+          return restarted ? [1202] : [1201];
+        },
+        sleep: async (ms) => {
+          fakeNow += Math.max(1, ms);
+        },
+        sendSignal: (pid, signal) => {
+          signals.push({ pid, signal });
+          restarted = true;
+        },
+        runNativeV3Restart: async (request) => {
+          nativeRestarts.push({
+            configPath: request.configPath,
+            timeoutMs: request.timeoutMs
+          });
+          restarted = true;
+          return { ok: true, stdout: '{"state":"running"}\n', stderr: '' };
+        },
+        fetch: (async (url: string) => {
+          if (String(url).includes('/health')) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                bind: '0.0.0.0',
+                manifest_version: 3,
+                port: 5555,
+                server_id: 'responses_v3_5555',
+                status: 'ok',
+                version: 3
+              })
+            } as any;
+          }
+          return { ok: false, status: 404, text: async () => '' } as any;
+        }) as any,
+        fsImpl: {
+          existsSync: (target: string) => (
+            String(target).includes('/state/v3-runtime')
+            || String(target).endsWith('/instance.json')
+            || String(target).endsWith('/status.json')
+            || String(target) === '/tmp/config.v3.toml'
+          ),
+          readdirSync: () => ['v3-current'],
+          statSync: () => ({ isDirectory: () => true, mtimeMs: 1234 }),
+          readFileSync: (target: string) => {
+            if (String(target).endsWith('/instance.json')) {
+              return JSON.stringify({
+                schema_version: 1,
+                instance_id: 'v3-current',
+                config_path: '/tmp/config.v3.toml',
+                config_digest: 'digest',
+                executable_path: '/tmp/rccv3',
+                listeners: [{ server_id: 'responses_v3_5555', bind: '0.0.0.0', port: 5555 }]
+              });
+            }
+            if (String(target).endsWith('/status.json')) {
+              return JSON.stringify({
+                schema_version: 1,
+                instance_id: 'v3-current',
+                state: 'running',
+                updated_at_epoch_ms: 2000,
+                detail: null
+              });
+            }
+            return '';
+          }
+        } as any,
+        getHomeDir: () => '/home/test',
+        env: { ROUTECODEX_RESTART_WAIT_MS: '5000' },
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(signals).toEqual([]);
+    expect(nativeRestarts).toEqual([{ configPath: '/tmp/config.v3.toml', timeoutMs: 5000 }]);
+  });
+
+  it('rejects native V3 health without lifecycle registry instead of legacy signal restart', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const errors: string[] = [];
+    let fakeNow = 1_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+    try {
+      createRestartCommand(program, {
+        isDevPackage: true,
+        isWindows: false,
+        defaultDevPort: 5555,
+        createSpinner: async () => createStubSpinner(),
+        logger: {
+          info: () => {},
+          error: (msg) => {
+            errors.push(msg);
+          }
+        },
+        findListeningPids: (port) => (port === 5555 ? [1401] : []),
+        sleep: async (ms) => {
+          fakeNow += Math.max(1, ms);
+        },
+        sendSignal: (pid, signal) => {
+          signals.push({ pid, signal });
+        },
+        fetch: (async (url: string) => {
+          if (String(url).includes('/health')) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                bind: '0.0.0.0',
+                manifest_version: 3,
+                port: 5555,
+                server_id: 'responses_v3_5555',
+                status: 'ok',
+                version: 3
+              })
+            } as any;
+          }
+          return { ok: false, status: 404, text: async () => '' } as any;
+        }) as any,
+        fsImpl: {
+          existsSync: () => false,
+          readdirSync: () => [],
+          statSync: () => ({ isDirectory: () => false }),
+          readFileSync: () => ''
+        } as any,
+        getHomeDir: () => '/home/test',
+        env: { ROUTECODEX_RESTART_WAIT_MS: '5000' },
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await expect(
+        program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' })
+      ).rejects.toThrow('exit:1');
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(signals).toEqual([]);
+    expect(errors).toContain('Refusing to restart a native V3 listener through legacy signal transport.');
+  });
+
+  it('recovers native V3 restart from lifecycle registry when the listener is absent', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const nativeRestarts: Array<{ configPath: string; timeoutMs: number }> = [];
+    let restarted = false;
+    let fakeNow = 1_000_000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+    try {
+      createRestartCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5555,
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, error: () => {} },
+        findListeningPids: (port) => {
+          if (port !== 5555) {
+            return [];
+          }
+          return restarted ? [1302] : [];
+        },
+        sleep: async (ms) => {
+          fakeNow += Math.max(1, ms);
+        },
+        sendSignal: (pid, signal) => {
+          signals.push({ pid, signal });
+        },
+        runNativeV3Restart: async (request) => {
+          nativeRestarts.push({
+            configPath: request.configPath,
+            timeoutMs: request.timeoutMs
+          });
+          restarted = true;
+          return { ok: true, stdout: '{"state":"running"}\n', stderr: '' };
+        },
+        fetch: (async (url: string) => {
+          if (String(url).includes('/health') && restarted) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({
+                bind: '0.0.0.0',
+                manifest_version: 3,
+                port: 5555,
+                server_id: 'responses_v3_5555',
+                status: 'ok',
+                version: 3
+              })
+            } as any;
+          }
+          if (String(url).includes('/health')) {
+            throw new Error('listener absent');
+          }
+          return { ok: false, status: 404, text: async () => '' } as any;
+        }) as any,
+        fsImpl: {
+          existsSync: (target: string) => (
+            String(target).includes('/state/v3-runtime')
+            || String(target).endsWith('/instance.json')
+            || String(target).endsWith('/status.json')
+            || String(target) === '/tmp/config.v3.toml'
+          ),
+          readdirSync: () => ['v3-current'],
+          statSync: () => ({ isDirectory: () => true, mtimeMs: 1234 }),
+          readFileSync: (target: string) => {
+            if (String(target).endsWith('/instance.json')) {
+              return JSON.stringify({
+                schema_version: 1,
+                instance_id: 'v3-current',
+                config_path: '/tmp/config.v3.toml',
+                config_digest: 'digest',
+                executable_path: '/tmp/rccv3',
+                listeners: [{ server_id: 'responses_v3_5555', bind: '0.0.0.0', port: 5555 }]
+              });
+            }
+            if (String(target).endsWith('/status.json')) {
+              return JSON.stringify({
+                schema_version: 1,
+                instance_id: 'v3-current',
+                state: 'running',
+                updated_at_epoch_ms: 2000,
+                detail: null
+              });
+            }
+            return '';
+          }
+        } as any,
+        getHomeDir: () => '/home/test',
+        env: { ROUTECODEX_RESTART_WAIT_MS: '5000' },
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5555'], { from: 'node' });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(signals).toEqual([]);
+    expect(nativeRestarts).toEqual([{ configPath: '/tmp/config.v3.toml', timeoutMs: 5000 }]);
   });
 });

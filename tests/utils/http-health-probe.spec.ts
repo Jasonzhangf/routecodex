@@ -45,6 +45,32 @@ describe('http-health-probe', () => {
     }
   });
 
+  it('accepts native V3 health body without legacy server marker', async () => {
+    const probe = await probeRouteCodexHealth({
+      fetchImpl: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          bind: '0.0.0.0',
+          manifest_version: 3,
+          port: 5555,
+          server_id: 'responses_v3_5555',
+          status: 'ok',
+          version: 3
+        })
+      })) as any,
+      host: '127.0.0.1',
+      port: 5555,
+      timeoutMs: 10
+    });
+
+    expect(probe.ok).toBe(true);
+    if (probe.ok) {
+      expect(probe.body.server_id).toBe('responses_v3_5555');
+      expect(probe.body.manifest_version).toBe(3);
+    }
+  });
+
   it('classifies routecodex starting body distinctly without treating it as bad_status', async () => {
     const probe = await probeRouteCodexHealth({
       fetchImpl: (async () => ({

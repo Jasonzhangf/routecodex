@@ -35,7 +35,11 @@ export type RouteCodexHealthBody = {
   status?: string;
   ready?: boolean;
   pipelineReady?: boolean;
-  version?: string;
+  version?: string | number;
+  manifest_version?: number;
+  server_id?: string;
+  port?: number;
+  bind?: string;
 };
 
 export type RouteCodexHealthProbeResult = ProbeResult<RouteCodexHealthBody>;
@@ -158,9 +162,37 @@ function isAuthStatus(status: number): boolean {
   return status === 401 || status === 403;
 }
 
+function routeCodexHealthStatus(body: RouteCodexHealthBody): string {
+  return typeof body?.status === 'string' ? body.status.toLowerCase() : '';
+}
+
+export function isNativeV3RouteCodexHealthBody(body: unknown): boolean {
+  if (!isRecord(body)) {
+    return false;
+  }
+  const manifestVersion = Number(body.manifest_version);
+  const serverId = typeof body.server_id === 'string' ? body.server_id.trim() : '';
+  return manifestVersion === 3 && serverId.length > 0;
+}
+
+function isRouteCodexHealthBody(body: RouteCodexHealthBody): boolean {
+  return body?.server === 'routecodex' || isNativeV3RouteCodexHealthBody(body);
+}
+
+export function isRouteCodexRestartReadyHealthBody(body: RouteCodexHealthBody): boolean {
+  if (isNativeV3RouteCodexHealthBody(body)) {
+    return ['healthy', 'ready', 'ok'].includes(routeCodexHealthStatus(body))
+      || body?.ready === true
+      || body?.pipelineReady === true;
+  }
+  return body?.server === 'routecodex'
+    && body?.ready === true
+    && body?.pipelineReady === true;
+}
+
 function isRouteCodexHealthy(body: RouteCodexHealthBody): boolean {
   const status = typeof body?.status === 'string' ? body.status.toLowerCase() : '';
-  return body?.server === 'routecodex'
+  return isRouteCodexHealthBody(body)
     && (
       status === 'healthy'
       || status === 'ready'
@@ -171,9 +203,8 @@ function isRouteCodexHealthy(body: RouteCodexHealthBody): boolean {
 }
 
 function isRouteCodexStarting(body: RouteCodexHealthBody): boolean {
-  const status = typeof body?.status === 'string' ? body.status.toLowerCase() : '';
-  return body?.server === 'routecodex'
-    && status === 'starting'
+  return isRouteCodexHealthBody(body)
+    && routeCodexHealthStatus(body) === 'starting'
     && body?.ready !== true
     && body?.pipelineReady !== true;
 }
@@ -241,7 +272,7 @@ export async function probeRouteCodexHealth(args: {
     };
   }
 
-  if (healthBody?.server !== 'routecodex') {
+  if (!isRouteCodexHealthBody(healthBody)) {
     return {
       ok: false,
       kind: 'not_routecodex',

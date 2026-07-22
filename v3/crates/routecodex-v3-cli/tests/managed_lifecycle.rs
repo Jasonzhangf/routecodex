@@ -260,6 +260,16 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .unwrap()
 }
 
+fn terminate_explicit_pid(pid: u64) {
+    let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    assert_eq!(
+        result,
+        0,
+        "explicit test PID {pid} must accept SIGTERM: {}",
+        std::io::Error::last_os_error()
+    );
+}
+
 fn assert_empty_stdout(output: &Output, label: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -1158,6 +1168,63 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
         stop_from_new_cli.status.success(),
         "{}",
         String::from_utf8_lossy(&stop_from_new_cli.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
+fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = run(binary, &state_root, &config, "start");
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let instance_dir = single_instance_dir(&state_root);
+    let first_pid: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    let stale_pid = first_pid["pid"].as_u64().unwrap();
+    terminate_explicit_pid(stale_pid);
+    for port in ports {
+        wait_port(port, false);
+    }
+
+    let recovered = run_with_timeout(binary, &state_root, &config, "restart", 15_000);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(last_json(&recovered)["state"], "running");
+    let second_pid: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    assert_ne!(
+        second_pid["pid"].as_u64().unwrap(),
+        stale_pid,
+        "restart recovery must publish a fresh managed child PID after the owned runtime died"
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let stop = run_with_timeout(binary, &state_root, &config, "stop", 15_000);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
     );
     for port in ports {
         wait_port(port, false);

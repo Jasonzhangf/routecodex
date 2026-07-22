@@ -312,10 +312,25 @@ impl V3ManagedLifecycle {
             V3ManagedRunState::Starting,
             None,
         )?;
+        self.spawn_managed_child_after_state_published(
+            executable_path.as_ref(),
+            &declaration,
+            timeout,
+        )
+        .await
+    }
+
+    async fn spawn_managed_child_after_state_published(
+        &self,
+        executable_path: &Path,
+        declaration: &V3ManagedInstanceDeclaration,
+        timeout: Duration,
+    ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
+        let instance_dir = self.instance_dir(&declaration.instance_id);
         let log_path = instance_dir.join("server.log");
         let stdout = private_log_file(&log_path)?;
         let stderr = stdout.try_clone()?;
-        let mut command = Command::new(executable_path.as_ref());
+        let mut command = Command::new(executable_path);
         command
             .arg("server")
             .arg("run-managed-child")
@@ -459,16 +474,42 @@ impl V3ManagedLifecycle {
         executable_path: impl AsRef<Path> + Clone,
         timeout: Duration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
-        let (declaration, _) = self.declaration(executable_path.as_ref())?;
+        let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
-        let response = send_restart_control(
+        let response = match send_restart_control(
             &instance_dir,
             &declaration,
             self.force_snapshots,
             self.force_snapshot_stages.clone(),
         )
-        .await?;
+        .await
+        {
+            Ok(response) => response,
+            Err(error @ V3LifecycleError::NotRunning(_)) => {
+                if !restart_recovery_state_is_stale_owned_unreachable(&instance_dir, &declaration)?
+                {
+                    return Err(error);
+                }
+                validate_auth_handles(&manifest)?;
+                reap_inactive_runtime_files(&instance_dir, &declaration)?;
+                write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
+                write_status(
+                    &instance_dir,
+                    &declaration.instance_id,
+                    V3ManagedRunState::Starting,
+                    Some("restart recovered stale owned runtime".to_string()),
+                )?;
+                return self
+                    .spawn_managed_child_after_state_published(
+                        executable_path.as_ref(),
+                        &declaration,
+                        timeout,
+                    )
+                    .await;
+            }
+            Err(error) => return Err(error),
+        };
         if !response.accepted {
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
@@ -1591,6 +1632,29 @@ fn reap_inactive_runtime_files(
         }
     }
     Ok(())
+}
+
+fn restart_recovery_state_is_stale_owned_unreachable(
+    instance_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    let status_path = instance_dir.join("status.json");
+    if !status_path.exists() {
+        return Ok(false);
+    }
+    let status: V3ManagedStatusRecord = read_json(&status_path)?;
+    if status.instance_id != expected.instance_id {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "refusing restart recovery for a different instance status".to_string(),
+        ));
+    }
+    if matches!(
+        status.state,
+        V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+    ) {
+        return Ok(false);
+    }
+    owned_unreachable_runtime_state_is_reapable(instance_dir, expected)
 }
 
 fn owned_unreachable_runtime_state_is_reapable(

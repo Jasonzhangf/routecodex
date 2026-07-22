@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import type { Command } from 'commander';
 
 // feature_id: runtime.lifecycle.restart_command
@@ -13,6 +14,8 @@ import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/t
 import { formatUnknownError } from '../../utils/common-utils.js';
 import {
   describeHealthProbeFailure,
+  isNativeV3RouteCodexHealthBody,
+  isRouteCodexRestartReadyHealthBody,
   probeRouteCodexHealth,
   type RouteCodexHealthProbeResult
 } from '../../utils/http-health-probe.js';
@@ -60,6 +63,7 @@ export type RestartCommandContext = {
   registerGuardianProcess?: (registration: GuardianRegistration) => Promise<void>;
   env?: NodeJS.ProcessEnv;
   reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
+  runNativeV3Restart?: (request: NativeV3RestartRequest) => Promise<NativeV3RestartResult> | NativeV3RestartResult;
   fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync' | 'readdirSync' | 'statSync'>;
   pathImpl?: Pick<typeof path, 'join'>;
   getHomeDir?: () => string;
@@ -77,11 +81,31 @@ type RestartMember = {
   oldPids: number[];
 };
 
+type NativeV3RestartTarget = {
+  configPath: string;
+  instanceId: string;
+  serverId?: string;
+  members: Array<{ host: string; port: number }>;
+};
+
+export type NativeV3RestartRequest = NativeV3RestartTarget & {
+  timeoutMs: number;
+};
+
+export type NativeV3RestartResult = {
+  ok: boolean;
+  status?: number | null;
+  stdout?: string;
+  stderr?: string;
+  errorMessage?: string;
+};
+
 type RestartTarget = {
   host: string;
   port: number;
   oldPids: number[];
   members: RestartMember[];
+  nativeV3?: NativeV3RestartTarget;
 };
 
 function logRestartNonBlocking(
@@ -350,6 +374,217 @@ function normalizeHostForHttp(host: string): string {
   return resolvePreferredLocalConnectHost(host);
 }
 
+function nativeV3StateInstancesDir(ctx: RestartCommandContext): string {
+  const pathImpl = ctx.pathImpl ?? path;
+  const home = ctx.getHomeDir ?? (() => homedir());
+  const explicit = normalizeString(ctx.env?.ROUTECODEX_V3_STATE_DIR ?? ctx.env?.RCC_V3_STATE_DIR);
+  if (explicit) {
+    return pathImpl.join(explicit, 'instances');
+  }
+  return pathImpl.join(home(), '.rcc', 'state', 'v3-runtime', 'instances');
+}
+
+function parseJsonFile(ctx: RestartCommandContext, filePath: string): any | null {
+  const fsImpl = ctx.fsImpl ?? fs;
+  try {
+    return JSON.parse(String(fsImpl.readFileSync(filePath)));
+  } catch {
+    return null;
+  }
+}
+
+function entryName(entry: unknown): string {
+  if (typeof entry === 'string') {
+    return entry;
+  }
+  const name = (entry as { name?: unknown } | null)?.name;
+  return typeof name === 'string' ? name : '';
+}
+
+function entryIsDirectory(ctx: RestartCommandContext, base: string, entry: unknown): boolean {
+  if (typeof entry !== 'string') {
+    const fn = (entry as { isDirectory?: () => boolean } | null)?.isDirectory;
+    if (typeof fn === 'function') {
+      return Boolean(fn.call(entry));
+    }
+  }
+  const fsImpl = ctx.fsImpl ?? fs;
+  const pathImpl = ctx.pathImpl ?? path;
+  try {
+    return Boolean((fsImpl.statSync(pathImpl.join(base, entryName(entry))) as any)?.isDirectory?.());
+  } catch {
+    return false;
+  }
+}
+
+function nativeV3MemberHost(bind: unknown): string {
+  const raw = typeof bind === 'string' && bind.trim() ? bind.trim() : LOCAL_HOSTS.LOCALHOST;
+  return normalizeHostForHttp(raw);
+}
+
+function resolveNativeV3RestartTargetFromRegistry(
+  ctx: RestartCommandContext,
+  args: {
+    port: number;
+    serverId?: string;
+    configPath?: string;
+  }
+): NativeV3RestartTarget | null {
+  const fsImpl = ctx.fsImpl ?? fs;
+  const pathImpl = ctx.pathImpl ?? path;
+  const instancesDir = nativeV3StateInstancesDir(ctx);
+  try {
+    if (!fsImpl.existsSync(instancesDir)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const entries = (() => {
+    try {
+      return (fsImpl.readdirSync as any)?.(instancesDir, { withFileTypes: true }) ?? fsImpl.readdirSync(instancesDir);
+    } catch {
+      return [] as unknown[];
+    }
+  })();
+
+  type Candidate = NativeV3RestartTarget & {
+    updatedAt: number;
+    mtimeMs: number;
+  };
+  const candidates: Candidate[] = [];
+  for (const entry of entries as unknown[]) {
+    const name = entryName(entry);
+    if (!name || !entryIsDirectory(ctx, instancesDir, entry)) {
+      continue;
+    }
+    const dir = pathImpl.join(instancesDir, name);
+    const instancePath = pathImpl.join(dir, 'instance.json');
+    const statusPath = pathImpl.join(dir, 'status.json');
+    if (!fsImpl.existsSync(instancePath) || !fsImpl.existsSync(statusPath)) {
+      continue;
+    }
+    const declaration = parseJsonFile(ctx, instancePath);
+    const status = parseJsonFile(ctx, statusPath);
+    const listeners = Array.isArray(declaration?.listeners) ? declaration.listeners : [];
+    const matchesPort = listeners.some((listener: any) => Number(listener?.port) === args.port);
+    if (!matchesPort) {
+      continue;
+    }
+    if (args.serverId && !listeners.some((listener: any) => (
+      Number(listener?.port) === args.port && listener?.server_id === args.serverId
+    ))) {
+      continue;
+    }
+    if (args.configPath && declaration?.config_path !== args.configPath) {
+      continue;
+    }
+    const configPath = typeof declaration?.config_path === 'string' ? declaration.config_path : '';
+    const instanceId = typeof declaration?.instance_id === 'string' ? declaration.instance_id : '';
+    if (!configPath || !instanceId || !fsImpl.existsSync(configPath)) {
+      continue;
+    }
+    const state = typeof status?.state === 'string' ? status.state : '';
+    if (state === 'stopped' || state === 'failed') {
+      continue;
+    }
+    const updatedAt = Number(status?.updated_at_epoch_ms ?? 0);
+    const mtimeMs = (() => {
+      try {
+        return Number((fsImpl.statSync(statusPath) as any)?.mtimeMs ?? 0);
+      } catch {
+        return 0;
+      }
+    })();
+    const members = listeners
+      .map((listener: any) => ({
+        host: nativeV3MemberHost(listener?.bind),
+        port: Number(listener?.port)
+      }))
+      .filter((member: { host: string; port: number }) => Number.isFinite(member.port) && member.port > 0)
+      .sort((a: { port: number }, b: { port: number }) => a.port - b.port);
+    if (!members.length) {
+      continue;
+    }
+    const matchingListener = listeners.find((listener: any) => Number(listener?.port) === args.port);
+    candidates.push({
+      configPath,
+      instanceId,
+      serverId: typeof matchingListener?.server_id === 'string' ? matchingListener.server_id : undefined,
+      members,
+      updatedAt,
+      mtimeMs
+    });
+  }
+
+  candidates.sort((a, b) => (
+    b.updatedAt - a.updatedAt
+    || b.mtimeMs - a.mtimeMs
+    || a.instanceId.localeCompare(b.instanceId)
+  ));
+  const selected = candidates[0];
+  if (!selected) {
+    return null;
+  }
+  const sameRank = candidates.filter((candidate) => (
+    candidate.updatedAt === selected.updatedAt && candidate.mtimeMs === selected.mtimeMs
+  ));
+  if (sameRank.length > 1) {
+    return null;
+  }
+  return {
+    configPath: selected.configPath,
+    instanceId: selected.instanceId,
+    serverId: selected.serverId,
+    members: selected.members
+  };
+}
+
+function buildNativeV3RestartMembers(
+  ctx: RestartCommandContext,
+  nativeV3: NativeV3RestartTarget,
+  explicitHost: string | null
+): RestartMember[] {
+  return nativeV3.members.map((member) => ({
+    port: member.port,
+    host: explicitHost || member.host || LOCAL_HOSTS.LOCALHOST,
+    oldPids: normalizePids(ctx.findListeningPids(member.port))
+  }));
+}
+
+async function runNativeV3Restart(
+  ctx: RestartCommandContext,
+  nativeV3: NativeV3RestartTarget,
+  timeoutMs: number
+): Promise<NativeV3RestartResult> {
+  const request: NativeV3RestartRequest = {
+    ...nativeV3,
+    timeoutMs
+  };
+  if (ctx.runNativeV3Restart) {
+    return await ctx.runNativeV3Restart(request);
+  }
+  const result = spawnSync('rccv3', [
+    'restart',
+    '--config',
+    nativeV3.configPath,
+    '--timeout-ms',
+    String(timeoutMs)
+  ], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      ...(ctx.env ?? {})
+    }
+  });
+  return {
+    ok: result.status === 0,
+    status: result.status,
+    errorMessage: result.error ? formatUnknownError(result.error) : undefined
+  };
+}
+
 function normalizePids(pids: number[]): number[] {
   return Array.from(new Set(
     pids.filter((pid) => Number.isFinite(pid) && pid > 0).map((pid) => Math.floor(pid))
@@ -365,9 +600,7 @@ function formatRestartMember(member: Pick<RestartMember, 'host' | 'port'>): stri
 }
 
 function isAggregateMemberReady(probe: RouteCodexHealthProbeResult | null): boolean {
-  return probe?.ok === true
-    && probe.body.ready === true
-    && probe.body.pipelineReady === true;
+  return probe?.ok === true && isRouteCodexRestartReadyHealthBody(probe.body);
 }
 
 async function resolveMemberProbeHost(
@@ -473,6 +706,22 @@ async function resolveRestartTarget(ctx: RestartCommandContext, options: Restart
       .sort((a, b) => a.port - b.port);
     const locator = members.find((member) => member.port === explicitPort);
     if (!locator?.oldPids.length) {
+      const nativeV3 = resolveNativeV3RestartTargetFromRegistry(ctx, {
+        port: explicitPort,
+        configPath: options.config ? resolveRouteCodexConfigPath(options.config) : undefined
+      });
+      if (nativeV3) {
+        const nativeMembers = buildNativeV3RestartMembers(ctx, nativeV3, explicitHost)
+          .sort((a, b) => a.port - b.port);
+        const nativeLocator = nativeMembers.find((member) => member.port === explicitPort) || nativeMembers[0];
+        return {
+          host: nativeLocator.host,
+          port: nativeLocator.port,
+          oldPids: nativeLocator.oldPids,
+          members: nativeMembers,
+          nativeV3
+        };
+      }
       const host = locator?.host || explicitHost || grouped?.host || LOCAL_HOSTS.LOCALHOST;
       spinner.fail(`No RouteCodex server found on ${host}:${explicitPort}`);
       ctx.exit(1);
@@ -489,9 +738,29 @@ async function resolveRestartTarget(ctx: RestartCommandContext, options: Restart
       );
       ctx.exit(1);
     }
+    let nativeV3: NativeV3RestartTarget | null = null;
     for (const member of members) {
       const resolved = await resolveMemberProbeHost(ctx, member);
       member.host = resolved.host;
+      if (
+        member.port === explicitPort
+        && resolved.probe?.ok === true
+        && isNativeV3RouteCodexHealthBody(resolved.probe.body)
+      ) {
+        nativeV3 = resolveNativeV3RestartTargetFromRegistry(ctx, {
+          port: explicitPort,
+          serverId: typeof resolved.probe.body.server_id === 'string' ? resolved.probe.body.server_id : undefined,
+          configPath: options.config ? resolveRouteCodexConfigPath(options.config) : undefined
+        });
+        if (!nativeV3) {
+          const serverId = typeof resolved.probe.body.server_id === 'string'
+            ? resolved.probe.body.server_id
+            : 'unknown';
+          spinner.fail(`Native V3 managed server registry not found for ${serverId} on ${formatRestartMember(member)}`);
+          ctx.logger.error('Refusing to restart a native V3 listener through legacy signal transport.');
+          ctx.exit(1);
+        }
+      }
       if (!isAggregateMemberReady(resolved.probe)) {
         const probeDetails = resolved.probe?.ok
           ? `ready=${String(resolved.probe.body.ready)} pipelineReady=${String(resolved.probe.body.pipelineReady)}`
@@ -507,6 +776,18 @@ async function resolveRestartTarget(ctx: RestartCommandContext, options: Restart
     }
     if (members.length > 1) {
       ctx.logger.info(`[restart] resolved aggregate members: ${members.map((member) => member.port).join(', ')}`);
+    }
+    if (nativeV3) {
+      const nativeMembers = buildNativeV3RestartMembers(ctx, nativeV3, explicitHost)
+        .sort((a, b) => a.port - b.port);
+      const nativeLocator = nativeMembers.find((member) => member.port === explicitPort) || nativeMembers[0];
+      return {
+        host: nativeLocator.host,
+        port: nativeLocator.port,
+        oldPids: nativeLocator.oldPids,
+        members: nativeMembers,
+        nativeV3
+      };
     }
     return {
       host: locator.host,
@@ -766,19 +1047,33 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
         if (ctx.reportGuardianLifecycle && approved !== true) {
           throw new Error(`guardian lifecycle apply rejected for aggregate server at ${target.host}:${target.port}`);
         }
-        const plan = planRestartTransport(ctx, target, restartApiKey);
-        const transport = plan.preferredTransport === 'http'
-          ? await requestProcessRestartViaHttp(ctx, target, restartApiKey.value, plan.httpFallbackTransport)
-          : plan.preferredTransport === 'signal'
-            ? (() => {
-              requestInPlaceRestart(ctx, target);
-              return 'signal' as const;
-            })()
-            : (() => {
-              throw new Error(`no restart transport available for aggregate server at ${target.host}:${target.port} (${plan.reasonCode})`);
-            })();
+        const restartWaitMs = resolveRestartWaitMs(ctx);
+        const transport = target.nativeV3
+          ? await (async () => {
+            const result = await runNativeV3Restart(ctx, target.nativeV3!, restartWaitMs);
+            if (!result.ok) {
+              const detail = result.errorMessage || result.stderr || result.stdout || `status=${String(result.status ?? 'unknown')}`;
+              throw new Error(`native V3 managed restart failed for ${target.nativeV3!.configPath}: ${detail}`);
+            }
+            return 'native_v3' as const;
+          })()
+          : await (async () => {
+            const plan = planRestartTransport(ctx, target, restartApiKey);
+            return plan.preferredTransport === 'http'
+              ? await requestProcessRestartViaHttp(ctx, target, restartApiKey.value, plan.httpFallbackTransport)
+              : plan.preferredTransport === 'signal'
+                ? (() => {
+                  requestInPlaceRestart(ctx, target);
+                  return 'signal' as const;
+                })()
+                : (() => {
+                  throw new Error(`no restart transport available for aggregate server at ${target.host}:${target.port} (${plan.reasonCode})`);
+                })();
+          })();
         if (transport === 'signal') {
           spinner.warn(`Used one in-place signal restart for aggregate server at ${target.host}:${target.port}.`);
+        } else if (transport === 'native_v3') {
+          spinner.info(`Used native V3 managed restart for aggregate server at ${target.host}:${target.port}.`);
         }
 
         spinner.text = 'Waiting for aggregate server members to become healthy...';
