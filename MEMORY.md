@@ -4281,3 +4281,15 @@ Tags: #v3 #5555 #stopless #reasoningStop #tool-choice #live-verified
 - Lifecycle rule for this area: do not use start/server-start/run-managed-child for V3 5555 validation. If lifecycle mutation is required, use only aggregate `routecodex restart --port 5555`.
 - Evidence run: `.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/` plus prior P0 run `.agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/`.
 Tags: #v3 #5555 #live-compat-matrix #anthropic-messages #multi-provider #restart-only
+
+## 2026-07-23T03:02+0800 V3 OpenAI Chat GLM tool schema compatibility
+- Verified fact: GLMRelay/OpenAI Chat rejects JSON Schema placeholders like  inside function tool ; valid schema positions must be object or boolean. MiniMax may tolerate this, so live route changes can expose schema defects hidden by the previous primary provider.
+- Stable fix pattern: OpenAI Chat provider-standard request formatting may normalize debug/client redaction placeholders in JSON Schema positions to boolean schema , while preserving valid sibling schemas and strict flags. Do not treat this as stopless tool-list loss.
+- Verification pattern: after schema/tool fixes, replay the exact failing sample and then submit the stopless CLI output to prove round2 provider request has full prompts/tools/no artifacts and live model emits real tool calls or valid terminal .
+
+
+## 2026-07-23T03:10+0800 Correction: V3 OpenAI Chat GLM tool schema compatibility
+- Supersedes the malformed `2026-07-23T03:02+0800` memory block with missing inline-code literals caused by shell expansion while writing.
+- Verified fact: GLMRelay/OpenAI Chat rejects scalar `"[REDACTED]"` placeholders inside function-tool JSON Schema positions such as `parameters.properties.max_output_tokens` / `parameters.properties.token_budget`; valid schema nodes must be JSON objects or boolean schemas. MiniMax can tolerate the invalid shape, so routing changes can reveal provider-wire schema defects.
+- Fix truth: `v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs` normalizes only redacted JSON Schema placeholders in OpenAI Chat function `parameters` schema positions to boolean schema `true`; it must not remove tools or normalize ordinary descriptions/text.
+- Closeout proof: evidence run `.agent-collab/runs/20260722T184300Z-Macstudio.local-46514-v3-openai-chat-redacted-tool-schema/` includes red/green source tests, runtime closeout test, V3 build/install/restart via `routecodex restart --port 5555`, old sample `...603662-996` dry-run/live replay, and second-round submit proving full prompts/tools plus exactly-one `reasoningStop` with live real `exec_command` tool calls from GLM.
