@@ -160,6 +160,7 @@ client-visible error
 ## Debug 优先级（强制）
 1. 任何 debug / 设计 / 生命周期问题，先读 `.agents/skills/rcc-dev-skills/SKILL.md`。
 2. 若涉及 `servertool / stopless / continuation / reasoningStop / tool governance / hook restore / schema gate`，必须按优先级继续读：
+   - `references/95-v3-stopless-sop.md`
    - `references/25-protocol-sse-continuation-boundary.md`
    - `references/24-node-contract-debug-method.md`
    - `references/22-servertool-hook-skeleton-workflow.md`
