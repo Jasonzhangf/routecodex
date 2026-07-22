@@ -223,6 +223,80 @@ fn responses_builtin_tool_types_encode_with_anthropic_names_and_object_tool_choi
     assert_eq!(tools[1]["input_schema"], json!({"type":"object"}));
     assert!(tools[1].get("external_web_access").is_none());
     assert!(tools[1].get("search_content_types").is_none());
+
+    let required_choice = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": false,
+        "tool_choice": "required",
+        "input": "Use a tool or reasoningStop.",
+        "tools": [{"type":"function","name":"reasoningStop","parameters":{"type":"object","properties":{"stopreason":{"type":"integer"}},"required":["stopreason"]}}]
+    }))
+    .expect("Responses required tool_choice must encode as Anthropic any");
+    assert_eq!(required_choice["tool_choice"], json!({"type":"any"}));
+}
+
+#[test]
+fn responses_additional_tools_input_item_projects_to_anthropic_tool_surface() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": true,
+        "tool_choice": "required",
+        "instructions":"Continue current goal; use tools before reporting done.",
+        "input": [
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"继续执行"}]
+            },
+            {
+                "type":"additional_tools",
+                "tools":[
+                    {
+                        "type":"function",
+                        "name":"exec",
+                        "description":"Run a command",
+                        "parameters":{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}
+                    },
+                    {
+                        "type":"function",
+                        "name":"wait",
+                        "parameters":{"type":"object","properties":{"ms":{"type":"integer"}}}
+                    },
+                    {
+                        "type":"function",
+                        "name":"request_user_input",
+                        "parameters":{"type":"object","properties":{"question":{"type":"string"}}}
+                    },
+                    {
+                        "type":"function",
+                        "name":"reasoningStop",
+                        "description":"0=完成 1=阻塞 2=继续 evidence reason",
+                        "parameters":{"type":"object","properties":{"stopreason":{"type":"integer"}},"required":["stopreason"]}
+                    }
+                ]
+            }
+        ]
+    }))
+    .expect("Responses additional_tools item must become Anthropic top-level tools");
+
+    assert_eq!(provider_request["tool_choice"], json!({"type":"any"}));
+    let tools = provider_request["tools"]
+        .as_array()
+        .expect("Anthropic provider request must expose tools top-level");
+    let names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("Anthropic tool name"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        vec!["exec", "wait", "request_user_input", "reasoningStop"],
+        "Anthropic provider wire dropped restored Responses additional_tools: {provider_request}"
+    );
+    assert_eq!(tools[0]["input_schema"]["required"], json!(["cmd"]));
+    assert_eq!(
+        tools[3]["description"],
+        json!("0=完成 1=阻塞 2=继续 evidence reason")
+    );
 }
 
 #[test]

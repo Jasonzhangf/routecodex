@@ -165,6 +165,11 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
     let mut context = Map::new();
     context.insert("input".to_string(), Value::Array(input));
     context.insert("output".to_string(), Value::Array(response_output));
+    if let Some(id) = finalized_response.get("id").and_then(Value::as_str) {
+        if !id.trim().is_empty() {
+            context.insert("id".to_string(), Value::String(id.to_string()));
+        }
+    }
     for field in [
         "tools",
         "tool_choice",
@@ -254,7 +259,28 @@ pub(crate) fn assert_v3_relay_local_continuation_context_has_call_ids(
 fn local_continuation_context_ids(
     canonical_context: &Value,
 ) -> Result<Vec<String>, V3LocalContinuationError> {
-    assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)
+    let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
+    let non_internal_ids = call_ids
+        .iter()
+        .filter(|id| !is_v3_stopless_internal_call_id(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !non_internal_ids.is_empty() {
+        return Ok(non_internal_ids);
+    }
+    if call_ids
+        .iter()
+        .any(|id| is_v3_stopless_internal_call_id(id))
+    {
+        if let Some(response_id) = canonical_context
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            return Ok(vec![response_id.to_string()]);
+        }
+    }
+    Ok(non_internal_ids)
 }
 
 pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
@@ -298,4 +324,101 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
         ))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn responses_scope() -> V3LocalContinuationScopeKey {
+        V3LocalContinuationScopeKey::responses(
+            "/v1/responses",
+            "session-stopless-repeat",
+            "conversation-stopless-repeat",
+            5555,
+            "coding",
+        )
+    }
+
+    fn stopless_context() -> Value {
+        json!({
+            "id":"resp_stopless_context",
+            "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}],
+            "output": [{
+                "type":"function_call",
+                "call_id":"call_stopless_reasoning",
+                "name":"exec_command",
+                "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
+            }]
+        })
+    }
+
+    #[test]
+    fn resp04_stores_stopless_context_by_response_id_not_internal_call_id() {
+        let mut store = V3LocalContinuationStore::default();
+        let scope = responses_scope();
+        let first = stopless_context();
+
+        commit_or_release_v3_relay_local_continuation_at_resp04(
+            &mut store,
+            scope.clone(),
+            10_000,
+            60_000,
+            &[],
+            &first,
+            V3HubContinuationCommit::LocalContext,
+        )
+        .expect("stopless projection context must be restorable by response id");
+
+        assert!(
+            !store.contains_in_scope(&scope, "call_stopless_reasoning"),
+            "internal stopless call id must not become a reusable local continuation context"
+        );
+        assert!(
+            store.contains_in_scope(&scope, "resp_stopless_context"),
+            "client previous_response_id must restore the stopless projected context"
+        );
+
+        commit_or_release_v3_relay_local_continuation_at_resp04(
+            &mut store,
+            scope.clone(),
+            11_000,
+            60_000,
+            &["resp_stopless_context".to_string()],
+            &stopless_context(),
+            V3HubContinuationCommit::LocalContext,
+        )
+        .expect("consumed stopless response-id context must release before recommit");
+
+        assert!(store.contains_in_scope(&scope, "resp_stopless_context"));
+    }
+
+    #[test]
+    fn resp04_still_stores_regular_tool_call_local_continuation() {
+        let mut store = V3LocalContinuationStore::default();
+        let scope = responses_scope();
+        let context = json!({
+            "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"use tool"}]}],
+            "output": [{
+                "type":"function_call",
+                "call_id":"call_exec_regular",
+                "name":"exec_command",
+                "arguments":"{\"cmd\":\"pwd\"}"
+            }]
+        });
+
+        commit_or_release_v3_relay_local_continuation_at_resp04(
+            &mut store,
+            scope.clone(),
+            20_000,
+            60_000,
+            &[],
+            &context,
+            V3HubContinuationCommit::LocalContext,
+        )
+        .expect("regular tool call must remain local-continuation owned");
+
+        assert!(store.contains_in_scope(&scope, "call_exec_regular"));
+        assert_eq!(store.len(), 1);
+    }
 }

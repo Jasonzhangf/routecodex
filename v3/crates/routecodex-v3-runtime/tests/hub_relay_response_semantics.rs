@@ -302,6 +302,50 @@ fn stopless_response_hook_projects_noop_cli_for_natural_stop_without_cli_state_j
 }
 
 #[test]
+fn stopless_response_hook_empty_natural_stop_projects_noop_without_synthetic_text() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_empty_natural_noop",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.canonical_context_payload().unwrap();
+    assert_eq!(payload["status"], "requires_action");
+    let output = payload["output"].as_array().expect("projected output");
+    assert_eq!(
+        output.len(),
+        1,
+        "transparent stopless projection must not synthesize assistant text: {payload}"
+    );
+    assert_eq!(output[0]["type"], "function_call");
+    assert_eq!(
+        stopless_noop_cmd(payload),
+        "routecodex hook run reasoningStop"
+    );
+    let serialized = serde_json::to_string(payload).unwrap();
+    for forbidden in ["继续。", "Stopless", "续轮上限"] {
+        assert!(
+            !serialized.contains(forbidden),
+            "client response leaked synthetic stopless text {forbidden}: {serialized}"
+        );
+    }
+}
+
+#[test]
 fn stopless_response_hook_ignores_assistant_text_schema_fence_as_state_source() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
@@ -471,15 +515,15 @@ fn stopless_response_hook_blocked_reasoning_stop_requires_reason_and_evidence() 
 }
 
 #[test]
-fn stopless_response_hook_natural_stop_guard_passes_cleaned_original_response() {
+fn stopless_response_hook_third_natural_stop_still_projects_noop_cli() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
             json!({
-                "id":"resp_stopless_natural_guard",
+                "id":"resp_stopless_natural_third_projection",
                 "status":"completed",
                 "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"third natural stop should pass through"}]
+                "output":[{"type":"output_text","text":"third natural stop should still project"}]
             }),
             V3HubTransportIntent::Json,
         ))
@@ -496,6 +540,50 @@ fn stopless_response_hook_natural_stop_guard_passes_cleaned_original_response() 
                 )),
         )
         .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "requires_action");
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(serialized.contains("third natural stop should still project"));
+    assert!(serialized.contains("call_stopless_reasoning"));
+    assert!(serialized.contains("routecodex hook run reasoningStop"));
+    for forbidden in ["repeatCount", "schemaFeedback"] {
+        assert!(
+            !serialized.contains(forbidden),
+            "third natural-stop projection leaked legacy stopless artifact {forbidden}: {serialized}"
+        );
+    }
+}
+
+#[test]
+fn stopless_response_hook_fourth_natural_stop_guard_passes_cleaned_original_response() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stopless_natural_guard",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{"type":"output_text","text":"fourth natural stop should pass through"}]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    3,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                )),
+        )
+        .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
     assert_eq!(resp03.tool_call_count(), 0);
     let resp04 = hooks.commit(resp03).unwrap();
@@ -503,7 +591,7 @@ fn stopless_response_hook_natural_stop_guard_passes_cleaned_original_response() 
     let payload = resp04.finalized_payload();
     assert_eq!(payload["status"], "completed");
     let serialized = serde_json::to_string(payload).unwrap();
-    assert!(serialized.contains("third natural stop should pass through"));
+    assert!(serialized.contains("fourth natural stop should pass through"));
     for forbidden in [
         "call_stopless_reasoning",
         "routecodex hook run reasoningStop",

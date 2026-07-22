@@ -5,6 +5,7 @@ pub mod hub_v1;
 pub mod kernel;
 pub mod local_continuation;
 pub mod nodes;
+mod provider_failure_runtime_policy;
 pub mod remote_continuation;
 mod shared;
 
@@ -21,9 +22,10 @@ pub use kernel::{
     execute_v3_responses_direct_runtime_kernel_with_default_transport,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
+    execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_transport_and_debug,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesDirectRuntimeOutput,
+    V3ResponsesDirectRuntimeOutput, V3ResponsesDirectRuntimeSharedState,
 };
 pub use local_continuation::*;
 pub use nodes::*;

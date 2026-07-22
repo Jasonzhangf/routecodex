@@ -38,7 +38,8 @@ for (const path of all) {
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
   const isProviderHealthRuntimeBoundary =
-    path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs');
+    path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs')
+    || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs');
   const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
     || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
   if (/V3Provider07ResponsesWirePayload|V3Transport08ResponsesHttpRequest|V3ProviderResp09Raw|V3Resp10ClientPayload|build_v3_provider_07|build_v3_transport_08|V3Provider07|V3Transport08|V3ProviderResp09/.test(text)) {

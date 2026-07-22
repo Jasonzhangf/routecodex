@@ -63,6 +63,11 @@ async fn upstream(
             .header("content-type", "text/event-stream")
             .body(Body::from("data: {\"id\":\"unterminated\"}\n"))
             .unwrap(),
+        "invalid_utf8_sse" => Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(b"data: \xff\n\n".to_vec()))
+            .unwrap(),
         "status_401" => Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header("content-type", "application/json")
@@ -254,7 +259,7 @@ async fn token_file_auth_is_resolved_only_at_transport_boundary() {
 }
 
 #[tokio::test]
-async fn sse_is_streamed_as_validated_raw_events_and_malformed_sse_fails_explicitly() {
+async fn sse_is_streamed_as_validated_raw_events_and_invalid_sse_fails_explicitly() {
     let (base_url, mut captures, shutdown) = start_upstream().await;
     std::env::set_var("V3_GENERAL_SSE_KEY", "secret-sse");
     let transport = ReqwestResponsesTransport::default();
@@ -286,8 +291,8 @@ async fn sse_is_streamed_as_validated_raw_events_and_malformed_sse_fails_explici
         Some("text/event-stream")
     );
 
-    let malformed = build_v3_provider_12_responses_wire_payload(
-        "req-malformed",
+    let trailing = build_v3_provider_12_responses_wire_payload(
+        "req-trailing",
         target(
             "stream-relay",
             &base_url,
@@ -299,7 +304,29 @@ async fn sse_is_streamed_as_validated_raw_events_and_malformed_sse_fails_explici
     )
     .unwrap();
     let raw = transport
-        .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(malformed).unwrap())
+        .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(trailing).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(raw.into_body_bytes().await.unwrap()).unwrap(),
+        "data: {\"id\":\"unterminated\"}\n\n"
+    );
+    let _ = captures.recv().await.unwrap();
+
+    let invalid = build_v3_provider_12_responses_wire_payload(
+        "req-invalid",
+        target(
+            "stream-relay",
+            &base_url,
+            "model-stream",
+            "stream",
+            "V3_GENERAL_SSE_KEY",
+        ),
+        json!({"model":"client","input":"hello","stream":true,"case":"invalid_utf8_sse"}),
+    )
+    .unwrap();
+    let raw = transport
+        .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(invalid).unwrap())
         .await
         .unwrap();
     assert!(matches!(

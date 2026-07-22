@@ -125,9 +125,9 @@ fn stopless_live_shape_preface_and_fenced_schema_text_is_visible_only_not_state(
 }
 
 #[test]
-fn stopless_live_shape_third_natural_stop_passes_original_text_without_cli() {
+fn stopless_live_shape_third_natural_stop_projects_noop_cli() {
     let hooks = compile_v3_hub_relay_response_hooks();
-    let live_text = "第三次自然 stop，防止无限循环，应该放行。";
+    let live_text = "第三次自然 stop，仍应完成第三次投影。";
     let resp02 = hooks
         .normalize(relay_raw(json!({
             "id":"resp_live_third_natural_stop",
@@ -146,6 +146,43 @@ fn stopless_live_shape_third_natural_stop_passes_original_text_without_cli() {
                 .with_stopless_reasoning_stop()
                 .with_stopless_center_state(V3StoplessCenterState::new(
                     2,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(serialized.contains(live_text));
+    assert!(serialized.contains("call_stopless_reasoning"));
+    assert!(serialized.contains("routecodex hook run reasoningStop"));
+}
+
+#[test]
+fn stopless_live_shape_fourth_natural_stop_passes_original_text_without_cli() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let live_text = "第四次自然 stop，三次投影已完成，应该放行。";
+    let resp02 = hooks
+        .normalize(relay_raw(json!({
+            "id":"resp_live_fourth_natural_stop",
+            "model":"MiniMax-M3",
+            "object":"response",
+            "status":"completed",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":live_text}]}],
+            "output_text": live_text
+        })))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    3,
                     3,
                     V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
                 )),
@@ -184,7 +221,7 @@ fn stopless_live_shape_guard_schema_only_text_passes_through_without_intercept()
             &V3HubRelayResponseHookProfile::empty()
                 .with_stopless_reasoning_stop()
                 .with_stopless_center_state(V3StoplessCenterState::new(
-                    2,
+                    3,
                     3,
                     V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
                 )),
@@ -282,7 +319,7 @@ fn stopless_live_shape_guard_reasoning_continue_tool_does_not_project_noop_or_di
             &V3HubRelayResponseHookProfile::empty()
                 .with_stopless_reasoning_stop()
                 .with_stopless_center_state(V3StoplessCenterState::new(
-                    2,
+                    3,
                     3,
                     V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
                 )),

@@ -10,7 +10,7 @@ use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
+use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc, time::Instant};
 use tokio::{
     sync::{mpsc, oneshot, Mutex},
     time::{timeout, Duration},
@@ -198,7 +198,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}]
 log_console = false
 snapshots = {snapshots}
 dry_run = {dry_run}
-retention = {{ raw_requests = 4, raw_responses = 4, events = 32 }}
+retention = {{ raw_requests = 4, raw_responses = 4, events = 128 }}
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
@@ -885,6 +885,18 @@ async fn controlled_failure_upstream() -> Response<Body> {
         .unwrap()
 }
 
+async fn controlled_capturing_failure_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    controlled_failure_upstream().await
+}
+
 async fn start_controlled_failure_upstream() -> (String, oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -899,6 +911,31 @@ async fn start_controlled_failure_upstream() -> (String, oneshot::Sender<()>) {
             .unwrap();
     });
     (format!("http://{address}/v1"), shutdown_tx)
+}
+
+async fn start_controlled_capturing_failure_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_capturing_failure_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
 fn free_port() -> u16 {
@@ -2459,11 +2496,16 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(3), socket.next())
+    let started = Instant::now();
+    let message = timeout(Duration::from_secs(15), socket.next())
         .await
         .unwrap()
         .unwrap()
         .unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(9_500),
+        "last-default provider websocket error must wait for two fixed 5s backoffs before projection"
+    );
     let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
     assert_eq!(event["type"], "error");
     assert_eq!(event["error"]["code"], "runtime_error");
@@ -2618,6 +2660,212 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
     std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
     handle.shutdown().await;
     failed_shutdown.send(()).unwrap();
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_shared_provider_health_cools_first_provider_after_three_failures() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failed_provider_base_url, mut failed_captures, failed_shutdown) =
+        start_controlled_capturing_failure_upstream().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_RESELECT_FIRST_KEY", "secret-first");
+    std::env::set_var("V3_P6_RESELECT_SECOND_KEY", "secret-second");
+    let handle = spawn_v3_server_aggregate(p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        &failed_provider_base_url,
+        &provider_base_url,
+        "V3_P6_RESELECT_FIRST_KEY",
+        "V3_P6_RESELECT_SECOND_KEY",
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+
+    for index in 0..3 {
+        let response = client
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .json(&json!({"model":"client-test","input":format!("hello {index}")}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let response_body = response.text().await.unwrap();
+        assert_eq!(status, 200, "unexpected response body: {response_body}");
+        let failed_capture = failed_captures.recv().await.unwrap();
+        assert_eq!(failed_capture.body["model"], "wire-first");
+        let success_capture = captures.recv().await.unwrap();
+        assert_eq!(success_capture.body["model"], "wire-second");
+    }
+
+    let cooled_response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"cooled provider should be skipped"}))
+        .send()
+        .await
+        .unwrap();
+    let status = cooled_response.status();
+    let response_body = cooled_response.text().await.unwrap();
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let success_capture = captures.recv().await.unwrap();
+    assert_eq!(success_capture.body["model"], "wire-second");
+    assert!(
+        timeout(Duration::from_millis(100), failed_captures.recv())
+            .await
+            .is_err(),
+        "direct path must share provider health and skip the cooled first provider before network send"
+    );
+
+    std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
+    std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
+    handle.shutdown().await;
+    failed_shutdown.send(()).unwrap();
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provider_cooldown() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failed_provider_base_url, mut failed_captures, failed_shutdown) =
+        start_controlled_capturing_failure_upstream().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_RESELECT_FIRST_KEY", "secret-first");
+    std::env::set_var("V3_P6_RESELECT_SECOND_KEY", "secret-second");
+    let handle = spawn_v3_server_aggregate(p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        &failed_provider_base_url,
+        &provider_base_url,
+        "V3_P6_RESELECT_FIRST_KEY",
+        "V3_P6_RESELECT_SECOND_KEY",
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+
+    for index in 0..3 {
+        let response = client
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .json(&json!({"model":"client-test","input":format!("cool first {index}")}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let _ = failed_captures.recv().await.unwrap();
+        let _ = captures.recv().await.unwrap();
+    }
+
+    let dry_run_response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({"model":"client-test","input":"dry-run must not heal cooldown"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dry_run_response.status(), 200);
+    let dry_run_body: Value = dry_run_response.json().await.unwrap();
+    assert_eq!(dry_run_body["object"], "routecodex.pipeline_dry_run");
+    assert_eq!(dry_run_body["evidence"]["providerNetworkSend"], false);
+    assert!(
+        timeout(Duration::from_millis(100), failed_captures.recv())
+            .await
+            .is_err(),
+        "provider-request dry-run must not send to the cooled provider"
+    );
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "provider-request dry-run must not send to any provider"
+    );
+
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"cooldown must remain after dry-run"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let success_capture = captures.recv().await.unwrap();
+    assert_eq!(success_capture.body["model"], "wire-second");
+    assert!(
+        timeout(Duration::from_millis(100), failed_captures.recv())
+            .await
+            .is_err(),
+        "dry-run must not clear shared provider cooldown state"
+    );
+
+    std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
+    std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
+    handle.shutdown().await;
+    failed_shutdown.send(()).unwrap();
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_last_default_waits_twice_then_projects_on_third_failure() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_capturing_failure_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let client = reqwest::Client::new();
+
+    let started = Instant::now();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"last default should fail on third attempt"}))
+        .send()
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
+
+    assert_eq!(status, 502);
+    assert_eq!(body["error"]["code"], "provider_transport_error");
+    assert_eq!(body["error"]["target_exhausted"], true);
+    assert_eq!(body["error"]["candidates_remaining"], 0);
+    assert_eq!(body["error"]["decision"], "project_client_error");
+    assert!(
+        elapsed >= Duration::from_millis(9_500),
+        "direct last-default provider retry must block for two fixed 5s waits, elapsed={elapsed:?}"
+    );
+    for _ in 0..3 {
+        let capture = captures.recv().await.unwrap();
+        assert_eq!(capture.body["model"], "wire-test");
+    }
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "last default must project on the third failure instead of looping"
+    );
+    let logs: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let backoff_waits = logs["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["node_id"] == "V3DefaultFloorBackoffWait")
+        .count();
+    assert_eq!(backoff_waits, 2);
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
     shutdown.send(()).unwrap();
 }
 
@@ -2842,6 +3090,68 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     assert!(
         !provider_hit,
         "Responses Relay provider-request dry-run must not call upstream"
+    );
+    assert!(
+        !response_body.contains("secret-key"),
+        "dry-run projection must not leak auth secrets"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_messages_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_wire_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec!["responses".to_string(), "anthropic".to_string()];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "max_tokens": 8,
+            "messages": [{"role":"user","content":"anthropic dry-run no upstream send"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    let provider_hit = timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_ok();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(body["object"], "routecodex.pipeline_dry_run");
+    assert_eq!(body["kind"], "provider_request");
+    assert_eq!(body["dryRun"], true);
+    assert_eq!(body["evidence"]["stoppedBeforeProviderSend"], true);
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(body["providerRequest"]["method"], "POST");
+    assert_eq!(
+        body["providerRequest"]["headers"]["authorization"],
+        "[REDACTED]"
+    );
+    assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
+    assert_eq!(body["providerRequest"]["body"]["input"][0]["role"], "user");
+    assert_eq!(
+        body["providerRequest"]["body"]["input"][0]["content"][0]["text"],
+        "anthropic dry-run no upstream send"
+    );
+    assert!(
+        !provider_hit,
+        "Anthropic Messages provider-request dry-run must not call upstream"
     );
     assert!(
         !response_body.contains("secret-key"),

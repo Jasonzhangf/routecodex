@@ -17,7 +17,7 @@ nodes:
     symbol: build_v3_server_03_http_request_raw
   - id: V3Resp15ClientPayload
     owner: routecodex-v3-runtime
-    symbol: execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation
+    symbol: execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
   - id: V3ResponsesInboundWs04ClientEventProjected
     owner: routecodex-v3-server
     symbol: send_responses_websocket_frame

@@ -540,6 +540,34 @@ chains:
           side_channel_reads: [v3.provider.health_state]
           side_channel_writes: [v3.provider.availability_projection]
         status: anchored
+      - step_id: v3-de-14
+        from_node: V3Transport13ResponsesHttpRequest
+        to_node: V3ProviderHealthStateMutated
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3ProviderHealthStore::record_provider_failure
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.provider.transport_request, v3.error.source]
+          produces: [v3.provider.health_state]
+          side_channel_reads: [v3.error.chain]
+          side_channel_writes: [v3.provider.health_state]
+        status: anchored
+      - step_id: v3-de-15
+        from_node: V3ProviderResp14Raw
+        to_node: V3ProviderHealthStateMutated
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        callee_symbol: V3ProviderHealthStore::record_provider_success
+        callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+        owner_feature_id: v3.debug_error_foundation
+        resource_flow:
+          consumes: [v3.response.provider_raw, v3.provider.health_state]
+          produces: [v3.provider.health_state]
+          side_channel_reads: [v3.provider.health_state]
+          side_channel_writes: [v3.provider.health_state]
+        status: anchored
   - chain_id: v3.responses_continuation.remote_contract_store
     owner_feature_id: v3.remote_continuation_contract_store
     summary: "H4 source-only direct-owner remote locator commit/load contract. It stores locator and pin control facts only and is not wired into Hub v1."
@@ -1110,7 +1138,7 @@ chains:
     edges:
       - { step_id: v3-inws-01, from_node: V3ResponsesInboundWs01ClientUpgrade, to_node: V3ResponsesInboundWs02CreateEventParsed, caller_symbol: responses_websocket_endpoint, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: responses_websocket_session, callee_file: v3/crates/routecodex-v3-server/src/lib.rs, status: anchored, owner_feature_id: v3.responses_inbound_websocket_proxy, resource_flow: { consumes: [v3.responses.inbound_websocket_client_connection], produces: [v3.responses.inbound_websocket_client_connection], side_channel_reads: [], side_channel_writes: [] } }
       - { step_id: v3-inws-02, from_node: V3ResponsesInboundWs02CreateEventParsed, to_node: V3Server03HttpRequestRaw, caller_symbol: responses_websocket_create_payload, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: build_v3_server_03_http_request_raw, callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs, status: anchored, owner_feature_id: v3.responses_inbound_websocket_proxy, resource_flow: { consumes: [v3.responses.inbound_websocket_client_connection], produces: [v3.request.normal_payload], side_channel_reads: [], side_channel_writes: [] } }
-      - { step_id: v3-inws-03, from_node: V3Server03HttpRequestRaw, to_node: V3Resp15ClientPayload, caller_symbol: execute_responses_direct_server_frame, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation, callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, status: anchored, owner_feature_id: v3.responses_inbound_websocket_proxy, resource_flow: { consumes: [v3.request.normal_payload], produces: [v3.response.client_payload], side_channel_reads: [v3.config.published_manifest], side_channel_writes: [] } }
+      - { step_id: v3-inws-03, from_node: V3Server03HttpRequestRaw, to_node: V3Resp15ClientPayload, caller_symbol: execute_responses_direct_server_frame, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug, callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs, status: anchored, owner_feature_id: v3.responses_inbound_websocket_proxy, resource_flow: { consumes: [v3.request.normal_payload, v3.provider.health_state], produces: [v3.response.client_payload], side_channel_reads: [v3.config.published_manifest, v3.provider.health_state], side_channel_writes: [] } }
       - { step_id: v3-inws-04, from_node: V3Resp15ClientPayload, to_node: V3ResponsesInboundWs04ClientEventProjected, caller_symbol: send_responses_websocket_frame, caller_file: v3/crates/routecodex-v3-server/src/lib.rs, callee_symbol: send_responses_websocket_sse_stream, callee_file: v3/crates/routecodex-v3-server/src/lib.rs, status: anchored, owner_feature_id: v3.responses_inbound_websocket_proxy, resource_flow: { consumes: [v3.response.client_payload], produces: [v3.responses.inbound_websocket_frame_projection], side_channel_reads: [v3.error.chain], side_channel_writes: [] } }
 
   - chain_id: v3.protocol_normalization_tool_governance_boundary

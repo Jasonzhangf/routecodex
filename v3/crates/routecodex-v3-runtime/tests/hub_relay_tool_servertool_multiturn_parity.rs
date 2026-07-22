@@ -85,11 +85,11 @@ fn assert_full_stopless_continuation_prompt(prompt: &str) {
     for required in [
         "继续当前目标",
         "基于已经恢复的完整上下文",
-        "复核当前目标",
+        "上一轮明确写出的下一步",
         "已有结论",
         "未完成事项",
-        "继续推理",
-        "按需调用可用工具",
+        "继续执行",
+        "本轮必须调用最相关工具",
         "不要只总结",
         "目标确实完成并有证据",
         "reasoningStop",
@@ -577,13 +577,93 @@ fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state(
     assert!(governed.payload()["instructions"]
         .as_str()
         .unwrap()
-        .contains("当前轮继续推进准则"));
+        .contains("当前轮推进准则"));
+    let tool_names = governed.payload()["tools"]
+        .as_array()
+        .expect("provider tools")
+        .iter()
+        .map(|tool| tool.get("name").and_then(Value::as_str).unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(
+        tool_names.contains(&"exec"),
+        "stopless Req04 must preserve the original client tool surface: {tool_names:?}"
+    );
     assert_eq!(
-        governed.payload()["tools"]
-            .as_array()
-            .unwrap()
+        tool_names
             .iter()
-            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .filter(|tool_name| **tool_name == "reasoningStop")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn stopless_hook_blackbox_preserves_additional_tools_surface() {
+    let request_hooks = compile_v3_hub_relay_request_hooks();
+    let projected = json!({
+        "type":"function_call",
+        "call_id":"call_stopless_reasoning",
+        "name":"exec_command",
+        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
+    });
+    let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-additional-tools"), scope())
+        .with_local_context(
+            "ctx-stopless-additional-tools",
+            scope(),
+            stopless_noop_context(
+                json!([
+                    {"role":"user","content":"original task"},
+                    projected.clone()
+                ]),
+                json!([projected]),
+            ),
+        );
+    let governed = request_hooks
+        .run(
+            raw_request(json!({
+                "input":[
+                    {
+                        "type":"additional_tools",
+                        "tools":[{"type":"function","name":"exec","description":"original embedded tool"}]
+                    },
+                    {"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}
+                ]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop().with_stopless_center_state(
+                V3StoplessCenterState::new(
+                    1,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                ),
+            ),
+        )
+        .unwrap();
+
+    assert!(
+        governed.payload().get("tools").is_none(),
+        "stopless Req04 must not rebuild embedded additional_tools into top-level tools"
+    );
+    let embedded_tools = governed.payload()["input"]
+        .as_array()
+        .expect("provider input")
+        .iter()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .and_then(|item| item.get("tools"))
+        .and_then(Value::as_array)
+        .expect("embedded additional_tools.tools");
+    let tool_names = embedded_tools
+        .iter()
+        .map(|tool| tool.get("name").and_then(Value::as_str).unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(
+        tool_names.contains(&"exec"),
+        "stopless Req04 must preserve embedded client tools: {tool_names:?}"
+    );
+    assert_eq!(
+        tool_names
+            .iter()
+            .filter(|tool_name| **tool_name == "reasoningStop")
             .count(),
         1
     );

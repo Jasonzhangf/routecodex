@@ -87,6 +87,13 @@ pub fn project_v3_responses_json_as_anthropic_message(
     Ok(message)
 }
 
+pub fn project_v3_responses_json_as_anthropic_events(
+    response: &Value,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let message = project_v3_responses_json_as_anthropic_message(response)?;
+    project_v3_anthropic_message_as_sse_events(&message)
+}
+
 pub fn project_v3_responses_error_as_anthropic_error(body: &[u8]) -> Value {
     match serde_json::from_slice::<Value>(body) {
         Ok(Value::Object(mut object)) if object.contains_key("error") => {
@@ -302,6 +309,145 @@ fn ensure_text_content_block(
     *active_text_index = Some(index);
     *next_index = index + 1;
     index
+}
+
+fn project_v3_anthropic_message_as_sse_events(
+    message: &Value,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let object = message
+        .as_object()
+        .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
+    let content = object
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or(V3AnthropicCodecError::ContentNotArray)?;
+    let mut message_start = json!({
+        "id": object.get("id").cloned().unwrap_or(Value::String("msg_anthropic_relay".to_string())),
+        "type": object.get("type").cloned().unwrap_or(Value::String("message".to_string())),
+        "role": object.get("role").cloned().unwrap_or(Value::String("assistant".to_string())),
+        "content": []
+    });
+    if let Some(model) = object.get("model") {
+        message_start["model"] = model.clone();
+    }
+    if let Some(usage) = object.get("usage") {
+        message_start["usage"] = usage.clone();
+    }
+    let mut events = vec![json!({
+        "event":"message_start",
+        "data":{"type":"message_start","message":message_start}
+    })];
+    for (index, part) in content.iter().enumerate() {
+        match part.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                let text = part.get("text").and_then(Value::as_str).unwrap_or("");
+                events.push(json!({
+                    "event":"content_block_start",
+                    "data":{"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}}
+                }));
+                if !text.is_empty() {
+                    events.push(json!({
+                        "event":"content_block_delta",
+                        "data":{"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":text}}
+                    }));
+                }
+                events.push(json!({
+                    "event":"content_block_stop",
+                    "data":{"type":"content_block_stop","index":index}
+                }));
+            }
+            Some("thinking" | "reasoning") => {
+                let thinking = part
+                    .get("thinking")
+                    .or_else(|| part.get("text"))
+                    .or_else(|| part.get("reasoning"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                events.push(json!({
+                    "event":"content_block_start",
+                    "data":{"type":"content_block_start","index":index,"content_block":{"type":"thinking","thinking":""}}
+                }));
+                if !thinking.is_empty() {
+                    events.push(json!({
+                        "event":"content_block_delta",
+                        "data":{"type":"content_block_delta","index":index,"delta":{"type":"thinking_delta","thinking":thinking}}
+                    }));
+                }
+                events.push(json!({
+                    "event":"content_block_stop",
+                    "data":{"type":"content_block_stop","index":index}
+                }));
+            }
+            Some("redacted_thinking") => {
+                let data = part
+                    .get("data")
+                    .or_else(|| part.get("signature"))
+                    .cloned()
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "redacted_thinking data",
+                    })?;
+                events.push(json!({
+                    "event":"content_block_start",
+                    "data":{"type":"content_block_start","index":index,"content_block":{"type":"redacted_thinking","data":data}}
+                }));
+                events.push(json!({
+                    "event":"content_block_stop",
+                    "data":{"type":"content_block_stop","index":index}
+                }));
+            }
+            Some("tool_use") => {
+                let id = part
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "tool_use id",
+                    })?;
+                let name = part
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "tool_use name",
+                    })?;
+                let input = part.get("input").cloned().unwrap_or_else(|| json!({}));
+                if !input.is_object() {
+                    return Err(V3AnthropicCodecError::MalformedField {
+                        field: "tool_use input",
+                    });
+                }
+                events.push(json!({
+                    "event":"content_block_start",
+                    "data":{"type":"content_block_start","index":index,"content_block":{"type":"tool_use","id":id,"name":name,"input":input}}
+                }));
+                events.push(json!({
+                    "event":"content_block_stop",
+                    "data":{"type":"content_block_stop","index":index}
+                }));
+            }
+            Some(_) | None => {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "content type",
+                })
+            }
+        }
+    }
+    events.push(json!({
+        "event":"message_delta",
+        "data":{
+            "type":"message_delta",
+            "delta":{
+                "stop_reason": object.get("stop_reason").cloned().unwrap_or(Value::String("end_turn".to_string())),
+                "stop_sequence": object.get("stop_sequence").cloned().unwrap_or(Value::Null)
+            },
+            "usage": object.get("usage").cloned().unwrap_or(Value::Object(serde_json::Map::new()))
+        }
+    }));
+    events.push(json!({
+        "event":"message_stop",
+        "data":{"type":"message_stop"}
+    }));
+    Ok(events)
 }
 
 fn parse_responses_function_call_arguments(item: &Value) -> Result<Value, V3AnthropicCodecError> {

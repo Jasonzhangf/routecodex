@@ -581,7 +581,7 @@ fn stopless_request_hook_guidance_varies_by_stopless_center_policy() {
     assert!(
         !second_prompt.contains("连续第")
             && !second_prompt.contains("最多")
-            && second_prompt.contains("更严格地推进")
+            && second_prompt.contains("最小可验证工具动作")
             && second_prompt.contains("工具动作"),
         "stronger policy prompt must vary by policy without exposing internal counters or no-op mechanism: {second_prompt}"
     );
@@ -653,11 +653,11 @@ fn assert_full_stopless_continuation_prompt(prompt: &str) {
     for required in [
         "继续当前目标",
         "基于已经恢复的完整上下文",
-        "复核当前目标",
+        "上一轮明确写出的下一步",
         "已有结论",
         "未完成事项",
-        "继续推理",
-        "按需调用可用工具",
+        "继续执行",
+        "本轮必须调用最相关工具",
         "不要只总结",
         "目标确实完成并有证据",
         "reasoningStop",
@@ -690,16 +690,16 @@ fn assert_full_stopless_continuation_prompt(prompt: &str) {
 
 fn assert_full_stopless_system_guidance(instructions: &str) {
     for required in [
-        "当前轮继续推进准则",
+        "当前轮推进准则",
         "当前轮",
         "继续当前目标",
         "基于已有上下文",
-        "继续推理",
-        "按需调用工具",
+        "继续执行",
+        "本轮必须调用最相关工具",
         "完成证据",
         "阻塞证据",
         "reasoningStop",
-        "不要自然停止",
+        "不要只输出分析",
     ] {
         assert!(
             instructions.contains(required),
@@ -836,6 +836,145 @@ fn stopless_request_hook_injects_full_guidance_and_exactly_one_internal_tool() {
             "full guidance kept old schema/control wording {forbidden}: {instructions}"
         );
     }
+}
+
+#[test]
+fn stopless_request_hook_preserves_original_instruction_and_adds_action_delta() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let payload = json!({
+        "input":[{"role":"user","content":"keep the original task text"}],
+        "tools":[{"type":"function","name":"exec","description":"original tool"}],
+        "tool_choice":"auto",
+        "instructions":"original client instruction"
+    });
+    let governed = hooks
+        .run(
+            raw(payload.clone()),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    let instructions = governed
+        .payload()
+        .get("instructions")
+        .and_then(Value::as_str)
+        .expect("original instructions plus stopless delta");
+    assert!(
+        instructions.starts_with("当前轮推进准则"),
+        "stopless must add only the current-turn delta to the runtime guidance field after canonicalization: {instructions}"
+    );
+    assert_eq!(
+        instructions.matches("当前轮推进准则").count(),
+        1,
+        "stopless current-turn delta must be appended exactly once: {instructions}"
+    );
+    assert!(
+        governed.payload()["messages"]
+            .as_array()
+            .expect("canonical messages")
+            .iter()
+            .any(|message| {
+                message.get("role").and_then(Value::as_str) == Some("system")
+                    && message.get("content").and_then(Value::as_str)
+                        == Some("original client instruction")
+            }),
+        "canonical system message must preserve the original instruction unchanged while stopless adds a separate current-turn delta: {}",
+        governed.payload()
+    );
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert!(
+        serialized.contains("original client instruction"),
+        "stopless must preserve the original client instruction while adding its delta: {serialized}"
+    );
+    assert_full_stopless_system_guidance(instructions);
+    let tools = governed.payload()["tools"]
+        .as_array()
+        .expect("provider tools");
+    assert_eq!(tools[0], payload["tools"][0]);
+    assert_eq!(
+        tools
+            .iter()
+            .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+            .count(),
+        1,
+        "stopless request must append exactly one reasoningStop schema"
+    );
+    assert_eq!(
+        governed.payload()["tool_choice"],
+        json!("required"),
+        "stopless must require a tool decision; otherwise provider can ignore the schema and emit repeated natural stop"
+    );
+    for forbidden in [
+        "routecodex hook run reasoningStop",
+        "call_stopless_reasoning",
+        "repeatCount",
+        "schemaFeedback",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "provider request leaked bridge/control artifact {forbidden}: {serialized}"
+        );
+    }
+}
+
+#[test]
+fn stopless_request_hook_removes_stale_generated_system_guidance_before_reinjecting_current_delta()
+{
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let stale_guidance = "当前轮推进准则（当前轮继续推进准则，仅用于当前轮，不改变原用户目标或系统指令优先级）：\n- 继续当前目标。\n- 停止时使用 reasoningStop。";
+    let governed = hooks
+        .run(
+            raw(json!({
+                "input":[
+                    {
+                        "role":"system",
+                        "content": format!("restored real system prefix\n\n{stale_guidance}")
+                    },
+                    {
+                        "role":"system",
+                        "content": stale_guidance
+                    },
+                    {"role":"user","content":"继续目标"},
+                    {
+                        "type":"function_call",
+                        "call_id":"call_stopless_reasoning",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_stopless_reasoning",
+                        "output":""
+                    }
+                ],
+                "tools":[{"type":"function","name":"exec","description":"original tool"}],
+                "tool_choice":"auto"
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    let serialized = serde_json::to_string(governed.payload()).unwrap();
+    assert_eq!(
+        serialized.matches("当前轮推进准则").count(),
+        1,
+        "restored generated system guidance is current-turn only and must not accumulate: {serialized}"
+    );
+    assert!(
+        serialized.contains("restored real system prefix"),
+        "real restored system prefix must be preserved while removing stale stopless suffix: {serialized}"
+    );
+    assert!(
+        !serialized.contains("停止时使用 reasoningStop"),
+        "stale generated stopless guidance must be removed from restored history: {serialized}"
+    );
+    assert_eq!(
+        governed.payload()["tool_choice"],
+        json!("required"),
+        "current managed turn still requires a provider-visible tool decision"
+    );
 }
 
 #[test]

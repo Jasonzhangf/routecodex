@@ -63,8 +63,15 @@ pub(crate) fn validated_sse_stream(
                     &mut state.decoder,
                     SseIncrementalDecoder::new(SseTransportLimits::default()),
                 );
-                return match decoder.finish() {
-                    Ok(()) => None,
+                return match decoder.finish_with_trailing_frame() {
+                    Ok(None) => None,
+                    Ok(Some(frame)) => {
+                        state.ready.push_back(
+                            build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame)
+                                .into_bytes(),
+                        );
+                        Some((Ok(state.ready.pop_front().expect("trailing frame")), state))
+                    }
                     Err(error) => Some((
                         Err(map_sse_transport_error(
                             error,
@@ -165,7 +172,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn sse_validation_preserves_chunked_events_and_rejects_unterminated_tail() {
+    async fn sse_validation_preserves_chunked_events_and_flushes_unterminated_tail() {
         let source = stream::iter([
             Ok(Bytes::from_static(b"data: one\n")),
             Ok(Bytes::from_static(b"\ndata: two\n\n")),
@@ -175,12 +182,13 @@ mod tests {
         assert_eq!(validated.next().await.unwrap().unwrap(), b"data: two\n\n");
         assert!(validated.next().await.is_none());
 
-        let source = stream::iter([Ok(Bytes::from_static(b"data: incomplete\n"))]);
-        let mut invalid = validated_sse_stream(source, "req".into(), "provider".into(), None);
-        assert!(matches!(
-            invalid.next().await.unwrap().unwrap_err(),
-            V3ProviderError::MalformedSse { .. }
-        ));
+        let source = stream::iter([Ok(Bytes::from_static(b"data: terminal"))]);
+        let mut trailing = validated_sse_stream(source, "req".into(), "provider".into(), None);
+        assert_eq!(
+            trailing.next().await.unwrap().unwrap(),
+            b"data: terminal\n\n"
+        );
+        assert!(trailing.next().await.is_none());
     }
 
     #[tokio::test]

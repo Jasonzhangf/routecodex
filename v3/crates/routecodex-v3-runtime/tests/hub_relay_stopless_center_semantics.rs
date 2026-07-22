@@ -74,11 +74,11 @@ fn assert_full_stopless_continuation_prompt(prompt: &str) {
     for required in [
         "继续当前目标",
         "基于已经恢复的完整上下文",
-        "复核当前目标",
+        "上一轮明确写出的下一步",
         "已有结论",
         "未完成事项",
-        "继续推理",
-        "按需调用可用工具",
+        "继续执行",
+        "本轮必须调用最相关工具",
         "不要只总结",
         "目标确实完成并有证据",
         "reasoningStop",
@@ -232,6 +232,23 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
     assert!(stronger.need_continue());
     assert!(!stronger.guard_exhausted());
 
+    let third_projection = V3StoplessCenterState::new(
+        3,
+        3,
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+    );
+    assert_eq!(
+        third_projection.phase(),
+        V3StoplessCenterPhase::CliNoopProjected
+    );
+    assert_eq!(
+        third_projection.next_request_policy(),
+        V3StoplessCenterNextRequestPolicy::ContinueWithStrongerInstruction
+    );
+    assert!(third_projection.need_continue());
+    assert!(!third_projection.guard_exhausted());
+    assert!(!third_projection.terminal());
+
     let needs_evidence =
         V3StoplessCenterState::new(1, 3, V3StoplessCenterSteering::ReasoningStopNeedsEvidence);
     assert_eq!(
@@ -259,7 +276,7 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
     );
 
     let guard = V3StoplessCenterState::new(
-        3,
+        4,
         3,
         V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
     );
@@ -304,11 +321,11 @@ fn request_guidance_changes_by_state_without_exposing_internal_status() {
     assert_full_stopless_continuation_prompt(&stronger_prompt);
     assert_full_stopless_continuation_prompt(&evidence_prompt);
     assert!(
-        stronger_prompt.contains("更严格地推进到工具动作"),
+        stronger_prompt.contains("最小可验证工具动作"),
         "second consecutive stop policy must strengthen task-progress guidance: {stronger_prompt}"
     );
     assert!(
-        evidence_prompt.contains("完成/阻塞证据不足"),
+        evidence_prompt.contains("证据不足"),
         "needs-evidence policy must ask for completion/blocked evidence without exposing internals: {evidence_prompt}"
     );
     assert!(
@@ -419,6 +436,41 @@ fn natural_stop_projects_noop_cli_without_cli_state_json() {
 }
 
 #[test]
+fn anthropic_end_turn_text_stop_schema_is_natural_stop_for_stopless() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_anthropic_end_turn_stopless",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"end_turn",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{
+                    "type":"output_text",
+                    "text": r#"{"stopreason":2,"current_goal":"still running","next_step":"continue"}"#
+                }]
+            }]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+
+    assert_eq!(resp04.finalized_payload()["status"], "requires_action");
+    assert_eq!(
+        stopless_cmd(resp04.finalized_payload()),
+        "routecodex hook run reasoningStop",
+        "Anthropic end_turn is a natural-stop finish reason in stopless relay"
+    );
+}
+
+#[test]
 fn assistant_text_stop_schema_fence_is_not_a_stopless_state_source() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
@@ -518,7 +570,7 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
         payload["instructions"]
             .as_str()
             .unwrap_or_default()
-            .contains("当前轮继续推进准则"),
+            .contains("当前轮推进准则"),
         "StoplessCenter steering must be a full provider-facing transparent guideline in instructions: {serialized}"
     );
     assert_eq!(state.phase(), V3StoplessCenterPhase::ProviderTurnInFlight);

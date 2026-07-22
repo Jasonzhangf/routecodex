@@ -304,6 +304,22 @@ impl SseIncrementalDecoder {
             Err(SseTransportError::UnterminatedFrame)
         }
     }
+
+    pub fn finish_with_trailing_frame(
+        self,
+    ) -> Result<Option<SseTransportIn03ValidatedFrameStream>, SseTransportError> {
+        if self.buffer.is_empty() {
+            return Ok(None);
+        }
+        if self.buffer.len() > self.limits.max_frame_bytes {
+            return Err(SseTransportError::FrameLimitExceeded {
+                limit: self.limits.max_frame_bytes,
+            });
+        }
+        Ok(Some(build_sse_transport_in_03_from_sse_transport_in_02(
+            build_sse_transport_in_02_from_sse_transport_in_01(&self.buffer, self.limits)?,
+        )?))
+    }
 }
 
 pub fn build_sse_transport_out_04_from_sse_transport_in_03(
@@ -465,6 +481,19 @@ mod tests {
         assert_eq!(
             unfinished.finish(),
             Err(SseTransportError::UnterminatedFrame)
+        );
+
+        let mut trailing = SseIncrementalDecoder::new(SseTransportLimits::default());
+        trailing
+            .push(build_sse_transport_in_01_raw_chunk(b"data: terminal"))
+            .unwrap();
+        let frame = trailing
+            .finish_with_trailing_frame()
+            .unwrap()
+            .expect("trailing frame");
+        assert_eq!(
+            build_sse_transport_out_04_from_sse_transport_in_03(&frame).as_bytes(),
+            b"data: terminal\n\n"
         );
 
         let mut invalid = SseIncrementalDecoder::new(SseTransportLimits::default());

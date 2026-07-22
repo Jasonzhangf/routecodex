@@ -397,7 +397,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert!(
         captures[0]["input"][0]["content"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("当前轮继续推进准则")),
+            .is_some_and(|text| text.contains("当前轮推进准则")),
         "Responses provider wire must carry Stopless guidance in provider-standard system input: {}",
         captures[0]
     );
@@ -414,7 +414,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert!(
         captures[1]["input"][0]["content"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("当前轮继续推进准则")),
+            .is_some_and(|text| text.contains("当前轮推进准则")),
         "Responses provider wire must carry Stopless guidance in provider-standard system input: {}",
         captures[1]
     );
@@ -554,7 +554,7 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
     assert!(
         body["input"][0]["content"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("当前轮继续推进准则")),
+            .is_some_and(|text| text.contains("当前轮推进准则")),
         "Responses target must carry Stopless guidance in provider-standard system input: {body}"
     );
     assert_eq!(body["input"][1]["type"], "message");
@@ -1112,6 +1112,51 @@ impl ResponsesTransport for ResponsesContextErrorThenSuccessTransport {
     }
 }
 
+struct ResponsesMalformedJsonThenSuccessTransport {
+    captures: Mutex<Vec<(String, Value)>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesMalformedJsonThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.captures
+            .lock()
+            .unwrap()
+            .push((request.provider_id().to_string(), request.body().clone()));
+        if request.provider_id() == "limited" {
+            return Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                b"{\"id\":\"broken\"".to_vec(),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"resp_malformed_retry",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"retried after malformed provider JSON"}],
+                "usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
 struct ResponsesDefaultFloorFailsThenSucceedsTransport {
     captures: Mutex<Vec<(String, Value)>>,
     fail_count: usize,
@@ -1200,6 +1245,49 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
             .as_ref()
             .and_then(|usage| usage.input_tokens),
         Some(206624)
+    );
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(captures[0].0, "limited");
+    assert_eq!(captures[1].0, "minimax");
+}
+
+#[tokio::test]
+async fn responses_relay_provider_response_decode_error_reselects_next_candidate_before_projection()
+{
+    let transport = ResponsesMalformedJsonThenSuccessTransport {
+        captures: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &responses_reselect_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-malformed-provider-json-reselect".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same large payload",
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("successful retry must keep console observability");
+    assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
+    assert_eq!(observability.provider_status, Some(200));
+    assert_eq!(observability.attempts, Some(2));
+    assert_eq!(
+        observability.unavailable_candidates,
+        vec!["limited:key1:gpt-5.5".to_string()]
     );
 
     let captures = transport.captures.lock().unwrap();
@@ -1298,7 +1386,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
 async fn responses_relay_default_floor_retries_until_success_within_cap() {
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
-        fail_count: 5,
+        fail_count: 2,
     };
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
         &responses_single_limited_manifest(),
@@ -1313,7 +1401,7 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
         },
         &transport,
         V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 5,
+            same_candidate_retries: V3ResponsesRelayRetryPolicy::default().same_candidate_retries,
             retry_delay_ms: 0,
         },
     )
@@ -1330,9 +1418,9 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
     assert_eq!(observability.provider_id.as_deref(), Some("limited"));
     assert_eq!(observability.provider_status, Some(200));
     assert_eq!(observability.response_status.as_deref(), Some("completed"));
-    assert_eq!(observability.attempts, Some(6));
+    assert_eq!(observability.attempts, Some(3));
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 6);
+    assert_eq!(captures.len(), 3);
     assert!(captures
         .iter()
         .all(|(provider_id, _)| provider_id == "limited"));
@@ -1436,10 +1524,10 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
 #[test]
 fn responses_relay_default_floor_backoff_sequence_is_fixed_five_seconds() {
     let policy = V3ResponsesRelayRetryPolicy::default();
-    assert_eq!(policy.same_candidate_retries, 5);
+    assert_eq!(policy.same_candidate_retries, 2);
     assert_eq!(policy.default_floor_delay_ms_for_retry(1), 5_000);
     assert_eq!(policy.default_floor_delay_ms_for_retry(2), 5_000);
-    assert_eq!(policy.default_floor_delay_ms_for_retry(5), 5_000);
+    assert_eq!(policy.default_floor_delay_ms_for_retry(3), 5_000);
     let no_sleep_policy = V3ResponsesRelayRetryPolicy {
         same_candidate_retries: 0,
         retry_delay_ms: 0,

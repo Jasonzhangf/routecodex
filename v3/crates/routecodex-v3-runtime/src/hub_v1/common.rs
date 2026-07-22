@@ -214,7 +214,7 @@ impl V3StoplessCenterState {
     ) -> Self {
         let max_stop_budget = max_natural_stops.max(1);
         let guard_exhausted = matches!(steering, V3StoplessCenterSteering::GuardTerminal)
-            || natural_stop_count >= max_stop_budget;
+            || natural_stop_count > max_stop_budget;
         let blocked = matches!(steering, V3StoplessCenterSteering::Blocked);
         let terminal = guard_exhausted || blocked;
         let need_continue = !terminal;

@@ -1,4 +1,7 @@
 use super::*;
+use crate::provider_failure_runtime_policy::{
+    V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+};
 use crate::V3LocalContinuationReq04RestoreRequest;
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -40,8 +43,10 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str =
     "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
-const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize = 5;
-const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 = 5_000;
+const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize =
+    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET;
+const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 =
+    V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS;
 
 pub type V3ResponsesRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -1549,17 +1554,46 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         };
         let provider_status = provider_raw.status();
         let provider_id = provider_raw.provider_id().to_string();
-        try_before_resp03!(provider_health
-            .record_provider_success(
-                &selected_target_provider_id,
-                Some(&selected_target_auth_alias),
-                Some(&selected_target_model_id),
-                v3_responses_relay_now_epoch_ms()?,
-            )
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string())));
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
-                let provider_value: Value = try_before_resp03!(serde_json::from_slice(&bytes));
+                let provider_value: Value = match serde_json::from_slice(&bytes) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: input.request_id.clone(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!("provider JSON response decode failed: {error}"),
+                            },
+                            &selected_target_provider_id,
+                            Some(selected_observability),
+                        );
+                        let terminal_failure = try_before_resp03!(
+                            handle_v3_responses_relay_provider_failure(
+                                &failure_context,
+                                selected,
+                                failure,
+                                &mut V3ResponsesRelayProviderRetryState {
+                                    failed_candidates: &mut failed_candidates,
+                                    same_candidate_retries: &mut same_candidate_retries,
+                                    retry_selected: &mut retry_selected,
+                                    pending_provider_failure: &mut pending_provider_failure,
+                                    trace: &mut trace,
+                                },
+                            )
+                            .await
+                        );
+                        if let Some(failure) = terminal_failure {
+                            clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                manifest,
+                                stopless_control.as_ref(),
+                                stopless_state.as_ref(),
+                            )?;
+                            return Ok(provider_failure_output(failure, trace, 0));
+                        }
+                        continue;
+                    }
+                };
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         try_before_resp03!(project_v3_anthropic_message_as_responses_response(
@@ -1608,6 +1642,16 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
+                try_before_resp03!(provider_health
+                    .record_provider_success(
+                        &selected_target_provider_id,
+                        Some(&selected_target_auth_alias),
+                        Some(&selected_target_model_id),
+                        v3_responses_relay_now_epoch_ms()?,
+                    )
+                    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
+                        error.to_string()
+                    )));
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
@@ -1640,14 +1684,51 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             }
             V3ProviderResponseBody::Sse(stream) => {
                 let stream_observation = V3RuntimeStreamObservation::default();
-                let provider_value = try_before_resp03!(
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+                let provider_value =
+                    match build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
                         provider_wire_protocol,
                         stream,
                         &stream_observation,
                     )
                     .await
-                );
+                    {
+                        Ok(value) => value,
+                        Err(error) => {
+                            let failure = provider_runtime_failure(
+                                V3ProviderError::MalformedSse {
+                                    request_id: input.request_id.clone(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!("provider SSE response decode failed: {error}"),
+                                },
+                                &selected_target_provider_id,
+                                Some(selected_observability),
+                            );
+                            let terminal_failure = try_before_resp03!(
+                                handle_v3_responses_relay_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut V3ResponsesRelayProviderRetryState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        retry_selected: &mut retry_selected,
+                                        pending_provider_failure: &mut pending_provider_failure,
+                                        trace: &mut trace,
+                                    },
+                                )
+                                .await
+                            );
+                            if let Some(failure) = terminal_failure {
+                                clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                    manifest,
+                                    stopless_control.as_ref(),
+                                    stopless_state.as_ref(),
+                                )?;
+                                return Ok(provider_failure_output(failure, trace, 0));
+                            }
+                            continue;
+                        }
+                    };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         V3HubProviderWireProtocol::Responses
@@ -1685,6 +1766,16 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
+                try_before_resp03!(provider_health
+                    .record_provider_success(
+                        &selected_target_provider_id,
+                        Some(&selected_target_auth_alias),
+                        Some(&selected_target_model_id),
+                        v3_responses_relay_now_epoch_ms()?,
+                    )
+                    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
+                        error.to_string()
+                    )));
                 stream_observation
                     .record_event(&json!({
                         "type":"response.completed",
@@ -1807,6 +1898,10 @@ fn find_responses_tool_output_ids(
     payload: &Value,
 ) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
     let paired_call_ids = payload_input_paired_call_ids(payload);
+    let previous_response_id = payload
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
     let mut ids = V3ResponsesRelayToolOutputIds::default();
     for item in payload
         .get("input")
@@ -1830,6 +1925,25 @@ fn find_responses_tool_output_ids(
             })?;
         if !ids.consumed_ids.iter().any(|existing| existing == id) {
             ids.consumed_ids.push(id.to_owned());
+        }
+        if is_v3_stopless_internal_call_id(id) {
+            if let Some(response_id) = previous_response_id {
+                if !ids
+                    .consumed_ids
+                    .iter()
+                    .any(|existing| existing == response_id)
+                {
+                    ids.consumed_ids.push(response_id.to_owned());
+                }
+                if !ids
+                    .restore_ids
+                    .iter()
+                    .any(|existing| existing == response_id)
+                {
+                    ids.restore_ids.push(response_id.to_owned());
+                }
+                continue;
+            }
         }
         if paired_call_ids.iter().any(|paired| paired == id) {
             continue;
@@ -1979,84 +2093,6 @@ fn commit_or_release_responses_local_continuation(
     Ok(())
 }
 
-#[derive(Debug)]
-struct V3ResponsesRelayDryRunNoNetworkTransport {
-    response_payload: Value,
-    captured_provider_request: Arc<Mutex<Option<Value>>>,
-}
-
-#[async_trait::async_trait]
-impl ResponsesTransport for V3ResponsesRelayDryRunNoNetworkTransport {
-    async fn send(
-        &self,
-        request: routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
-    ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError> {
-        if let Ok(mut captured) = self.captured_provider_request.lock() {
-            *captured = Some(request.redacted_provider_request_projection());
-        }
-        let response_payload = v3_responses_relay_dry_run_response_payload_for_request(
-            &request,
-            &self.response_payload,
-        );
-        Ok(
-            routecodex_v3_provider_responses::V3ProviderResp14Raw::from_json(
-                request.request_id(),
-                request.provider_id(),
-                200,
-                vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
-                serde_json::to_vec(&response_payload).map_err(|error| {
-                    V3ProviderError::ResponseBody {
-                        request_id: request.request_id().to_string(),
-                        provider_id: request.provider_id().to_string(),
-                        reason: error.to_string(),
-                    }
-                })?,
-            ),
-        )
-    }
-}
-
-fn v3_responses_relay_dry_run_response_payload_for_request(
-    request: &routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
-    responses_payload: &Value,
-) -> Value {
-    let text = "routecodex provider-request dry-run stopped before provider send";
-    if request
-        .url()
-        .trim_end_matches('/')
-        .ends_with("/v1/messages")
-    {
-        return json!({
-            "id": format!("dry_run_{}", request.request_id()),
-            "type": "message",
-            "role": "assistant",
-            "model": request.body().get("model").cloned().unwrap_or(Value::Null),
-            "content": [{"type":"text","text":text}],
-            "stop_reason": "end_turn"
-        });
-    }
-    if request
-        .url()
-        .trim_end_matches('/')
-        .ends_with("/chat/completions")
-    {
-        return json!({
-            "id": format!("dry_run_{}", request.request_id()),
-            "object": "chat.completion",
-            "model": request.body().get("model").cloned().unwrap_or(Value::Null),
-            "choices": [{
-                "index": 0,
-                "message": {"role":"assistant","content":text},
-                "finish_reason": "stop"
-            }]
-        });
-    }
-    responses_payload.clone()
-}
-
 pub async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
@@ -2119,8 +2155,8 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
 ) -> crate::V3FoundationRuntimeOutput {
     let captured_provider_request = Arc::new(Mutex::new(None));
-    let transport = V3ResponsesRelayDryRunNoNetworkTransport {
-        response_payload: json!({
+    let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
+        json!({
             "id": format!("dry_run_{}", input.request_id),
             "object": "response",
             "status": "completed",
@@ -2130,8 +2166,8 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
                 "text": "routecodex provider-request dry-run stopped before provider send"
             }]
         }),
-        captured_provider_request: Arc::clone(&captured_provider_request),
-    };
+        Arc::clone(&captured_provider_request),
+    );
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
     let mut output = match execute_v3_responses_relay_runtime_inner(
         manifest,
@@ -3338,7 +3374,7 @@ struct V3AnthropicProviderStreamState {
     message_stop_seen: bool,
 }
 
-async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
@@ -4792,37 +4828,6 @@ mod tests {
         .expect("usage summary");
         assert_eq!(summary.input_tokens, Some(59_842));
         assert_eq!(summary.cached_tokens, Some(41_984));
-    }
-
-    #[test]
-    fn provider_request_dry_run_uses_provider_protocol_matching_terminal_payload() {
-        let request = build_v3_transport_13_responses_http_request_from_parts(
-            "req_dry_anthropic",
-            "anthropic_provider",
-            "https://provider.example/v1/messages",
-            V3ProviderAuthHandle {
-                alias: "test".to_string(),
-                secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".to_string()),
-            },
-            routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse,
-            json!({
-                "model": "claude-test",
-                "messages": [{"role":"user","content":[{"type":"text","text":"hi"}]}],
-                "stream": true
-            }),
-        )
-        .expect("anthropic dry-run request");
-
-        let payload = v3_responses_relay_dry_run_response_payload_for_request(
-            &request,
-            &json!({"object":"response","output":[]}),
-        );
-
-        assert_eq!(payload["type"], "message");
-        assert_eq!(payload["content"][0]["type"], "text");
-        project_v3_anthropic_message_as_responses_response(&payload).expect(
-            "provider-request dry-run terminal payload must match Anthropic response codec",
-        );
     }
 
     #[test]

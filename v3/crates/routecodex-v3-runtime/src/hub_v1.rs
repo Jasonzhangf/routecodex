@@ -19,6 +19,8 @@ pub(crate) use common::{
 
 mod side_channel;
 pub(crate) use side_channel::find_v3_hub_side_channel_key;
+mod provider_request_dry_run;
+pub(crate) use provider_request_dry_run::V3ProviderRequestDryRunNoNetworkTransport;
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
     build_v3_anthropic_messages_transport_request_from_v3_provider_08, provider_protocol_compat_id,

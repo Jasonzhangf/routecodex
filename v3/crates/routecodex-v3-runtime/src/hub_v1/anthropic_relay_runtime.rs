@@ -22,7 +22,7 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_target::V3TargetInterpreter;
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 const V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
@@ -148,6 +148,96 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport(
     input: V3AnthropicRelayRuntimeInput,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     execute_v3_anthropic_relay_runtime(manifest, input, &ReqwestResponsesTransport::default()).await
+}
+
+pub async fn execute_v3_anthropic_relay_dry_run_runtime(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+) -> crate::V3FoundationRuntimeOutput {
+    let captured_provider_request = Arc::new(Mutex::new(None));
+    let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
+        json!({
+            "id": format!("dry_run_{}", input.request_id),
+            "object": "response",
+            "status": "completed",
+            "output_text": "routecodex provider-request dry-run stopped before provider send",
+            "output": [{
+                "type": "output_text",
+                "text": "routecodex provider-request dry-run stopped before provider send"
+            }]
+        }),
+        Arc::clone(&captured_provider_request),
+    );
+    let mut output = match execute_v3_anthropic_relay_runtime_inner(
+        manifest,
+        input,
+        &transport,
+        None,
+        V3HubRelayResponseHookProfile::empty(),
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) => project_v3_anthropic_relay_runtime_failure(error),
+    };
+    if let Some(index) = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3ProviderReqOutbound09TransportRequest")
+    {
+        output
+            .node_trace
+            .insert(index + 1, "V3DryRunNoNetworkTerminalEffect");
+    }
+    output.node_trace.push("V3Server16HttpFrame");
+    let provider_request = captured_provider_request
+        .lock()
+        .ok()
+        .and_then(|captured| captured.clone())
+        .unwrap_or(Value::Null);
+    let dry_run_status = if provider_request.is_null() {
+        output.status
+    } else {
+        200
+    };
+    crate::V3FoundationRuntimeOutput {
+        status: dry_run_status,
+        body: json!({
+            "object": "routecodex.pipeline_dry_run",
+            "kind": "provider_request",
+            "dryRun": true,
+            "evidence": {
+                "stoppedBeforeProviderSend": true,
+                "providerNetworkSend": false,
+                "stoppedBeforeNetworkSend": true,
+                "providerRequestCaptured": !provider_request.is_null()
+            },
+            "providerRequest": provider_request,
+            "dry_run": {
+                "probe_id": "anthropic_relay_provider_request",
+                "server_id": "anthropic_relay",
+                "method": "POST",
+                "path": "/v1/messages",
+                "terminal_effect": "no_network_send",
+                "provider_pipeline_executed": true,
+                "provider_network_send": false,
+                "stopped_before_network_send": true,
+                "stopped_before_provider_send": true,
+                "provider_request": provider_request,
+                "node_ids": output.node_trace,
+                "snapshots": [],
+                "response_payload": output.client_response
+            }
+        }),
+        debug_node: "V3DryRunNoNetworkTerminalEffect",
+        error_node: output
+            .error_chain
+            .as_ref()
+            .map_or("none", |_| "V3Error06ClientProjected"),
+        error_chain: output.error_chain.unwrap_or_default(),
+        node_trace: output.node_trace,
+        stopped_before_provider_send: true,
+    }
 }
 
 pub async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
@@ -378,9 +468,58 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let provider_body = provider_raw.into_body();
     if let V3ProviderResponseBody::Sse(stream) = provider_body {
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-            return Err(V3AnthropicRelayRuntimeError::StructuredSse(
-                "Anthropic Relay Anthropic provider SSE is not implemented".to_string(),
-            ));
+            let stream_observation = V3RuntimeStreamObservation::default();
+            let canonical_response =
+                super::responses_relay_runtime::build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+                    stream,
+                    &stream_observation,
+                )
+                .await
+                .map_err(|error| V3AnthropicRelayRuntimeError::StructuredSse(error.to_string()))?;
+            let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+                canonical_response,
+                V3ProviderRespInbound01RawContext::new(
+                    V3HubEntryProtocol::Anthropic,
+                    V3HubProviderWireProtocol::Responses,
+                    V3HubContinuationOwnership::New,
+                    V3HubExecutionMode::Relay,
+                    V3HubInvocationSource::Client,
+                    V3HubTransportIntent::Sse,
+                )
+                .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
+            );
+            trace.push("V3ProviderRespInbound01Raw");
+            let hooks = compile_v3_hub_relay_response_hooks();
+            let resp02 = hooks.normalize(resp01)?;
+            trace.push("ProviderRespCompat02ProviderCompat");
+            trace.push("V3HubRespInbound02Normalized");
+            let resp03 = hooks.govern(resp02, &response_hook_profile)?;
+            trace.push("V3HubRespChatProcess03Governed");
+            let resp04 = hooks.commit(resp03)?;
+            trace.push("V3HubRespContinuation04Committed");
+            let servertool_followup_required = resp04.previous.servertool_action()
+                == V3HubServertoolResponseAction::FollowupRequired;
+            commit_or_release_local_continuation(
+                local.as_ref(),
+                &requested_local_ids,
+                resp04.finalized_payload(),
+                resp04.action(),
+            )?;
+            let client_events =
+                project_v3_responses_json_as_anthropic_events(resp04.finalized_payload())?;
+            let client_response =
+                V3AnthropicRelaySseProjection::project_after_resp04(client_events);
+            let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
+            trace.push("V3HubRespOutbound05ClientSemantic");
+            let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
+            trace.push("V3ServerRespOutbound06ClientFrame");
+            return Ok(V3AnthropicRelayRuntimeOutput {
+                status: 200,
+                client_response,
+                node_trace: trace,
+                error_chain: None,
+                servertool_followup_required,
+            });
         }
         let projection = project_v3_responses_sse_as_anthropic_events(stream)
             .await
@@ -471,8 +610,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         resp04.finalized_payload(),
         resp04.action(),
     )?;
-    let client_response =
-        project_v3_responses_json_as_anthropic_message(resp04.finalized_payload())?;
+    let client_response = if transport_intent == V3HubTransportIntent::Sse {
+        let client_events =
+            project_v3_responses_json_as_anthropic_events(resp04.finalized_payload())?;
+        V3AnthropicRelaySseProjection::project_after_resp04(client_events)
+    } else {
+        project_v3_responses_json_as_anthropic_message(resp04.finalized_payload())?
+    };
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);

@@ -1,23 +1,28 @@
 use crate::hooks::V3HookRegistry;
 use crate::nodes::*;
+use crate::provider_failure_runtime_policy::{
+    V3ProviderFailureRuntimeHealth, V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS,
+    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+};
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorActionScope, V3ErrorSourceKind,
-    V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry, V3ProviderError,
-    V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
@@ -76,10 +81,61 @@ impl V3ResponsesDirectContinuationState {
     }
 }
 
-struct V3ResponsesDirectContinuationExecution<'a> {
-    state: &'a V3ResponsesDirectContinuationState,
-    scope: V3ResponsesDirectContinuationScope,
+pub struct V3ResponsesDirectRuntimeSharedState<'a> {
+    pub continuation_state: &'a V3ResponsesDirectContinuationState,
+    provider_health: V3ProviderFailureRuntimeHealth,
+}
+
+impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
+    pub fn new<H>(
+        continuation_state: &'a V3ResponsesDirectContinuationState,
+        provider_health: H,
+    ) -> Self
+    where
+        H: Into<V3ProviderFailureRuntimeHealth>,
+    {
+        Self {
+            continuation_state,
+            provider_health: provider_health.into(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct V3ResponsesDirectRuntimeCoreState<'a> {
+    continuation_state: Option<&'a V3ResponsesDirectContinuationState>,
+    continuation_scope: Option<V3ResponsesDirectContinuationScope>,
     now_epoch_ms: u64,
+    provider_health: Option<V3ProviderFailureRuntimeHealth>,
+}
+
+impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
+    fn no_continuation() -> Self {
+        Self {
+            continuation_state: None,
+            continuation_scope: None,
+            now_epoch_ms: 0,
+            provider_health: None,
+        }
+    }
+
+    fn with_continuation(
+        state: &'a V3ResponsesDirectContinuationState,
+        scope: V3ResponsesDirectContinuationScope,
+        now_epoch_ms: u64,
+    ) -> Self {
+        Self {
+            continuation_state: Some(state),
+            continuation_scope: Some(scope),
+            now_epoch_ms,
+            provider_health: None,
+        }
+    }
+
+    fn with_provider_health(mut self, provider_health: V3ProviderFailureRuntimeHealth) -> Self {
+        self.provider_health = Some(provider_health);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -129,11 +185,36 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_d
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        Some(V3ResponsesDirectContinuationExecution {
+        V3ResponsesDirectRuntimeCoreState::with_continuation(
             state,
-            scope: continuation_scope,
+            continuation_scope,
             now_epoch_ms,
-        }),
+        ),
+        manifest,
+        raw,
+        hook_registry,
+        default_responses_transport(),
+        debug,
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
+    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    continuation_scope: V3ResponsesDirectContinuationScope,
+    hook_registry: V3HookRegistry,
+    debug: &V3DebugRuntime,
+    now_epoch_ms: u64,
+) -> V3ResponsesDirectRuntimeOutput {
+    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
+        V3ResponsesDirectRuntimeCoreState::with_continuation(
+            shared_state.continuation_state,
+            continuation_scope,
+            now_epoch_ms,
+        )
+        .with_provider_health(shared_state.provider_health),
         manifest,
         raw,
         hook_registry,
@@ -153,7 +234,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_transport_and_debug
     debug: &V3DebugRuntime,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        None,
+        V3ResponsesDirectRuntimeCoreState::no_continuation(),
         manifest,
         raw,
         hook_registry,
@@ -166,7 +247,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_transport_and_debug
 async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
     T: ResponsesTransport,
 >(
-    continuation: Option<V3ResponsesDirectContinuationExecution<'_>>,
+    state: V3ResponsesDirectRuntimeCoreState<'_>,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     hook_registry: V3HookRegistry,
@@ -183,24 +264,14 @@ async fn execute_v3_responses_direct_runtime_kernel_with_transport_debug_core<
         return debug_error_output("V3Debug02RawRequestCaptured", error, &hook_registry);
     }
 
-    let output = match continuation {
-        Some(continuation) => {
-            execute_v3_responses_direct_runtime_kernel_with_continuation(
-                continuation.state,
-                manifest,
-                raw,
-                continuation.scope,
-                hook_registry,
-                transport,
-                continuation.now_epoch_ms,
-            )
-            .await
-        }
-        None => {
-            execute_v3_responses_direct_runtime_kernel(manifest, raw, hook_registry, transport)
-                .await
-        }
-    };
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        state,
+        manifest,
+        raw,
+        hook_registry,
+        transport,
+    )
+    .await;
 
     for node_id in &output.node_trace {
         if let Err(error) = debug.record_node_event(
@@ -408,13 +479,11 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_core(
-        None,
+        V3ResponsesDirectRuntimeCoreState::no_continuation(),
         manifest,
         raw,
-        None,
         hook_registry,
         transport,
-        0,
     )
     .await
 }
@@ -429,28 +498,30 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: Res
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_core(
-        Some(state),
+        V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms),
         manifest,
         raw,
-        Some(scope),
         hook_registry,
         transport,
-        now_epoch_ms,
     )
     .await
 }
 
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
-    continuation_state: Option<&V3ResponsesDirectContinuationState>,
+    state: V3ResponsesDirectRuntimeCoreState<'_>,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
-    continuation_scope: Option<V3ResponsesDirectContinuationScope>,
     hook_registry: V3HookRegistry,
     transport: &T,
-    now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     require_static_hooks(&hook_registry);
+    let V3ResponsesDirectRuntimeCoreState {
+        continuation_state,
+        continuation_scope,
+        now_epoch_ms,
+        provider_health,
+    } = state;
 
     let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
     trace.push("V3Req04StandardizedResponses");
@@ -515,7 +586,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     };
 
     let target = V3TargetInterpreter::default();
-    let availability = V3ProviderAvailabilityRegistry::from_manifest(manifest);
+    let provider_health =
+        provider_health.unwrap_or_else(|| V3ProviderFailureRuntimeHealth::from_manifest(manifest));
+    let availability = provider_health.clone();
     let mut pinned_selected = if let Some(locator) = pinned {
         let candidate = match target.resolve_exact_provider_model_auth(
             manifest,
@@ -658,6 +731,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         None
     };
     let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::<String, usize>::new();
+    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     loop {
         let attempt_availability = V3RuntimeAttemptAvailability {
             base: &availability,
@@ -665,39 +740,42 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         };
         let selected = match pinned_selected.take() {
             Some(selected) => selected,
-            None => match target.select_available(
-                match expanded.as_ref() {
-                    Some(expanded) => expanded.clone(),
-                    None => {
+            None => match retry_selected.take() {
+                Some(selected) => selected,
+                None => match target.select_available(
+                    match expanded.as_ref() {
+                        Some(expanded) => expanded.clone(),
+                        None => {
+                            return error_output(
+                                runtime_source(
+                                    "V3Target09CandidateSetExpanded",
+                                    "routed candidate set missing",
+                                ),
+                                trace,
+                                &hook_registry,
+                            )
+                        }
+                    },
+                    &attempt_availability,
+                    0,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
                         return error_output(
-                            runtime_source(
-                                "V3Target09CandidateSetExpanded",
-                                "routed candidate set missing",
+                            build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::TargetPoolExhausted,
+                                "V3Target10ConcreteProviderSelected",
+                                "selected_target_exhausted",
+                                format!(
+                                    "{} candidates unavailable",
+                                    error.attempted_candidates.len()
+                                ),
                             ),
                             trace,
                             &hook_registry,
                         )
                     }
                 },
-                &attempt_availability,
-                0,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    return error_output(
-                        build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::TargetPoolExhausted,
-                            "V3Target10ConcreteProviderSelected",
-                            "selected_target_exhausted",
-                            format!(
-                                "{} candidates unavailable",
-                                error.attempted_candidates.len()
-                            ),
-                        ),
-                        trace,
-                        &hook_registry,
-                    )
-                }
             },
         };
         if previous_response_id.is_none() {
@@ -720,10 +798,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     )
                 }
             };
-        let provider_scope = V3ErrorActionScope::ProviderInstance {
-            provider_id: selected.candidate.provider_id.clone(),
-        };
-        let failed_key = candidate_key(&selected.candidate);
         let policy = hook_registry.run_route(selected, &standardized);
         trace.push("V3ResponsesDirect11Policy");
 
@@ -772,7 +846,21 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(error) => {
+                let source = build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3Transport13ResponsesHttpRequest",
+                    "provider_transport_error",
+                    error.to_string(),
+                );
                 if previous_response_id.is_some() {
+                    if let Err(health_error) = record_v3_direct_provider_failure(
+                        &provider_health,
+                        &policy.target,
+                        &source,
+                        now_epoch_ms,
+                    ) {
+                        return error_output(health_error, trace, &hook_registry);
+                    }
                     if let Err(release_error) = release_terminal_failure_locator(
                         continuation_state,
                         previous_response_id.as_deref(),
@@ -789,52 +877,36 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             V3ErrorSourceKind::ProviderFailure,
                             "V3Transport13ResponsesHttpRequest",
                             "pinned_provider_transport_error",
-                            error.to_string(),
+                            source.message.clone(),
                         ),
                         trace,
                         &hook_registry,
                     );
                 }
-                failed_candidates.insert(failed_key);
-                let expanded_candidates = match expanded.as_ref() {
-                    Some(expanded) => &expanded.candidates,
-                    None => {
-                        return error_output(
-                            runtime_source(
-                                "V3Target09CandidateSetExpanded",
-                                "routed candidate set missing",
-                            ),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
-                };
-                let remaining = remaining_available_candidates(
-                    expanded_candidates,
+                match run_v3_direct_provider_failure_policy(
+                    &provider_health,
+                    &hook_registry,
                     &availability,
-                    &failed_candidates,
-                );
-                let projected = hook_registry.run_error(
-                    build_v3_error_01_source_raised(
-                        V3ErrorSourceKind::ProviderFailure,
-                        "V3Transport13ResponsesHttpRequest",
-                        "provider_transport_error",
-                        error.to_string(),
-                    ),
-                    provider_scope,
-                    remaining,
-                );
-                trace.extend(V3_ERROR_CHAIN_NODE_IDS);
-                if projected
-                    .body
-                    .pointer("/error/decision")
-                    .and_then(Value::as_str)
-                    == Some("target_local_reselect")
+                    expanded.as_ref(),
+                    &policy.target,
+                    source,
+                    &mut failed_candidates,
+                    &mut same_candidate_retries,
+                    now_epoch_ms,
+                    &mut trace,
+                )
+                .await
                 {
-                    trace.push("V3TargetLocalReselected");
-                    continue;
+                    Ok(V3DirectProviderFailureDecision::Reselect) => continue,
+                    Ok(V3DirectProviderFailureDecision::RetrySame(selected)) => {
+                        retry_selected = Some(selected);
+                        continue;
+                    }
+                    Ok(V3DirectProviderFailureDecision::Project(projected)) => {
+                        return projected_error_output(projected, trace);
+                    }
+                    Err(source) => return error_output(source, trace, &hook_registry),
                 }
-                return projected_error_output(projected, trace);
             }
         };
         trace.push("V3ProviderResp14Raw");
@@ -843,20 +915,68 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             match hook_registry.run_response_projection(provider_raw).await {
                 Ok(projection) => projection,
                 Err(source) => {
-                    if let Err(error) = release_terminal_failure_locator(
-                        continuation_state,
-                        previous_response_id.as_deref(),
-                    ) {
-                        return error_output(
-                            runtime_source("V3HubRespContinuation04Committed", error),
-                            trace,
-                            &hook_registry,
-                        );
+                    if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
+                        if let Err(error) = release_terminal_failure_locator(
+                            continuation_state,
+                            previous_response_id.as_deref(),
+                        ) {
+                            return error_output(
+                                runtime_source("V3HubRespContinuation04Committed", error),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                        if previous_response_id.is_some() {
+                            trace.push("V3HubRespContinuation04Committed");
+                        }
+                        return error_output(source, trace, &hook_registry);
                     }
                     if previous_response_id.is_some() {
+                        if let Err(health_error) = record_v3_direct_provider_failure(
+                            &provider_health,
+                            &policy.target,
+                            &source,
+                            now_epoch_ms,
+                        ) {
+                            return error_output(health_error, trace, &hook_registry);
+                        }
+                        if let Err(error) = release_terminal_failure_locator(
+                            continuation_state,
+                            previous_response_id.as_deref(),
+                        ) {
+                            return error_output(
+                                runtime_source("V3HubRespContinuation04Committed", error),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
                         trace.push("V3HubRespContinuation04Committed");
+                        return error_output(source, trace, &hook_registry);
                     }
-                    return error_output(source, trace, &hook_registry);
+                    match run_v3_direct_provider_failure_policy(
+                        &provider_health,
+                        &hook_registry,
+                        &availability,
+                        expanded.as_ref(),
+                        &policy.target,
+                        source,
+                        &mut failed_candidates,
+                        &mut same_candidate_retries,
+                        now_epoch_ms,
+                        &mut trace,
+                    )
+                    .await
+                    {
+                        Ok(V3DirectProviderFailureDecision::Reselect) => continue,
+                        Ok(V3DirectProviderFailureDecision::RetrySame(selected)) => {
+                            retry_selected = Some(selected);
+                            continue;
+                        }
+                        Ok(V3DirectProviderFailureDecision::Project(projected)) => {
+                            return projected_error_output(projected, trace);
+                        }
+                        Err(source) => return error_output(source, trace, &hook_registry),
+                    }
                 }
             };
         if let V3RemoteContinuationObservation::Streaming { state } =
@@ -893,6 +1013,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     }
                     other => other,
                 };
+            }
+            if let Err(source) =
+                record_v3_direct_provider_success(&provider_health, &policy.target, now_epoch_ms)
+            {
+                return error_output(source, trace, &hook_registry);
             }
             trace.push("V3Resp15ClientPayload");
 
@@ -983,6 +1108,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 trace.push("V3HubRespContinuation04Committed");
             }
         }
+        if let Err(source) =
+            record_v3_direct_provider_success(&provider_health, &policy.target, now_epoch_ms)
+        {
+            return error_output(source, trace, &hook_registry);
+        }
         trace.push("V3Resp15ClientPayload");
 
         return V3ResponsesDirectRuntimeOutput {
@@ -991,6 +1121,102 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             error_chain: None,
         };
     }
+}
+
+enum V3DirectProviderFailureDecision {
+    Reselect,
+    RetrySame(routecodex_v3_target::V3Target10ConcreteProviderSelected),
+    Project(V3Error06ClientProjected),
+}
+
+fn record_v3_direct_provider_failure(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: &V3Error01SourceRaised,
+    now_epoch_ms: u64,
+) -> Result<(), V3Error01SourceRaised> {
+    provider_health
+        .record_provider_failure(
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            Some(&source.message),
+            now_epoch_ms,
+        )
+        .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
+}
+
+fn record_v3_direct_provider_success(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    now_epoch_ms: u64,
+) -> Result<(), V3Error01SourceRaised> {
+    provider_health
+        .record_provider_success(
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            now_epoch_ms,
+        )
+        .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
+}
+
+async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    hook_registry: &V3HookRegistry,
+    availability: &R,
+    expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    source: V3Error01SourceRaised,
+    failed_candidates: &mut BTreeSet<String>,
+    same_candidate_retries: &mut BTreeMap<String, usize>,
+    now_epoch_ms: u64,
+    trace: &mut Vec<&'static str>,
+) -> Result<V3DirectProviderFailureDecision, V3Error01SourceRaised> {
+    record_v3_direct_provider_failure(provider_health, selected, &source, now_epoch_ms)?;
+
+    let failed_key = candidate_key(&selected.candidate);
+    let expanded_candidates = match expanded {
+        Some(expanded) => &expanded.candidates,
+        None => {
+            return Err(runtime_source(
+                "V3Target09CandidateSetExpanded",
+                "routed candidate set missing",
+            ))
+        }
+    };
+    let mut failed_with_current = failed_candidates.clone();
+    failed_with_current.insert(failed_key.clone());
+    let remaining =
+        remaining_available_candidates(expanded_candidates, availability, &failed_with_current);
+    let provider_scope = V3ErrorActionScope::ProviderInstance {
+        provider_id: selected.candidate.provider_id.clone(),
+    };
+    let projected = hook_registry.run_error(source, provider_scope, remaining);
+    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    if projected
+        .body
+        .pointer("/error/decision")
+        .and_then(Value::as_str)
+        == Some("target_local_reselect")
+    {
+        failed_candidates.insert(failed_key);
+        trace.push("V3TargetLocalReselected");
+        return Ok(V3DirectProviderFailureDecision::Reselect);
+    }
+    if selected.default_floor_protected || selected.candidate.default_pool_member {
+        let retries_done = same_candidate_retries.entry(failed_key).or_insert(0);
+        if *retries_done < V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET {
+            *retries_done = retries_done.saturating_add(1);
+            trace.push("V3DefaultFloorBackoffWait");
+            if V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS > 0 {
+                tokio::time::sleep(Duration::from_millis(V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS))
+                    .await;
+            }
+            return Ok(V3DirectProviderFailureDecision::RetrySame(selected.clone()));
+        }
+    }
+    Ok(V3DirectProviderFailureDecision::Project(projected))
 }
 
 fn release_terminal_failure_locator(
@@ -1553,6 +1779,79 @@ mod tests {
         }
 
         let transport = FirstFailsSecondSucceeds {
+            sends: AtomicUsize::new(0),
+        };
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &reselection_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({"model":"client-model","input":"hello"}),
+            },
+            crate::register_responses_direct_hooks(),
+            &transport,
+        )
+        .await;
+
+        assert_eq!(output.client_payload.status, 200, "{output:?}");
+        assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            output
+                .node_trace
+                .iter()
+                .filter(|node| **node == "V3Router07OpaqueTargetHitOnce")
+                .count(),
+            1
+        );
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    }
+
+    #[tokio::test]
+    async fn provider_response_decode_failure_reselects_without_router_reentry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FirstMalformedSecondSucceeds {
+            sends: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ResponsesTransport for FirstMalformedSecondSucceeds {
+            async fn send(
+                &self,
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+                    assert_eq!(request.provider_id(), "first");
+                    return Ok(V3ProviderResp14Raw::from_json(
+                        request.request_id(),
+                        request.provider_id(),
+                        200,
+                        vec![V3ProviderResponseHeader {
+                            name: "content-type".to_string(),
+                            value: b"application/json".to_vec(),
+                        }],
+                        b"{\"id\":\"broken\"".to_vec(),
+                    ));
+                }
+                assert_eq!(request.provider_id(), "second");
+                assert_eq!(request.body()["model"], "wire-second");
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(),
+                    request.provider_id(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+                ))
+            }
+        }
+
+        let transport = FirstMalformedSecondSucceeds {
             sends: AtomicUsize::new(0),
         };
         let output = execute_v3_responses_direct_runtime_kernel(

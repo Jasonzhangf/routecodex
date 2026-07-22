@@ -1,5 +1,6 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3AnthropicCodecStage {
@@ -216,17 +217,9 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         );
     }
     output.insert("messages".to_string(), Value::Array(messages));
-    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
-        output.insert(
-            "tools".to_string(),
-            Value::Array(
-                tools
-                    .iter()
-                    .filter_map(Value::as_object)
-                    .map(responses_tool_as_anthropic_tool)
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-        );
+    let tools = responses_tools_for_anthropic_wire(object)?;
+    if !tools.is_empty() {
+        output.insert("tools".to_string(), Value::Array(tools));
     }
     if let Some(tool_choice) = object.get("tool_choice") {
         output.insert(
@@ -1273,6 +1266,53 @@ fn responses_tool_output_as_anthropic_content(value: Option<&Value>) -> Value {
         Some(value) => Value::String(serde_json::to_string(value).unwrap_or_default()),
         None => Value::String(String::new()),
     }
+}
+
+fn responses_tools_for_anthropic_wire(
+    object: &Map<String, Value>,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let mut output = Vec::new();
+    let mut seen_names = HashSet::new();
+    append_responses_tools_for_anthropic_wire(object.get("tools"), &mut output, &mut seen_names)?;
+    for item in object
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            append_responses_tools_for_anthropic_wire(
+                item.get("tools"),
+                &mut output,
+                &mut seen_names,
+            )?;
+        }
+    }
+    Ok(output)
+}
+
+fn append_responses_tools_for_anthropic_wire(
+    tools: Option<&Value>,
+    output: &mut Vec<Value>,
+    seen_names: &mut HashSet<String>,
+) -> Result<(), V3AnthropicCodecError> {
+    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
+        let tool_object = tool
+            .as_object()
+            .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
+        let anthropic_tool = responses_tool_as_anthropic_tool(tool_object)?;
+        let name = anthropic_tool
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "tools[].name",
+            })?
+            .to_string();
+        if seen_names.insert(name) {
+            output.push(anthropic_tool);
+        }
+    }
+    Ok(())
 }
 
 fn responses_tool_as_anthropic_tool(

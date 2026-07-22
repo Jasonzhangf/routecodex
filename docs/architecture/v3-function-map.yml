@@ -245,6 +245,7 @@ features:
       - v3/crates/routecodex-v3-provider-responses/src/health.rs
       - v3/crates/routecodex-v3-runtime/src/foundation.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     resource_bindings:
       - v3.request.protocol_context
       - v3.debug.trace_context
@@ -275,6 +276,8 @@ features:
       - v3-de-11
       - v3-de-12
       - v3-de-13
+      - v3-de-14
+      - v3-de-15
     entry_symbols:
       - execute_v3_foundation_pending_runtime
       - execute_v3_responses_direct_dry_run_runtime
@@ -293,6 +296,8 @@ features:
       - V3ProviderHealthStore::record_provider_failure
       - V3ProviderHealthStore::record_provider_success
       - V3ProviderHealthStore::availability
+      - V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET
+      - V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS
     allowed_paths:
       - v3/crates/routecodex-v3-debug
       - v3/crates/routecodex-v3-error
@@ -345,6 +350,9 @@ features:
       - v3.request.normal_payload
       - v3.target.concrete_provider
       - v3.responses_direct.policy
+      - v3.error.chain
+      - v3.provider.health_state
+      - v3.provider.availability_projection
       - v3.response.provider_raw
       - v3.response.client_payload
     mainline_bindings:
@@ -353,10 +361,16 @@ features:
       - v3-rd-14
     entry_symbols:
       - execute_v3_responses_direct_runtime_kernel
+      - execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
+      - V3ResponsesDirectRuntimeSharedState
       - responses_direct_route_hook
       - responses_direct_response_projection_hook
+      - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
       - build_v3_server_16_http_frame_from_v3_resp_15
       - pending_endpoint
+      - multi_listener_server::responses_direct_shared_provider_health_cools_first_provider_after_three_failures
+      - multi_listener_server::responses_direct_provider_request_dry_run_does_not_clear_shared_provider_cooldown
+      - multi_listener_server::responses_direct_last_default_waits_twice_then_projects_on_third_failure
     allowed_paths:
       - v3/crates/routecodex-v3-runtime
       - v3/crates/routecodex-v3-provider-responses
@@ -2070,6 +2084,7 @@ features:
       - execute_v3_responses_relay_runtime
       - execute_v3_responses_relay_runtime_with_local_continuation
       - execute_v3_responses_relay_dry_run_runtime
+      - V3ProviderRequestDryRunNoNetworkTransport
       - V3ResponsesRelayLocalContinuationState
       - V3ResponsesRelayLocalContinuationScope
       - execute_v3_responses_relay_request
@@ -2080,8 +2095,12 @@ features:
       - hub_relay_runtime_closeout::responses_relay_client_json_request_projects_json_even_when_provider_returns_sse
       - multi_listener_server::responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse
       - multi_listener_server::responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send
+      - multi_listener_server::anthropic_messages_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send
       - hub_relay_runtime_closeout::local_continuation_servertool_roundtrip_is_runtime_e2e
       - hub_relay_runtime_closeout::provider_error_closeout_enters_error01_06_without_success_projection
+      - hub_relay_runtime_closeout::responses_relay_provider_response_decode_error_reselects_next_candidate_before_projection
+      - hub_relay_runtime_closeout::responses_relay_default_floor_backoff_sequence_is_fixed_five_seconds
+      - hub_relay_runtime_closeout::responses_relay_default_floor_projects_error_after_retry_cap
       - responses_relay_local_continuation_integration::json_two_turn_restores_tool_call_pairs_output_and_preserves_tools
       - responses_relay_local_continuation_integration::wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
       - verify-v3-hub-relay-runtime-closeout

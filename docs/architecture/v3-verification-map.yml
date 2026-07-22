@@ -760,6 +760,9 @@ features:
       - no relay continuation servertool other protocol V2 compatibility fallback repair sanitize or raw replay
       - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
       - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport with a no-network effect
+      - Direct provider errors enter the shared Error01-06/provider-health policy; success remains passthrough but error policy cannot passthrough
+      - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
+      - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
     required_gates:
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-rust-only
@@ -855,6 +858,7 @@ features:
       - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
       - routecodex-v3-provider-responses provider/auth/model scoped health state and read-only availability
       - routecodex-v3-runtime foundation pending and dry-run kernels
+      - routecodex-v3-runtime provider failure policy constants keep V3 direct and relay retry budgets aligned
     required_contract:
       - Debug/Error/Health remain side-channel resources and cannot enter provider/client success payloads
       - Error generates action plans only; Provider alone mutates health state
@@ -868,6 +872,9 @@ features:
       - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
       - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
       - Provider health scoped action tests prove cross-provider/key/model isolation
+      - Direct shared-health blackbox proves three cross-request failures cool the first provider before network send
+      - Direct dry-run blackbox proves provider-request dry-run does not clear shared provider cooldown
+      - Direct last-default blackbox proves two blocking 5s waits and third-failure client projection
     required_gates:
       - npm run test:v3-debug-contract
       - npm run test:v3-error-contract
@@ -1448,6 +1455,9 @@ features:
       - servertool response hook profile is consumed by Runtime response governance
       - Responses Relay separates provider request transport intent, provider response body kind, and client response projection intent; client `stream=true` remains SSE even if provider raw body is JSON, and client `stream=false` remains JSON even if a controlled provider raw body is SSE
       - provider error enters Error01-06 without Resp01 success projection
+      - provider raw response decode/protocol errors enter the same provider failure policy and reselect before Error06 while alternatives remain
+      - provider-request dry-run uses the shared no-network transport terminal effect for Responses Relay and Anthropic Messages Relay
+      - Responses Relay last default retries exactly twice with fixed 5s delay and projects on the third failure
       - provider/client payloads do not leak session continuation metadata_center resource or routecodex control fields
     required_gates:
       - npm run test:v3-hub-relay-runtime-closeout

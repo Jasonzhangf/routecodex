@@ -18,11 +18,12 @@ use routecodex_v3_error::{
     project_v3_http_boundary_error, V3HttpBoundaryErrorKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_runtime_with_default_transport,
+    build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_dry_run_runtime,
+    execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_responses_direct_dry_run_runtime,
-    execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
+    execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
     execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
@@ -36,7 +37,7 @@ use routecodex_v3_runtime::{
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeInput,
@@ -953,6 +954,59 @@ async fn pending_endpoint(
         }
         return foundation_output_response(output);
     }
+    if is_provider_request_dry_run(&request_headers)
+        && entry_protocol == "anthropic"
+        && execution_mode == V3EntryProtocolExecutionMode::Relay
+    {
+        let output = execute_v3_anthropic_relay_dry_run_runtime(
+            &state.manifest,
+            V3AnthropicRelayRuntimeInput {
+                server_id: state.server.id.clone(),
+                request_id: request_id.clone(),
+                payload: payload.clone(),
+            },
+        )
+        .await;
+        let observability = build_v3_foundation_console_observability(&state, &output);
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &request_headers,
+            &payload,
+        );
+        emit_v3_observability_console_lines(
+            &console_context,
+            output.status,
+            &output.node_trace,
+            &observability,
+            started_at,
+            true,
+        );
+        if let Some(response) = record_v3_live_snapshot_projection(
+            &state,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            output.status,
+            &output.node_trace,
+            "provider_request_dry_run",
+        ) {
+            return response;
+        }
+        if let Some(response) = capture_v3_foundation_runtime_response(
+            &state,
+            &trace_scope,
+            &entry_protocol,
+            execution_mode,
+            &path,
+            &request_id,
+            &output,
+        ) {
+            return response;
+        }
+        return foundation_output_response(output);
+    }
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let output = match execute_v3_openai_chat_completions_request(
             &state.manifest,
@@ -1726,8 +1780,11 @@ async fn execute_responses_direct_server_frame(
         }
     };
     let output =
-        execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(
-            &state.responses_direct_continuation,
+        execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
+            V3ResponsesDirectRuntimeSharedState::new(
+                &state.responses_direct_continuation,
+                state.provider_health.store(),
+            ),
             &state.manifest,
             build_v3_server_03_http_request_raw(
                 state.server.id.clone(),
@@ -2842,6 +2899,38 @@ fn resolve_v3_console_project_path_with_metadata(
     .flatten()
     .or_else(|| read_first_scope_value(turn_metadata, TURN_METADATA_WORKDIR_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
+    .or_else(|| read_v3_environment_context_cwd_from_payload(payload))
+}
+
+fn read_v3_environment_context_cwd_from_payload(payload: &Value) -> Option<String> {
+    for item in payload.get("input").and_then(Value::as_array)? {
+        let Some(parts) = item.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for text in parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+        {
+            if let Some(cwd) = read_v3_environment_context_cwd_from_text(text) {
+                return Some(cwd);
+            }
+        }
+    }
+    None
+}
+
+fn read_v3_environment_context_cwd_from_text(text: &str) -> Option<String> {
+    let start = text.find("<environment_context>")?;
+    let tail = &text[start..];
+    let cwd_start = tail.find("<cwd>")? + "<cwd>".len();
+    let cwd_tail = &tail[cwd_start..];
+    let cwd_end = cwd_tail.find("</cwd>")?;
+    let cwd = cwd_tail[..cwd_end].trim();
+    if cwd.is_empty() {
+        None
+    } else {
+        Some(cwd.to_string())
+    }
 }
 
 fn format_v3_console_line_for_identity(
@@ -5323,6 +5412,38 @@ mod tests {
 
     fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
         format!("{}:{port}", format_v3_console_cwd(project_path))
+    }
+
+    #[test]
+    fn console_project_path_reads_codex_environment_context_cwd() {
+        let payload = json!({
+            "model":"gpt-5.5",
+            "client_metadata": {
+                "x-codex-turn-metadata": "{\"workspaces\":{\"/Volumes/extension/code\":{\"associated_remote_urls\":{\"origin\":\"https://github.com/Jasonzhangf/OneStop.git\"}}}}"
+            },
+            "input": [{
+                "type":"message",
+                "role":"user",
+                "content": [{
+                    "type":"input_text",
+                    "text":"<environment_context>\n  <cwd>/Volumes/extension/code/OneStop</cwd>\n  <shell>zsh</shell>\n  <filesystem><workspace_roots><root>/Volumes/extension/code/OneStop</root></workspace_roots></filesystem>\n</environment_context>"
+                }]
+            }]
+        });
+        let headers = HeaderMap::new();
+
+        assert_eq!(
+            resolve_v3_console_project_path(&headers, &payload).as_deref(),
+            Some("/Volumes/extension/code/OneStop")
+        );
+        assert_eq!(
+            format_v3_console_monitor_prefix(
+                "5555",
+                "/v1/responses",
+                resolve_v3_console_project_path(&headers, &payload).as_deref()
+            ),
+            "[5555] [responses] cwd=/Volumes/extension/code/OneStop"
+        );
     }
 
     #[test]
