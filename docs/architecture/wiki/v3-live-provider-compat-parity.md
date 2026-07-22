@@ -37,7 +37,7 @@ The machine manifest covers every endpoint and transport pair:
 | --- | --- | --- | --- |
 | Responses Direct | controlled + live verified | controlled + live verified | controlled + live verified for client-facing WebSocket |
 | Responses Relay | controlled + live verified | controlled + live verified | controlled verified, live pending |
-| Anthropic Messages | controlled verified, final 5555 profile blocker | controlled verified, final 5555 profile blocker | blocked: no entry contract |
+| Anthropic Messages | controlled + current 5555 live verified | controlled + current 5555 live verified | blocked: no entry contract |
 | OpenAI Chat Completions | controlled + live verified | controlled + live verified | blocked: no entry contract |
 | Gemini Generate Content | controlled verified, final 5555 profile blocker | controlled verified, final 5555 profile blocker | blocked: no entry contract |
 
@@ -67,12 +67,28 @@ It also tracks selector absence for the currently exposed `gpt-5.5` catalog:
 Current blockers are explicit and must not be silently converted into readiness:
 
 - responses_relay_live_verified: /v1/responses Relay source binding, controlled Server entry, and live JSON/SSE provider replay are verified.
-- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for pending Anthropic, Gemini, and live 401/403/5xx/timeout cases.
-- anthropic_messages_live_replay_pending: Anthropic Messages JSON/SSE is not enabled in the final 5555 profile.
+- anthropic_messages_live_verified_current_5555: Anthropic Messages JSON and SSE are enabled and live verified on the current multi-provider 5555 profile.
+- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for Responses Relay WebSocket v2, Gemini, remote continuation, and live 401/403/5xx/timeout cases.
 - gemini_generate_content_live_replay_pending: Gemini Generate Content JSON/SSE remains outside the final 5555 profile.
-- final_5555_profile_anthropic_endpoint_not_enabled and final_5555_profile_gemini_endpoint_not_enabled: live 5555 returned typed endpoint_not_enabled errors for protocols excluded from the final responses + openai_chat profile.
+- final_5555_profile_gemini_endpoint_not_enabled: Gemini remains outside the current 5555 endpoint profile and retains the typed endpoint_not_enabled blocker.
 
-Live audit on 2026-07-16T03:41:00Z used the globally installed managed V3 5555 profile with endpoints responses and openai_chat. Evidence is recorded in .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json. It verified /v1/models for gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, and gpt-5.6-luna with required Codex capability fields, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat Relay JSON/SSE against the real provider. Anthropic Messages and Gemini Generate Content returned explicit endpoint_not_enabled because the final 5555 profile does not declare those endpoints. The audit status is live_v3_provider_replay_partial_verified; it is not a full production cutover, live config mutation, or P6 deletion claim.
+## Current 5555 Multi-Provider Profile
+
+The 2026-07-22T17:22:53Z audit is the current 5555 truth. Globally installed RouteCodex `0.90.3971` reports `server_id=responses_v3_5555`, `manifest_version=3`, and a healthy V3 listener. The profile enables `responses` and `anthropic` entries and routes across `minimax_openai`, `minimax_anthropic`, `glmrelay_openai`, and `glmrelay_anthropic`. The default pool remains weighted MiniMax OpenAI + Anthropic; the non-default pools intentionally include GLMRelay targets.
+
+Anthropic Messages JSON provider-request dry-run stopped before provider send with `providerNetworkSend=false`, and the live JSON request returned HTTP 200 `type=message`. Anthropic Messages SSE provider-request dry-run preserved `stream=true`, `streamIntent=sse`, and `Accept: text/event-stream` while still stopping before provider send. The live SSE request returned HTTP 200 `text/event-stream` with `message_start`, `content_block_delta`, and `message_stop`, and no error event. Evidence:
+
+- `.agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-dryrun-messages-20260722T164017Z.summary.json`
+- `.agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-messages-json2-20260722T164155Z.summary.json`
+- `.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-dryrun-messages-sse-20260722T172253Z.summary.json`
+- `.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-messages-sse-20260722T172233Z.summary.json`
+- `.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log`
+
+This audit did not mutate provider config, credentials, or live config. It did not use any start/server-start/run-managed-child lifecycle command. If a lifecycle action is required, the only allowed command for this aggregate listener is `routecodex restart --port 5555`.
+
+## Historical Audits
+
+The 2026-07-16T03:41:00Z audit used an older managed V3 profile with responses and openai_chat entries. Evidence is recorded in `.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json`. It verified `/v1/models`, Responses Direct JSON/SSE/client WebSocket, and OpenAI Chat Relay JSON/SSE against the real provider. Its Anthropic exclusion applied only to that historical profile and is superseded by the current 5555 evidence above; Gemini remains excluded. The audit status remains `live_v3_provider_replay_partial_verified`, not a full production cutover, live config mutation, or P6 deletion claim.
 
 Current 2026-07-21 catalog ceiling supersedes the old gpt-5.6 exposure for new `/v1/models` responses: RouteCodex exposes Codex built-ins only through `gpt-5.5` until the gpt-5.6 client surface is explicitly enabled.
 
@@ -98,4 +114,4 @@ Responses Direct fresh live recheck on 2026-07-16T12:20:33Z used a temporary nat
 
 ## Completion Boundary
 
-This closeout proves a partial live 5555 provider replay after authorized global install, managed V3 restart, temporary non-production Direct replay, and final live profile responses + openai_chat restoration. It includes Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, /v1/models, and OpenAI Chat Relay JSON/SSE. It also records controlled provider-failure evidence for 401/403/5xx/timeout reroute/default-pool behavior. It does not prove two-turn remote continuation/tool_outputs exact-pin live replay, credential mutation, P6 deletion, Anthropic/Gemini live replay, live 401/403/5xx/timeout provider failures, or full production cutover. A follow-up provider-side WebSocket v2 probe found 0 HTTP 101 upgrades across 13 configured Responses providers and 52 candidate endpoints, so remote continuation remains blocked by provider/profile endpoint availability rather than by this live compat matrix.
+This closeout proves a partial live 5555 provider replay after authorized global install and managed V3 restart evidence, plus the current read-only multi-provider audit. It includes Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, Anthropic Messages JSON/SSE, `/v1/models`, and OpenAI Chat Relay JSON/SSE. It also records controlled provider-failure evidence for 401/403/5xx/timeout reroute/default-pool behavior. It does not prove two-turn remote continuation/tool_outputs exact-pin live replay, credential mutation, P6 deletion, Gemini live replay, live 401/403/5xx/timeout provider failures, or full production cutover. A follow-up provider-side WebSocket v2 probe found 0 HTTP 101 upgrades across 13 configured Responses providers and 52 candidate endpoints, so remote continuation remains blocked by provider/profile endpoint availability rather than by this live compat matrix.

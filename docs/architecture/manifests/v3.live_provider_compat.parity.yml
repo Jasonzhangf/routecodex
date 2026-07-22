@@ -99,8 +99,8 @@ cases:
     scenario_groups: [text, tool, error]
     owner_feature_id: v3.anthropic_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-anthropic-relay-runtime-integration, npm run verify:v3-anthropic-relay-runtime-integration] }
-    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_anthropic_endpoint_not_enabled, live_anthropic_messages_json_provider_replay_pending] }
-    production: { status: blocked, blockers: [live_anthropic_provider_compat_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-dryrun-messages-20260722T164017Z.summary.json, .agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-messages-json2-20260722T164155Z.summary.json, .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: anthropic_messages_sse_http
     endpoint: anthropic_messages
     protocol: anthropic
@@ -109,8 +109,8 @@ cases:
     scenario_groups: [text, tool, error]
     owner_feature_id: v3.anthropic_relay_runtime_integration
     controlled_evidence: { status: controlled_verified, refs: [docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml, docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md], gates: [npm run test:v3-anthropic-relay-runtime-integration, npm run verify:v3-anthropic-relay-runtime-integration] }
-    live_evidence: { status: blocker, refs: [.agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json], blockers: [final_5555_profile_anthropic_endpoint_not_enabled, live_anthropic_messages_sse_provider_replay_pending] }
-    production: { status: blocked, blockers: [live_anthropic_provider_compat_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-dryrun-messages-sse-20260722T172253Z.summary.json, .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-messages-sse-20260722T172233Z.summary.json, .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: anthropic_messages_websocket_v2
     endpoint: anthropic_messages
     protocol: anthropic
@@ -222,10 +222,38 @@ capability_cases:
     selector_absence_fields: [use_responses_lite, tool_mode]
 production_blockers:
   - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
-  - { blocker_id: anthropic_messages_live_replay_pending, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: MEMORY.md }
   - { blocker_id: gemini_generate_content_live_replay_pending, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: docs/architecture/manifests/v3.live_provider_compat.parity.yml }
-  - { blocker_id: final_5555_profile_anthropic_endpoint_not_enabled, owner_feature_id: v3.anthropic_relay_runtime_integration, evidence: .agent-collab/runs/20260716T032203Z-Macstudio.local-73370-compatresume/logs/live-provider-matrix-20260716T033635Z/summary.json }
   - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt }
+current_5555_profile_audit:
+  timestamp: 2026-07-22T17:22:53Z
+  status: current_5555_multi_provider_profile_partial_verified
+  routecodex_version: 0.90.3971
+  server_id: responses_v3_5555
+  manifest_version: 3
+  lifecycle_command_used_for_this_audit: none
+  allowed_lifecycle_command_if_needed: routecodex restart --port 5555
+  forbidden_lifecycle_commands_used: []
+  endpoints_enabled: [responses, anthropic]
+  providers:
+    - glmrelay_anthropic
+    - glmrelay_openai
+    - minimax_anthropic
+    - minimax_openai
+  route_pools:
+    anthropic_entry: [glmrelay_anthropic.key1.glm-5.2, minimax_anthropic.key1.MiniMax-M3]
+    default: [minimax_anthropic.key1.MiniMax-M3, minimax_openai.key1.MiniMax-M3]
+    coding: [minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.glm-5.2, glmrelay_openai.key1.deepseek-v4-pro]
+    longcontext: [glmrelay_openai.key1.glm-5.2, minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.deepseek-v4-pro]
+    search: [minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.glm-5.2, glmrelay_openai.key1.deepseek-v4-pro]
+    thinking: [glmrelay_openai.key1.glm-5.2, minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.deepseek-v4-pro]
+    web_search: [minimax_openai.key1.MiniMax-M3, minimax_anthropic.key1.MiniMax-M3, glmrelay_openai.key1.glm-5.2, glmrelay_openai.key1.deepseek-v4-pro]
+  evidence:
+    health_and_pool_status: .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log
+    messages_json_dryrun_no_send: .agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-dryrun-messages-20260722T164017Z.summary.json
+    messages_json_live_200: .agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-messages-json2-20260722T164155Z.summary.json
+    messages_sse_dryrun_no_send: .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-dryrun-messages-sse-20260722T172253Z.summary.json
+    messages_sse_live_200: .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-messages-sse-20260722T172233Z.summary.json
+  finding: Current 5555 is a V3 multi-provider profile with responses and anthropic endpoints enabled. Anthropic Messages JSON and SSE are live_verified on current 5555; the old Anthropic endpoint_not_enabled blocker is stale and must not be reintroduced. Gemini remains outside the current 5555 endpoint profile. No provider config or credential was mutated, no live config was changed, and no start/server-start/run-managed-child lifecycle command was used for this audit.
 live_read_only_audit:
   timestamp: 2026-07-16T12:21:44Z
   command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml; Responses Direct fresh replay used a temporary native V3 direct config generated from the current V2 config, then removed after restoring /Volumes/extension/.rcc/config.5555.v2.toml
@@ -255,11 +283,14 @@ completion_boundary:
   matrix_contract: true
   controlled_source_evidence_indexed: true
   live_provider_evidence_indexed: true
+  current_5555_multi_provider_profile: true
+  anthropic_messages_current_5555_live_verified: true
   production_ready_claim: false
   remote_continuation_two_turn_live: false
   remote_continuation_provider_ws_probe: .agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json
   remote_continuation_provider_ws_opened_count: 0
   live_config_mutation: false
+  start_lifecycle_used_for_item3: false
   temporary_non_production_direct_config_emitted_removed: true
   global_install_restart: true
   p6_deletion: false

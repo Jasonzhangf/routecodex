@@ -4268,3 +4268,16 @@ Tags: #v3 #anthropic-relay #glmrelay #sse #tool-use #source-temp-only
 - Live stopless probes must include real session scope (`client_metadata.session_id/thread_id` or Codex equivalent). Missing-session lightweight curl requests intentionally do not write StoplessCenter/stopless control and cannot be used as stopless injection evidence.
 - Installed V3 5555 evidence after `routecodex restart --port 5555`: old stopless sample provider-request dry-run preserved original Codex system/tools, appended exactly-one `reasoningStop`, upgraded `tool_choice` to `required`, and leaked no stopless CLI artifacts; a scoped real live probe returned `requires_action` with `exec_command`/`tool_calls` rather than text-only natural stop.
 Tags: #v3 #5555 #stopless #reasoningStop #tool-choice #live-verified
+
+## 2026-07-23 — V3 stopless 5555 tool-surface truth
+- V3 stopless live 5555 “model does not call tools” can be caused by provider wire missing restored tool declarations, not by SSE truncation. For Responses→Anthropic relay, restored `input[].type=additional_tools.tools` must be projected to Anthropic top-level `tools`, preserving original tools and adding exactly one `reasoningStop`.
+- Anthropic `finish_reason=end_turn` is a stopless natural-stop equivalent to `stop`; response hook must project it to stopless `requires_action` when stopless is active.
+- Online black-box evidence location: `.agent-collab/runs/20260722T162222Z-Macstudio.local-95840-stopless-anthropic-tools/live-probes-after-global-3971/`. Provider dry-runs show `exec`, `wait`, `request_user_input`, and one `reasoningStop` visible before provider send, with no stopless/control/bridge leaks.
+
+## 2026-07-23 V3 current 5555 live compat matrix truth
+- Current 5555 compatibility matrix truth is the live profile, not stale historical endpoint blockers. As of RouteCodex `0.90.3971`, 5555 is V3 `responses_v3_5555` with enabled `responses` + `anthropic` entries and intentional multi-provider routing across MiniMax OpenAI/Anthropic plus GLMRelay OpenAI/Anthropic. Do not collapse this profile to MiniMax-only.
+- Anthropic Messages JSON and SSE are current 5555 live_verified: JSON provider-request dry-run no-sends and live JSON returns HTTP 200 `type=message`; SSE provider-request dry-run preserves `stream=true`/`streamIntent=sse` and no-sends; live SSE returns HTTP 200 `text/event-stream` with `message_start`, `content_block_delta`, and `message_stop`.
+- Matrix/verifier rule: stale `final_5555_profile_anthropic_endpoint_not_enabled` and `anthropic_messages_live_replay_pending` must not be reintroduced for current 5555. Gemini endpoint blocker, Responses Relay WebSocket v2, remote continuation, and natural/authorized live 401/403/5xx/timeout samples remain pending.
+- Lifecycle rule for this area: do not use start/server-start/run-managed-child for V3 5555 validation. If lifecycle mutation is required, use only aggregate `routecodex restart --port 5555`.
+- Evidence run: `.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/` plus prior P0 run `.agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/`.
+Tags: #v3 #5555 #live-compat-matrix #anthropic-messages #multi-provider #restart-only

@@ -2359,10 +2359,17 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
       - git diff --check
-    runtime_status: matrix_contract_only
+    runtime_status: partial_live_provider_replay_verified
+    runtime_evidence:
+      - current 5555 V3 multi-provider profile health and pool status are recorded in .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log
+      - current Anthropic Messages JSON dry-run/live evidence is recorded under .agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/
+      - current Anthropic Messages SSE dry-run/live evidence is recorded under .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/
     pending_runtime:
-      - live provider replay matrix
+      - remaining live provider replay matrix
       - inbound Responses WebSocket live replay
+      - Gemini Generate Content live replay
+      - two-turn remote continuation exact-pin replay
+      - natural or authorized live 401 403 5xx timeout provider-error samples
       - provider verified Responses WebSocket v2 endpoint
       - live Relay cutover
 

@@ -61,6 +61,29 @@ const requiredSelectorAbsenceFields = [
   'use_responses_lite',
   'tool_mode',
 ];
+const requiredCurrentProfileProviders = [
+  'glmrelay_anthropic',
+  'glmrelay_openai',
+  'minimax_anthropic',
+  'minimax_openai',
+];
+const requiredCurrentProfilePools = [
+  'anthropic_entry',
+  'coding',
+  'default',
+  'longcontext',
+  'search',
+  'thinking',
+  'web_search',
+];
+const forbiddenCurrentAnthropicBlockerText = [
+  'final_5555_profile_anthropic_endpoint_not_enabled',
+  'anthropic_messages_live_replay_pending',
+  'Anthropic Messages final-profile endpoint_not_enabled',
+  'Anthropic Messages JSON/SSE is not enabled',
+  'protocols excluded from the final responses + openai_chat profile',
+  'final live profile responses + openai_chat',
+];
 
 if (manifest.lifecycle_id !== 'v3.live_provider_compat.parity') {
   failures.push(manifestPath + ': lifecycle_id mismatch');
@@ -82,6 +105,11 @@ if (manifest.completion_boundary?.production_ready_claim !== false
     || manifest.completion_boundary?.global_install_restart !== true) {
   failures.push(manifestPath + ': completion boundary must record global install/restart live closeout without live config mutation or full production cutover');
 }
+if (manifest.completion_boundary?.current_5555_multi_provider_profile !== true
+    || manifest.completion_boundary?.anthropic_messages_current_5555_live_verified !== true
+    || manifest.completion_boundary?.start_lifecycle_used_for_item3 !== false) {
+  failures.push(manifestPath + ': completion boundary must lock current multi-provider Anthropic live evidence and no start lifecycle use');
+}
 if (manifest.live_read_only_audit?.status !== 'live_v3_provider_replay_partial_verified') {
   failures.push(manifestPath + ': live audit must record partial V3 provider replay verification');
 }
@@ -91,8 +119,49 @@ if (!(manifest.verification_gates ?? []).includes('npm run verify:provider-failu
 if (!String(manifest.live_read_only_audit?.finding ?? '').includes('Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, and OpenAI Chat Relay JSON/SSE')) {
   failures.push(manifestPath + ': live audit must name the verified V3 5555 live replay surface');
 }
-if (!String(manifest.live_read_only_audit?.finding ?? '').includes('endpoint_not_enabled')) {
-  failures.push(manifestPath + ': live audit must record final-profile endpoint_not_enabled blockers');
+
+const currentProfile = manifest.current_5555_profile_audit;
+if (currentProfile?.status !== 'current_5555_multi_provider_profile_partial_verified') {
+  failures.push(manifestPath + ': current_5555_profile_audit must record the current multi-provider partial verification status');
+}
+if (currentProfile?.server_id !== 'responses_v3_5555'
+    || currentProfile?.manifest_version !== 3) {
+  failures.push(manifestPath + ': current_5555_profile_audit must bind the V3 5555 server identity');
+}
+if (currentProfile?.lifecycle_command_used_for_this_audit !== 'none'
+    || currentProfile?.allowed_lifecycle_command_if_needed !== 'routecodex restart --port 5555'
+    || !Array.isArray(currentProfile?.forbidden_lifecycle_commands_used)
+    || currentProfile.forbidden_lifecycle_commands_used.length !== 0) {
+  failures.push(manifestPath + ': current audit must use no lifecycle command and allow only routecodex restart --port 5555 if needed');
+}
+for (const endpoint of ['responses', 'anthropic']) {
+  requireArrayText(currentProfile?.endpoints_enabled, endpoint, 'current_5555_profile_audit.endpoints_enabled');
+}
+for (const provider of requiredCurrentProfileProviders) {
+  requireArrayText(currentProfile?.providers, provider, 'current_5555_profile_audit.providers');
+}
+for (const pool of requiredCurrentProfilePools) {
+  if (!Array.isArray(currentProfile?.route_pools?.[pool])
+      || currentProfile.route_pools[pool].length === 0) {
+    failures.push(manifestPath + ': current 5555 profile missing non-empty route pool ' + pool);
+  }
+}
+for (const evidenceKey of [
+  'health_and_pool_status',
+  'messages_json_dryrun_no_send',
+  'messages_json_live_200',
+  'messages_sse_dryrun_no_send',
+  'messages_sse_live_200',
+]) {
+  if (!String(currentProfile?.evidence?.[evidenceKey] ?? '').startsWith('.agent-collab/runs/')) {
+    failures.push(manifestPath + ': current 5555 profile missing run evidence ' + evidenceKey);
+  }
+}
+const currentFinding = String(currentProfile?.finding ?? '');
+if (!currentFinding.includes('Anthropic Messages JSON and SSE are live_verified')
+    || !currentFinding.includes('multi-provider')
+    || !currentFinding.includes('no start/server-start/run-managed-child')) {
+  failures.push(manifestPath + ': current 5555 finding must name multi-provider Anthropic JSON/SSE live evidence and no start lifecycle use');
 }
 
 for (const endpoint of expectedEndpoints) requireArrayText(manifest.axes?.endpoints, endpoint, 'axes.endpoints');
@@ -114,6 +183,21 @@ for (const relayCaseId of ['responses_relay_json_http', 'responses_relay_sse_htt
   const relayCase = cases.find((entry) => entry.id === relayCaseId);
   if (!relayCase || relayCase.live_evidence?.status !== 'live_verified' || relayCase.production?.status !== 'ready') {
     failures.push(manifestPath + ': Responses Relay live case must be live_verified and ready after 5555 replay ' + relayCaseId);
+  }
+}
+for (const anthropicCaseId of ['anthropic_messages_json_http', 'anthropic_messages_sse_http']) {
+  const anthropicCase = cases.find((entry) => entry.id === anthropicCaseId);
+  if (!anthropicCase || anthropicCase.live_evidence?.status !== 'live_verified' || anthropicCase.production?.status !== 'ready') {
+    failures.push(manifestPath + ': Anthropic Messages current 5555 case must be live_verified and ready ' + anthropicCaseId);
+    continue;
+  }
+  const refs = anthropicCase.live_evidence?.refs ?? [];
+  if (!refs.some((ref) => String(ref).includes('20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix'))
+      && anthropicCaseId === 'anthropic_messages_sse_http') {
+    failures.push(manifestPath + ': Anthropic Messages SSE case must cite current 5555 SSE run evidence');
+  }
+  if (refs.some((ref) => String(ref).includes('20260716T032203Z-Macstudio.local-73370-compatresume'))) {
+    failures.push(manifestPath + ': Anthropic Messages current case must not cite stale endpoint_not_enabled evidence ' + anthropicCaseId);
   }
 }
 
@@ -183,13 +267,17 @@ else {
 
 for (const blocker of [
   'live_provider_replay_matrix_pending',
-  'anthropic_messages_live_replay_pending',
   'gemini_generate_content_live_replay_pending',
-  'final_5555_profile_anthropic_endpoint_not_enabled',
   'final_5555_profile_gemini_endpoint_not_enabled',
 ]) {
   if (!(manifest.production_blockers ?? []).some((entry) => entry.blocker_id === blocker)) {
     failures.push(manifestPath + ': missing production blocker ' + blocker);
+  }
+}
+for (const blocker of manifest.production_blockers ?? []) {
+  if (['anthropic_messages_live_replay_pending', 'final_5555_profile_anthropic_endpoint_not_enabled']
+    .includes(blocker.blocker_id)) {
+    failures.push(manifestPath + ': stale current Anthropic production blocker reintroduced ' + blocker.blocker_id);
   }
 }
 
@@ -242,10 +330,21 @@ for (const phrase of [
 for (const phrase of [
   'live_provider_replay_matrix_pending',
   'responses_relay_live_verified',
-  'anthropic_messages_live_replay_pending',
+  'anthropic_messages_live_verified_current_5555',
   'gemini_generate_content_live_replay_pending',
   'npm run verify:provider-failure-ban-blackbox',
 ]) requireText(wiki, wikiPath, phrase);
+for (const [path, text] of [
+  [manifestPath, readFileSync(manifestPath, 'utf8')],
+  [wikiPath, wiki],
+  [planPath, plan],
+]) {
+  for (const forbidden of forbiddenCurrentAnthropicBlockerText) {
+    if (text.includes(forbidden)) {
+      failures.push(path + ': stale current Anthropic blocker text reintroduced: ' + forbidden);
+    }
+  }
+}
 for (const phrase of [
   'scenarioTimeout',
   'production_credentials_must_not_be_mutated_for_auth_error',
@@ -262,6 +361,9 @@ function validateEvidence(evidence, label, caseId) {
   const statuses = ['controlled_verified', 'live_verified', 'live_pending', 'pending', 'blocker'];
   if (!evidence || !statuses.includes(evidence.status)) {
     failures.push(manifestPath + ': invalid ' + label + ' status in case ' + caseId);
+  }
+  if (label === 'live_evidence' && evidence?.status === 'controlled_verified') {
+    failures.push(manifestPath + ': live_evidence must not reuse controlled evidence status in case ' + caseId);
   }
   if (!Array.isArray(evidence.refs)) {
     failures.push(manifestPath + ': ' + label + '.refs must be an array in case ' + caseId);

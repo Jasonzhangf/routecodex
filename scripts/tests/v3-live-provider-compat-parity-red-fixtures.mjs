@@ -68,6 +68,54 @@ const cases = [
     diagnostic: /missing npm run verify:provider-failure-ban-blackbox/,
   },
   {
+    name: 'stale Anthropic endpoint blocker reintroduced',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      doc.production_blockers.push({
+        blocker_id: 'final_5555_profile_anthropic_endpoint_not_enabled',
+        owner_feature_id: 'v3.anthropic_relay_runtime_integration',
+        evidence: 'stale',
+      });
+    },
+    diagnostic: /stale current Anthropic production blocker reintroduced final_5555_profile_anthropic_endpoint_not_enabled/,
+  },
+  {
+    name: 'current 5555 provider removed',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      doc.current_5555_profile_audit.providers = doc.current_5555_profile_audit.providers
+        .filter((provider) => provider !== 'glmrelay_anthropic');
+    },
+    diagnostic: /missing glmrelay_anthropic in current_5555_profile_audit\.providers/,
+  },
+  {
+    name: 'Anthropic JSON current evidence downgraded to blocker',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      const target = doc.cases.find((entry) => entry.id === 'anthropic_messages_json_http');
+      target.live_evidence = {
+        status: 'blocker',
+        refs: [],
+        blockers: ['live_anthropic_messages_json_provider_replay_pending'],
+      };
+      target.production = {
+        status: 'blocked',
+        blockers: ['live_anthropic_provider_compat_pending'],
+      };
+    },
+    diagnostic: /Anthropic Messages current 5555 case must be live_verified and ready anthropic_messages_json_http/,
+  },
+  {
+    name: 'live evidence confused with controlled evidence',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      const target = doc.cases.find((entry) => entry.id === 'anthropic_messages_sse_http');
+      target.live_evidence.status = 'controlled_verified';
+      target.production = { status: 'ready', blockers: [] };
+    },
+    diagnostic: /live_evidence must not reuse controlled evidence status in case anthropic_messages_sse_http/,
+  },
+  {
     name: 'codex capability field removed',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
     mutateYaml: (doc) => {
