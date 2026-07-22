@@ -421,16 +421,17 @@ function summarizeProviderDryRun(response, expectedPrompt) {
     : true;
   const structuredStoplessLeaks = collectStructuredStoplessLeaks(providerBody);
   const structuredControlLeaks = collectStructuredControlLeaks(providerBody);
+  const providerVisibleBridgeLeaks = collectProviderVisibleBridgeLeaks(providerBody);
   const guidanceText = extractProviderGuidanceText(providerBody);
   const guidance = typeof guidanceText === 'string'
     && [
+      '当前轮继续推进准则',
+      '继续当前目标',
       'reasoningStop',
-      '<rcc_stop_schema>',
-      'stopreason',
-      'has_evidence',
+      'stopreason=0',
+      'stopreason=1',
+      'stopreason=2',
       'evidence',
-      'current_goal',
-      'next_step',
       'needs_user_input'
     ].every((token) => guidanceText.includes(token));
   const stoppedBeforeProviderSend = dryBody?.stoppedBeforeProviderSend === true
@@ -470,6 +471,7 @@ function summarizeProviderDryRun(response, expectedPrompt) {
     lastUserMatchesExpected,
     structuredStoplessLeaks,
     structuredControlLeaks,
+    providerVisibleBridgeLeaks,
     ok: response.status === 200
       && objectOk
       && stoppedBeforeProviderSend
@@ -482,6 +484,7 @@ function summarizeProviderDryRun(response, expectedPrompt) {
       && lastUserMatchesExpected
       && structuredStoplessLeaks.length === 0
       && structuredControlLeaks.length === 0
+      && providerVisibleBridgeLeaks.length === 0
   };
 }
 
@@ -615,6 +618,28 @@ function collectStructuredControlLeaks(value) {
     }
   });
   return leaks;
+}
+
+function collectProviderVisibleBridgeLeaks(value) {
+  const serialized = JSON.stringify(value ?? {});
+  const forbidden = [
+    'call_stopless_reasoning',
+    'routecodex hook run reasoningStop',
+    '--input-json',
+    'no-op',
+    'CLI',
+    'client tool round',
+    '客户端工具轮',
+    'finish_reason=stop',
+    '上一轮 reasoningStop CLI',
+    '不是工具结果',
+    'RouteCodex stopless continuation',
+    '连续第',
+    '最多 3 次',
+    '续轮上限',
+    '连续 stop 次数'
+  ];
+  return forbidden.filter((token) => serialized.includes(token));
 }
 
 function walkJson(value, path, visit) {
@@ -791,19 +816,37 @@ async function main() {
       const finalResume = report.resumeChain.at(-1);
       const providerDryRunsOk = report.providerDryRuns.length === 2
         && report.providerDryRuns.every((dryRun) => dryRun.ok === true);
+      const finalOutputText = typeof finalResume?.outputText === 'string'
+        ? finalResume.outputText.trim()
+        : '';
+      const finalExposesInternalGuardState = finalOutputText.includes('Stopless 已达到连续自动续轮上限')
+        || finalOutputText.includes('连续自动续轮上限')
+        || finalOutputText.includes('连续 stop 次数');
       const completedTwoRoundLoop = report.resumeChain.length === 2
         && providerDryRunsOk
         && firstResume?.hasExecCommand === true
         && firstResume?.isStopMessageAutoExecCommand === true
         && finalResume?.responseStatus === 'completed'
-        && finalResume?.leakedStopSchema !== true
+        && finalResume?.hasExecCommand === false
+        && finalResume?.leakedStopSchema === false
+        && finalExposesInternalGuardState === false
+        && !finalResume?.errorCode;
+      const guardTerminalPassThrough = report.resumeChain.length === 2
+        && providerDryRunsOk
+        && firstResume?.hasExecCommand === true
+        && firstResume?.isStopMessageAutoExecCommand === true
+        && finalResume?.responseStatus === 'completed'
+        && finalResume?.hasExecCommand === false
+        && finalExposesInternalGuardState === false
         && !finalResume?.errorCode;
       report.finalStatus = completedTwoRoundLoop
         ? 'completed'
-        : 'invalid_stopless_continuation_loop';
+        : guardTerminalPassThrough
+          ? 'guard_passthrough'
+          : 'invalid_stopless_continuation_loop';
       await fs.writeFile(outputPath, JSON.stringify(report, null, 2));
       console.log(JSON.stringify(report, null, 2));
-      if (!completedTwoRoundLoop) {
+      if (!completedTwoRoundLoop && !guardTerminalPassThrough) {
         process.exitCode = 3;
       }
       return;

@@ -79,4 +79,30 @@ describe('stopless live probe SSE closeout parsing', () => {
     expect(summary.reasoningStopToolCallId).toBe('call_reasoning_stop_1');
     expect(summary.reasoningStopArguments).toContain('"stopreason":"2"');
   });
+
+  test('completed continuation is not accepted when stop schema leaked as plain text', () => {
+    const summary = summarizeAttempt('submit_tool_outputs', 2, {
+      status: 200,
+      body: {
+        id: 'resp_leaked_stop_schema',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [
+              {
+                type: 'output_text',
+                text: '{"stopreason":2,"reason":"继续推进"}'
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    expect(summary.responseStatus).toBe('completed');
+    expect(summary.hasExecCommand).toBe(false);
+    expect(summary.leakedStopSchema).toBe(true);
+  });
 });

@@ -31,6 +31,12 @@ registration must call these protocol-owned transformations through the fixed Hu
 
 - JSON request preserves Anthropic messages, tool_use, tool_result, tools, system blocks, and
   thinking/reasoning fields.
+- Responses-to-Anthropic provider-wire request preserves replay-safe tool context while normalizing
+  Responses builtin tool declarations (`tool_search`, `web_search`) into Anthropic-safe named tools
+  and Anthropic object-shaped `tool_choice`.
+- Responses-to-Anthropic provider-wire request groups consecutive Responses `function_call` /
+  `custom_tool_call` items into one Anthropic assistant `tool_use` message and the immediately
+  following outputs into one user `tool_result` message, so Anthropic sees valid tool-result order.
 - SSE response characterization preserves transport intent without materializing or reframing an
   event stream.
 - Provider response preserves text, thinking, and tool_use blocks.
@@ -40,6 +46,10 @@ registration must call these protocol-owned transformations through the fixed Hu
 
 - Non-Anthropic entry or provider protocol is rejected.
 - Non-object payloads, non-array messages/content, and malformed provider errors are rejected.
+- Nameless non-builtin Responses tool declarations are rejected before provider wire instead of
+  producing Anthropic `tools[].name = null`.
+- Orphan or non-immediate Responses tool outputs are rejected before provider wire instead of
+  producing Anthropic `tool_result` blocks that do not directly follow their `tool_use` blocks.
 - RouteCodex internal control fields (routecodex_internal, metadata_center, debug_snapshot,
   provider_protocol, resource_handle) are rejected instead of stripped.
 - The characterization module cannot register Hub hooks, import Server runtime, branch on provider
@@ -61,3 +71,17 @@ registration must call these protocol-owned transformations through the fixed Hu
 Passing these gates proves only generic Anthropic codec characterization. It does not prove H6 hook
 registration, Hub v1 runtime integration, Server exposure, provider transport, live compatibility,
 global installation, or production replacement.
+
+## Runtime regression addendum
+
+The live V3 5555 Responses Relay path also has one adjacent runtime regression gate in
+`v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs`:
+
+- Positive: Anthropic provider SSE (`message_start` -> `content_block_*` -> `message_delta` ->
+  `message_stop`) is decoded after provider raw event validation, projected to Responses semantic,
+  and only then enters Responses Chat Process / client SSE projection.
+- Negative: EOF before `message_stop` fails as provider SSE malformed before any successful
+  client projection; malformed tool-use JSON remains fail-fast, not downgraded to text.
+
+This addendum does not change the generic codec scope above; it records the old-sample regression
+needed to prove Responses Relay selected Anthropic provider SSE is no longer an unimplemented branch.

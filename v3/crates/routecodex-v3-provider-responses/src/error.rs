@@ -13,6 +13,13 @@ pub struct V3ProviderHttpFailure {
 pub enum V3ProviderError {
     #[error("Responses wire body for request {request_id} must be a JSON object")]
     InvalidWireBody { request_id: String },
+    #[error(
+        "Responses wire body for request {request_id} contains RouteCodex control field {field}"
+    )]
+    ControlFieldInWireBody {
+        request_id: String,
+        field: &'static str,
+    },
     #[error("Responses stream flag for request {request_id} must be boolean")]
     InvalidStreamIntent { request_id: String },
     #[error("provider {provider_id} has an invalid Responses base URL for request {request_id}: {reason}")]

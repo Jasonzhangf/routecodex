@@ -103,6 +103,8 @@ enum ServerCommand {
         snap: bool,
         #[arg(long)]
         snap_stages: Option<String>,
+        #[arg(long, default_value_t = false)]
+        console: bool,
     },
 }
 
@@ -242,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config,
                     snap,
                     snap_stages,
+                    console,
                 },
         } => {
             let config = resolve_config_path(config)?;
@@ -249,6 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             V3ManagedLifecycle::new(config)?
                 .with_snapshots_enabled(snap)
                 .with_snapshot_stages(snap_stages)
+                .with_console_enabled(console)
                 .run_managed_child(&executable)
                 .await?;
         }

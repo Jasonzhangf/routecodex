@@ -80,6 +80,46 @@ fn stopless_projected_call(payload: &Value) -> &Value {
         .find(|item| item["call_id"] == json!("call_stopless_reasoning"))
         .expect("projected stopless exec_command call")
 }
+
+fn assert_full_stopless_continuation_prompt(prompt: &str) {
+    for required in [
+        "继续当前目标",
+        "基于已经恢复的完整上下文",
+        "复核当前目标",
+        "已有结论",
+        "未完成事项",
+        "继续推理",
+        "按需调用可用工具",
+        "不要只总结",
+        "目标确实完成并有证据",
+        "reasoningStop",
+        "阻塞",
+        "needs_user_input",
+        "既未完成也未阻塞，继续工作",
+    ] {
+        assert!(
+            prompt.contains(required),
+            "stopless continuation prompt missing transparent guideline token {required}: {prompt}"
+        );
+    }
+    for forbidden in [
+        "no-op",
+        "CLI",
+        "client tool round",
+        "客户端工具轮",
+        "routecodex hook run reasoningStop",
+        "上一轮 reasoningStop CLI",
+        "不是工具结果",
+        "finish_reason=stop",
+        "RouteCodex stopless continuation",
+    ] {
+        assert!(
+            !prompt.contains(forbidden),
+            "provider-visible continuation prompt leaked black-box bridge mechanism {forbidden}: {prompt}"
+        );
+    }
+}
+
 fn provider_protocol_for_entry(entry_protocol: V3HubEntryProtocol) -> V3HubProviderWireProtocol {
     match entry_protocol {
         V3HubEntryProtocol::Responses => V3HubProviderWireProtocol::Responses,
@@ -462,8 +502,11 @@ fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state(
         .as_str()
         .unwrap();
     assert!(arguments.contains("routecodex hook run reasoningStop"));
+    assert!(
+        !arguments.contains("--input-json"),
+        "response projected CLI must be no-input: {arguments}"
+    );
     for forbidden in [
-        "--input-json",
         "repeatCount",
         "schemaFeedback",
         "next_step",
@@ -505,9 +548,17 @@ fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state(
             ),
         )
         .unwrap();
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"original task"}])
+    let input = governed.payload()["input"]
+        .as_array()
+        .expect("provider input");
+    assert_eq!(input.len(), 2);
+    assert_eq!(input[0], json!({"role":"user","content":"original task"}));
+    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    assert_full_stopless_continuation_prompt(
+        input[1]
+            .get("content")
+            .and_then(Value::as_str)
+            .expect("stopless continuation prompt"),
     );
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     for forbidden in [
@@ -526,7 +577,7 @@ fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state(
     assert!(governed.payload()["instructions"]
         .as_str()
         .unwrap()
-        .contains("继续完成当前目标"));
+        .contains("当前轮继续推进准则"));
     assert_eq!(
         governed.payload()["tools"]
             .as_array()

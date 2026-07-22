@@ -12,6 +12,7 @@ features:
       - v3.lifecycle.pid_cache
       - v3.lifecycle.control_channel
       - v3.lifecycle.operation_lock
+      - v3.lifecycle.restart_plan
     entry_symbols:
       - V3ManagedLifecycle::declaration
       - V3ManagedLifecycle::start
@@ -24,6 +25,13 @@ features:
       - V3ManagedLifecycle::run_managed_child
       - V3ServerStartup01ListenerSetPreflight
       - V3Server03HttpRequestRaw
+      - release_listener_set_for_start
+      - release_foreign_managed_listener_ports_for_start
+      - control_release_ports
+      - guard_explicit_listener_pids_are_scoped_to_target_ports
+      - explicit_listener_pids_for_ports
+      - occupied_listener_ports
+      - send_release_ports_control
     allowed_paths:
       - v3/crates/routecodex-v3-lifecycle
       - v3/crates/routecodex-v3-cli
@@ -475,6 +483,7 @@ features:
       - execute_v3_p5_routing_runtime
       - build_v3_server_03_http_request_raw
       - build_v3_req_04_standardized_responses_from_v3_server_03
+      - build_v3_router_request_facts_for_entry
       - V3TargetInterpreter::classify_kind
       - V3TargetInterpreter::expand_candidates
       - V3TargetInterpreter::select_available
@@ -504,6 +513,7 @@ features:
     required_gates:
       - npm run test:v3-p5-router-target
       - npm run test:v3-p5-server-blackbox
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:: -- --nocapture
       - npm run verify:v3-module-boundaries
       - npm run test:v3-compile-fail
       - npm run verify:v3-cargo-fmt
@@ -511,6 +521,10 @@ features:
       - npm run test:v3-workspace
       - npm run build:v3-cli
       - git diff --check
+    required_contract:
+      - "Request image/media facts are normal request data and must enter V3RouterRequestFacts as multimodal/vision before pool matching."
+      - "V3Router07OpaqueTargetHitOnce carries request capabilities to Target so a thinking/tool route cannot select a text-only provider for an image request."
+      - "Target candidate dedupe preserves pool provenance, required capabilities, and default-pool membership; default's final compatible provider remains selectable under health cooldown."
     runtime_status: owner_queryability_bound_to_existing_p5_source
 
   - feature_id: v3.models_capability_catalog
@@ -635,6 +649,33 @@ features:
   - feature_id: v3.hub_pipeline_static_skeleton
     owner_crate: routecodex-v3-runtime
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+    module_export_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+    root_aggregator_policy: "module declarations, pub-use reexports, #[cfg(test)] mod tests only; no node structs/builders/parsers or hidden semantic mutation."
+    provider_compat_branch_numbering: branch_local_contract_number
+    node_owner_files:
+      - { node: V3HubReqInbound01ClientRaw, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs, builder_symbol: build_v3_hub_req_inbound_01_client_raw }
+      - { node: V3HubReqInbound02Normalized, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs, builder_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01 }
+      - { node: V3HubReqContinuation03Classified, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs, builder_symbol: build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02 }
+      - { node: V3HubReqChatProcess04Governed, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs, builder_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03 }
+      - { node: V3HubReqExecution05Planned, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs, builder_symbol: build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04 }
+      - { node: V3HubReqTarget06Resolved, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs, builder_symbol: build_v3_hub_req_target_06_from_v3_hub_req_execution_05 }
+      - { node: V3HubReqOutbound07ProviderSemantic, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs, builder_symbol: build_v3_hub_req_outbound_07_from_v3_hub_req_target_06 }
+      - { node: ProviderReqCompat06ProviderCompat, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs, builder_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07 }
+      - { node: V3ProviderReqOutbound08WirePayload, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs, builder_symbol: build_v3_provider_req_outbound_08_from_provider_req_compat_06 }
+      - { node: V3ProviderReqOutbound09TransportRequest, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs, builder_symbol: build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08 }
+      - { node: V3ProviderRespInbound01Raw, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs, builder_symbol: build_v3_provider_resp_inbound_01_raw }
+      - { node: ProviderRespCompat02ProviderCompat, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs, builder_symbol: build_provider_resp_compat_02_from_v3_provider_resp_inbound_01 }
+      - { node: V3HubRespInbound02Normalized, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs, builder_symbol: build_v3_hub_resp_inbound_02_from_provider_resp_compat_02 }
+      - { node: V3HubRespChatProcess03Governed, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs, builder_symbol: build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02 }
+      - { node: V3HubRespContinuation04Committed, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs, builder_symbol: build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03 }
+      - { node: V3HubRespOutbound05ClientSemantic, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs, builder_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04 }
+      - { node: V3ServerRespOutbound06ClientFrame, owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs, builder_symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05 }
+    shared_helper_owner_files:
+      - { file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs, owner_boundary: "shared enums/value types used by multiple nodes; no node-local builders/parsers" }
+      - { file: v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs, owner_boundary: "side-channel lookup helpers only; no normal request/response payload construction" }
+      - { file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs, owner_boundary: "provider-compat shared protocol helpers; no Hub node builder ownership" }
+      - { file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, owner_boundary: "Responses/OpenAI shared codec helpers; called by node files, not a node owner" }
+      - { file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, owner_boundary: "provider-standard request format helpers; no lifecycle/node transition owner" }
     resource_bindings:
       - v3.config.hub_pipeline_declarations
       - v3.hub.static_hook_registry
@@ -678,14 +719,45 @@ features:
       - compile_models
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
       - v3/crates/routecodex-v3-config/src/types.rs
       - v3/crates/routecodex-v3-config/src/validate.rs
+      - docs/design/pipeline-type-topology-and-module-boundaries.md
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-v3-hub-v1-node-file-topology.mjs
+      - scripts/tests/v3-hub-v1-node-file-topology-red-fixtures.mjs
+      - package.json
     forbidden_paths:
       - v3/crates/routecodex-v3-server/src
       - v3/crates/routecodex-v3-provider-responses/src
       - src
       - sharedmodule
     required_gates:
+      - npm run verify:v3-hub-v1-node-file-topology
+      - npm run test:v3-hub-v1-node-file-topology-red-fixtures
       - npm run verify:v3-p6-freeze
       - npm run test:v3-p6-freeze-red-fixtures
       - npm run verify:v3-static-hook-registry
@@ -1683,6 +1755,97 @@ features:
       - live provider compatibility
       - global install restart and production cutover
 
+
+  - feature_id: v3.protocol_conversion_field_parity
+    owner_crates: [routecodex-v3-runtime]
+    owner_scope: "V2/V3 protocol conversion field parity contract for Responses -> OpenAI Chat -> Responses, Anthropic Messages -> Responses -> Anthropic Messages, and OpenAI Chat -> OpenAI Chat Relay paths; fields remain data-plane payload semantics and never MetadataCenter control state."
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+    resource_bindings:
+      - v3.hub.entry_protocol
+      - v3.hub.provider_protocol
+      - v3.request.normal_payload
+      - v3.request.provider_semantic
+      - v3.hub.provider_wire_payload
+      - v3.response.provider_raw
+      - v3.hub.response_semantic
+      - v3.response.client_payload
+      - v3.protocol_conversion.field_parity_contract
+    mainline_bindings:
+      - v3-protocol-field-parity-responses-chat-req-01
+      - v3-protocol-field-parity-responses-chat-resp-01
+      - v3-protocol-field-parity-anthropic-responses-req-01
+      - v3-protocol-field-parity-responses-anthropic-resp-01
+      - v3-protocol-field-parity-openai-chat-same-protocol-01
+    entry_symbols:
+      - build_v3_chat_canonical_request_from_responses_payload
+      - build_v3_openai_chat_standard_request_from_chat_canonical
+      - build_v3_responses_provider_response_from_openai_chat_payload
+      - encode_v3_anthropic_request_as_responses_semantic
+      - project_v3_responses_json_as_anthropic_message
+      - responses_openai_chat_field_parity_request_matrix
+      - responses_openai_chat_field_parity_response_matrix
+      - anthropic_responses_field_parity_request_matrix
+      - anthropic_responses_field_parity_response_matrix
+      - anthropic_responses_field_parity_rejects_malformed_function_arguments
+      - openai_chat_same_protocol_field_parity_request_response_matrix
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+      - docs/goals/v3-protocol-conversion-field-parity-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs
+      - scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs
+      - package.json
+      - note.md
+      - MEMORY.md
+      - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - MetadataCenter
+      - SSE transport
+      - provider transport
+      - fallback
+      - ~/.rcc
+    required_gates:
+      - npm run test:v3-protocol-conversion-field-parity
+      - npm run verify:v3-protocol-conversion-field-parity
+      - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:function-map-compile-gate
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    notes:
+      - "Protocol body fields named metadata/client_metadata are data-plane fields when the entry/provider protocol supports them; they must not be moved to MetadataCenter or reconstructed from MetadataCenter."
+      - "RouteCodex-created internal control fields fail-fast before provider/client payload projection."
+      - "Malformed function/custom-tool arguments fail-fast; no empty-object or text fallback is allowed."
+    runtime_status: source_field_parity_focused_gates_only
+    pending_runtime:
+      - global install, managed restart, and 5555 same-entry live replay were not run by this source closeout
+
   - feature_id: v3.gemini_relay_runtime_integration
     owner_crates: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-config, routecodex-v3-virtual-router]
     owner_files:
@@ -2293,7 +2456,7 @@ features:
     status: controlled_runtime_slice_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_hook
-    owner_scope: "V3 StoplessCenter lifecycle inside Rust Chat Process only: response hook runs in Resp03 before Resp04 continuation commit, request hook runs in Req04 after local continuation/context restore and before request tool output governance. CLI is a no-op client roundtrip; StoplessCenter state is MetadataCenter/runtime_control side-channel state, not continuation context, CLI stdout, or normal payload."
+    owner_scope: "V3 StoplessCenter lifecycle inside Rust Chat Process only: response hook runs in Resp03 before Resp04 continuation commit, request hook runs in Req04 after local continuation/context restore and before request tool output governance. StoplessCenter is a Metadata Center control-signal state machine for the Stopless feature. CLI is a no-input no-op client roundtrip and carries no scope/state/parameters. StoplessCenter state is MetadataCenter/runtime_control side-channel state, not continuation context, CLI args/stdout, debug snapshot metadata, provider body, client body, or normal payload."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -2333,13 +2496,19 @@ features:
       - V3HubRelayResponseHookProfile::with_stopless_reasoning_stop
       - V3HubRelayResponseHookProfile::with_stopless_center_state
       - V3ResponsesRelayStoplessControlState
+      - V3ResponsesRelayStoplessControlScope
       - V3ResponsesRelayStoplessControlState::load_for_scope
       - V3ResponsesRelayStoplessControlState::store_for_scope
       - V3ResponsesRelayStoplessControlState::clear_for_scope
+      - execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control
+      - apply_v3_responses_relay_stopless_control_request_transition
       - build_v3_relay_local_continuation_context_at_resp04
       - natural_stop_projects_noop_cli_without_cli_state_json
       - request_consumes_noop_cli_and_uses_runtime_control_not_stdout
+      - json_stopless_center_persists_without_local_continuation_store
+      - json_stopless_center_missing_client_session_scope_passes_stop_without_control_write
       - feature_toggle_false_disables_relay_stopless_injection_and_projection
+      - verify-v3-stopless-resource-control
       - verify-v3-normalization-payload-logic-boundary
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
@@ -2354,8 +2523,17 @@ features:
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
       - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/stopless-session-mainline-source.md
+      - docs/architecture/wiki/html/stopless-session-mainline-source.html
+      - scripts/architecture/verify-v3-stopless-resource-control.mjs
+      - scripts/tests/v3-stopless-resource-control-red-fixtures.mjs
+      - scripts/architecture/render-v3-stopless-state-machine-docs.mjs
+      - scripts/architecture/verify-v3-stopless-state-machine-docs.mjs
+      - scripts/tests/v3-stopless-state-machine-docs-red-fixtures.mjs
       - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
       - package.json
@@ -2367,8 +2545,12 @@ features:
       - src
       - sharedmodule
     required_gates:
+      - npm run verify:v3-stopless-state-machine-docs
+      - npm run test:v3-stopless-state-machine-docs-red-fixtures
       - npm run verify:v3-normalization-payload-logic-boundary
       - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - npm run verify:v3-stopless-resource-control
+      - npm run test:v3-stopless-resource-control-red-fixtures
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
@@ -2376,6 +2558,7 @@ features:
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
+      - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts
       - npm run verify:v3-relay-response-semantics
       - npm run verify:v3-relay-request-semantics
       - npm run verify:v3-architecture-docs
@@ -2385,13 +2568,16 @@ features:
       - git diff --check
     notes:
       - "V3 StoplessCenter is enabled by default and can be disabled only via `[features].stopless_center = false`; disabled relay does not inject stopless guidance/tool and does not project stopless CLI."
-      - "Provider-facing guidance is short and positive: continue the current goal, reason with existing context, call tools as needed, and call `reasoningStop` only to report complete/blocked/continue."
+      - "Provider-facing guidance is a complete non-persistent current-turn guideline, not a terse `继续。`: Req04 must be transparent to the model by not mentioning no-op/CLI/client bridge/finish_reason/counters/budget/guard; it should continue from restored context, use tools when needed, require evidence before complete/blocked `reasoningStop`, and vary wording by StoplessCenter next_request_policy without exposing internal state."
       - "The internal `reasoningStop` tool-call arguments are the only model-originated stop state. Assistant visible text, fenced JSON, `<rcc_stop_schema>`, `next_step`, schemaFeedback, repeatCount/maxRepeats/triggerHint, and CLI stdout JSON are not StoplessCenter state sources."
-      - "Natural `finish_reason=stop` without a reasoningStop state update increments only `natural_stop_count`; before the guard it projects a no-op `routecodex hook run reasoningStop` client command, and at the guard it passes the cleaned original visible text through."
-      - "The no-op CLI command has no args and no JSON state. Req04 consumes the current stopless call/output as current-turn evidence; StoplessCenter state is loaded from runtime_control, and missing control state strips the no-op pair without synthesizing persistent state."
-      - "StoplessCenter side-channel state is stored only in MetadataCenter/runtime_control equivalent V3 relay control state, bound by entry endpoint + session + conversation + port + routing group. Local continuation context must never carry stopless control fields."
+      - "Natural `finish_reason=stop` without a reasoningStop state update updates StoplessCenter phase/consecutive_stop_count/need_continue policy; before the guard it projects a no-input no-op `routecodex hook run reasoningStop` client command, and at the guard it stops intercepting so the current provider `finish_reason=stop` response passes through without another CLI or synthesized internal-state diagnostic."
+      - "The no-op CLI command has no args, no JSON envelope, no scope, and no state. Req04 consumes the current stopless call/output as current-turn evidence but never parses CLI stdout/args as StoplessCenter state."
+      - "StoplessCenter side-channel state is stored only in MetadataCenter/runtime_control equivalent V3 relay control state, bound by entry endpoint + session + conversation + port + routing group. `V3ResponsesRelayStoplessControlState` is an adapter runtime handle under `StoplessCenterMetadataControl`, not the semantic owner. Local continuation context/store must never carry stopless control fields."
+      - "Data/control lock: client/provider normal payload carries user/model data only; StoplessCenter is control_signal. CLI-carried scope/state, empty CLI JSON envelopes, normal payload state, continuation context state, debug/snapshot truth restore, and undeclared cross-SOP access are forbidden."
+      - "Central aggregation may call StoplessCenter only through the declared v3.servertool_hook_skeleton_lifecycle SOP nodes. Generic Hub closeout, server entry/output aggregate edges, direct/provider-direct, provider runtime, SSE, debug, and continuation stores cannot claim StoplessCenter read/write ownership."
       - "Tool injection preserves the original declaration surface: top-level `tools` stays top-level, Responses `input[].type=additional_tools.tools` stays embedded, and stopless only appends exactly one internal `reasoningStop` declaration."
       - "Direct/provider-direct remains exactly-zero relay stopless: no schema/tool injection, no no-op CLI projection, and no relay stopless response hook activation."
+      - "Stopless lifecycle docs are generated from `docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml`; `docs/architecture/wiki/stopless-session-mainline-source.md` and `docs/architecture/wiki/html/stopless-session-mainline-source.html` must contain both the hook edge flowchart and StoplessCenter state transition diagram."
     runtime_status: controlled_runtime_slice_only
 
   - feature_id: v3.protocol_normalization_tool_governance_boundary

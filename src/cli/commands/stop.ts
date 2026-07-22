@@ -45,6 +45,7 @@ export type StopCommandContext = {
   createSpinner: (text: string) => Promise<Spinner>;
   logger: LoggerLike;
   findListeningPids: (port: number) => number[];
+  findListeningPortsByPid?: (pid: number) => number[];
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   sleep: (ms: number) => Promise<void>;
   stopGuardianDaemon?: () => Promise<GuardianStopResult>;
@@ -154,6 +155,68 @@ function buildCallerAudit(): StopCallerAudit {
   };
 }
 
+function normalizePositivePorts(ports: number[]): number[] {
+  return Array.from(new Set(
+    (Array.isArray(ports) ? ports : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  ));
+}
+
+function normalizePositivePids(pids: number[]): number[] {
+  return Array.from(new Set(
+    (Array.isArray(pids) ? pids : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  ));
+}
+
+function findNonTargetListenerPortsForPid(
+  ctx: StopCommandContext,
+  pid: number,
+  targetPorts: number[],
+  safetyPorts: number[]
+): number[] {
+  const targetSet = new Set(normalizePositivePorts(targetPorts));
+  if (typeof ctx.findListeningPortsByPid === 'function') {
+    return normalizePositivePorts(ctx.findListeningPortsByPid(pid))
+      .filter((listenerPort) => !targetSet.has(listenerPort));
+  }
+  const out: number[] = [];
+  for (const candidatePort of normalizePositivePorts(safetyPorts)) {
+    if (targetSet.has(candidatePort)) {
+      continue;
+    }
+    const pids = ctx.findListeningPids(candidatePort);
+    if (Array.isArray(pids) && pids.includes(pid)) {
+      out.push(candidatePort);
+    }
+  }
+  return normalizePositivePorts(out);
+}
+
+function assertSinglePortSignalSafe(
+  ctx: StopCommandContext,
+  targetPorts: number[],
+  pids: number[],
+  safetyPorts: number[]
+): void {
+  const unsafe = normalizePositivePids(pids)
+    .map((pid) => ({
+      pid,
+      nonTargetPorts: findNonTargetListenerPortsForPid(ctx, pid, targetPorts, safetyPorts)
+    }))
+    .filter((item) => item.nonTargetPorts.length > 0);
+  if (unsafe.length === 0) {
+    return;
+  }
+  throw new Error(
+    `single-port stop refused because managed PID(s) also own non-target listener port(s): ${
+      unsafe.map((item) => `${item.pid}->${item.nonTargetPorts.join(',')}`).join('; ')
+    }`
+  );
+}
+
 function resolveFetchImpl(ctx: StopCommandContext): typeof fetch | null {
   if (typeof ctx.fetchImpl === 'function') {
     return ctx.fetchImpl;
@@ -241,6 +304,83 @@ async function attemptHttpShutdown(
   return false;
 }
 
+async function attemptPortScopedStop(
+  ctx: StopCommandContext,
+  resolvedPort: number,
+  callerAudit: StopCallerAudit
+): Promise<boolean> {
+  const fetchImpl = resolveFetchImpl(ctx);
+  if (!fetchImpl) {
+    return false;
+  }
+
+  const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
+  for (const host of candidates) {
+    try {
+      logProcessLifecycleSync({
+        event: 'stop_port_scoped_shutdown',
+        source: 'cli.stop',
+        details: {
+          result: 'attempt',
+          host,
+          port: resolvedPort,
+          ...callerAudit
+        }
+      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch {
+          /* ignore */
+        }
+      }, 1200);
+
+      const response = await fetchImpl(`http://${host}:${resolvedPort}/_routecodex/admin/ports/${resolvedPort}/stop`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'x-routecodex-stop-caller-pid': String(callerAudit.callerPid),
+          'x-routecodex-stop-caller-ts': callerAudit.callerTs,
+          'x-routecodex-stop-caller-cwd': callerAudit.callerCwd,
+          'x-routecodex-stop-caller-cmd': callerAudit.callerCmd
+        }
+      });
+      clearTimeout(timeout);
+
+      logProcessLifecycleSync({
+        event: 'stop_port_scoped_shutdown',
+        source: 'cli.stop',
+        details: {
+          result: response.ok ? 'accepted' : 'rejected',
+          host,
+          port: resolvedPort,
+          statusCode: response.status,
+          ...callerAudit
+        }
+      });
+
+      if (response.ok) {
+        return true;
+      }
+    } catch (error) {
+      logProcessLifecycleSync({
+        event: 'stop_port_scoped_shutdown',
+        source: 'cli.stop',
+        details: {
+          result: 'failed',
+          host,
+          port: resolvedPort,
+          error,
+          ...callerAudit
+        }
+      });
+    }
+  }
+
+  return false;
+}
+
 async function isHttpServerStillHealthy(
   ctx: StopCommandContext,
   resolvedPort: number
@@ -304,11 +444,13 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
 
         const explicitPort = typeof options?.port === 'string' && options.port.trim() ? Number(options.port.trim()) : NaN;
         const basePort = Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : resolveStopPort(ctx, spinner);
+        const explicitSinglePortStop = Number.isFinite(explicitPort) && explicitPort > 0;
         const grouped = ctx.isDevPackage ? null : resolvePortGroupFromConfig(ctx, {
           targetPort: basePort,
           includeSiblingsForTarget: true
         });
-        const targetPorts = grouped?.ports?.length ? grouped.ports : [basePort];
+        const configuredGroupPorts = grouped?.ports?.length ? grouped.ports : [basePort];
+        const targetPorts = explicitSinglePortStop ? [basePort] : configuredGroupPorts;
         if (targetPorts.length > 1) {
           ctx.logger.info(`[stop] resolved config port-group: ${targetPorts.join(', ')}`);
         }
@@ -413,7 +555,9 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
 
           const pids = ctx.findListeningPids(resolvedPort);
           if (!pids.length) {
-            const accepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
+            const accepted = explicitSinglePortStop
+              ? await attemptPortScopedStop(ctx, resolvedPort, callerAudit)
+              : await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
             if (accepted) {
               const stopped = await waitForHttpShutdown(ctx, resolvedPort);
               if (!stopped) {
@@ -454,7 +598,9 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
             actorPid: process.pid,
             metadata: { port: resolvedPort }
           }, resolvedPort);
-          const httpShutdownAccepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
+          const httpShutdownAccepted = explicitSinglePortStop
+            ? await attemptPortScopedStop(ctx, resolvedPort, callerAudit)
+            : await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
           const gracefulDeadline = Date.now() + 3000;
           let stopped = false;
           while (Date.now() < gracefulDeadline) {
@@ -477,6 +623,11 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
           }
           if (stopped) {
             continue;
+          }
+
+          if (explicitSinglePortStop) {
+            const currentPids = ctx.findListeningPids(resolvedPort);
+            assertSinglePortSignalSafe(ctx, [resolvedPort], currentPids, configuredGroupPorts);
           }
 
           const remain = ctx.findListeningPids(resolvedPort);

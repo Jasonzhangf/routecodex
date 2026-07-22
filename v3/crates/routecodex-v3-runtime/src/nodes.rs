@@ -120,6 +120,10 @@ pub fn build_v3_router_request_facts_for_entry(
     if body.get("reasoning").is_some() {
         capabilities.insert("reasoning".to_string());
     }
+    if value_has_v3_media_kind(body, "image") {
+        capabilities.insert("multimodal".to_string());
+        capabilities.insert("vision".to_string());
+    }
     if body
         .get("input")
         .and_then(Value::as_array)
@@ -134,10 +138,6 @@ pub fn build_v3_router_request_facts_for_entry(
     {
         capabilities.insert("tool_outputs".to_string());
     }
-    if body.get("stream").and_then(Value::as_bool) == Some(true) {
-        capabilities.insert("streaming".to_string());
-    }
-
     routecodex_v3_virtual_router::V3RouterRequestFacts {
         entry_protocol: entry_protocol.to_string(),
         client_model: body
@@ -236,6 +236,30 @@ fn detect_v3_media_kind(values: &serde_json::Map<String, Value>) -> Option<&'sta
     None
 }
 
+fn value_has_v3_media_kind(value: &Value, kind: &str) -> bool {
+    match value {
+        Value::Array(values) => values
+            .iter()
+            .any(|value| value_has_v3_media_kind(value, kind)),
+        Value::Object(values) => {
+            detect_v3_media_kind(values) == Some(kind)
+                || values
+                    .values()
+                    .any(|value| value_has_v3_media_kind(value, kind))
+        }
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+            likely_json
+                && serde_json::from_str::<Value>(trimmed)
+                    .ok()
+                    .is_some_and(|parsed| value_has_v3_media_kind(&parsed, kind))
+        }
+        _ => false,
+    }
+}
+
 pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     standardized: &V3Req04StandardizedResponses,
@@ -292,6 +316,52 @@ mod tests {
         assert!(
             image_tokens <= base_tokens + 8,
             "V3 routing token estimate must omit image/base64 bytes like the V2 Rust estimator; base={base_tokens}, image={image_tokens}"
+        );
+    }
+
+    #[test]
+    fn v3_routing_facts_mark_image_requests_as_multimodal() {
+        let request = json!({
+            "model": "gpt-5.6-sol",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Describe this image."},
+                        {"type": "input_image", "image_url": {"url": "data:image/png;base64,AAAA"}}
+                    ]
+                }
+            ],
+            "tools": []
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+
+        assert!(facts.capabilities.contains("multimodal"));
+        assert!(facts.capabilities.contains("vision"));
+    }
+
+    #[test]
+    fn v3_routing_facts_do_not_model_stream_as_capability() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "stream": true,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "ping"}
+                    ]
+                }
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+
+        assert!(facts.capabilities.contains("text"));
+        assert!(
+            !facts.capabilities.contains("streaming"),
+            "stream is a transport intent, not a routing/model capability"
         );
     }
 

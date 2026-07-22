@@ -588,11 +588,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 target_kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
                 target_id: None,
                 target_plan: Vec::new(),
+                request_capabilities: BTreeSet::new(),
                 hit_count: 1,
             },
             candidate,
             unavailable_candidates: Vec::new(),
             attempts: 1,
+            default_floor_protected: false,
         })
     } else {
         None
@@ -1740,16 +1742,18 @@ type = "responses"
 base_url = "http://optional.invalid/v1"
 default_model = "test"
 auth = { type = "api_key", entries = [{ alias = "key", env = "OPTIONAL_KEY" }] }
-[providers.optional.models.test]
-wire_name = "wire-optional"
+	[providers.optional.models.test]
+	wire_name = "wire-optional"
+	capabilities = ["text", "tools"]
 
 [providers.default]
 type = "responses"
 base_url = "http://default.invalid/v1"
 default_model = "test"
 auth = { type = "api_key", entries = [{ alias = "key", env = "DEFAULT_KEY" }] }
-[providers.default.models.test]
-wire_name = "wire-default"
+	[providers.default.models.test]
+	wire_name = "wire-default"
+	capabilities = ["text", "tools"]
 
 [route_groups.default.pools.tools]
 selection = { strategy = "priority" }

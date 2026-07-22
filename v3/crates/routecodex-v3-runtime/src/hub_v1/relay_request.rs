@@ -6,18 +6,13 @@ use super::{
     drop_v3_client_tool_error_pairs_at_req04, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
-    V3StoplessCenterState,
+    V3HubRequestSemanticProtocol, V3StoplessCenterState,
 };
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3HubRequestSemanticProtocol {
-    Chat,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3HubContinuationScope {
@@ -108,6 +103,8 @@ pub enum V3HubServertoolRequestProfile {
         hook_ids: Vec<&'static str>,
         stopless_reasoning_stop: bool,
         stopless_center_state: Option<V3StoplessCenterState>,
+        stopless_transition_request_id: Option<String>,
+        stopless_transition_updated_at: Option<u64>,
     },
     RequiredFailure(&'static str),
 }
@@ -120,6 +117,8 @@ impl V3HubServertoolRequestProfile {
             hook_ids: hook_ids.into(),
             stopless_reasoning_stop: false,
             stopless_center_state: None,
+            stopless_transition_request_id: None,
+            stopless_transition_updated_at: None,
         }
     }
     pub fn stopless_reasoning_stop() -> Self {
@@ -127,6 +126,8 @@ impl V3HubServertoolRequestProfile {
             hook_ids: vec!["stop_message_auto"],
             stopless_reasoning_stop: true,
             stopless_center_state: None,
+            stopless_transition_request_id: None,
+            stopless_transition_updated_at: None,
         }
     }
     pub fn with_stopless_center_state(mut self, state: V3StoplessCenterState) -> Self {
@@ -136,6 +137,22 @@ impl V3HubServertoolRequestProfile {
         } = &mut self
         {
             *stopless_center_state = Some(state);
+        }
+        self
+    }
+    pub fn with_stopless_transition_context(
+        mut self,
+        request_id: impl Into<String>,
+        updated_at: u64,
+    ) -> Self {
+        if let Self::Enabled {
+            stopless_transition_request_id,
+            stopless_transition_updated_at,
+            ..
+        } = &mut self
+        {
+            *stopless_transition_request_id = Some(request_id.into());
+            *stopless_transition_updated_at = Some(updated_at);
         }
         self
     }
@@ -157,6 +174,24 @@ impl V3HubServertoolRequestProfile {
                 stopless_center_state,
                 ..
             } => stopless_center_state.as_ref(),
+            _ => None,
+        }
+    }
+    pub fn stopless_transition_request_id(&self) -> Option<&str> {
+        match self {
+            Self::Enabled {
+                stopless_transition_request_id,
+                ..
+            } => stopless_transition_request_id.as_deref(),
+            _ => None,
+        }
+    }
+    pub fn stopless_transition_updated_at(&self) -> Option<u64> {
+        match self {
+            Self::Enabled {
+                stopless_transition_updated_at,
+                ..
+            } => *stopless_transition_updated_at,
             _ => None,
         }
     }
@@ -183,6 +218,9 @@ pub enum V3HubRelayRequestHookEvent {
     Req04ApplyPatchGuidanceGoverned,
     Req04HistoryGoverned,
     Req04ServertoolGoverned,
+    Req04StoplessControlLoaded,
+    Req04StoplessCliNoopObserved,
+    Req04StoplessGuidancePrepared,
     Req04StoplessResultParsed,
     Req04StoplessTextRewritten,
     Req04StoplessToolInjected,
@@ -244,6 +282,16 @@ pub struct V3HubRelayRequestOutcome {
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
         &self.governed.previous.previous.previous.payload.0
+    }
+    pub(crate) fn responses_original_input_surface_payload(&self) -> Option<Value> {
+        super::build_v3_responses_original_input_surface_from_chat_canonical(
+            self.payload(),
+            self.governed
+                .previous
+                .previous
+                .original_responses_payload
+                .as_ref(),
+        )
     }
     pub fn continuation(&self) -> V3HubContinuationOwnership {
         self.governed.previous.continuation
@@ -378,6 +426,8 @@ impl V3HubRelayRequestHooks {
                 &mut classified.previous.previous.payload.0,
                 &mut events,
                 profile.stopless_center_state(),
+                profile.stopless_transition_request_id(),
+                profile.stopless_transition_updated_at(),
             )?
         } else {
             None
@@ -394,9 +444,12 @@ impl V3HubRelayRequestHooks {
         )? {
             events.push(V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned);
         }
+        let govern_chat_messages_tool_outputs = classified.previous.canonicalized_from_responses
+            || classified.previous.previous.entry_protocol == V3HubEntryProtocol::OpenAiChat;
         let tool_output_count = govern_tool_outputs_at_req04(
             &mut classified.previous.previous.payload.0,
             local_context.as_deref(),
+            govern_chat_messages_tool_outputs,
         )?;
         govern_attachment_history_at_req04(
             &mut classified.previous.previous.payload.0,
@@ -673,7 +726,14 @@ fn is_apply_patch_tool(tool: &Value) -> bool {
 fn govern_tool_outputs_at_req04(
     payload: &mut Value,
     local_context: Option<&Value>,
+    govern_chat_messages: bool,
 ) -> Result<usize, V3HubRelayRequestError> {
+    if payload.get("input").and_then(Value::as_array).is_none()
+        && payload.get("messages").and_then(Value::as_array).is_some()
+        && govern_chat_messages
+    {
+        return govern_chat_tool_outputs_at_req04(payload, local_context);
+    }
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
@@ -707,6 +767,48 @@ fn govern_tool_outputs_at_req04(
                 normalize_apply_patch_tool_output_item_at_req04(item);
             }
         } else {
+            return Err(V3HubRelayRequestError::OrphanToolOutput {
+                index,
+                call_id: call_id.to_owned(),
+            });
+        }
+    }
+    Ok(output_count)
+}
+
+fn govern_chat_tool_outputs_at_req04(
+    payload: &mut Value,
+    local_context: Option<&Value>,
+) -> Result<usize, V3HubRelayRequestError> {
+    let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
+    let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+        return Ok(0);
+    };
+    for message in messages {
+        if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+            for call in calls {
+                if let Some((call_id, expected_kind)) =
+                    expected_tool_call_output_from_chat_call(call)
+                {
+                    expected_outputs.insert(call_id, expected_kind);
+                }
+            }
+        }
+    }
+    let mut output_count = 0usize;
+    for (index, message) in messages.iter().enumerate() {
+        if message.get("role").and_then(Value::as_str) != Some("tool") {
+            continue;
+        }
+        output_count = output_count.saturating_add(1);
+        let call_id = message
+            .get("tool_call_id")
+            .or_else(|| message.get("call_id"))
+            .or_else(|| message.get("id"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
+        if !expected_outputs.contains_key(call_id) {
             return Err(V3HubRelayRequestError::OrphanToolOutput {
                 index,
                 call_id: call_id.to_owned(),
@@ -756,7 +858,43 @@ fn expected_tool_outputs(context: &Value) -> BTreeMap<String, V3HubRelayExpected
             }
         }
     }
+    if let Some(messages) = context.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            let Some(calls) = message.get("tool_calls").and_then(Value::as_array) else {
+                continue;
+            };
+            for call in calls {
+                if let Some((call_id, expected_kind)) =
+                    expected_tool_call_output_from_chat_call(call)
+                {
+                    expected.insert(call_id, expected_kind);
+                }
+            }
+        }
+    }
     expected
+}
+
+fn expected_tool_call_output_from_chat_call(
+    call: &Value,
+) -> Option<(String, V3HubRelayExpectedToolOutputKind)> {
+    let call_id = call
+        .get("id")
+        .or_else(|| call.get("call_id"))
+        .or_else(|| call.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())?;
+    let name = call
+        .get("name")
+        .or_else(|| call.pointer("/function/name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let expected_kind = if name.eq_ignore_ascii_case("apply_patch") {
+        V3HubRelayExpectedToolOutputKind::ApplyPatch
+    } else {
+        V3HubRelayExpectedToolOutputKind::Function
+    };
+    Some((call_id.to_owned(), expected_kind))
 }
 
 fn expected_tool_call_output_from_item(

@@ -1,177 +1,171 @@
+<!-- AUTO-GENERATED: do not edit by hand. Rebuild with `npm run render:v3-stopless-state-machine-docs`. -->
 # Stopless Session Mainline Source
 
 ## Purpose
 
-This page is the review surface for the stopless runtime-metadata session mainline. It is the only canonical place to read the current owner binding, mainline edges, gate coverage, and the current "sessionId-only for stopless counting, no other identity source, no Responses continuation mutation" closure status proved by `tests/servertool/stopless-cli-continuation.spec.ts`.
+This page is the generated review surface for the V3 stopless lifecycle. It binds the StoplessCenter MetadataCenter state machine, the fixed Req04/Resp03 hook edges, and the generated HTML flow/state diagrams to one manifest truth.
 
-This is not a second source of truth. The mechanical edges live in `docs/architecture/mainline-call-map.yml` (`chain_id: stopless.session.mainline`) and the owner / gate policy lives in `docs/architecture/function-map.yml` and `docs/architecture/verification-map.yml` (`feature_id: hub.servertool_stopless_cli_continuation`). The Mermaid figure below is a render artifact and must not be hand-edited.
+Canonical sources:
+- `docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml`
+- `docs/architecture/v3-resource-operation-map.yml` (`resource_id: v3.metadata.runtime_control_stopless`)
+- `docs/architecture/v3-function-map.yml` (`feature_id: v3.servertool_hook_skeleton_lifecycle`)
+- `docs/architecture/v3-mainline-call-map.yml` (`chain_id: v3.servertool_hook_skeleton_lifecycle`)
+- `docs/architecture/v3-verification-map.yml`
+- `.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md`
 
-Stopless does not own or mutate the `/v1/responses` continuation store. Continuation store / restore / materialize is its own owner (`responses-continuation-store`); stopless only operates after that owner has restored the current request. ReqChatProcess may read the current `responsesResume.toolOutputsDetailed` control evidence, but stopless never re-shapes or replaces continuation scope.
+Generated artifacts:
+- Markdown: `docs/architecture/wiki/stopless-session-mainline-source.md`
+- HTML: `docs/architecture/wiki/html/stopless-session-mainline-source.html`
+- Generator: `scripts/architecture/render-v3-stopless-state-machine-docs.mjs`
+- Verifier: `scripts/architecture/verify-v3-stopless-state-machine-docs.mjs`
 
-Runtime-control rule: `MetadataCenter.runtime_control.stopless` is the canonical request-scoped stopless control slot. Request Chat Process Rust governance emits `metadata.runtime_control.stopless`; the TS request-stage shell may only commit that Rust output into the bound MetadataCenter and must fail fast if no center is bound. Response Chat Process reads that same slot. `requestTruth.runtimeControl`, top-level metadata mirrors, file persistence, and sessionDir writeback are not legal stopless control sources.
-
-Hook placement rule: response-side stopless hooks run after `HubRespChatProcess03Governed` and before `HubRespOutbound04ClientSemantic`. Request-side stopless hooks run after `HubReqInbound02Standardized` and before `HubReqChatProcess03Governed`. They must not be placed inside the Responses continuation store / restore edges (`responses-request-context-capture` or `responses-resume`), or they will compete with continuation semantics.
-
-Ordering rule:
-
-- every managed relay provider request must contain the complete stop schema as
-  a system instruction and declare exactly one model-facing/internal
-  `reasoningStop` tool; direct/provider-direct requests must declare neither
-  the tool nor the stopless guidance
-- response-side stopless interception/schema judgment must complete before the response continuation owner persists the canonical response truth
-- next-turn stopless restore must run only after the Responses continuation owner restores/materializes the request
-- stopless 3-round no-schema/invalid-schema guard is evaluated on that restored current-turn truth, not on stale pre-hook saved context
-- the latest real user turn is a hard reset boundary for every inbound/history/codec collapse owner; older stopless pairs are removed, the user text is preserved verbatim, and no automatic guidance is rebuilt
-- the Responses-to-chat codec must remove internal stopless declarations from embedded `toolsNormalized` while preserving ordinary client tools
-- if save happens before stopless interception/projection, the next restore will miss the injected guidance/shape change and the loop becomes misaligned
-
-## Three-Round Lock
-
-### Round 1 request
-
-This round owns only server-side per-request injection:
-
-1. complete stop-schema/system guidance for the `finish_reason=stop` path;
-2. exactly one provider-facing/model-visible internal `reasoningStop` tool
-   declaration on managed relay only;
-3. unchanged normal client tool surface, including `exec_command`.
-
-These are injected by chat-process/servertool owner on every stopless-managed
-request. They are not client input.
-
-### Round 1 response
-
-This round owns only:
-
-1. intercept `finish_reason=stop`;
-2. evaluate the assistant text/fence through the stop schema gate;
-3. if stop is denied, project client-visible CLI;
-4. save canonical continuation context after the normalized client-visible
-   response exists;
-5. then return to client.
-
-### Round 2 request
-
-This round owns only:
-
-1. restore continuation context first;
-2. consume Round-1 CLI execution result as private control evidence;
-3. remove the stopless CLI call/result pair from provider-visible history;
-4. emit one ordinary user message: exact valid `next_step`, otherwise the
-   fixed transparent continuation prompt;
-5. inject the same system stop-schema contract and one internal
-   `reasoningStop` tool again for the new managed relay request.
-
-If a real user message already follows the stopless pair, that message starts a
-new turn: preserve it verbatim, reset the streak, remove only the older
-stopless pair, and do not emit automatic guidance.
-
-### Round 3 guard
-
-This round adds one extra rule only:
-
-- after the 3rd consecutive `no_schema` / invalid-schema stop, pass the
-  original `finish_reason=stop` through to the client instead of projecting
-  another `reasoningStop` CLI command; do not synthesize a budget-exhausted
-  terminal payload;
-- any non-stop progress, ordinary tool call, valid terminal schema,
-  `simple_question=true`, or session change resets the streak to zero, so the
-  next missing/invalid stop starts again at `repeatCount=1`;
-- CLI/manual input with `repeatCount >= maxRepeats` is invalid and must fail
-  fast instead of being clamped into a terminal success result.
+Main rule: stopless is transparent to client/provider/agent except for the public no-input `exec_command` bridge that lets the black-box client display the stopped assistant text. StoplessCenter is the only control truth and lives in MetadataCenter/runtime_control; it never lives in CLI args/stdout, provider payload, client payload, continuation store, SSE, handler, debug snapshot, or dry-run metadata. Provider-request dry-run may read the scoped StoplessCenter state to build an observational provider request, but it must never write, clear, or advance that live state.
 
 ## Stopless Session Mainline
 
 ```mermaid
 flowchart LR
-  StoplessResp01StopDetected["StoplessResp01StopDetected"]
-  StoplessResp02SchemaGateEvaluated["StoplessResp02SchemaGateEvaluated"]
-  StoplessState03RuntimeSnapshotResolved["StoplessState03RuntimeSnapshotResolved"]
-  StoplessCli04ProjectionPlanned["StoplessCli04ProjectionPlanned"]
-  StoplessCli06ClientExecuted["StoplessCli06ClientExecuted"]
-  StoplessReq07ContinuationRestored["StoplessReq07ContinuationRestored"]
-  StoplessReq08GuidanceRewritten["StoplessReq08GuidanceRewritten"]
-  StoplessReq09SchemaContractInjected["StoplessReq09SchemaContractInjected"]
-  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
-
-  StoplessResp01StopDetected -->|stl-01| StoplessResp02SchemaGateEvaluated
-  StoplessResp02SchemaGateEvaluated -->|stl-02| StoplessState03RuntimeSnapshotResolved
-  StoplessState03RuntimeSnapshotResolved -->|stl-03| StoplessCli04ProjectionPlanned
-  StoplessCli04ProjectionPlanned -.->|stl-04| StoplessCli06ClientExecuted
-  StoplessCli06ClientExecuted -.->|stl-05| StoplessReq07ContinuationRestored
-  StoplessReq07ContinuationRestored -->|stl-06| StoplessReq08GuidanceRewritten
-  StoplessReq08GuidanceRewritten -->|stl-07| StoplessReq09SchemaContractInjected
-  StoplessReq09SchemaContractInjected -->|stl-08| VrRoute04SelectedTarget
+  V3HubReqContinuation03Classified["V3HubReqContinuation03Classified"]
+  V3HubReqChatProcess04Governed["V3HubReqChatProcess04Governed"]
+  V3StoplessReq01RuntimeControlLoaded["V3StoplessReq01RuntimeControlLoaded"]
+  V3StoplessReq02NoopCliConsumed["V3StoplessReq02NoopCliConsumed"]
+  V3StoplessReq03GuidanceToolInjected["V3StoplessReq03GuidanceToolInjected"]
+  V3HubRespChatProcess03Governed["V3HubRespChatProcess03Governed"]
+  V3StoplessResp01ReasoningStopInspected["V3StoplessResp01ReasoningStopInspected"]
+  V3StoplessResp02RuntimeControlUpdated["V3StoplessResp02RuntimeControlUpdated"]
+  V3StoplessResp03NoopCliOrTerminalProjected["V3StoplessResp03NoopCliOrTerminalProjected"]
+  V3HubRespContinuation04Committed["V3HubRespContinuation04Committed"]
+  V3HubReqContinuation03Classified -->|v3-servertool-stopless-req-01| V3HubReqChatProcess04Governed
+  V3HubReqChatProcess04Governed -->|v3-servertool-stopless-req-02| V3StoplessReq01RuntimeControlLoaded
+  V3StoplessReq01RuntimeControlLoaded -->|v3-servertool-stopless-req-03| V3StoplessReq02NoopCliConsumed
+  V3StoplessReq02NoopCliConsumed -->|v3-servertool-stopless-req-04| V3StoplessReq03GuidanceToolInjected
+  V3HubRespChatProcess03Governed -->|v3-servertool-stopless-resp-01| V3StoplessResp01ReasoningStopInspected
+  V3StoplessResp01ReasoningStopInspected -->|v3-servertool-stopless-resp-02| V3StoplessResp02RuntimeControlUpdated
+  V3StoplessResp02RuntimeControlUpdated -->|v3-servertool-stopless-resp-03| V3StoplessResp03NoopCliOrTerminalProjected
+  V3StoplessResp03NoopCliOrTerminalProjected -->|v3-servertool-stopless-resp-04| V3HubRespContinuation04Committed
 ```
+
+## Stopless State Machine
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> ProviderTurnInFlight: stsm-01 managed_relay_req04_without_active_noop
+  ProviderTurnInFlight --> Idle: stsm-02 resp03_non_stop_progress_or_ordinary_tool_call
+  ProviderTurnInFlight --> TerminalCompleted: stsm-03 resp03_reasoning_stop_finished_with_evidence
+  ProviderTurnInFlight --> TerminalBlocked: stsm-04 resp03_reasoning_stop_blocked_with_reason_and_evidence
+  ProviderTurnInFlight --> RespStopObserved: stsm-05 resp03_natural_stop_or_invalid_or_need_continue
+  RespStopObserved --> CliNoopProjected: stsm-06 budget_remaining
+  CliNoopProjected --> CliNoopObserved: stsm-07 req04_after_restore_current_noop_output_seen
+  CliNoopObserved --> ContinuationGuidancePrepared: stsm-08 req04_shell_artifacts_removed
+  ContinuationGuidancePrepared --> ProviderTurnInFlight: stsm-09 req04_guidance_and_tool_injected
+  RespStopObserved --> GuardTerminal: stsm-10 budget_exhausted
+  CliNoopProjected --> Idle: stsm-11 latest_real_user_turn_after_noop_or_scope_change
+  ProviderTurnInFlight --> Idle: stsm-12 provider_or_route_terminal_error_before_resp03
+  Idle --> Idle: stsm-13 direct_provider_direct_disabled_or_missing_client_session_scope
+  TerminalCompleted --> [*]
+  TerminalBlocked --> [*]
+  GuardTerminal --> [*]
+  note right of CliNoopProjected
+    client sees only assistant text + no-input exec_command
+  end note
+  note right of ContinuationGuidancePrepared
+    provider sees only transparent task guideline + reasoningStop tool
+  end note
+```
+
+## State Contract
+
+| state | kind | stored | client-visible | provider-visible | description |
+| --- | --- | --- | --- | --- | --- |
+| `Idle` | `reset` | `false` | `false` | `false` | No active stopless control state for this scoped session. |
+| `ProviderTurnInFlight` | `active` | `true` | `false` | `false` | A managed relay provider turn is in flight with transparent stopless guidance and exactly one internal reasoningStop declaration. |
+| `RespStopObserved` | `transient` | `false` | `false` | `false` | Resp03 observed a natural stop, invalid/no evidence reasoningStop, or explicit continue signal before deciding projection or pass-through. |
+| `CliNoopProjected` | `active` | `true` | `true` | `false` | Resp03 preserved visible assistant text and projected no-input exec_command for client tool-round closure. |
+| `CliNoopObserved` | `transient` | `false` | `false` | `false` | Req04 after continuation restore observed the current no-op output only as tool-round completion evidence. |
+| `ContinuationGuidancePrepared` | `transient` | `false` | `false` | `true` | Req04 removed no-op shell artifacts and stale generated stopless guidelines, then prepared one ordinary, transparent provider-facing current-turn continuation guideline. |
+| `TerminalCompleted` | `terminal` | `false` | `true` | `false` | Resp03 accepted reasoningStop completion only when evidence is present, stripped internal tool artifacts, and cleared StoplessCenter. |
+| `TerminalBlocked` | `terminal` | `false` | `true` | `false` | Resp03 accepted reasoningStop blocked only when reason and evidence are present, stripped internal tool artifacts, and cleared StoplessCenter or waits for a real user turn. |
+| `GuardTerminal` | `terminal` | `false` | `true` | `false` | The configured consecutive-stop guard is reached; current provider stop passes through without no-op or internal diagnostic and StoplessCenter is cleared. |
 
 ## Edge Owners and Current Status
 
-| step | transition | owner_feature_id | status | mainline edge note |
-| --- | --- | --- | --- | --- |
-| stl-01 | stop response detected | `hub.servertool_stopless_cli_continuation` | anchored | `runServerToolOrchestration` routes stopless detection into the servertool handler. |
-| stl-02 | runtime snapshot resolved | `hub.servertool_stopless_cli_continuation` | anchored | stopless state is restored from runtime metadata or the current request `tool_outputs` after the request shape is materialized; never from another identity source. |
-| stl-03 | CLI projection planned | `hub.servertool_stopless_cli_continuation` | anchored | Rust `plan_client_exec_cli_projection_output` plus native projection shell builds the client-visible CLI command with concise structured input: `flowId/repeatCount/maxRepeats/triggerHint` plus optional `schemaFeedback{reasonCode,missingFields}`. |
-| stl-04 | client executes the CLI | `hub.servertool_stopless_cli_continuation` | anchored | `routecodex hook run reasoningStop` executes as the public client CLI alias with status/control input. The provider never receives this shell alias or its history; managed relay receives only the fresh internal `reasoningStop` tool declaration injected by ReqChatProcess. |
-| stl-05 | CLI result restored into next request scope | `hub.servertool_stopless_cli_continuation` | anchored | after Responses continuation restore, ReqChatProcess reads current `responsesResume.toolOutputsDetailed` plus the bound MetadataCenter snapshot to restore private repeat state. It never derives repeatCount from provider-visible text and never writes back into continuation store. |
-| stl-06 | next-turn guidance rewritten | `hub.servertool_stopless_cli_continuation` | anchored | inbound normalization removes the stopless shell call/result pair and emits one ordinary user turn. A valid `stopreason=2 + next_step` uses `next_step` verbatim; missing/invalid schema uses the fixed transparent continuation prompt. No internal feedback fields survive into the provider request. |
-| stl-07 | req-side schema contract rebound | `hub.servertool_stopless_cli_continuation` | anchored | req_chatprocess must physically rebind the stopless schema contract onto the next request mainline: chat/messages use a system message, `/v1/responses` uses `instructions` which the bridge must materialize back into the outbound system message. |
-| stl-08 | VR routes stopless turn to thinking | `hub.servertool_stopless_cli_continuation` | anchored | route selection forces the next turn into thinking rather than reusing the stopless CLI result as history. |
+| step | from | to | status | owner feature | resource access |
+| --- | --- | --- | --- | --- | --- |
+| `v3-servertool-stopless-req-01` | `V3HubReqContinuation03Classified` | `V3HubReqChatProcess04Governed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`, `v3.hub.continuation_ownership`<br/>produces: `v3.request.normal_payload`<br/>side_channel_reads: `v3.continuation.local_context_truth` |
+| `v3-servertool-stopless-req-02` | `V3HubReqChatProcess04Governed` | `V3StoplessReq01RuntimeControlLoaded` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`<br/>produces: `v3.request.normal_payload`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless` |
+| `v3-servertool-stopless-req-03` | `V3StoplessReq01RuntimeControlLoaded` | `V3StoplessReq02NoopCliConsumed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`<br/>produces: `v3.request.normal_payload` |
+| `v3-servertool-stopless-req-04` | `V3StoplessReq02NoopCliConsumed` | `V3StoplessReq03GuidanceToolInjected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`<br/>produces: `v3.request.normal_payload`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless`<br/>side_channel_writes: `v3.hub.tool_governance_truth` |
+| `v3-servertool-stopless-resp-01` | `V3HubRespChatProcess03Governed` | `V3StoplessResp01ReasoningStopInspected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.hub.response_semantic`<br/>side_channel_reads: `v3.hub.static_hook_registry` |
+| `v3-servertool-stopless-resp-02` | `V3StoplessResp01ReasoningStopInspected` | `V3StoplessResp02RuntimeControlUpdated` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.hub.response_semantic`<br/>side_channel_writes: `v3.metadata.runtime_control_stopless` |
+| `v3-servertool-stopless-resp-03` | `V3StoplessResp02RuntimeControlUpdated` | `V3StoplessResp03NoopCliOrTerminalProjected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.response.client_payload`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless` |
+| `v3-servertool-stopless-resp-04` | `V3StoplessResp03NoopCliOrTerminalProjected` | `V3HubRespContinuation04Committed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`, `v3.response.client_payload`<br/>produces: `v3.continuation.local_context_truth`<br/>side_channel_writes: `v3.continuation.local_context_truth` |
 
-## Owner / Allowed / Forbidden Path Summary
+## State Transition Matrix
 
-- Owner module: `sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src`.
-- Allowed paths include Rust `servertool-core`, Rust `router-hotpath-napi`, and owner-specific `src/modules/llmswitch/bridge/*-host.ts` shells. `src/modules/llmswitch/bridge/native-exports.ts` is allowed only as the private loader behind those hosts and must not be the stopless semantic owner surface.
-- Forbidden paths: `src/providers`, `src/server/runtime/http-server/executor`, and deleted `sharedmodule/llmswitch-core/src/servertool/**` TS surfaces.
+| transition | class | from | to | event | action |
+| --- | --- | --- | --- | --- | --- |
+| `stsm-01` | `normal` | `Idle` | `ProviderTurnInFlight` | `managed_relay_req04_without_active_noop` | Inject transparent base guidance and exactly one reasoningStop tool; no StoplessCenter write unless a prior state is being consumed. |
+| `stsm-02` | `normal` | `ProviderTurnInFlight` | `Idle` | `resp03_non_stop_progress_or_ordinary_tool_call` | Clear scoped StoplessCenter; preserve normal response/tool progression. |
+| `stsm-03` | `normal` | `ProviderTurnInFlight` | `TerminalCompleted` | `resp03_reasoning_stop_finished_with_evidence` | Strip internal reasoningStop artifact, preserve/replace visible completion text, clear state, no CLI projection. |
+| `stsm-04` | `normal` | `ProviderTurnInFlight` | `TerminalBlocked` | `resp03_reasoning_stop_blocked_with_reason_and_evidence` | Strip internal reasoningStop artifact, preserve blocked text, clear or wait-user state, no CLI projection. |
+| `stsm-05` | `normal` | `ProviderTurnInFlight` | `RespStopObserved` | `resp03_natural_stop_or_invalid_or_need_continue` | Classify stop kind and compute next consecutive stop count in MetadataCenter control, not from text/CLI/stdout. |
+| `stsm-06` | `normal` | `RespStopObserved` | `CliNoopProjected` | `budget_remaining` | Store scoped StoplessCenter state and project client-visible no-input exec_command while preserving assistant visible text. |
+| `stsm-07` | `normal` | `CliNoopProjected` | `CliNoopObserved` | `req04_after_restore_current_noop_output_seen` | Consume no-op output only as current-turn evidence; do not parse stdout or args. |
+| `stsm-08` | `normal` | `CliNoopObserved` | `ContinuationGuidancePrepared` | `req04_shell_artifacts_removed` | Remove matching stopless shell call/output, stale internal artifacts, and previously generated stopless continuation guidelines; append exactly one transparent current-turn guideline. |
+| `stsm-09` | `normal` | `ContinuationGuidancePrepared` | `ProviderTurnInFlight` | `req04_guidance_and_tool_injected` | Store scoped ProviderTurnInFlight state, then re-inject transparent guidance and exactly one internal reasoningStop tool before VR/provider wire. |
+| `stsm-10` | `abnormal` | `RespStopObserved` | `GuardTerminal` | `budget_exhausted` | Do not project another no-op; pass through current finish_reason=stop response without guard/budget/counter diagnostic and clear state. |
+| `stsm-11` | `abnormal` | `CliNoopProjected` | `Idle` | `latest_real_user_turn_after_noop_or_scope_change` | Reset scoped StoplessCenter and remove only stale stopless shell artifacts; preserve the real user turn verbatim. |
+| `stsm-12` | `abnormal` | `ProviderTurnInFlight` | `Idle` | `provider_or_route_terminal_error_before_resp03` | Project the real error through ErrorErr chain; stopless must not synthesize success/fallback/diagnostic or retain stale client-visible bridge state. |
+| `stsm-13` | `abnormal` | `Idle` | `Idle` | `direct_provider_direct_disabled_or_missing_client_session_scope` | No stopless guidance/tool/projection/control write; pass provider response through the normal path. |
+
+## Normal Closure
+
+- `TerminalCompleted`: only a valid model-visible `reasoningStop(stopreason=0)` with evidence closes as completed; internal tool artifacts are stripped and StoplessCenter is cleared.
+- `TerminalBlocked`: only a valid model-visible `reasoningStop(stopreason=1)` with reason and evidence closes as blocked/wait-user; internal tool artifacts are stripped and StoplessCenter is cleared or waits for a real user turn.
+- `Idle`: non-stop progress, ordinary tool progress, or real user turn after a stale stopless bridge resets the scoped state without changing normal user/model payload semantics.
+
+## Abnormal Closure
+
+- `GuardTerminal`: when the configured consecutive-stop guard is reached, stopless stops intercepting the current provider `finish_reason=stop`; it does not project another no-op and does not expose guard/budget/counter diagnostics.
+- Missing client session scope, direct/provider-direct paths, disabled feature flags, and scope changes never write StoplessCenter and never inject relay stopless guidance/tool/projection.
+- Provider or route terminal errors stay real ErrorErr-chain errors; stopless must not synthesize success, fallback, or diagnostics and must not retain stale bridge state as user-visible truth.
+
+## Provider/Client Transparency Checklist
+
+- Provider-visible continuation guidance must not mention no-op, CLI, client tool round, `routecodex hook run reasoningStop`, `finish_reason=stop`, consecutive stop count, stop budget, or guard exhaustion.
+- Provider-visible continuation guidance is current-turn only: Req04 must remove earlier generated stopless continuation guidelines before appending the current one, so restored provider history never accumulates repeated stopless prompts.
+- Client-visible no-op command is exactly `routecodex hook run reasoningStop` and carries no input JSON, session, conversation, scope, counter, or state.
+- Provider request after no-op must remove `call_stopless_reasoning`, CLI stdout, `--input-json`, `repeatCount`, `schemaFeedback`, `runtime_control`, `metadata_center`, and other control/debug fields while preserving real tools and real history.
+- Provider-request dry-run must be observational: the same live StoplessCenter state and same local continuation state must produce identical provider requests across repeated dry-runs, and dry-run must not write or clear StoplessCenter.
 
 ## Required Gates
 
-- `cargo test -p servertool-core cli_contract --lib`
-- `cargo test -p servertool-core persisted_lookup --lib`
-- `cargo test -p servertool-cli --test cli_blackbox`
-- `cargo test -p router-hotpath-napi test_req_process_responses_input_still_materializes_stopless_contract --lib -- --nocapture`
-- `npm run verify:stopless-contract-blackbox`
-- `npm run verify:stopless-invalid-schema-blackbox`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/responses/responses-openai-bridge.spec.ts --runInBand`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/cli/servertool-command.spec.ts --runInBand`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-cli-continuation.spec.ts --runInBand`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/stopless-vr-route-hint.spec.ts --runInBand`
-- `node --experimental-vm-modules ./node_modules/.bin/jest tests/servertool/execution-stage-shell.spec.ts --runInBand`
-- `npm run verify:architecture-mainline-call-map`
-- `npm run verify:function-map-compile-gate`
+- `npm run verify:v3-stopless-state-machine-docs`
+- `npm run test:v3-stopless-state-machine-docs-red-fixtures`
+- `npm run verify:v3-stopless-resource-control`
+- `npm run test:v3-stopless-resource-control-red-fixtures`
+- `npm run verify:v3-normalization-payload-logic-boundary`
+- `npm run test:v3-normalization-payload-logic-boundary-red-fixtures`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_stopless_live_shapes -- --nocapture`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture`
+- `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture`
 
 ## Active Gaps
 
-- `stopless-gap-01`: broader docs/wiki/html artifacts outside this page still contain some older persisted/sessionDir wording and need a follow-up sweep.
-- `stopless-gap-03`: stopless 曾被误读为 session-scoped persisted continuation；当前已改成 session-keyed runtime metadata/current-turn `tool_outputs` owner，但历史命名和审计路径仍需持续防回潮。
-- `stopless-gap-04`: stopless 与 Responses continuation store / restore 的边界此前不显式；当前已明确 stopless 不写 continuation store，但仍需要在更大 session/state 审计里持续复核。
-- `stopless-gap-05`: `ROUTECODEX_SESSION_DIR` 仍是共享 runtime workdir root；虽然 stopless 已不依赖任何其它身份源，但目录物理拆分是否推进仍待后续总体 closeout 决策。
-
-## Recent Closures
-
-- stopless loop counter is keyed strictly by the active request `sessionId`; no other runtime scope is admitted.
-- `sessionDir` is treated as a server/CLI shared persisted-state directory, not as session identity; persistence path is decided per request and never derived from conversation/default identity.
-- CLI command and stdout stay status/control-only; model-facing schema guidance comes from the system instruction, while ReqChatProcess generates the ordinary user continuation.
-- next-turn private state restoration is locked to current `responsesResume.toolOutputsDetailed` / MetadataCenter truth after Responses continuation restore; stopless does not own continuation store / materialize.
-- stopless collapses completed shell call/result pairs into one ordinary user message and keeps no provider-facing stopless shell history; managed relay re-injects a fresh internal `reasoningStop` tool declaration exactly once per request.
-- old shell-projected stop history (`exec_command(cmd="reasoningStop")`, `reasoning_stop`, paired `command not found`) is legacy pollution and is removed during req-side normalization instead of replayed.
-- `/v1/responses` stopless turns now have an explicit two-owner contract: req owner preserves schema contract in `instructions`, bridge owner materializes it back into the outbound system message.
-- `/v1/responses` stopless turns have an explicit two-owner contract: req owner preserves schema contract in `instructions`, bridge owner materializes it back into the outbound system message. This is independent of Responses continuation store and must not mutate continuation scope.
-- `responsesRequestContext.sessionId/conversationId` is Responses continuation context only; it must not be promoted into stopless session truth, stopless activation input, or stopless state key material.
-- client-visible stopless projection prose is ordinary assistant text; reasoning fields are not the display surface, and stopless `function_call_output` is never projected back to the provider.
-- provider-request dry-run is the black-box gate for the system contract. It must stop before upstream send and inspect the final `providerRequest.body`, not an intermediate Hub payload.
+- `stopless-gap-03`: historical wording that treats stopless as sessionDir/CLI-persisted state must keep failing gates; StoplessCenter is MetadataCenter control truth only.
+- `stopless-gap-04`: stopless and Responses continuation restore/save must remain separate owners; any logic in the immutable interval is a regression.
+- `stopless-gap-05`: runtime workdir/sessionDir may exist for CLI/server process plumbing, but it must not become stopless identity or control-state truth.
 
 ## Review Checklist
 
-- stopless does not admit conversation, default, client-inject scope, or Responses continuation scope as session identity.
-- CLI projection stays in the stopless owner.
-- CLI input/output is concise structured control only; provider-visible natural language comes from ReqChatProcess rewrite.
-- the next turn's private state is materialized from current resume evidence / runtime metadata after continuation restore, with no extra identity fallback path.
-- request-side stopless runtime control is written as `MetadataCenter.runtime_control.stopless`, not `requestTruth.runtimeControl` or top-level metadata.
-- response canonical save must happen after stopless response interception/projection; saving pre-hook truth is invalid because the next restore would lose stopless-visible modifications.
-- old stopless tool pairs never survive into continuation history; only the latest guidance is allowed to cross turns.
-- a real user turn after a stopless pair wins over automatic guidance in inbound normalization, continuation history, and the final Responses-to-chat codec.
-- `/v1/responses` next turn cannot lose the schema contract between req_chatprocess and responses bridge; provider-request must still contain the stopless system/schema instruction.
-- provider-request messages/history and embedded `toolsNormalized` must not contain `servertool`, `routecodex hook`, stale `reasoningStop`, `reasoning_stop`, `stop_message_auto`, stopless `function_call_output`, `repeatCount`, `reasonCode`, `missingFields`, `schemaGuidance`, or malformed-CLI diagnostics. Managed relay top-level `tools` must contain exactly one fresh internal `reasoningStop`; direct/provider-direct must contain none.
-- filtering internal stopless declarations must preserve ordinary client tools such as `exec_command`.
-- VR still routes the rewritten stopless turn to `thinking`, not `tools`, even when historical tool route hints exist.
-- `responsesRequestContext` remains a Responses continuation carrier only and never materializes request `sessionId/conversationId` into stopless scope.
+- Resp03 projects no-input CLI or transparent terminal/pass-through before Resp04 continuation commit.
+- Req04 runs only after continuation/local context restore; it consumes no-op output only as evidence and loads StoplessCenter from MetadataCenter/runtime_control.
+- Req04 removes stale generated stopless continuation guidelines before appending one current-turn guideline.
+- Provider-request dry-run reads StoplessCenter for projection only and does not commit StoplessCenter transitions.
+- The state diagram includes both normal and abnormal terminal/reset edges.
+- The HTML page is generated from this Markdown and contains both the lifecycle flowchart and the state transition diagram.

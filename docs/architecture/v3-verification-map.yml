@@ -25,15 +25,15 @@ features:
       - deterministic identity and strict state schema
       - exclusive operation lock and auth-handle preflight
       - no resolved secret in lifecycle projection
-      - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, and already-stopped failures
+      - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures
       - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
       - top-level start without -c resolves ~/.rcc/config.v3.toml and --snap forces snapshots
       - foreground start forces startup and common HTTP request console even when config log_console is false
     required_integration:
       - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
-      - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output
-      - stable instance identity and changed PID/start nonce across restart
-      - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path
+      - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output; human server logs persist the same ANSI-colored monitor lines; route hit uses `[virtual-router-hit] req=... sid=... -> provider[key].wire_model reason=...`; usage uses `project=<path>:<port> route=router-direct|router-relay:<reason> model=request->wire time=i/e/t finish_reason=...`
+      - stable instance identity, preserved PID, refreshed start nonce, same-binary executable preservation, explicit new-release executable republish across restart, and port-scoped foreign managed listener release when a configured listener is already owned by another managed instance
+      - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path; release-a running restart from release-b execs in place into the new executable
       - all listeners close on one stop
       - lifecycle state, argv, log, and evidence contain no resolved secret
       - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
@@ -51,7 +51,7 @@ features:
       - npm run build:v3-cli
     completion_rule:
       source: "Lifecycle whitebox, negative, CLI blackbox, architecture/resource/module, fmt, Clippy, workspace, and secret/broad-kill gates pass."
-      runtime: "5555 is owned by the managed instance rather than an agent exec session; managed restart preserves real JSON/SSE Responses and leaves V2 5520/10000/4444 healthy."
+      runtime: "5555 is owned by the managed instance rather than an agent exec session; managed restart preserves real JSON/SSE Responses, releases only overlapping foreign managed listener ports when needed, and leaves V2 5520/10000/4444 healthy."
       forbidden_claim: "Do not claim completion from source or temporary-port evidence alone; no broad kill, fallback, second supervisor, SSE/continuation/Anthropic ownership, or secret persistence is allowed. Start takeover may only signal explicit PIDs listening on the configured listener set."
 
   - feature_id: v3.config_server_full_function
@@ -95,7 +95,7 @@ features:
       forbidden_claim: "Do not claim Relay, continuation runtime, Chat Process governance, other provider protocols, Hub v1 cutover, P6 deletion, global install, or production replacement."
 
   - feature_id: v3.models_capability_catalog
-    status: live_5555_verified
+    status: source_gate_pending_live_replay
     change_risk: medium
     owner_kind: rust_v3_server_client_catalog_projection
     owner_scope: "Read-only /v1/models projection from the compiled V3 Manifest plus stable built-in Codex ModelInfo entries."
@@ -184,7 +184,7 @@ features:
     status: h1_typed_skeleton_and_static_registry_implemented
     change_risk: critical
     owner_kind: rust_project_v3
-    owner_scope: "Fixed Rust Hub v1 request/response skeleton, static hook registry, four independent branch axes, continuation immutable interval, and P6 migration/deletion contract"
+    owner_scope: "Fixed Rust Hub v1 request/response skeleton, node-per-file contract ownership, static hook registry, four independent branch axes, continuation immutable interval, and P6 migration/deletion contract"
     owner_modules:
       - v3/crates/routecodex-v3-runtime
       - v3/crates/routecodex-v3-config
@@ -203,6 +203,10 @@ features:
     test_design:
       - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
     required_contract:
+      - each V3 Hub contract node has exactly one split owner file and the adjacent builder/parser lives in that target node file
+      - hub_v1.rs is only the module declaration/reexport surface and may not own node structs/builders/parsers
+      - shared helper files have explicit owner boundaries and may not hide node-local transitions
+      - provider compat numbering is branch-local contract numbering and must stay documented/gated
       - one fixed request chain and one fixed response chain
       - entry protocol continuation ownership execution mode and provider wire protocol are independent typed axes
       - routed and pinned target resolution merge into one typed target node
@@ -214,6 +218,8 @@ features:
       - Relay and new protocols fill hooks without changing or renumbering the skeleton
       - servertool followup Dry Run JSON SSE retry and Error paths use existing hook slots and the sole response exit
     required_gates:
+      - npm run verify:v3-hub-v1-node-file-topology
+      - npm run test:v3-hub-v1-node-file-topology-red-fixtures
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-resource-map
       - npm run verify:v3-module-boundaries
@@ -897,8 +903,12 @@ features:
       - Target expands nested forwarders and performs all internal availability reselection
       - Router cannot import Provider availability and Target cannot mutate Provider health
       - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
+      - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
+      - Target dedupe retains optional/default provenance and protects the default floor's final compatible provider
     required_gates:
       - npm run test:v3-p5-router-target
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:: -- --nocapture
       - npm run test:v3-p5-server-blackbox
       - npm run verify:v3-module-boundaries
       - npm run test:v3-compile-fail
@@ -1273,6 +1283,49 @@ features:
       runtime: "Controlled Rust loopback replay only; live provider compatibility is not claimed."
       forbidden_claim: "Do not claim Responses Direct, Anthropic continuation, Provider WebSocket, live config, install, restart, release, or production cutover."
 
+
+  - feature_id: v3.protocol_conversion_field_parity
+    status: source_field_parity_focused_gates_only
+    change_risk: high
+    owner_kind: rust_v3_protocol_codec_field_parity
+    owner_scope: "Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths without server/SSE/provider-transport/MetadataCenter repair owners."
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+    design:
+      - docs/goals/v3-protocol-conversion-field-parity-test-design.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_unit:
+      - Responses request to OpenAI Chat provider wire preserves data-plane metadata/client_metadata/stop, tool schema, tool_choice, user, sampling, response_format, and token fields.
+      - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
+      - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
+      - Anthropic thinking is preserved under Responses reasoning.thinking rather than compressed to effort-only state.
+      - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
+      - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
+    required_blackbox:
+      - Source-level controlled runtime tests capture provider wire and client projection for the three supported paths.
+      - No live 5555/provider replay is claimed by this feature until global install and managed restart gates run separately.
+    required_gates:
+      - npm run test:v3-protocol-conversion-field-parity
+      - npm run verify:v3-protocol-conversion-field-parity
+      - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-resource-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    completion_rule:
+      source: "Complete when focused parity tests, verifier, red fixtures, architecture/resource/module/Rust-only/function-map gates, fmt, and diff checks pass."
+      runtime: "Live completion additionally requires global install, managed restart, and same-entry 5555 replay; this source feature does not claim that evidence."
+      forbidden_claim: "Do not claim live provider compatibility, production cutover, MetadataCenter ownership, SSE transport ownership, or V2 sharedmodule mutation from this source closeout."
+
   - feature_id: v3.gemini_relay_runtime_integration
     status: controlled_runtime_source_verified_live_5555_profile_blocker_verified
     change_risk: high
@@ -1644,7 +1697,7 @@ features:
     status: controlled_runtime_slice_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_hook
-    owner_scope: "V3 StoplessCenter first built-in servertool hook. Stopless state lives in MetadataCenter/runtime_control side-channel state owned by Chat Process runtime; CLI is no-op; continuation stores only protocol context; tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
+    owner_scope: "V3 StoplessCenter first built-in servertool hook. StoplessCenter is a Metadata Center control-signal state machine. Stopless state lives in MetadataCenter/runtime_control side-channel state owned by the Stopless Chat Process SOP; CLI is no-input no-op protocol tool-call completion only and must not carry scope/state/parameters. Continuation stores only protocol context; debug/snapshot metadata is diagnostic-only; tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -1655,6 +1708,8 @@ features:
     design:
       - .agents/skills/rcc-dev-skills/references/22-servertool-hook-skeleton-workflow.md
       - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
+      - docs/architecture/wiki/stopless-session-mainline-source.md
+      - docs/architecture/wiki/html/stopless-session-mainline-source.html
     contract:
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
@@ -1665,15 +1720,27 @@ features:
       - reasoningStop tool-call arguments are the only model-originated stop state
       - terminal reasoningStop with evidence returns cleaned visible terminal text and no CLI
       - request stopless hook consumes no-op CLI only as current-turn evidence and reads StoplessCenter state from runtime_control side-channel
+      - StoplessCenter exposes explicit state-machine phase, consecutive_stop_count, max_stop_budget, last_stop_kind, need_continue, blocked, terminal, guard, next_request_policy, last_request_id, last_response_id, last_transition_reason, and updated_at fields
       - local continuation context never carries StoplessCenter control fields
+      - StoplessCenter persists through MetadataCenter control state without local continuation storage
       - no-op CLI stdout is never parsed for prompt/state
+      - no-op CLI carries no request/session/conversation scope, no empty JSON envelope, and no StoplessCenter state
+      - missing or request-fallback session scope disables stopless projection/guidance/control writes and lets provider stop pass through
+      - Req04 provider-facing continuation is a complete non-persistent guideline that is transparent to the model: it must not expose no-op/CLI/client bridge/finish_reason/counters/budget/guard, must cover restored-context continuation, tool-use progress, and completion/blocked evidence requirements; a single terse `继续。` prompt fails
+      - Req04 provider-facing continuation text changes by StoplessCenter policy for default continue, stronger continue, needs-evidence, and blocked/wait-user states without exposing counters, guard, budget, CLI, no-op, or client bridge internals
+      - guard exhaustion does not project another no-op and does not synthesize internal state diagnostics; it stops intercepting so the current provider finish_reason=stop response passes through
       - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
       - direct negative stays exactly-zero relay stopless for the same payload matrix
       - "`[features].stopless_center = false` disables relay stopless injection and projection"
+      - architecture resource-control gate rejects StoplessCenter state modeled as CLI args/stdout, local continuation context/store, provider/client normal payload, debug/snapshot truth, generic Hub closeout, or server-entry aggregate ownership
       - normalization boundary gate rejects tool governance hook schema and tool-result payload logic in ReqInbound RespInbound ReqOutbound RespOutbound
     required_gates:
+      - npm run verify:v3-stopless-state-machine-docs
+      - npm run test:v3-stopless-state-machine-docs-red-fixtures
       - npm run verify:v3-normalization-payload-logic-boundary
       - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
+      - npm run verify:v3-stopless-resource-control
+      - npm run test:v3-stopless-resource-control-red-fixtures
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics -- --nocapture
@@ -1681,6 +1748,7 @@ features:
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
+      - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts
       - npm run verify:v3-relay-response-semantics
       - npm run verify:v3-relay-request-semantics
       - npm run verify:v3-architecture-docs
@@ -1695,7 +1763,11 @@ features:
       global_install_restart: false
     notes:
       - "Old V3 stop schema/fence/CLI JSON continuation is not an allowed runtime source. `<rcc_stop_schema>`, `schemaFeedback`, `repeatCount`, `maxRepeats`, `triggerHint`, `continuationPrompt`, and `next_step` must not appear in provider/client normal payload."
-      - "StoplessCenter state changes only at Resp03 and is read at Req04 from MetadataCenter/runtime_control side-channel state; local continuation context must never carry stopless control."
+      - "StoplessCenter state changes only at Resp03 and is read at Req04 from MetadataCenter/runtime_control side-channel state through `StoplessCenterMetadataControl`; `V3ResponsesRelayStoplessControlState` is only an adapter runtime handle."
+      - "data/control lock: StoplessCenter is a Metadata Center control-signal; client/provider normal payload carries user/model data only."
+      - "Local continuation context/store, CLI stdout, CLI args, empty CLI JSON envelopes, client/provider body, snapshot metadata, `__runtime.json`, generic Hub closeout, and server-entry aggregate edges must never carry or own StoplessCenter control."
+      - "Central aggregation is allowed only through declared v3.servertool_hook_skeleton_lifecycle SOP/pipeline nodes; cross-process shortcuts and undeclared relay-local StoplessCenter access must fail gate."
+      - "Generated stopless review docs must stay manifest-synced and contain both lifecycle flowchart and state transition diagram; stale Markdown or HTML is a gate failure."
 
   - feature_id: v3.protocol_normalization_tool_governance_boundary
     status: source_controlled_runtime_boundary_verified

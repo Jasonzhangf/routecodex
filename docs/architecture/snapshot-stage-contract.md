@@ -91,6 +91,8 @@ V2 / legacy TS `src/utils/snapshot-stage-policy.ts` 的默认 `--snap` 仍保持
 - snapshot metadata 只能留在 snapshot root / meta，禁止写回 provider wire payload 或 client response payload。
 - `client-request` 若因 payload 超过 debug 限额而不能保留完整正文，必须由 debug owner 写显式 oversize artifact；禁止写出仅含 `meta` 的假成功快照。
 - `__runtime.json` 若已有 request truth / runtime metadata，可观测面必须保留足以区分历史主线的链路识别字段，例如 `sessionId`、`conversationId`、`continuationOwner`、`responsesResume/continuation`、stopless runtime control；禁止把不同 continuation / stopless / 独立 create 链压扁成不可区分的同桶样本。
+- Stopless 相关 snapshot metadata 与 `__runtime.json` 只允许作 diagnostic correlation only，属于 L8 observability/debug；它们必须保留在观测侧，must never restore or own StoplessCenter control truth，也不得替代 L5 Metadata Center。
+- snapshot/debug artifact 中的 Stopless 标识只能关联同一请求链的样本；禁止从 snapshot metadata、debug metadata 或 `__runtime.json` restore / hydrate / rebuild StoplessCenter state，禁止据此驱动 guidance、CLI、repeat guard 或 terminal 判定。
 
 ## 5. 测试覆盖要求
 

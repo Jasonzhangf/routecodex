@@ -73,10 +73,13 @@ export const MANUAL_WIKI_PAGES = [
   {
     path: `${WIKI_ROOT}/stopless-session-mainline-source.md`,
     title: '# Stopless Session Mainline Source',
-    minMermaidBlocks: 1,
+    minMermaidBlocks: 2,
     requiredTokens: [
       '## Purpose',
       '## Stopless Session Mainline',
+      '## Stopless State Machine',
+      '## State Transition Matrix',
+      'GuardTerminal',
       '## Edge Owners and Current Status',
       '## Active Gaps',
       'stopless-gap-03',

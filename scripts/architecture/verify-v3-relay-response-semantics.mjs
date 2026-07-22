@@ -4,7 +4,17 @@ import { join, resolve } from 'node:path';
 
 const root = process.cwd();
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
-const source = readFileSync(resolve(root, sourcePath), 'utf8');
+const splitSourceDir = 'v3/crates/routecodex-v3-runtime/src/hub_v1';
+function readRelayResponseSourceSurface() {
+  const rootSource = readFileSync(resolve(root, sourcePath), 'utf8');
+  const splitSources = readdirSync(resolve(root, splitSourceDir))
+    .filter((entry) => entry.endsWith('.rs'))
+    .sort()
+    .map((entry) => readFileSync(resolve(root, join(splitSourceDir, entry)), 'utf8'))
+    .join('\n');
+  return `${rootSource}\n${splitSources}`;
+}
+const source = readRelayResponseSourceSurface();
 
 function fail(message) {
   console.error(`[verify:v3-relay-response-semantics] ${message}`);
@@ -38,7 +48,19 @@ function forbidAll(text, owner, patterns) {
 }
 
 const normalize = functionBody('normalize_v3_hub_relay_response');
+const providerRespCompat = [
+  functionBody('build_provider_resp_compat_02_from_v3_provider_resp_inbound_01'),
+  functionBody('apply_v3_provider_resp_compat'),
+].join('\n');
 const govern = functionBody('govern_v3_hub_relay_response');
+const resp03ProtocolGovernance = [
+  govern,
+  functionBody('build_v3_resp03_protocol_governance'),
+  functionBody('build_v3_responses_resp03_protocol_governance'),
+  functionBody('collect_v3_resp03_responses_tool_calls'),
+  functionBody('build_v3_openai_chat_resp03_protocol_governance'),
+  functionBody('build_v3_gemini_resp03_protocol_governance'),
+].join('\n');
 const commit = functionBody('commit_v3_hub_relay_response');
 const resp05 = functionBody('build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04');
 const resp06 = functionBody('build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05');
@@ -58,7 +80,25 @@ forbidAll(normalize, 'Resp02 normalize', [
   /Arc::clone/,
 ]);
 
-requireAll(govern, 'Resp03 Chat Process', [
+requireAll(providerRespCompat, 'ProviderRespCompat02 provider-private only', [
+  'run_resp_inbound_stage3_compat',
+  'ReqOutboundCompatInput',
+  'AdapterContext',
+  'provider_protocol_compat_id',
+]);
+forbidAll(providerRespCompat, 'ProviderRespCompat02 provider-private only', [
+  /tool_search/,
+  /exec_command/,
+  /Script running/,
+  /unsupported Responses tool type/,
+  /tool_calls/,
+  /servertool_names/,
+  /V3HubContinuationCommit/,
+  /V3HubRelayResponseHookProfile/,
+  /build_v3_resp03_protocol_governance/,
+]);
+
+requireAll(resp03ProtocolGovernance, 'Resp03 Chat Process', [
   '"function_call"',
   '"custom_tool_call"',
   '"tool_call"',
@@ -68,7 +108,7 @@ requireAll(govern, 'Resp03 Chat Process', [
   'V3HubResponseTerminality::NonTerminal',
   'V3HubServertoolResponseAction::FollowupRequired',
 ]);
-forbidAll(govern, 'Resp03 Chat Process', [
+forbidAll(resp03ProtocolGovernance, 'Resp03 Chat Process', [
   /canonical_context/,
   /V3HubContinuationCommit/,
   /Arc::clone/,
@@ -115,8 +155,8 @@ forbidAll(source, sourcePath, [
   /dynamic[_-]?hook/i,
   /fallback/i,
   /provider[_-]?family/i,
-  /serde_json::(?:to_vec|to_string|from_slice|from_str)/,
 ]);
+forbidAll(responseExit, 'single response exit', [/serde_json::(?:to_vec|to_string|from_slice|from_str)/]);
 
 function filesBelow(relative) {
   const absolute = resolve(root, relative);

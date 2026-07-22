@@ -292,7 +292,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_OPENAI
 wire_name = "chat-wire-model"
 aliases = ["chat-client-alias"]
 supports_streaming = true
-capabilities = ["text", "tools", "streaming"]
+capabilities = ["text", "tools"]
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }}]

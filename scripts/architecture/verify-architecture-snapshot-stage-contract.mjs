@@ -24,6 +24,10 @@ const httpServer = read('src/server/runtime/http-server/index.ts');
 const routerDirectFailureSnapshot = read('src/server/runtime/http-server/router-direct-failure-snapshot.ts');
 const rustHubSnapshotHooks = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_snapshot_hooks.rs');
 const snapshotRequestRetention = read('src/utils/snapshot-request-retention.ts');
+const snapshotStoplessSources = [
+  ['v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs', v3ResponsesRelayRuntime],
+  ['v3/crates/routecodex-v3-debug/src/lib.rs', v3DebugRuntime],
+];
 const testsToRequire = [
   'tests/utils/snapshot-stage-policy.spec.ts',
   'tests/providers/core/utils/snapshot-writer.release-gating.spec.ts',
@@ -61,6 +65,26 @@ for (const token of [
 ]) {
   if (!contractDoc.includes(token)) {
     failures.push(`snapshot contract doc missing provider-request live/legacy boundary: ${token}`);
+  }
+}
+for (const token of [
+  'diagnostic correlation only',
+  'L8 observability/debug',
+  'L5 Metadata Center',
+  'must never restore or own StoplessCenter control truth',
+  '禁止从 snapshot metadata、debug metadata 或 `__runtime.json` restore / hydrate / rebuild StoplessCenter state',
+]) {
+  if (!contractDoc.includes(token)) {
+    failures.push(`snapshot contract doc missing StoplessCenter observability-only boundary: ${token}`);
+  }
+}
+const forbiddenStoplessSnapshotRestorePatterns = [
+  /(?:restore|hydrate|rebuild|load)[A-Za-z0-9_\s]*(?:stopless|StoplessCenter)[A-Za-z0-9_\s]*(?:snapshot|debug|runtime_json)/u,
+  /(?:snapshot|debug|runtime_json)[A-Za-z0-9_\s]*(?:restore|hydrate|rebuild|load)[A-Za-z0-9_\s]*(?:stopless|StoplessCenter)/u,
+];
+for (const [rel, source] of snapshotStoplessSources) {
+  if (forbiddenStoplessSnapshotRestorePatterns.some((pattern) => pattern.test(source))) {
+    failures.push(`${rel}: snapshot/debug artifacts must not restore StoplessCenter control truth`);
   }
 }
 for (const token of ['client-request', 'provider-request', 'provider-response', 'client-response']) {

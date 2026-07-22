@@ -4,10 +4,11 @@ import net from 'node:net';
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 import { probeRouteCodexHealth, type RouteCodexHealthProbeResult } from '../../utils/http-health-probe.js';
-import { listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
+import { listListeningPortsByPid, listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
 import { formatUnknownError, isRecord } from '../../utils/common-utils.js';
 import { buildShutdownCallerHeaders } from '../../utils/shutdown-caller-headers.js';
 
+// feature_id: runtime.lifecycle.port_scoped_start_stop
 
 function logPortUtilsNonBlockingError(
   stage: string,
@@ -141,6 +142,21 @@ export function findListeningPidsImpl(args: {
   }
 }
 
+export function findListeningPortsByPidImpl(args: {
+  pid: number;
+  logger: PortUtilsLogger;
+  spawnSyncImpl?: typeof nodeSpawnSync;
+}): number[] {
+  try {
+    return listListeningPortsByPid(args.pid, {
+      spawnSyncImpl: args.spawnSyncImpl
+    });
+  } catch {
+    args.logger.warning(`Failed to resolve managed ports for pid ${args.pid}`);
+    return [];
+  }
+}
+
 export async function probeServerHealthQuickImpl(args: {
   port: number;
   fetchImpl: typeof fetch;
@@ -161,19 +177,28 @@ export async function isServerHealthyQuickImpl(args: { port: number; fetchImpl: 
 export async function ensurePortAvailableImpl(args: {
   port: number;
   parentSpinner: PortUtilsSpinner;
-  opts?: { restart?: boolean };
+  opts?: { restart?: boolean; targetPorts?: number[] };
   fetchImpl: typeof fetch;
   sleep: (ms: number) => Promise<void>;
   env: NodeJS.ProcessEnv;
   logger: PortUtilsLogger;
   createSpinner: (text: string) => Promise<PortUtilsSpinner>;
   findListeningPids: (port: number) => number[];
+  findListeningPortsByPid?: (pid: number) => number[];
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   isServerHealthyQuick: (port: number) => Promise<boolean>;
   exit: (code: number) => never;
 }): Promise<void> {
   const { port, parentSpinner } = args;
   const opts = args.opts ?? {};
+  const targetPorts = Array.from(
+    new Set(
+      ((Array.isArray(opts.targetPorts) && opts.targetPorts.length > 0 ? opts.targetPorts : [port])
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item) && item > 0))
+    )
+  );
+  const targetPortSet = new Set(targetPorts);
   const buildRestartOnly = (() => {
     const raw = String(args.env.ROUTECODEX_BUILD_RESTART_ONLY ?? args.env.RCC_BUILD_RESTART_ONLY ?? '').trim().toLowerCase();
     return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
@@ -212,6 +237,71 @@ export async function ensurePortAvailableImpl(args: {
       await args.sleep(pollIntervalMs);
     }
     return await canBindPort();
+  };
+
+  const attemptConfirmedPortScopedShutdown = async (): Promise<boolean> => {
+    let accepted = false;
+    try {
+      const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
+      for (const h of candidates) {
+        try {
+          const controller = new AbortController();
+          const t = setTimeout(() => {
+            try {
+              controller.abort();
+            } catch (abortError) {
+              logPortUtilsNonBlockingError('ensurePortAvailableImpl.portScopedShutdown.abortController', abortError, {
+                host: h,
+                port
+              });
+            }
+          }, 700);
+          const callerHeaders = buildShutdownCallerHeaders();
+          logProcessLifecycle({
+            event: 'port_scoped_shutdown',
+            source: 'cli.ensurePortAvailable',
+            details: {
+              result: 'attempt',
+              host: h,
+              port,
+              callerTs: callerHeaders['x-routecodex-stop-caller-ts'],
+              callerPid: callerHeaders['x-routecodex-stop-caller-pid'],
+              callerCwd: callerHeaders['x-routecodex-stop-caller-cwd'],
+              callerCmd: callerHeaders['x-routecodex-stop-caller-cmd']
+            }
+          });
+          await args.fetchImpl(`http://${h}:${port}/_routecodex/admin/ports/${port}/stop`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: callerHeaders
+          }).then((response) => {
+            accepted = accepted || Boolean((response as { ok?: boolean })?.ok);
+          }).catch((error) => {
+            logProcessLifecycle({
+              event: 'port_scoped_shutdown',
+              source: 'cli.ensurePortAvailable',
+              details: {
+                result: 'failed',
+                host: h,
+                port,
+                error
+              }
+            });
+          });
+          clearTimeout(t);
+        } catch (shutdownHostError) {
+          logPortUtilsNonBlockingError('ensurePortAvailableImpl.portScopedShutdownHost', shutdownHostError, {
+            host: h,
+            port
+          });
+        }
+      }
+    } catch (shutdownError) {
+      logPortUtilsNonBlockingError('ensurePortAvailableImpl.portScopedShutdown', shutdownError, {
+        port
+      });
+    }
+    return accepted;
   };
 
   const attemptConfirmedHttpShutdown = async (): Promise<boolean> => {
@@ -292,13 +382,13 @@ export async function ensurePortAvailableImpl(args: {
   if (initialPids.length === 0) {
     const healthyWithoutPid = await args.isServerHealthyQuick(port);
     if (healthyWithoutPid && opts.restart && !buildRestartOnly) {
-      const accepted = await attemptConfirmedHttpShutdown();
+      const accepted = await attemptConfirmedPortScopedShutdown();
       const shutdownTimeoutMs = Number(args.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
       if (accepted && await waitForPortFree(shutdownTimeoutMs, 150)) {
         logProcessLifecycle({
           event: 'port_check_result',
           source: 'cli.ensurePortAvailable',
-          details: { port, result: 'freed_after_http_shutdown_no_pid' }
+          details: { port, result: 'freed_after_port_scoped_shutdown_no_pid' }
         });
         return;
       }
@@ -306,7 +396,7 @@ export async function ensurePortAvailableImpl(args: {
       if (lateManagedPids.length > 0) {
         initialPids = lateManagedPids;
       } else {
-        const result = accepted ? 'http_shutdown_timeout_no_pid' : 'http_shutdown_unconfirmed_no_pid';
+        const result = accepted ? 'port_scoped_shutdown_timeout_no_pid' : 'port_scoped_shutdown_unconfirmed_no_pid';
         logProcessLifecycle({
           event: 'port_check_result',
           source: 'cli.ensurePortAvailable',
@@ -314,8 +404,8 @@ export async function ensurePortAvailableImpl(args: {
         });
         throw new Error(
           accepted
-            ? `Timed out waiting for RouteCodex /shutdown to free port ${port}; no managed PID is available for signal fallback.`
-            : `Port ${port} is occupied by RouteCodex but no managed PID is available; refusing to start until /shutdown is confirmed.`
+            ? `Timed out waiting for RouteCodex port-scoped stop to free port ${port}; no managed PID is available for signal fallback.`
+            : `Port ${port} is occupied by RouteCodex but no managed PID is available; refusing to start until port-scoped stop is confirmed.`
         );
       }
     }
@@ -359,6 +449,33 @@ export async function ensurePortAvailableImpl(args: {
     source: 'cli.ensurePortAvailable',
     details: { port, result: 'occupied', pids: initialPids }
   });
+
+  const extraPortsByPid = new Map<number, number[]>();
+  const getPidPorts = (pid: number): number[] => {
+    if (extraPortsByPid.has(pid)) {
+      return extraPortsByPid.get(pid) ?? [];
+    }
+    const ports = Array.from(
+      new Set(
+        (typeof args.findListeningPortsByPid === 'function'
+          ? args.findListeningPortsByPid(pid)
+          : [])
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0)
+      )
+    );
+    extraPortsByPid.set(pid, ports);
+    return ports;
+  };
+  const unsafePids = initialPids.filter((pid) => getPidPorts(pid).some((listenerPort) => !targetPortSet.has(listenerPort)));
+  const assertNoUnsafePidSignal = (): void => {
+    if (unsafePids.length === 0) {
+      return;
+    }
+    throw new Error(
+      `Port ${port} is occupied by managed PID(s) that also own non-target listener port(s): ${unsafePids.join(', ')}`
+    );
+  };
 
   if (opts.restart && buildRestartOnly) {
     parentSpinner.stop();
@@ -431,25 +548,27 @@ export async function ensurePortAvailableImpl(args: {
   const killTimeout = Number(args.env.ROUTECODEX_KILL_TIMEOUT_MS ?? 3000);
   const pollInterval = 150;
 
-  const httpShutdownAccepted = await attemptConfirmedHttpShutdown();
-  if (httpShutdownAccepted) {
+  const portScopedShutdownAccepted = await attemptConfirmedPortScopedShutdown();
+  if (portScopedShutdownAccepted) {
     if (await waitForPortFree(gracefulTimeout, pollInterval)) {
       logProcessLifecycle({
         event: 'port_check_result',
         source: 'cli.ensurePortAvailable',
-        details: { port, result: 'freed_after_http_shutdown' }
+        details: { port, result: 'freed_after_port_scoped_shutdown' }
       });
-      stopSpinner.succeed(`Port ${port} freed after RouteCodex /shutdown.`);
-      args.logger.success(`Port ${port} freed after RouteCodex /shutdown.`);
+      stopSpinner.succeed(`Port ${port} freed after RouteCodex port-scoped stop.`);
+      args.logger.success(`Port ${port} freed after RouteCodex port-scoped stop.`);
       parentSpinner.start('Starting RouteCodex server...');
       return;
     }
     logProcessLifecycle({
       event: 'port_check_result',
       source: 'cli.ensurePortAvailable',
-      details: { port, result: 'http_shutdown_timeout', pids: args.findListeningPids(port) }
+      details: { port, result: 'port_scoped_shutdown_timeout', pids: args.findListeningPids(port) }
     });
   }
+
+  assertNoUnsafePidSignal();
 
   stopSpinner.warn(`Graceful shutdown did not free port ${port}, sending SIGTERM to managed PID(s): ${initialPids.join(', ')}`);
   for (const pid of initialPids) {

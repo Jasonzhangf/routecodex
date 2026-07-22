@@ -270,6 +270,7 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_OPTIONAL_KEY" }}] }}
 [providers.optional.models.test]
 wire_name = "wire-optional"
+capabilities = ["text", "tools"]
 
 [providers.default]
 type = "responses"
@@ -278,6 +279,7 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_DEFAULT_KEY" }}] }}
 [providers.default.models.test]
 wire_name = "wire-default"
+capabilities = ["text", "tools"]
 
 [providers.exhausted]
 type = "responses"
@@ -286,6 +288,7 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_EXHAUSTED_KEY" }}] }}
 [providers.exhausted.models.test]
 wire_name = "wire-exhausted"
+capabilities = ["text", "tools"]
 
 [route_groups.vr_success.pools.tools]
 selection = {{ strategy = "priority" }}

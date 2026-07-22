@@ -7,7 +7,7 @@ use routecodex_v3_runtime::{
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
     V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubResponseNormalizedKind,
     V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTransportIntent,
-    V3StoplessCenterState, V3StoplessCenterSteering,
+    V3ProviderRespInbound01RawContext, V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -76,13 +76,15 @@ fn provider_resp_compat_profile_loads_before_chat_process_tool_governance() {
             }],
             "output_text": "<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
         }),
-        V3HubEntryProtocol::Responses,
-        V3HubProviderWireProtocol::Responses,
-        V3HubContinuationOwnership::New,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
-        Some("chat:minimax"),
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubContinuationOwnership::New,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+        .with_compatibility_profile(Some("chat:minimax")),
     );
 
     let resp02 = hooks
@@ -282,8 +284,8 @@ fn stopless_response_hook_projects_noop_cli_for_natural_stop_without_cli_state_j
         "routecodex hook run reasoningStop"
     );
     let serialized = serde_json::to_string(payload).unwrap();
+    assert!(!serialized.contains("--input-json"));
     for forbidden in [
-        "--input-json",
         "repeatCount",
         "maxRepeats",
         "triggerHint",
@@ -605,6 +607,97 @@ fn missing_or_unknown_status_fails_inside_response_chat_process() {
                 | Err(V3HubRelayResponseError::UnsupportedStatus { .. })
         ));
     }
+}
+
+#[test]
+fn response_chat_process_preserves_tool_search_tool_call_without_script_conversion() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let raw = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        json!({
+            "id": "resp_tool_search_passthrough",
+            "status": "requires_action",
+            "tools": [{"type": "tool_search", "name": "tool_search"}],
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_tool_search",
+                "name": "tool_search",
+                "arguments": "{\"query\":\"routecodex v3 response compat\"}"
+            }]
+        }),
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubContinuationOwnership::New,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+        .with_compatibility_profile(Some("compat:passthrough")),
+    );
+
+    let resp02 = hooks
+        .normalize(raw)
+        .expect("provider compat must not reject generic tool_search response shape");
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .expect("RespChatProcess owns tool_search tool-call harvesting");
+    assert_eq!(resp03.tool_call_count(), 1);
+    assert_eq!(
+        resp03.tool_call_kinds(),
+        vec![routecodex_v3_runtime::V3HubRelayToolKind::Function]
+    );
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+
+    let resp04 = hooks.commit(resp03).expect("tool_search response commit");
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    let finalized = resp04.finalized_payload();
+    assert_eq!(finalized["output"][0]["name"], "tool_search");
+    assert_eq!(finalized["output"][0]["call_id"], "call_tool_search");
+    assert_eq!(
+        finalized["output"][0]["arguments"],
+        "{\"query\":\"routecodex v3 response compat\"}"
+    );
+    let serialized = serde_json::to_string(finalized).expect("finalized response JSON");
+    assert!(!serialized.contains("exec_command"));
+    assert!(!serialized.contains("Script running"));
+    assert!(!serialized.contains("shell"));
+}
+
+#[test]
+fn passthrough_response_chat_process_does_not_turn_shell_fence_text_into_tool_call() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let raw = relay_raw(
+        json!({
+            "id": "resp_shell_fence_text_only",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "<function_calls>```bash\npwd\n```</function_calls>"
+                }]
+            }],
+            "output_text": "<function_calls>```bash\npwd\n```</function_calls>"
+        }),
+        V3HubTransportIntent::Json,
+    );
+
+    let resp02 = hooks
+        .normalize(raw)
+        .expect("RespInbound02 accepts provider standard text response");
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .expect("RespChatProcess preserves non-tool shell fence text");
+    assert_eq!(resp03.tool_call_count(), 0);
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+
+    let resp04 = hooks.commit(resp03).expect("terminal response commit");
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(serialized.contains("```bash\\npwd\\n```"));
+    assert!(!serialized.contains("requires_action"));
+    assert!(!serialized.contains("exec_command"));
 }
 
 #[test]

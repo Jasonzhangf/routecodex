@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVERTOOL_BINARY_NAME = process.platform === 'win32' ? 'routecodex-servertool.exe' : 'routecodex-servertool';
 const STOPLESS_PUBLIC_TOOL_NAME = 'reasoning_stop';
+const V3_STOPLESS_NO_INPUT_TOOL_NAME = 'reasoningStop';
 const STOPLESS_INTERNAL_TOOL_NAME = 'stop_message_auto';
 
 export function createServertoolCommand(
@@ -25,15 +26,34 @@ export function createServertoolCommand(
   servertool
     .command('run <toolName>')
     .description('Run a RouteCodex servertool')
-    .requiredOption('--input-json <json>', 'servertool input JSON object')
+    .option('--input-json <json>', 'servertool input JSON object')
     .option('--flow <flowId>', 'servertool flow id')
     .option('--repeat-count <count>', 'stopless repeat count')
     .option('--max-repeats <count>', 'stopless max repeats')
     .option('--session-dir <sessionDir>', 'runtime session workdir root')
     .option('--session-id <sessionId>', 'stopless session id')
     .option('--request-id <requestId>', 'stopless request id')
-    .action(async (toolName: string, options: { inputJson: string; flow?: string; repeatCount?: string; maxRepeats?: string; sessionDir?: string; sessionId?: string; requestId?: string }) => {
+    .action(async (toolName: string, options: { inputJson?: string; flow?: string; repeatCount?: string; maxRepeats?: string; sessionDir?: string; sessionId?: string; requestId?: string }) => {
       try {
+        if (toolName === V3_STOPLESS_NO_INPUT_TOOL_NAME) {
+          if (typeof options.inputJson === 'string') {
+            throw new Error('SERVERTOOL_CLI_INVALID_FIELD: reasoningStop is a no-input no-op hook; --input-json is forbidden');
+          }
+          if (
+            typeof options.flow === 'string'
+            || typeof options.repeatCount === 'string'
+            || typeof options.maxRepeats === 'string'
+            || typeof options.sessionDir === 'string'
+            || typeof options.sessionId === 'string'
+            || typeof options.requestId === 'string'
+          ) {
+            throw new Error('SERVERTOOL_CLI_INVALID_FIELD: reasoningStop is a no-input no-op hook; scope/state flags are forbidden');
+          }
+          return;
+        }
+        if (typeof options.inputJson !== 'string') {
+          throw new Error("error: required option '--input-json <json>' not specified");
+        }
         const args = ['run', toolName, '--input-json', options.inputJson];
         if (typeof options.flow === 'string') {
           args.push('--flow', options.flow);

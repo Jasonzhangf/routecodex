@@ -17,6 +17,8 @@ mod response_typed_entrypoints;
 mod tool_surface_contract;
 mod vr_route_04_selected_target;
 
+pub(crate) use tool_surface_contract::is_builtin_tool_type;
+
 pub(crate) use hub_req_chatprocess_03_governed::{
     build_hub_req_chatprocess_03_from_hub_req_inbound_02, HubReqChatProcess03Governed,
 };

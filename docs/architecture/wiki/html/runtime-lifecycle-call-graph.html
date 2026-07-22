@@ -139,6 +139,8 @@
         <p>Managed server lifecycle: restart identity is one aggregate listener PID set across configured member ports; <code>ROUTECODEX_SESSION_DIR</code> is only the runtime workdir root, and tmux/request/conversation identities remain separate namespaces.</p>
         <p>Entry contract: <code>ServerPidCacheRecord</code> via <code>docs/design/server-runtime-lifecycle-ssot.md</code></p>
         <pre class="mermaid">flowchart LR
+          PortRegistry[&quot;PortRegistry&quot;]
+          PortScopedListenerRelease[&quot;PortScopedListenerRelease&quot;]
           StartRestartTakeoverGuard[&quot;StartRestartTakeoverGuard&quot;]
           StartShutdownHandler[&quot;StartShutdownHandler&quot;]
           DaemonRestartLoop[&quot;DaemonRestartLoop&quot;]
@@ -164,6 +166,9 @@
           StartShutdownHandler --&gt;|rtl-11| RuntimeInstanceRecord
           ServerStopCommand --&gt;|rtl-12| RuntimeInstanceRecord
           ServerStartCommand --&gt;|rtl-13| StartRestartTakeoverGuard
+          ServerStartCommand --&gt;|rtl-14| PortScopedListenerRelease
+          ServerStopCommand --&gt;|rtl-15| PortScopedListenerRelease
+          PortScopedListenerRelease --&gt;|rtl-16| PortRegistry
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -178,7 +183,9 @@
           class DaemonSupervisorLoop anchored;
           class DaemonRestartLoop anchored;
           class StartShutdownHandler anchored;
-          class StartRestartTakeoverGuard anchored;</pre>
+          class StartRestartTakeoverGuard anchored;
+          class PortScopedListenerRelease anchored;
+          class PortRegistry anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -195,7 +202,10 @@
         <tr><td>rtl-10</td><td><code>ServerStartCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; planRuntimeInstanceStatusUpdate</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-11</td><td><code>StartShutdownHandler -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; planRuntimeInstanceStatusUpdate</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
         <tr><td>rtl-12</td><td><code>ServerStopCommand -&gt; RuntimeInstanceRecord</code></td><td>anchored</td><td><code>updateRuntimeInstanceStatus -&gt; planRuntimeInstanceStatusUpdate</code></td><td></td><td><code>runtime.lifecycle.instance_registry</code>&lt;br/&gt;managed server instance declaration lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/instance.json</td></tr>
-        <tr><td>rtl-13</td><td><code>ServerStartCommand -&gt; StartRestartTakeoverGuard</code></td><td>anchored</td><td><code>createStartCommand -&gt; planRuntimeStartRestartTakeoverGuard</code></td><td></td><td><code>runtime.lifecycle.start_command</code>&lt;br/&gt;CLI start owns server process launch; default start and explicit start --restart must not hide restart semantics behind takeover</td></tr>
+        <tr><td>rtl-13</td><td><code>ServerStartCommand -&gt; StartRestartTakeoverGuard</code></td><td>anchored</td><td><code>createStartCommand -&gt; planRuntimeStartRestartTakeoverGuard</code></td><td></td><td><code>runtime.lifecycle.start_command</code>&lt;br/&gt;CLI start owns server process launch and port takeover intent; occupied target ports are released before bind unless --no-restart forbids takeover</td></tr>
+        <tr><td>rtl-14</td><td><code>ServerStartCommand -&gt; PortScopedListenerRelease</code></td><td>anchored</td><td><code>createStartCommand -&gt; ensurePortAvailableImpl</code></td><td></td><td><code>runtime.lifecycle.port_scoped_start_stop</code>&lt;br/&gt;V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process</td></tr>
+        <tr><td>rtl-15</td><td><code>ServerStopCommand -&gt; PortScopedListenerRelease</code></td><td>anchored</td><td><code>createStopCommand -&gt; registerHttpRoutes</code></td><td></td><td><code>runtime.lifecycle.port_scoped_start_stop</code>&lt;br/&gt;V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process</td></tr>
+        <tr><td>rtl-16</td><td><code>PortScopedListenerRelease -&gt; PortRegistry</code></td><td>anchored</td><td><code>registerHttpRoutes -&gt; removePort</code></td><td></td><td><code>runtime.lifecycle.port_scoped_start_stop</code>&lt;br/&gt;V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process</td></tr>
         </tbody>
         </table>
         <h2>Other Chains</h2>

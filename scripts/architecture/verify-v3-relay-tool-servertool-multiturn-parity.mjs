@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import YAML from 'yaml';
 
 const files = {
-  response: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+  responseCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
+  responseChatProcess:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  responseContinuation:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
@@ -22,6 +26,13 @@ const files = {
 const text = Object.fromEntries(
   Object.entries(files).map(([key, path]) => [key, readFileSync(path, 'utf8')]),
 );
+const responseOwnerSource = [
+  text.responseCommon,
+  text.responseChatProcess,
+  text.responseContinuation,
+].join('\n');
+const responseSplitOwner =
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/{common.rs,resp_chat_process_03_governed.rs,resp_continuation_04_committed.rs}';
 const manifest = YAML.parse(text.manifest);
 const packageJson = JSON.parse(text.packageJson);
 const failures = [];
@@ -114,23 +125,54 @@ if (injectStart < 0 || injectEnd < 0) {
     'object.insert(',
   ]);
 }
-requireAll(text.response, files.response, [
-  'pub enum V3HubRelayToolKind',
+requireAll(text.responseCommon, files.responseCommon, ['pub enum V3HubRelayToolKind']);
+requireAll(text.responseChatProcess, files.responseChatProcess, [
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
   'fn project_v3_apply_patch_freeform_calls_at_resp03',
   'normalize_v3_apply_patch_freeform_input_for_client',
   'tool_call_kinds',
-  'canonical_tool_call_kinds',
-  'fn canonicalize_v3_hub_resp04_finalized_payload',
-  'canonical_context_shares_provider_payload',
   'SideChannelLeaked',
   'servertool_action',
   'V3HubServertoolResponseAction::FollowupRequired',
 ]);
-requireAll(text.responsesRelayRuntime, files.responsesRelayRuntime, [
-  'Some("requires_action") => "response.requires_action"',
-  '"response.completed" | "response.requires_action"',
+requireAll(text.responseContinuation, files.responseContinuation, [
+  'canonical_tool_call_kinds',
+  'fn canonicalize_v3_hub_resp04_finalized_payload',
+  'canonical_context_shares_provider_payload',
 ]);
+const clientSseProjectionStart = text.responsesRelayRuntime.indexOf(
+  'fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
+);
+const clientSseProjectionEnd = text.responsesRelayRuntime.indexOf(
+  '\nfn project_v3_responses_client_event_output_item_done_item',
+  clientSseProjectionStart,
+);
+if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
+  fail(`${files.responsesRelayRuntime}: unable to isolate Responses client SSE projection owner`);
+} else {
+  const clientSseProjection = text.responsesRelayRuntime.slice(
+    clientSseProjectionStart,
+    clientSseProjectionEnd,
+  );
+  requireAll(clientSseProjection, files.responsesRelayRuntime, [
+    'Some("failed" | "incomplete")',
+    '"response.failed"',
+    '"response.completed"',
+    '"response.done"',
+    'b"data: [DONE]\\n\\n"',
+  ]);
+  requireOrdered(clientSseProjection, files.responsesRelayRuntime, [
+    '"response.completed"',
+    '"response.done"',
+    'b"data: [DONE]\\n\\n"',
+  ]);
+  forbid(
+    clientSseProjection,
+    files.responsesRelayRuntime,
+    /"response\.requires_action"/,
+    'response.requires_action client SSE terminal projection',
+  );
+}
 forbid(
   text.responsesRelayRuntime,
   files.responsesRelayRuntime,
@@ -191,10 +233,18 @@ requireAll(text.tests, files.tests, [
 ]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
-  'json_stopless_preserves_codex_additional_tools_across_continuation',
-  'json_stopless_budget_exhausted_provider_tool_call_returns_requires_action',
-  'Responses Relay client SSE must not relabel Hub-finalized requires_action as completed',
-  'Responses Relay client SSE must not relabel Hub-finalized tool-call continuation as completed',
+  'json_stopless_center_noop_cli_roundtrip_preserves_provider_tools',
+  'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
+  'client no-op CLI must be no-input',
+  'client no-op CLI must be no-input and must not carry an input envelope',
+  'json_stopless_center_natural_stop_guard_passes_cleaned_original_response',
+  'Responses client SSE must terminate stopless projection with response.completed',
+  'Responses client SSE must emit response.done before [DONE]',
+  'Responses client SSE must not use response.requires_action as terminal stream event',
+  'Responses client SSE terminal response must preserve stopless requires_action status',
+  'Responses Relay client SSE must terminate with response.completed while preserving Hub-finalized requires_action status',
+  'Responses Relay client SSE must emit response.done before the [DONE] transport marker',
+  'Responses Relay client SSE must not use response.requires_action as the terminal stream event',
   'json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
   'original request path $.tools must preserve original tools and append exactly one internal reasoningStop tool',
@@ -231,13 +281,12 @@ for (const script of supportingProtocolScripts) {
   requireAll(text.wiki, files.wiki, [`npm run ${script}`]);
 }
 
-const responseOwnerSource = text.response.split('#[cfg(test)]')[0];
 const requestWrongOwnerAuditSource = stripStringLiterals(text.request);
 const responseWrongOwnerAuditSource = stripStringLiterals(responseOwnerSource);
 forbid(requestWrongOwnerAuditSource, files.request, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in request governance');
-forbid(responseWrongOwnerAuditSource, files.response, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in response governance');
-forbid(text.request + text.response, 'V3 Relay tool parity Rust owner', /fallback|full_materiali[sz]e|collect\s*::<\s*Vec|read_dir|libloading/i, 'fallback/materialization/dynamic hook');
-forbid(text.request + text.response, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
+forbid(responseWrongOwnerAuditSource, responseSplitOwner, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in response governance');
+forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /fallback|full_materiali[sz]e|collect\s*::<\s*Vec|read_dir|libloading/i, 'fallback/materialization/dynamic hook');
+forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
 forbid(text.tests, files.tests, /fallback/i, 'fallback in parity tests');
 forbid(text.responsesLocalTests, files.responsesLocalTests, /fallback/i, 'fallback in Responses Relay local continuation tests');
 

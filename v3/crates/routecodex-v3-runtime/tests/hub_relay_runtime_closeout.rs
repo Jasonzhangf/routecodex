@@ -24,6 +24,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
     },
+    time::{Duration, Instant},
 };
 
 const EXPECTED_RELAY_TRACE: [&str; 17] = [
@@ -97,6 +98,31 @@ impl ResponsesTransport for JsonThenSseTransport {
                 value: b"text/event-stream".to_vec(),
             }],
             Box::pin(stream),
+        ))
+    }
+}
+
+struct SingleJsonCaptureTransport {
+    captures: Mutex<Vec<Value>>,
+    response: Value,
+}
+
+#[async_trait]
+impl ResponsesTransport for SingleJsonCaptureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.captures.lock().unwrap().push(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&self.response).unwrap(),
         ))
     }
 }
@@ -301,7 +327,17 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(text.contains("event: response.output_item.done"));
-            assert!(text.contains("event: response.requires_action"));
+            assert!(text.contains("event: response.completed"));
+            assert!(text.contains("event: response.done"));
+            assert!(!text.contains("event: response.requires_action"));
+            assert!(text.contains("\"status\":\"requires_action\""));
+            assert!(
+                text.find("event: response.completed").unwrap()
+                    < text.find("event: response.done").unwrap()
+                    && text.find("event: response.done").unwrap()
+                        < text.find("data: [DONE]").unwrap(),
+                "Responses Relay client terminal ordering must be response.completed -> response.done -> [DONE]: {text}"
+            );
             assert!(text.contains("\"input_tokens\":13"));
             assert!(
                 !text.contains("event: response.function_call_arguments.delta"),
@@ -354,9 +390,176 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0]["model"], "responses-wire-model");
-    assert_eq!(captures[0]["input"], "json");
+    assert!(captures[0].get("instructions").is_none());
+    assert_eq!(captures[0]["input"][0]["type"], "message");
+    assert_eq!(captures[0]["input"][0]["role"], "system");
+    assert_eq!(captures[0]["input"][0]["content"][0]["type"], "input_text");
+    assert!(
+        captures[0]["input"][0]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("当前轮继续推进准则")),
+        "Responses provider wire must carry Stopless guidance in provider-standard system input: {}",
+        captures[0]
+    );
+    assert_eq!(captures[0]["input"][1]["type"], "message");
+    assert_eq!(captures[0]["input"][1]["role"], "user");
+    assert_eq!(captures[0]["input"][1]["content"][0]["type"], "input_text");
+    assert_eq!(captures[0]["input"][1]["content"][0]["text"], "json");
     assert_eq!(captures[1]["model"], "responses-wire-model");
     assert_eq!(captures[1]["stream"], true);
+    assert!(captures[1].get("instructions").is_none());
+    assert_eq!(captures[1]["input"][0]["type"], "message");
+    assert_eq!(captures[1]["input"][0]["role"], "system");
+    assert_eq!(captures[1]["input"][0]["content"][0]["type"], "input_text");
+    assert!(
+        captures[1]["input"][0]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("当前轮继续推进准则")),
+        "Responses provider wire must carry Stopless guidance in provider-standard system input: {}",
+        captures[1]
+    );
+    assert_eq!(captures[1]["input"][1]["type"], "message");
+    assert_eq!(captures[1]["input"][1]["role"], "user");
+    assert_eq!(captures[1]["input"][1]["content"][0]["type"], "input_text");
+    assert_eq!(captures[1]["input"][1]["content"][0]["text"], "sse");
+}
+
+#[tokio::test]
+async fn responses_relay_responses_target_builds_responses_standard_payload_from_chat_canonical() {
+    let transport = SingleJsonCaptureTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_responses_standard_payload",
+            "status":"completed",
+            "output":[{"type":"output_text","text":"ok"}],
+            "usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11}
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-standard-payload".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "tools":[{"type":"tool_search","name":"tool_search"}],
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"search docs"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = &captures[0];
+    assert!(
+        body.get("input").and_then(Value::as_array).is_some(),
+        "Responses target must receive OpenAI Responses standard input built from Chat canonical: {body}"
+    );
+    assert!(
+        body.get("messages").is_none(),
+        "Responses target must not receive Chat canonical messages directly: {body}"
+    );
+    assert!(body.get("instructions").is_none());
+    assert_eq!(body["input"][0]["type"], "message");
+    assert_eq!(body["input"][0]["role"], "system");
+    assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
+    assert!(
+        body["input"][0]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("当前轮继续推进准则")),
+        "Responses target must carry Stopless guidance in provider-standard system input: {body}"
+    );
+    assert_eq!(body["input"][1]["type"], "message");
+    assert_eq!(body["input"][1]["role"], "user");
+    assert_eq!(body["input"][1]["content"][0]["type"], "input_text");
+    assert_eq!(body["input"][1]["content"][0]["text"], "search docs");
+    assert_eq!(body["tools"][0]["type"], "tool_search");
+    let serialized = serde_json::to_string(body).unwrap();
+    assert!(!serialized.contains("\"name\":\"exec\""));
+    assert!(!serialized.contains("\"name\":\"script\""));
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_target_preserves_tool_search_without_compat_rejection() {
+    let transport = SingleJsonCaptureTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"chatcmpl_tool_search",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{"role":"assistant","content":"ok"},
+                "finish_reason":"stop"
+            }],
+            "usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-openai-chat-tool-search".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "tools":[{"type":"tool_search","name":"tool_search"}],
+                "input":[{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"search docs"}]
+                }]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderReqCompat06ProviderCompat"),
+        "request must still traverse compat node without letting compat own generic tool semantics"
+    );
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let body = &captures[0];
+    assert!(
+        body.get("messages").and_then(Value::as_array).is_some(),
+        "OpenAI Chat target must receive Chat standard messages: {body}"
+    );
+    assert_eq!(body["tools"][0]["type"], "tool_search");
+    let serialized = serde_json::to_string(body).unwrap();
+    assert!(!serialized.contains("unsupported Responses tool type"));
+    let tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("OpenAI Chat target tools");
+    assert!(
+        !tools.iter().any(|tool| {
+            tool.get("type").and_then(Value::as_str) == Some("function")
+                && tool
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    == Some("tool_search")
+        }),
+        "tool_search must not be converted to an OpenAI Chat function tool: {body}"
+    );
+    assert!(!serialized.contains("\"name\":\"exec\""));
+    assert!(!serialized.contains("\"name\":\"script\""));
 }
 
 struct CompletedTextSseTransport;
@@ -661,6 +864,49 @@ impl ResponsesTransport for ResponsesContextErrorThenSuccessTransport {
     }
 }
 
+struct ResponsesDefaultFloorFailsThenSucceedsTransport {
+    captures: Mutex<Vec<(String, Value)>>,
+    fail_count: usize,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesDefaultFloorFailsThenSucceedsTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let mut captures = self.captures.lock().unwrap();
+        captures.push((request.provider_id().to_string(), request.body().clone()));
+        if captures.len() <= self.fail_count {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    status: 429,
+                    headers: vec![],
+                    body: br#"{"error":{"type":"rate_limit_error","message":"controlled default floor backoff"}}"#.to_vec(),
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"resp_default_floor_retry",
+                "status":"completed",
+                "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+                "usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn responses_relay_provider_context_error_reselects_next_candidate_before_projection() {
     let transport = ResponsesContextErrorThenSuccessTransport {
@@ -801,9 +1047,10 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
 }
 
 #[tokio::test]
-async fn responses_relay_provider_error_projects_only_after_candidate_exhaustion() {
-    let transport = ResponsesContextErrorThenSuccessTransport {
+async fn responses_relay_default_floor_retries_until_success_within_cap() {
+    let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
+        fail_count: 5,
     };
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
         &responses_single_limited_manifest(),
@@ -818,33 +1065,138 @@ async fn responses_relay_provider_error_projects_only_after_candidate_exhaustion
         },
         &transport,
         V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 3,
+            same_candidate_retries: 5,
             retry_delay_ms: 0,
         },
     )
     .await
     .unwrap();
 
-    assert_eq!(output.status, 400);
+    assert_eq!(output.status, 200);
+    assert_eq!(output.error_chain, None);
+    assert!(output.node_trace.contains(&"V3DefaultFloorBackoffWait"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("default floor retry success must keep console observability");
+    assert_eq!(observability.provider_id.as_deref(), Some("limited"));
+    assert_eq!(observability.provider_status, Some(200));
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    assert_eq!(observability.attempts, Some(6));
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 6);
+    assert!(captures
+        .iter()
+        .all(|(provider_id, _)| provider_id == "limited"));
+}
+
+#[tokio::test]
+async fn responses_relay_default_floor_projects_error_after_retry_cap() {
+    let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
+        captures: Mutex::new(Vec::new()),
+        fail_count: usize::MAX,
+    };
+    let output = tokio::time::timeout(
+        Duration::from_millis(250),
+        execute_v3_responses_relay_runtime_with_retry_policy(
+            &responses_single_limited_manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: "req-responses-default-floor-cap".into(),
+                payload: json!({
+                    "model":"client-responses",
+                    "input":"same large payload",
+                    "stream":false
+                }),
+            },
+            &transport,
+            V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 2,
+                retry_delay_ms: 1,
+            },
+        ),
+    )
+    .await
+    .expect("default floor must honor retry cap instead of storm-looping forever")
+    .unwrap();
+
+    assert_eq!(output.status, 429);
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
         &V3_ERROR_CHAIN_NODE_IDS
     );
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    assert_eq!(
+        output
+            .node_trace
+            .iter()
+            .filter(|node| **node == "V3DefaultFloorBackoffWait")
+            .count(),
+        2
+    );
     let observability = output
         .observability
         .as_ref()
-        .expect("exhausted error must keep console observability");
+        .expect("default floor capped error must keep console observability");
     assert_eq!(observability.provider_id.as_deref(), Some("limited"));
-    assert_eq!(observability.provider_status, Some(400));
+    assert_eq!(observability.provider_status, Some(429));
     assert_eq!(observability.response_status.as_deref(), Some("error"));
-    assert_eq!(observability.attempts, Some(4));
+    assert_eq!(observability.attempts, Some(3));
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 4);
+    assert_eq!(captures.len(), 3);
     assert!(captures
         .iter()
         .all(|(provider_id, _)| provider_id == "limited"));
+}
+
+#[tokio::test]
+async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
+    let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
+        captures: Mutex::new(Vec::new()),
+        fail_count: 1,
+    };
+    let started = Instant::now();
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &responses_single_limited_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-default-floor-waits".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same large payload",
+                "stream":false
+            }),
+        },
+        &transport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 1,
+            retry_delay_ms: 25,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    assert!(
+        started.elapsed() >= Duration::from_millis(20),
+        "default floor retry must block on backoff instead of forming an immediate error storm"
+    );
+    assert_eq!(transport.captures.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn responses_relay_default_floor_backoff_sequence_is_fixed_five_seconds() {
+    let policy = V3ResponsesRelayRetryPolicy::default();
+    assert_eq!(policy.same_candidate_retries, 5);
+    assert_eq!(policy.default_floor_delay_ms_for_retry(1), 5_000);
+    assert_eq!(policy.default_floor_delay_ms_for_retry(2), 5_000);
+    assert_eq!(policy.default_floor_delay_ms_for_retry(5), 5_000);
+    let no_sleep_policy = V3ResponsesRelayRetryPolicy {
+        same_candidate_retries: 0,
+        retry_delay_ms: 0,
+    };
+    assert_eq!(no_sleep_policy.default_floor_delay_ms_for_retry(1), 0);
 }
 
 #[test]
@@ -935,7 +1287,7 @@ wire_name = "gpt-5.5"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 200000
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "reasoning"]
 [providers.minimax]
 type = "responses"
 base_url = "http://minimax.invalid/v1"
@@ -946,7 +1298,7 @@ wire_name = "MiniMax-M3"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 1000000
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "reasoning"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [
@@ -980,7 +1332,7 @@ wire_name = "gpt-5.5"
 supports_streaming = true
 supports_thinking = true
 max_context_tokens = 200000
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "reasoning"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [
@@ -1025,10 +1377,40 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn openai_chat_target_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.controlled]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "controlled"
+endpoints = ["responses"]
+[providers.chat]
+type = "openai_chat"
+base_url = "http://controlled.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+[providers.chat.models.chat-wire-model]
+wire_name = "chat-wire-model"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "chat", model = "chat-wire-model", key = "controlled", priority = 1 }]
 "#,
         )
         .unwrap(),

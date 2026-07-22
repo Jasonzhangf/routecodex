@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
+use crate::hub_pipeline_types::is_builtin_tool_type;
 use crate::shared_json_utils::read_first_object_trimmed_string;
 use crate::shared_json_utils::read_trimmed_string;
 
@@ -388,6 +389,14 @@ pub(crate) fn filter_namespace_mcp_aggregator_tool_definitions(tools: &mut Value
         let Some(tool_obj) = tool.as_object() else {
             return false;
         };
+        let tool_type = tool_obj
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("function");
+        if is_builtin_tool_type(tool_type) {
+            return true;
+        }
         let function_obj = tool_obj.get("function").and_then(Value::as_object);
         let name = function_obj
             .and_then(|function| function.get("name"))
@@ -879,6 +888,51 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["exec_command", "mcp__node_repl__js"]);
+    }
+
+    #[test]
+    fn tool_definition_filter_preserves_builtins_and_drops_only_mcp_aggregator() {
+        let mut tools = json!([
+            {
+                "type": "function",
+                "name": "exec_command",
+                "parameters": { "type": "object", "properties": {} }
+            },
+            {
+                "type": "function",
+                "name": "mcp__node_repl",
+                "parameters": {}
+            },
+            {
+                "type": "tool_search",
+                "execution": "client"
+            },
+            {
+                "type": "web_search",
+                "external_web_access": true
+            }
+        ]);
+
+        filter_namespace_mcp_aggregator_tool_definitions(&mut tools);
+
+        assert_eq!(
+            tools,
+            json!([
+                {
+                    "type": "function",
+                    "name": "exec_command",
+                    "parameters": { "type": "object", "properties": {} }
+                },
+                {
+                    "type": "tool_search",
+                    "execution": "client"
+                },
+                {
+                    "type": "web_search",
+                    "external_web_access": true
+                }
+            ])
+        );
     }
 
     #[test]

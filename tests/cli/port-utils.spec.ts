@@ -349,7 +349,7 @@ describe('cli server port-utils', () => {
     expect(fetchCalled).toBe(false);
   });
 
-  it('ensurePortAvailableImpl frees a managed RouteCodex port via HTTP shutdown before signals', async () => {
+  it('ensurePortAvailableImpl frees a managed RouteCodex port via per-port stop before signals', async () => {
     const probe = net.createServer();
     await new Promise<void>((resolve, reject) => {
       probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
@@ -386,7 +386,7 @@ describe('cli server port-utils', () => {
         opts: { restart: true },
         fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
           calls.push(`fetch:${String(url)}`);
-          if (String(url).endsWith('/shutdown')) {
+          if (String(url).endsWith(`/_routecodex/admin/ports/${occupiedPort}/stop`)) {
             shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
             await closeProbe();
             return { ok: true, status: 200 };
@@ -405,7 +405,7 @@ describe('cli server port-utils', () => {
         exit: (() => { throw new Error('exit should not be called'); }) as any
       });
 
-      expect(calls.some((call) => call.includes('/shutdown'))).toBe(true);
+      expect(calls.some((call) => call.includes(`/_routecodex/admin/ports/${occupiedPort}/stop`))).toBe(true);
       expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
         'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
         'x-routecodex-stop-caller-ts': expect.any(String),
@@ -418,7 +418,7 @@ describe('cli server port-utils', () => {
     }
   });
 
-  it('ensurePortAvailableImpl falls back from HTTP shutdown to explicit managed PID signals', async () => {
+  it('ensurePortAvailableImpl falls back from per-port stop to explicit managed PID signals', async () => {
     const probe = net.createServer();
     await new Promise<void>((resolve, reject) => {
       probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
@@ -457,10 +457,13 @@ describe('cli server port-utils', () => {
         opts: { restart: true },
         fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
           calls.push(`fetch:${String(url)}`);
-          if (String(url).endsWith('/shutdown')) {
+          if (String(url).endsWith(`/_routecodex/admin/ports/${occupiedPort}/stop`)) {
             shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
           }
-          return { ok: String(url).endsWith('/shutdown'), status: String(url).endsWith('/shutdown') ? 200 : 503 };
+          return {
+            ok: String(url).endsWith(`/_routecodex/admin/ports/${occupiedPort}/stop`),
+            status: String(url).endsWith(`/_routecodex/admin/ports/${occupiedPort}/stop`) ? 200 : 503
+          };
         }) as any,
         sleep: async () => {
           await new Promise((resolve) => setTimeout(resolve, 1));
@@ -479,7 +482,7 @@ describe('cli server port-utils', () => {
         exit: (() => { throw new Error('exit should not be called'); }) as any
       });
 
-      const shutdownIndex = calls.findIndex((call) => call.includes('/shutdown'));
+      const shutdownIndex = calls.findIndex((call) => call.includes(`/_routecodex/admin/ports/${occupiedPort}/stop`));
       const sigtermIndex = calls.findIndex((call) => call === 'kill:12345:SIGTERM');
       expect(shutdownIndex).toBeGreaterThanOrEqual(0);
       expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
@@ -492,6 +495,57 @@ describe('cli server port-utils', () => {
       expect(calls).not.toContain('kill:12345:SIGKILL');
     } finally {
       await closeProbe();
+    }
+  });
+
+  it('ensurePortAvailableImpl refuses PID signals when the listener also owns non-target ports', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
+      probe.once('error', reject);
+    });
+    const address = probe.address();
+    const occupiedPort = typeof address === 'object' && address ? address.port : 0;
+
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+    const calls: string[] = [];
+
+    try {
+      await expect(ensurePortAvailableImpl({
+        port: occupiedPort,
+        parentSpinner: spinner,
+        opts: { restart: true, targetPorts: [occupiedPort] } as any,
+        fetchImpl: (async (url: string | URL | Request) => {
+          calls.push(`fetch:${String(url)}`);
+          return { ok: false, status: 404 };
+        }) as any,
+        sleep: async () => {},
+        env: { ROUTECODEX_STOP_TIMEOUT_MS: '20' },
+        logger,
+        createSpinner: async () => spinner,
+        findListeningPids: () => [12345],
+        findListeningPortsByPid: () => [occupiedPort, occupiedPort + 1],
+        killPidBestEffort: (pid, opts) => {
+          calls.push(`kill:${pid}:${opts.force ? 'SIGKILL' : 'SIGTERM'}`);
+        },
+        isServerHealthyQuick: async () => true,
+        exit: (() => { throw new Error('exit should not be called'); }) as any
+      } as any)).rejects.toThrow('non-target listener port(s)');
+
+      expect(calls.some((call) => call.startsWith('kill:'))).toBe(false);
+      expect(calls.some((call) => call.includes(`/_routecodex/admin/ports/${occupiedPort}/stop`))).toBe(true);
+      expect(calls.some((call) => call.includes('/shutdown'))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
     }
   });
 

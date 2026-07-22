@@ -272,7 +272,7 @@ describe('cli stop command', () => {
     expect(killCalls).toEqual([{ pid: 12345, force: false }]);
   });
 
-  it('release stop expands a matched config port to the full port group and shuts down healthy no-pid servers', async () => {
+  it('release stop with --port stops only the requested listener and uses per-port shutdown', async () => {
     const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));
     const configPath = path.join(tempDir, 'config.toml');
@@ -297,6 +297,7 @@ port = 10000
     const program = new Command();
     const shutdownPorts: number[] = [];
     const shutdownHeaders: Array<Record<string, string>> = [];
+    let listenerAlive = true;
 
     try {
       createStopCommand(program, {
@@ -304,7 +305,7 @@ port = 10000
         defaultDevPort: 5520,
         createSpinner: async () => createStubSpinner(),
         logger: { info: () => {}, error: () => {} },
-        findListeningPids: () => [],
+        findListeningPids: (port: number) => (listenerAlive && port === 5520 ? [12345] : []),
         killPidBestEffort: () => {},
         sleep: async () => {},
         env: {},
@@ -313,9 +314,10 @@ port = 10000
         getHomeDir: () => '/home/test',
         fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
           const text = String(url);
-          if (text.endsWith('/shutdown')) {
+          if (text.endsWith('/_routecodex/admin/ports/5520/stop')) {
             shutdownPorts.push(Number(new URL(text).port));
             shutdownHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
+            listenerAlive = false;
             return { ok: true, status: 200 };
           }
           throw new Error('server stopped');
@@ -325,9 +327,9 @@ port = 10000
         }
       });
 
-      await program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' });
-      expect(shutdownPorts).toEqual([4444, 5520, 5555, 10000]);
-      expect(shutdownHeaders).toHaveLength(4);
+      await program.parseAsync(['node', 'rcc', 'stop', '--port', '5520'], { from: 'node' });
+      expect(shutdownPorts).toEqual([5520]);
+      expect(shutdownHeaders).toHaveLength(1);
       expect(shutdownHeaders[0]).toEqual(expect.objectContaining({
         'x-routecodex-stop-caller-pid': expect.stringMatching(/^\d+$/),
         'x-routecodex-stop-caller-ts': expect.any(String),
@@ -344,7 +346,7 @@ port = 10000
     }
   });
 
-  it('release stop treats later no-pid group ports as stopped after an earlier shutdown closes the process', async () => {
+  it('release stop without --port still stops the resolved config group', async () => {
     const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));
     const configPath = path.join(tempDir, 'config.toml');
@@ -402,6 +404,72 @@ port = 5520
       expect(shutdownPorts).toEqual([4444]);
       expect(succeeded.join('\n')).toContain('RouteCodex server stopped on 4444');
       expect(succeeded.join('\n')).toContain('No server listening on 5520');
+    } finally {
+      if (previousConfig === undefined) {
+        delete process.env.ROUTECODEX_CONFIG_PATH;
+      } else {
+        process.env.ROUTECODEX_CONFIG_PATH = previousConfig;
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses explicit single-port stop when the managed PID also owns sibling listeners', async () => {
+    const previousConfig = process.env.ROUTECODEX_CONFIG_PATH;
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-stop-command-'));
+    const configPath = path.join(tempDir, 'config.toml');
+    fs.writeFileSync(configPath, `
+[httpserver]
+port = 5520
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+port = 4444
+
+[[httpserver.ports]]
+port = 5520
+
+[[httpserver.ports]]
+port = 10000
+`);
+    process.env.ROUTECODEX_CONFIG_PATH = configPath;
+    const program = new Command();
+    const killCalls: Array<{ pid: number; force: boolean }> = [];
+
+    try {
+      createStopCommand(program, {
+        isDevPackage: false,
+        defaultDevPort: 5520,
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: () => {}, error: () => {} },
+        findListeningPids: (port: number) => ([4444, 5520, 10000].includes(port) ? [12345] : []),
+        killPidBestEffort: (pid, opts) => {
+          killCalls.push({ pid, force: opts.force });
+        },
+        sleep: async () => {},
+        env: {},
+        fsImpl: fs,
+        pathImpl: { join: (...parts: string[]) => parts.join('/') },
+        getHomeDir: () => '/home/test',
+        fetchImpl: (async (url: string | URL | Request) => {
+          const text = String(url);
+          if (text.endsWith('/_routecodex/admin/ports/5520/stop')) {
+            return { ok: false, status: 404 };
+          }
+          if (text.endsWith('/shutdown')) {
+            throw new Error('aggregate shutdown must not be used for single-port stop');
+          }
+          return { ok: false, status: 503 };
+        }) as any,
+        exit: (code) => {
+          throw new Error(`exit:${code}`);
+        }
+      });
+
+      await expect(
+        program.parseAsync(['node', 'rcc', 'stop', '--port', '5520'], { from: 'node' })
+      ).rejects.toThrow('exit:1');
+      expect(killCalls).toEqual([]);
     } finally {
       if (previousConfig === undefined) {
         delete process.env.ROUTECODEX_CONFIG_PATH;

@@ -23,15 +23,20 @@ result. Request/response Runtime remains the only business lifecycle.
 `instance.json` is the stable declaration: schema version, deterministic instance ID, canonical
 config path and digest, executable identity, and complete listener set. `pid.cache` is transient and
 binds PID to a random start nonce. `control.json` exposes only the Unix control socket path and nonce
-handle. `status.json` records starting/running/stopping/stopped/failed without provider/client data.
+handle. `restart.plan.json` is an owner-only transient control-side file for in-place exec options
+(new executable path, snapshots, snapshot stages) and is bound to the current start nonce; it is not
+client/provider payload and is deleted when no override is needed or when the re-entered child
+publishes its fresh control nonce. `status.json` records
+starting/running/stopping/stopped/failed without provider/client data.
 Every schema uses `deny_unknown_fields`; every write is temp-file plus rename; state directories are
 owner-only. No resolved secret, provider/client payload, Metadata, Debug snapshot, request ID, session,
 or continuation truth may enter lifecycle state.
 
 The instance ID is the stable service identity derived from canonical config path plus config digest.
-`executable_path` is exact launch provenance: it must match while state is non-terminal, but a
-`stopped` or `failed` instance may republish the same service declaration from a new canonical release
-snapshot executable. That rollover is legal only when instance ID, config path/digest, listener set,
+`executable_path` is exact launch provenance. Same-binary restart preserves it; explicit
+restart from a new release snapshot publishes a nonce-bound `restart.plan.json` and then execs the
+running PID in place into that new executable. A `stopped` or `failed` instance may also republish the
+same service declaration from a new canonical release snapshot executable. That rollover is legal only when instance ID, config path/digest, listener set,
 and schema are unchanged and terminal status/control ownership are verified. Missing terminal proof,
 active state, or any other declaration difference must fail without reaping state.
 
@@ -43,7 +48,9 @@ active state, or any other declaration difference must fail without reaping stat
 - child publishes PID/start nonce only after all listeners bind;
 - status challenge validates instance ID plus nonce through the control socket;
 - stop transitions running -> stopping -> stopped and closes all aggregate listeners;
-- restart is one stop plus one start for the instance, never per listener;
+- restart is one in-place exec for the instance, never per listener; same-binary restart preserves
+  the running executable path, while new-release restart uses a nonce-bound restart plan file and
+  republishes `instance.json` before exec; the re-entered child removes the consumed plan;
 - start over an already-running exact instance performs the old `rcc start` takeover: graceful
   control stop, then a fresh child with the same instance ID and a new PID/start nonce;
 - stale stopped PID/control caches are reaped after exact state/schema validation;
@@ -78,7 +85,7 @@ config check
   -> health/status
   -> duplicate start takes over the exact instance with stable instance ID + changed PID/start nonce
   -> top-level restart
-  -> stable instance ID + changed PID/start nonce
+  -> stable instance ID + same PID + refreshed start nonce
   -> stop -> copy/invoke next release snapshot executable -> start with stable instance ID
   -> health
   -> top-level stop
@@ -94,17 +101,20 @@ The user-facing parse shape is the old-style top-level command set:
 must not be documented as the normal start path.
 The same black-box suite also holds a SIGTERM-resistant process on a configured listener port and
 requires `rccv3 start` to free it with explicit listener PID SIGTERM then SIGKILL before binding.
+If that configured listener is owned by another managed multi-port instance, the owner must release only the overlapping configured listener ports by using a foreign managed port-scoped release; an unmanaged PID with sibling listener ports is rejected rather than broad-killed.
 Foreground `rccv3 start` also forces console visibility even when config has `debug.log_console=false`:
 startup must emit `V3ServerStartup01ListenerSetPreflight`, and a dry-run request must emit
-`V3Server03HttpRequestRaw`. `rccv3 start --snap` must force `/_routecodex/debug/status` to report
+`V3Server03HttpRequestRaw`. The foreground/server-log human lines must match the V2 request monitor
+shape: `▶` request start, `[virtual-router-hit] req=... sid=... -> provider[key].wire_model reason=...`,
+`✅` completion with `finish_reason=...`, and `[usage] req=<short> project=<path>:<port>
+route=<router-direct|router-relay>:<reason> model=<request-model>-><wire-model> time=i/e/t
+finish_reason=...`; the persisted server log must keep the same ANSI colorized line rather than an
+uncolored copy. `rccv3 start --snap` must force `/_routecodex/debug/status` to report
 `snapshots_enabled=true` even when the config has snapshots disabled.
 
 ## Live matrix
 
-After every source/controlled gate passes, migrate only the already-known V3 5555 instance to the
-managed owner. Before acting, verify its executable/config/listener identity. Use the lifecycle
-control surface first. If the configured listener is still occupied, release only explicit PIDs
-listening on that configured V3 listener set; do not broad kill and do not touch the V2 aggregate.
+After every source/controlled gate passes, migrate only the already-known V3 5555 instance to the managed owner. Before acting, verify its executable/config/listener identity. Use the lifecycle control surface first. If the configured listener is still occupied, release only the overlapping configured listener ports from any foreign managed owner; if an unmanaged PID also owns sibling listener ports, fail explicitly instead of broad-killing. Do not touch the V2 aggregate.
 
 Before and after one managed restart:
 

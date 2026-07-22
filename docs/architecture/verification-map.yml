@@ -189,6 +189,7 @@ verification:
     build:
       - npm run build:base
     notes:
+      - "V3 stopless override: see `.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md` and `feature_id: v3.servertool_hook_skeleton_lifecycle`; V3 `reasoningStop` CLI is no-input no-op and StoplessCenter state lives only in MetadataCenter."
       - "Validation must prove stopless request-side private-state restore/user-prompt rewrite/schema-contract reinjection happens on the Chat Process request boundary after `/v1/responses` continuation restore and before normal request governance; response-side stop/schema normalization must happen on the Chat Process response boundary before continuation save and before RespOutbound."
       - "Validation must prove the response-side stopless hook is executed as the standard `ServertoolRespHook` skeleton inside Rust Hub RespChatProcess, and that outbound/SSE layers only receive the finalized semantic payload."
       - "stopless is a Rust-owned CLI continuation: progression truth comes from runtime metadata plus current request tool_output, and `StoplessExecutionPlan` must compose request-truth session/control state and expose `cli_projection` for non-terminal stop_message_flow."
@@ -196,28 +197,28 @@ verification:
       - "Validation must prove direct/provider-direct runtime routeName disables stopless CLI projection entirely, so direct `/v1/responses` never emits the public `reasoningStop` CLI."
       - "Engine must project stopless to a client-visible `exec_command` and must not call `reenterPipeline` for stopless CLI flows."
       - "Validation must prove TS engine orchestration calls Rust `planStoplessExecutionJson` and does not build stopless `context.stopless`, `context.requestTruth`, or session truth locally."
-      - "Command input and CLI stdout must stay status/control-only; provider-facing guidance is built by ReqChatProcess as an ordinary user prompt, while schema guidance comes only from the system instruction."
+      - "For V3, command input and CLI stdout must stay no-input/no-state/no-parse; provider-facing guidance is built by ReqChatProcess from StoplessCenter as an ordinary user prompt, while schema guidance comes only from the system instruction."
       - "Validation must prove the client-visible stopless command uses alias `reasoningStop` and the client payload does not expose `__servertool_cli_projection`."
-      - "Validation must prove NoSchema model-facing schema guidance is present through the provider-visible system instruction plus exactly-one fresh internal `reasoningStop` tool declaration on managed relay, current-request restoration advances repeatCount 1 -> 2 privately, and the 3rd consecutive missing/invalid-schema stop passes the original `finish_reason=stop` through without another CLI projection."
-      - "Validation must prove req_chatprocess consumes the paired stopless shell result as private evidence, emits only deterministic schema repair prompts or exact valid `next_step`, and VR still routes that turn to thinking."
+      - "Validation must prove NoSchema model-facing schema guidance is present through the provider-visible system instruction plus exactly-one fresh internal `reasoningStop` tool declaration on managed relay, MetadataCenter StoplessCenter advances consecutive_stop_count privately, and the guard closes without another CLI projection."
+      - "Validation must prove req_chatprocess consumes the paired stopless shell result only as no-op evidence, emits only StoplessCenter state-machine selected provider-facing prompts, and VR still routes that turn to thinking."
       - "Validation must prove the latest real user turn is a hard reset boundary across inbound normalization, continuation-history collapse, and the final Responses-to-chat codec: older stopless pairs are removed, the user text is preserved verbatim, and no automatic guidance is rebuilt."
       - "Validation must prove embedded `responsesContext.toolsNormalized` cannot replay stale `reasoningStop`, `reasoning_stop`, or `stop_message_auto` tool history into provider tools, while ordinary client tools such as `exec_command` remain present and managed relay receives one freshly injected internal `reasoningStop` declaration without rebuilding the original tool declaration shape; Codex `input[].type=additional_tools.tools` must stay in that original array and must not be lifted into a new top-level `tools` surface."
       - "`verify:stopless-contract-blackbox` must inspect dry-run `providerRequest.body`, prove `object=routecodex.pipeline_dry_run`, `kind=provider_request`, `dryRun=true`, `stoppedBeforeProviderSend=true`, managed relay system schema plus exactly-one fresh internal `reasoningStop` tool are present, and stopless shell/control artifacts are absent."
       - "Validation must prove `/v1/responses` stopless turns do not lose the schema contract between req_chatprocess and the responses->chat bridge: req owner must preserve the contract in `instructions`, and bridge owner must materialize it into the outbound system message."
-      - "Validation must prove stopless CLI projection/CLI execution uses write-once `request_truth.sessionId/requestId` for identity, and that Rust-produced `MetadataCenter.runtime_control.stopless` plus current request tool_output are the only progression truth while `sessionDir` and any persisted writeback path remain absent."
+      - "Validation must prove stopless CLI projection/CLI execution carries no identity or input; write-once `request_truth.sessionId/requestId` scopes StoplessCenter, and Rust-produced `MetadataCenter.runtime_control.stopless` is the only progression truth while `sessionDir`, CLI stdout, and any persisted writeback path remain absent."
       - "Validation must prove missing/blank current request-truth `sessionId` disables stopless interception, writes no stopless runtime state, emits `stopless_missing_session_id`, and lets the model stop naturally."
-      - "Validation must prove repeatCount is same-session consecutive missing/invalid-schema only: non-stop progress or ordinary tool calls reset it to 0, valid terminal schema and `simple_question=true` clear it, and a different `sessionId` starts from repeatCount=1 instead of inheriting stale state."
+      - "Validation must prove StoplessCenter consecutive_stop_count is same-session consecutive missing/invalid-schema only: non-stop progress, ordinary tool calls, valid terminal schema, real user turns, and `simple_question=true` clear it, and a different `sessionId` starts fresh instead of inheriting stale state."
       - "Validation must prove ReqChatProcess emits `metadata.runtime_control.stopless`, the TS request-stage shell only writes that Rust plan into the bound MetadataCenter, and missing binding fails fast."
       - "Retired zero-consumer stop-message auto TS wrapper `native-stop-message-auto-semantics.ts` must stay physically deleted; stop-message decision/schema tests must use direct Rust/NAPI `decideStopMessageAction` and `evaluateStopSchemaGateJson` evidence."
       - "Validation must prove response-side stopless activation reads the live `MetadataCenter.runtime_control.stopless.active` shape carried through the current request, so submit_tool_outputs rounds cannot bypass the response hook."
       - "Validation must prove MetadataCenter never carries `responsesRequestContext` or any request/context payload mirror, and continuation control cannot materialize request session truth, stopless activation, stop-message scope, or state keys."
       - "The stop contract is dual-gated: `finish_reason=stop` only triggers evaluation; terminal stop still requires a valid terminal schema or the temporary three-round safety guard."
       - "If stop arrives without schema, validation must prove the same stop hook is auto-projected with zero schema input and its result tells the model to provide schema / call the same hook before terminal stop."
-      - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected with schema-derived input and returns corrective guidance."
-      - "For malformed/invalid schema, validation must prove the hook result includes parse/interpretation feedback plus explicit field/value/shape errors, not only a generic deny-stop message."
-      - "Validation must prove stop schema missingFields are conditional, not all-fields-required: `simple_question=true` allows natural stop without `stopreason`; otherwise `stopreason` is unconditional; `stopreason=0` needs `has_evidence=1` plus `evidence`; `stopreason=1` needs `reason`, `has_evidence=1`, and `evidence`; `stopreason=2` needs `current_goal` plus `next_step`; diagnostic fields are not globally mandatory."
+      - "If stop arrives with invalid/non-terminal/malformed schema arguments, validation must prove the same stop hook is auto-projected as no-input CLI and StoplessCenter records the corrective state."
+      - "For malformed/invalid schema, validation must prove StoplessCenter state includes parse/interpretation feedback policy plus explicit field/value/shape classification, not only a generic deny-stop message."
+      - "Validation must prove stop schema fields are conditional, not all-fields-required: `simple_question=true` allows natural stop without `stopreason`; otherwise `stopreason` is unconditional; `stopreason=0` needs `has_evidence=1` plus `evidence`; `stopreason=1` needs `reason`, `has_evidence=1`, and `evidence`; `stopreason=2` means continue-needed and moves into StoplessCenter policy, not provider-visible prompt/control fields; diagnostic fields are not globally mandatory."
       - "Validation must prove `simple_question=false` or absent still requires `stopreason`, and client-visible terminal payload strips any `simple_question` schema control text."
-      - "Validation must prove `stopreason=2 + current_goal + next_step` sends the model's own `next_step` directly as the next model-facing prompt without consuming schema-error budget, while missing current_goal/next_step is rejected with corrective guidance and `blocked + needs_user_input=true` returns summary/reason/evidence plus the user decision question to the client and terminates with stop."
+      - "Validation must prove `stopreason=2` / need_continue enters StoplessCenter next_request_policy without consuming schema-error budget, while missing required fields are rejected with corrective guidance and `blocked + needs_user_input=true` returns summary/reason/evidence plus the user decision question to the client and terminates with stop."
       - "If stop arrives with valid terminal schema, validation must prove stop is allowed even when the model did not proactively call the stop hook."
       - "Validation must also prove the auto-projected stopless CLI result is rewritten on the next request into text guidance, not replayed back to the model as if the model had initiated that tool call."
       - "Validation must prove client-visible stopless prose is ordinary assistant text and not `reasoning_text` / `reasoning_content` / `reasoning.summary`; `function_call_output` remains only the next-turn model-side restore shape."
@@ -4035,12 +4036,15 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/cli/commands/restart.ts
+      - src/utils/managed-server-pids.ts
     contract:
       - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
-    integration: []
+      - tests/utils/managed-server-pids.spec.ts
+    integration:
+      - tests/utils/managed-server-pids.spec.ts
     smoke:
       - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
@@ -4058,13 +4062,16 @@ verification:
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
       - src/cli/commands/start.ts
+      - src/cli/server/port-utils.ts
       - scripts/install-release.sh
     contract:
       - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/start-command.spec.ts
+      - tests/cli/port-utils.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
     integration:
       - tests/cli/start-command.spec.ts
+      - tests/cli/port-utils.spec.ts
     smoke:
       - npm run verify:resource-operation-map
       - npm run verify:runtime-lifecycle-pid-rebase
@@ -4073,7 +4080,40 @@ verification:
       - npm run build:native-hotpath
       - npm run build:base
     notes:
-      - "Default start and explicit `start --restart` must fail before stop-intent or /shutdown when a runtime listener already exists. Install release verification must use in-session `rcc restart` for live runtime and `rcc start --no-restart` only when the target is stopped."
+      - "Default start and explicit `start --restart` may take over occupied target ports through port-scoped graceful stop plus safe explicit-PID signal fallback. `--no-restart` must fail before stop-intent or /shutdown when a runtime listener already exists."
+      - "Start takeover tests must prove managed PID fallback refuses when the PID also owns non-target listener ports."
+
+  - feature_id: runtime.lifecycle.port_scoped_start_stop
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - src/cli/commands/start.ts
+      - src/cli/commands/stop.ts
+      - src/cli/server/port-utils.ts
+      - src/utils/managed-server-pids.ts
+      - src/server/runtime/http-server/routes.ts
+      - src/server/runtime/http-server/port-registry.ts
+    contract:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
+      - tests/cli/port-utils.spec.ts
+      - tests/server/http-server/port-mode-routing.spec.ts
+    integration:
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
+      - tests/cli/port-utils.spec.ts
+      - tests/server/http-server/port-mode-routing.spec.ts
+    smoke:
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:native-hotpath
+      - npm run build:base
+    notes:
+      - "Positive: occupied target port gets `/_routecodex/admin/ports/:port/stop` first; default start and explicit --restart continue after release; explicit stop --port closes only that listener."
+      - "Negative: --no-restart refuses takeover; single-port stop/takeover refuses PID signal fallback when the PID also owns sibling/non-target listener ports."
+      - "No-port stop remains configured group stop; do not claim this feature changed group stop semantics."
 
   - feature_id: server.port_config_provider_failure_exemption
     change_risk: medium

@@ -492,7 +492,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]

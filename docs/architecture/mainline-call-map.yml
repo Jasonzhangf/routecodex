@@ -793,14 +793,14 @@ chains:
         callee_file: src/modules/llmswitch/bridge/responses-request-handler-host.ts
         owner_feature_id: hub.chat_process_responses_continuation
         semantic_input: "canonical restored current-turn request truth including payload/input/tools and request-scoped continuation metadata"
-        semantic_output: "request truth after current-turn client exec_command result has been restored back to model-visible reasoningStop semantics/guidance"
+        semantic_output: "request truth after current-turn client exec_command no-op evidence has been consumed and provider-visible transparent guidance is prepared without shell/CLI history"
         resource_flow:
           consumes: [request.normal_payload, continuation.scope_state]
           produces: [request.normal_payload, servertool.followup_state]
           side_channel_reads: [continuation.scope_state]
           side_channel_writes: [servertool.followup_state]
         status: anchored
-        note: "After the Rust request-context plan selects the canonical payload, the same host bridge invokes the Rust req_inbound context snapshot builder directly; no relay-specific TS reconstruction helper remains. Tests must prove exec_command CLI output is restored into model-visible reasoningStop semantics after continuation restore."
+        note: "After the Rust request-context plan selects the canonical payload, the same host bridge invokes the Rust req_inbound context snapshot builder directly; no relay-specific TS reconstruction helper remains. Tests must prove current exec_command no-op evidence is consumed after continuation restore without exposing shell/CLI history to the provider."
       - step_id: rct-04
         from_node: ChatProcReqContinuation04HookRestored
         to_node: ChatProcReqContinuation05Governed
@@ -1599,16 +1599,64 @@ chains:
         callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
         owner_feature_id: runtime.lifecycle.start_command
         semantic_input: "start request mode plus resolved port group and listener observations"
-        semantic_output: "Rust guard plan refuses default/--restart start when an existing runtime listener is present before stop-intent or /shutdown; stopped target may proceed to start"
+        semantic_output: "Rust guard plan allows default/--restart target-port takeover and refuses only --no-restart when occupied; stopped target may proceed to start"
         resource_flow:
           consumes: [runtime.instance_record]
           produces: [runtime.instance_record]
           side_channel_reads: []
           side_channel_writes: []
         status: anchored
+      - step_id: rtl-14
+        from_node: ServerStartCommand
+        to_node: PortScopedListenerRelease
+        caller_symbol: createStartCommand
+        caller_file: src/cli/commands/start.ts
+        callee_symbol: ensurePortAvailableImpl
+        callee_file: src/cli/server/port-utils.ts
+        owner_feature_id: runtime.lifecycle.port_scoped_start_stop
+        semantic_input: "target port plus effective port-group targetPorts after Rust takeover guard allows restart/takeover"
+        semantic_output: "port-utils sends port-scoped stop first, waits for bind availability, and only signals explicit managed PID(s) when they do not own non-target listener ports"
+        resource_flow:
+          consumes: [runtime.pid_cache, runtime.http_entry_dispatch]
+          produces: [runtime.http_entry_dispatch]
+          side_channel_reads: []
+          side_channel_writes: [runtime.stop_intent]
+        status: anchored
+      - step_id: rtl-15
+        from_node: ServerStopCommand
+        to_node: PortScopedListenerRelease
+        caller_symbol: createStopCommand
+        caller_file: src/cli/commands/stop.ts
+        callee_symbol: registerHttpRoutes
+        callee_file: src/server/runtime/http-server/routes.ts
+        owner_feature_id: runtime.lifecycle.port_scoped_start_stop
+        semantic_input: "explicit `rcc stop --port <port>` request with caller provenance headers"
+        semantic_output: "CLI calls `/_routecodex/admin/ports/:port/stop`; the server removes only the target listener from PortRegistry and preserves sibling ports"
+        resource_flow:
+          consumes: [runtime.http_entry_dispatch, runtime.stop_intent]
+          produces: [runtime.http_entry_dispatch, runtime.instance_record]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
+      - step_id: rtl-16
+        from_node: PortScopedListenerRelease
+        to_node: PortRegistry
+        caller_symbol: registerHttpRoutes
+        caller_file: src/server/runtime/http-server/routes.ts
+        callee_symbol: removePort
+        callee_file: src/server/runtime/http-server/port-registry.ts
+        owner_feature_id: runtime.lifecycle.port_scoped_start_stop
+        semantic_input: "accepted local port-scoped stop request for one registered listener port"
+        semantic_output: "PortRegistry closes sockets/server for that port and deletes only that port instance; last listener may terminate process outside test"
+        resource_flow:
+          consumes: [runtime.http_entry_dispatch]
+          produces: [runtime.http_entry_dispatch]
+          side_channel_reads: []
+          side_channel_writes: []
+        status: anchored
 
   - chain_id: stopless.session.mainline
-    summary: "Stopless three-round contract inside Chat Process boundary: every managed relay request injects the stop schema as a system instruction plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the fresh schema/tool contract, and Round-3 passes the original finish_reason=stop through."
+    summary: "Stopless three-round contract inside Chat Process boundary: every managed relay request injects stopless system guidance plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected complete non-persistent ordinary user continuation guideline plus the fresh tool contract, and guard terminal stops without another CLI projection."
     entry_contract:
       node: StoplessResp01StopDetected
       owner_doc: docs/architecture/wiki/stopless-session-mainline-source.md
@@ -1654,8 +1702,8 @@ chains:
         callee_symbol: build_stopless_auto_cli_projection_from_engine_json
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/stopless_auto_handler_bridge.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "concise stopless command payload: flowId/repeatCount/maxRepeats/triggerHint plus optional schemaFeedback{reasonCode,missingFields}"
-        semantic_output: "client-visible exec_command using public alias reasoningStop; no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
+        semantic_input: "StoplessCenter state-machine transition plus client-visible assistant text"
+        semantic_output: "client-visible no-input exec_command using public alias reasoningStop; no input-json, no sessionDir/sessionId/requestId flags; natural-language feedback is deferred to req_chatprocess rewrite"
         resource_flow:
           consumes: [stopless.schema_gate_state, stopless.runtime_snapshot]
           produces: [stopless.cli_projection]
@@ -1670,8 +1718,8 @@ chains:
         callee_symbol: build_servertool_cli_binary_run_command_from_client_exec_result
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/servertool-cli/src/main.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "exec_command shell string with status-only input and repeat flags"
-        semantic_output: "status/control-only servertool CLI stdout JSON containing trigger/result state and optional structured schemaFeedback; no model-facing schema guidance text"
+        semantic_input: "exec_command shell string with no input and no state"
+        semantic_output: "no-op CLI completion output; no trigger/result state, no repeat flags, no schemaFeedback, no model-facing schema guidance text"
         resource_flow:
           consumes: [stopless.cli_projection]
           produces: [stopless.cli_result]
@@ -1687,8 +1735,8 @@ chains:
         callee_symbol: latest_stopless_cli_output_from_resume
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_process_stage1_tool_governance_blocks/orchestrator.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "next request after Responses continuation restore, including current `responsesResume.toolOutputsDetailed` control evidence and the bound MetadataCenter snapshot"
-        semantic_output: "private stopless repeat state restored into the current request control slot without parsing the provider-visible continuation text and without file persistence"
+        semantic_input: "next request after Responses continuation restore, including current no-op tool output evidence and the bound MetadataCenter StoplessCenter snapshot"
+        semantic_output: "private StoplessCenter state loaded into the current request control slot without parsing CLI stdout/provider-visible continuation text and without file persistence"
         resource_flow:
           consumes: [stopless.cli_result, stopless.runtime_snapshot, continuation.scope_state]
           produces: [stopless.runtime_snapshot]
@@ -1704,8 +1752,8 @@ chains:
         callee_symbol: build_stop_hook_guidance_text_from_output
         callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_req_inbound_tool_call_normalization.rs
         owner_feature_id: hub.servertool_stopless_cli_continuation
-        semantic_input: "restored stopless CLI tool_output plus responses/chat request context"
-        semantic_output: "ordinary user continuation for the next provider turn: exact `next_step` when valid; deterministic schema repair prompt for no_schema/invalid/missing-next-step; all stopless shell/tool history and control fields are removed"
+        semantic_input: "restored no-op stopless CLI tool_output plus StoplessCenter state and responses/chat request context"
+        semantic_output: "complete non-persistent ordinary user continuation guideline for the next provider turn selected by StoplessCenter next_request_policy/count; it is model-transparent about the no-op/CLI bridge and only describes restored-context continuation, objective/open-work review, tool-use progress, and completion/blocked evidence requirements while removing all stopless shell/tool history and control fields"
         resource_flow:
           consumes: [request.normal_payload, stopless.cli_result, stopless.runtime_snapshot]
           produces: [stopless.guidance_rewrite]

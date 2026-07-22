@@ -134,7 +134,62 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_MANAGED_TEST_KEY" }}] }}
 [providers.test.models.test]
 wire_name = "wire-test"
-capabilities = ["text", "streaming"]
+capabilities = ["text"]
+supports_streaming = true
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+fn write_config_with_server_b_enabled(
+    root: &TempDir,
+    filename: &str,
+    ports: [u16; 2],
+    server_b_enabled: bool,
+) -> PathBuf {
+    let path = root.path().join(filename);
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let port_a = ports[0];
+    let port_b = ports[1];
+    let server_b_enabled = if server_b_enabled { "true" } else { "false" };
+    fs::write(
+        &path,
+        format!(
+            r#"version = 3
+{hub_v1_declaration}
+[features]
+responses_direct = true
+[debug]
+log_console = true
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 4, raw_responses = 4, events = 32 }}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+[servers.b]
+enabled = {server_b_enabled}
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_MANAGED_TEST_KEY" }}] }}
+[providers.test.models.test]
+wire_name = "wire-test"
+capabilities = ["text"]
 supports_streaming = true
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
@@ -314,12 +369,13 @@ fn run_top_level_without_config(
         .unwrap()
 }
 
-fn send_responses_dry_run_request(port: u16, session_id: &str) {
+fn send_responses_dry_run_request(port: u16, session_id: &str, workdir: &Path) {
     let body = format!(
         r#"{{"model":"test","input":"console probe","stream":false,"client_metadata":{{"session_id":"{session_id}","thread_id":"thread-{session_id}"}}}}"#
     );
     let request = format!(
-        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nx-routecodex-dry-run: provider-request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nx-routecodex-dry-run: provider-request\r\nx-routecodex-workdir: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        workdir.display(),
         body.len(),
         body
     );
@@ -453,6 +509,29 @@ setInterval(() => {{}}, 1000);
     child
 }
 
+fn spawn_sigterm_resistant_multi_listener(ports: [u16; 2]) -> Child {
+    let script = format!(
+        r#"
+const net = require('net');
+process.on('SIGTERM', () => {{}});
+for (const port of [{}, {}]) {{
+  net.createServer((socket) => socket.end()).listen({{ host: '127.0.0.1', port }});
+}}
+setInterval(() => {{}}, 1000);
+"#,
+        ports[0], ports[1]
+    );
+    let child = Command::new("node")
+        .args(["-e", &script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_port(ports[0], true);
+    wait_port(ports[1], true);
+    child
+}
+
 fn single_instance_dir(state_root: &Path) -> PathBuf {
     let entries = fs::read_dir(state_root.join("instances"))
         .unwrap()
@@ -567,6 +646,11 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
     assert_eq!(last_json(&restart)["instance_id"], started["instance_id"]);
     let second_pid: Value =
         serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    assert_eq!(
+        second_pid["pid"].as_u64().unwrap(),
+        takeover_pid["pid"].as_u64().unwrap(),
+        "managed restart must exec in place and preserve the server PID"
+    );
     assert_ne!(
         second_pid["start_nonce"].as_str().unwrap(),
         takeover_pid["start_nonce"].as_str().unwrap()
@@ -618,8 +702,8 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         vr_status["virtualRouter"]["routes"]["default"]["pools"][0]["poolId"],
         "default"
     );
-    send_responses_dry_run_request(ports[0], "console-alpha");
-    send_responses_dry_run_request(ports[0], "console-beta");
+    send_responses_dry_run_request(ports[0], "console-alpha", root.path());
+    send_responses_dry_run_request(ports[0], "console-beta", root.path());
     send_invalid_json_request(ports[0]);
     send_path_not_found_request(ports[0]);
 
@@ -641,6 +725,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     for port in ports {
         wait_port(port, true);
     }
+    send_responses_dry_run_request(ports[0], "console-after-restart", root.path());
 
     let stop = run_top_level(binary, &state_root, &config, "stop");
     assert!(
@@ -676,6 +761,13 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         "top-level start must stream standard human startup status with version/binary evidence even when config log_console=false, got:\n{start_stdout}"
     );
     assert!(
+        start_stdout
+            .matches("[RouteCodexV3] Server started version=")
+            .count()
+            >= 2,
+        "top-level restart must exec in place and keep streaming startup console output to the original foreground session, got:\n{start_stdout}"
+    );
+    assert!(
         start_stdout.contains("▶ [/v1/responses]")
             && start_stdout.contains("request ")
             && start_stdout.contains(" started")
@@ -689,7 +781,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         .filter(|line| line.contains("▶ [/v1/responses]"))
         .collect::<Vec<_>>();
     assert!(
-        started_lines.len() >= 2,
+        started_lines.len() >= 3,
         "top-level start must show every request start, got:\n{start_stdout}"
     );
     let request_counters = started_lines
@@ -744,26 +836,37 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         "different client sessions must resolve to different foreground colors, got:\n{start_stdout}"
     );
     assert!(
-        start_stdout.contains("🎯 [/v1/responses]")
-            && start_stdout.contains("route=")
-            && start_stdout.contains("provider=")
-            && start_stdout.contains("providerKey=")
-            && start_stdout.contains("path="),
-        "foreground monitor must show route/provider hit object, got:\n{start_stdout}"
+        start_stdout.contains("[virtual-router-hit]")
+            && start_stdout.contains("req=openai-responses-router-test-")
+            && start_stdout.contains("sid=console-alpha")
+            && start_stdout.contains(" -> test[key].wire-test")
+            && start_stdout.contains("reason=provider-request-dry-run")
+            && !start_stdout.contains("🎯 [/v1/responses]"),
+        "foreground monitor must use the V2 virtual-router-hit route/provider shape, got:\n{start_stdout}"
     );
     assert!(
         start_stdout.contains("✅ [/v1/responses]")
             && start_stdout.contains("status=200")
             && !start_stdout.contains("providerStatus=200")
             && start_stdout.contains("nodes=")
-            && start_stdout.contains("elapsedMs="),
-        "foreground monitor must show one normal status and pipeline cost without repeating providerStatus=200, got:\n{start_stdout}"
+            && start_stdout.contains("elapsedMs=")
+            && start_stdout.contains("finish_reason=")
+            && !start_stdout.contains("finishReason="),
+        "foreground monitor must show V2 snake-case finish_reason without repeating providerStatus=200, got:\n{start_stdout}"
     );
     assert!(
         start_stdout.contains("[usage]")
             && start_stdout.contains("usage=")
-            && start_stdout.contains("pipeline="),
-        "foreground monitor must show usage and pipeline summary, got:\n{start_stdout}"
+            && start_stdout.contains("project=")
+            && start_stdout.contains(&format!(":{}", ports[0]))
+            && start_stdout.contains("route=router-direct:provider-request-dry-run")
+            && start_stdout.contains("model=test->wire-test")
+            && start_stdout.contains("finish_reason=")
+            && start_stdout.contains("time=i:")
+            && start_stdout.contains(" e:")
+            && start_stdout.contains(" t:")
+            && !start_stdout.contains("finishReason="),
+        "foreground monitor must show the V2 usage summary shape, got:\n{start_stdout}"
     );
     assert!(
         start_stderr.contains("\u{1b}[31m")
@@ -849,14 +952,15 @@ fn top_level_start_snap_forces_debug_snapshots() {
         expected_log_file.display().to_string(),
         "foreground start must project the production-style server log file path"
     );
-    send_responses_dry_run_request(ports[0], "snap-log-file");
+    send_responses_dry_run_request(ports[0], "snap-log-file", root.path());
     let log_text = fs::read_to_string(&expected_log_file).unwrap();
     assert!(
         log_text.contains("▶ [/v1/responses]")
-            && log_text.contains("🎯 [/v1/responses]")
+            && log_text.contains("\u{1b}[")
+            && log_text.contains("[virtual-router-hit]")
             && log_text.contains("✅ [/v1/responses]")
             && log_text.contains("[usage]"),
-        "foreground dry-run must persist the same human monitor lines into server log, got:\n{log_text}"
+        "foreground dry-run must persist the same colorized V2-shaped human monitor lines into server log, got:\n{log_text}"
     );
 
     let stop = run_top_level(binary, &state_root, &config, "stop");
@@ -999,6 +1103,13 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
     let first_pid: Value =
         serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
     let managed_child_pid = first_pid["pid"].as_u64().unwrap();
+    let managed_child_nonce = first_pid["start_nonce"].as_str().unwrap().to_string();
+    let managed_executable_path =
+        serde_json::from_slice::<Value>(&fs::read(instance_dir.join("instance.json")).unwrap())
+            .unwrap()["executable_path"]
+            .as_str()
+            .unwrap()
+            .to_string();
     assert_ne!(managed_child_pid, u64::from(start_cli_pid));
 
     let status_from_new_cli = run(binary, &state_root, &config, "status");
@@ -1021,7 +1132,23 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
     );
     let second_pid: Value =
         serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
-    assert_ne!(second_pid["pid"].as_u64().unwrap(), managed_child_pid);
+    let second_declaration: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("instance.json")).unwrap()).unwrap();
+    assert_eq!(
+        second_declaration["executable_path"].as_str().unwrap(),
+        managed_executable_path,
+        "same-binary restart must preserve the originally published executable path"
+    );
+    assert_eq!(
+        second_pid["pid"].as_u64().unwrap(),
+        managed_child_pid,
+        "restart must exec the running managed child in place instead of spawning a replacement PID"
+    );
+    assert_ne!(
+        second_pid["start_nonce"].as_str().unwrap(),
+        managed_child_nonce,
+        "restart must republish a fresh control nonce after exec"
+    );
     for port in ports {
         wait_port(port, true);
     }
@@ -1126,6 +1253,103 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
 }
 
 #[test]
+fn running_instance_restart_execs_next_release_snapshot_in_place() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let source_binary = env!("CARGO_BIN_EXE_rccv3");
+    let first_release = copy_release_binary(source_binary, &root.path().join("active-release-a"));
+    let second_release = copy_release_binary(source_binary, &root.path().join("active-release-b"));
+
+    let first_start = run(
+        first_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "start",
+    );
+    assert!(
+        first_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first_start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let instance_dir = single_instance_dir(&state_root);
+    let first_pid: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    let pid_before = first_pid["pid"].as_u64().unwrap();
+    let nonce_before = first_pid["start_nonce"].as_str().unwrap().to_string();
+    let first_instance_id =
+        status_json(first_release.to_str().unwrap(), &state_root, &config)["instance_id"].clone();
+
+    let restart_from_next_release = run_with_timeout(
+        second_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "restart",
+        15_000,
+    );
+    assert!(
+        restart_from_next_release.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart_from_next_release.stderr)
+    );
+    assert_eq!(
+        last_json(&restart_from_next_release)["instance_id"],
+        first_instance_id
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let second_pid: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
+    assert_eq!(
+        second_pid["pid"].as_u64().unwrap(),
+        pid_before,
+        "restart from the next release must exec in place and preserve the managed PID"
+    );
+    assert_ne!(
+        second_pid["start_nonce"].as_str().unwrap(),
+        nonce_before,
+        "restart from the next release must republish a fresh control nonce"
+    );
+    let declaration: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("instance.json")).unwrap()).unwrap();
+    assert_eq!(
+        declaration["executable_path"],
+        fs::canonicalize(&second_release)
+            .unwrap()
+            .display()
+            .to_string(),
+        "restart must re-enter the executable path supplied by the current restart command"
+    );
+    assert!(
+        !instance_dir.join("restart.plan.json").exists(),
+        "the restarted managed child must consume and remove the nonce-bound restart plan"
+    );
+
+    let second_stop = run(
+        second_release.to_str().unwrap(),
+        &state_root,
+        &config,
+        "stop",
+    );
+    assert!(
+        second_stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second_stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
 fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
@@ -1181,5 +1405,122 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
         start_output.status.success(),
         "{}",
         String::from_utf8_lossy(&start_output.stderr)
+    );
+}
+
+#[test]
+fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let shared_port = free_port();
+    let sibling_port = free_port();
+    let inactive_single_config_port = free_port();
+    let aggregate_config = write_config_with_server_b_enabled(
+        &root,
+        "aggregate.v3.toml",
+        [shared_port, sibling_port],
+        true,
+    );
+    let single_port_config = write_config_with_server_b_enabled(
+        &root,
+        "single.v3.toml",
+        [shared_port, inactive_single_config_port],
+        false,
+    );
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let aggregate_start = run(binary, &state_root, &aggregate_config, "start");
+    assert!(
+        aggregate_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&aggregate_start.stderr)
+    );
+    wait_port(shared_port, true);
+    wait_port(sibling_port, true);
+    let aggregate_status = status_json(binary, &state_root, &aggregate_config);
+    assert_eq!(aggregate_status["state"], "running");
+
+    let single_start = run(binary, &state_root, &single_port_config, "start");
+    let single_start_success = single_start.status.success();
+    let shared_port_open = TcpStream::connect(("127.0.0.1", shared_port)).is_ok();
+    let sibling_still_open = TcpStream::connect(("127.0.0.1", sibling_port)).is_ok();
+    let aggregate_status_after_release = run(binary, &state_root, &aggregate_config, "status");
+    let aggregate_still_running = aggregate_status_after_release.status.success()
+        && last_json(&aggregate_status_after_release)["state"] == "running";
+
+    let _ = run(binary, &state_root, &single_port_config, "stop");
+    let _ = run(binary, &state_root, &aggregate_config, "stop");
+    wait_port(shared_port, false);
+    wait_port(sibling_port, false);
+
+    assert!(
+        single_start_success,
+        "{}",
+        String::from_utf8_lossy(&single_start.stderr)
+    );
+    assert!(
+        shared_port_open,
+        "single-port V3 start must own the overlapping configured port"
+    );
+    assert!(
+        sibling_still_open,
+        "single-port V3 start must not stop a sibling listener from a foreign multi-port managed instance"
+    );
+    assert!(
+        aggregate_still_running,
+        "foreign managed instance control plane must remain live after port-scoped release"
+    );
+}
+
+#[test]
+fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let target_port = free_port();
+    let sibling_port = free_port();
+    let inactive_single_config_port = free_port();
+    let mut unmanaged = spawn_sigterm_resistant_multi_listener([target_port, sibling_port]);
+    let single_port_config = write_config_with_server_b_enabled(
+        &root,
+        "single.v3.toml",
+        [target_port, inactive_single_config_port],
+        false,
+    );
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = Command::new(binary)
+        .args(["server", "start", "--config"])
+        .arg(&single_port_config)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_V3_STOP_TIMEOUT_MS", "200")
+        .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "200")
+        .output()
+        .unwrap();
+    let target_still_open = TcpStream::connect(("127.0.0.1", target_port)).is_ok();
+    let sibling_still_open = TcpStream::connect(("127.0.0.1", sibling_port)).is_ok();
+    let stderr = String::from_utf8_lossy(&start.stderr).to_string();
+
+    let _ = unmanaged.kill();
+    let _ = unmanaged.wait();
+    wait_port(target_port, false);
+    wait_port(sibling_port, false);
+
+    assert!(
+        !start.status.success(),
+        "start must fail explicitly instead of killing an unmanaged multi-port PID"
+    );
+    assert!(
+        stderr.contains("refusing to signal listener PID")
+            && stderr.contains("non-target listener ports"),
+        "start must expose the scoped PID refusal, got:\n{stderr}"
+    );
+    assert!(
+        target_still_open,
+        "target port must remain owned by the unmanaged process after scoped refusal"
+    );
+    assert!(
+        sibling_still_open,
+        "sibling port must not be stopped when only one target port is configured"
     );
 }

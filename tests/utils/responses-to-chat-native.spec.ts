@@ -43,6 +43,67 @@ describe('responses-to-chat native normalization', () => {
     expect(messages.some((message) => message.role === 'tool' && message.tool_call_id === 'call_1')).toBe(true);
   });
 
+  test('preserves Responses builtin tool declarations instead of wrapping them as shell/function tools', () => {
+    const body: Record<string, unknown> = {
+      model: 'gpt-5.5',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'find deferred tools' }]
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          name: 'exec_command',
+          parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] }
+        },
+        {
+          type: 'custom',
+          name: 'apply_patch',
+          description: 'Apply a patch'
+        },
+        {
+          type: 'tool_search',
+          execution: 'client',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+            required: ['query']
+          }
+        },
+        {
+          type: 'web_search',
+          external_web_access: true,
+          search_content_types: ['text', 'image']
+        }
+      ],
+      tool_choice: 'auto',
+      stream: true
+    };
+
+    normalizeResponsesToChatBody(body);
+
+    const tools = body.tools as Array<Record<string, unknown>>;
+    expect(tools).toHaveLength(4);
+    expect(tools.find((tool) => tool.type === 'tool_search')).toMatchObject({
+      type: 'tool_search',
+      execution: 'client'
+    });
+    expect(tools.find((tool) => tool.type === 'web_search')).toMatchObject({
+      type: 'web_search',
+      external_web_access: true
+    });
+    expect(JSON.stringify(tools)).not.toContain('"script"');
+    expect(
+      tools.filter((tool) => {
+        const fn = tool.function as Record<string, unknown> | undefined;
+        return fn?.name === 'exec_command';
+      })
+    ).toHaveLength(0);
+  });
+
   test('collapses live stopless continuation tool pair into latest user guidance for responses previous_response_id resume', () => {
     const body: Record<string, unknown> = {
       model: 'gpt-5.5',

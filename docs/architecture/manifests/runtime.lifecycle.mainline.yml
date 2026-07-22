@@ -11,6 +11,8 @@ entrypoint:
 node_ids:
   - DaemonRestartLoop
   - DaemonSupervisorLoop
+  - PortRegistry
+  - PortScopedListenerRelease
   - RestartProcessHttpRequest
   - RestartProcessSignal
   - RuntimeInstanceRecord
@@ -111,6 +113,27 @@ edges:
     to_node: StartRestartTakeoverGuard
     status: anchored
     owner_feature_id: runtime.lifecycle.start_command
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-14
+    from_node: ServerStartCommand
+    to_node: PortScopedListenerRelease
+    status: anchored
+    owner_feature_id: runtime.lifecycle.port_scoped_start_stop
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-15
+    from_node: ServerStopCommand
+    to_node: PortScopedListenerRelease
+    status: anchored
+    owner_feature_id: runtime.lifecycle.port_scoped_start_stop
+    binding_pending: null
+    split_binding_id: null
+  - step_id: rtl-16
+    from_node: PortScopedListenerRelease
+    to_node: PortRegistry
+    status: anchored
+    owner_feature_id: runtime.lifecycle.port_scoped_start_stop
     binding_pending: null
     split_binding_id: null
 verification:

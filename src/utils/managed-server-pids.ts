@@ -4,6 +4,7 @@ import { spawnSync as nodeSpawnSync } from 'node:child_process';
 import { resolveRccUserDir } from '../config/user-data-paths.js';
 import { resolveServerPidCachePath } from './server-runtime-pid.js';
 
+// feature_id: runtime.lifecycle.restart_command
 type SpawnSyncLike = typeof nodeSpawnSync;
 
 export type ManagedZombieProcess = {
@@ -124,6 +125,51 @@ function listListeningPidsByPort(port: number, spawnSyncImpl: SpawnSyncLike): nu
   }
 }
 
+export function listListeningPortsByPid(
+  pid: number,
+  options: {
+    spawnSyncImpl?: SpawnSyncLike;
+  } = {}
+): number[] {
+  if (!Number.isFinite(pid) || pid <= 0 || process.platform === 'win32') {
+    return [];
+  }
+
+  const spawnSyncImpl = options.spawnSyncImpl ?? nodeSpawnSync;
+  try {
+    const result = spawnSyncImpl(
+      'lsof',
+      ['-nP', '-Pan', '-p', String(pid), '-iTCP', '-sTCP:LISTEN'],
+      { encoding: 'utf8' }
+    );
+    if (result.error || Number(result.status ?? 0) !== 0) {
+      return [];
+    }
+
+    const out: number[] = [];
+    const seen = new Set<number>();
+    const lines = String(result.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (const line of lines) {
+      const match = line.match(/:(\d+)\s+\(LISTEN\)\s*$/);
+      if (!match || !match[1]) {
+        continue;
+      }
+      const port = Number.parseInt(match[1], 10);
+      if (!Number.isFinite(port) || port <= 0 || seen.has(port)) {
+        continue;
+      }
+      seen.add(port);
+      out.push(port);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export function isTrustedRouteCodexCommand(command: string): boolean {
   const normalized = String(command || '').trim().toLowerCase();
   if (!normalized) {
@@ -147,10 +193,16 @@ export function isTrustedRouteCodexCommand(command: string): boolean {
   if (/\/install\/current\/dist\/cli\.js(?:\s|$)/.test(normalized)) {
     return true;
   }
+  if (/\/install\/current\/dist\/bin\/rccv3(?:\s|$)/.test(normalized)) {
+    return true;
+  }
   if (/\/install\/releases\/routecodex-[^/\s]+\/dist\/index\.js(?:\s|$)/.test(normalized)) {
     return true;
   }
   if (/\/install\/releases\/routecodex-[^/\s]+\/dist\/cli\.js(?:\s|$)/.test(normalized)) {
+    return true;
+  }
+  if (/\/install\/releases\/routecodex-[^/\s]+\/dist\/bin\/rccv3(?:\s|$)/.test(normalized)) {
     return true;
   }
   return false;

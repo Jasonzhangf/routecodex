@@ -290,14 +290,8 @@ pub fn project_v3_anthropic_message_as_responses_response(
                     "text": part.get("text").cloned().unwrap_or(Value::String(String::new()))
                 }));
             }
-            Some("thinking") => {
-                output_items.push(json!({
-                    "type":"reasoning",
-                    "summary":[{
-                        "type":"summary_text",
-                        "text": part.get("thinking").or_else(|| part.get("text")).cloned().unwrap_or(Value::String(String::new()))
-                    }]
-                }));
+            Some("thinking" | "reasoning" | "redacted_thinking") => {
+                output_items.push(anthropic_reasoning_part_as_responses_reasoning(part)?);
             }
             Some("tool_use") => {
                 output_items.push(json!({
@@ -357,6 +351,50 @@ pub fn project_v3_anthropic_message_as_responses_response(
         response.insert("finish_reason".to_string(), stop_reason.clone());
     }
     Ok(Value::Object(response))
+}
+
+fn anthropic_reasoning_part_as_responses_reasoning(
+    part: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    let object = part
+        .as_object()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "provider response reasoning content",
+        })?;
+    let mut item = Map::new();
+    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+    if let Some(text) = object
+        .get("thinking")
+        .or_else(|| object.get("text"))
+        .or_else(|| object.get("reasoning"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        item.insert(
+            "summary".to_string(),
+            Value::Array(vec![json!({"type":"summary_text","text":text})]),
+        );
+    }
+    if let Some(encrypted_content) = object
+        .get("encrypted_content")
+        .or_else(|| object.get("signature"))
+        .or_else(|| object.get("data"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        item.insert(
+            "encrypted_content".to_string(),
+            Value::String(encrypted_content.to_string()),
+        );
+    }
+    if !item.contains_key("summary") && !item.contains_key("encrypted_content") {
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "provider response reasoning content",
+        });
+    }
+    Ok(Value::Object(item))
 }
 
 pub fn characterize_v3_anthropic_client_input_to_hub_semantic(

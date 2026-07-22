@@ -38,7 +38,8 @@ use routecodex_v3_runtime::{
     V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeInput,
     V3ResponsesRelayRuntimeOutput, V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
     V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
@@ -405,6 +406,20 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
+    }
+
+    pub async fn shutdown_listener_ports(&mut self, ports: &BTreeSet<u16>) -> Vec<u16> {
+        let mut released = Vec::new();
+        for listener in &mut self.listeners {
+            if !ports.contains(&listener.addr.port()) {
+                continue;
+            }
+            if let Some(shutdown) = listener.shutdown.take() {
+                let _ = shutdown.send(());
+                released.push(listener.addr.port());
+            }
+        }
+        released
     }
 }
 
@@ -1059,12 +1074,16 @@ async fn pending_endpoint(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                &state.responses_relay_local_continuation,
-                &state.responses_relay_stopless_control,
-                continuation_scope,
-                now_epoch_ms,
-                capture_provider_request,
-                capture_provider_response,
+                V3ResponsesRelayLocalStoplessControlInput::new(
+                    &state.responses_relay_local_continuation,
+                    &state.responses_relay_stopless_control,
+                    continuation_scope,
+                    now_epoch_ms,
+                ),
+                V3ResponsesRelayProviderSnapshotCapture::new(
+                    capture_provider_request,
+                    capture_provider_response,
+                ),
             )
             .await
             {
@@ -1260,8 +1279,8 @@ fn allocate_v3_console_request_id(
             "V3RequestIdCounter01Allocated",
             V3DebugError::MalformedFixture(message),
         );
-        emit_v3_error_console_line(
-            &state.server,
+        emit_v3_error_console_line_for_state(
+            state,
             endpoint,
             "request-id-unavailable",
             output.status,
@@ -1799,14 +1818,7 @@ fn record_and_emit_v3_error_projection(
             error,
         )));
     }
-    emit_v3_error_console_line(
-        &state.server,
-        endpoint,
-        request_id,
-        status,
-        error_chain,
-        body,
-    );
+    emit_v3_error_console_line_for_state(state, endpoint, request_id, status, error_chain, body);
     None
 }
 
@@ -2096,9 +2108,7 @@ fn capture_v3_responses_relay_provider_snapshots(
     {
         return None;
     }
-    let Some(snapshots) = output.provider_snapshots.as_ref() else {
-        return None;
-    };
+    let snapshots = output.provider_snapshots.as_ref()?;
     if let Some(provider_request) = snapshots.provider_request.as_ref() {
         if state
             .debug
@@ -2110,7 +2120,7 @@ fn capture_v3_responses_relay_provider_snapshots(
                 endpoint,
                 request_id,
                 "provider-request.json",
-                &provider_request,
+                provider_request,
             ) {
                 return Some(foundation_output_response(project_v3_debug_failure(
                     "V3DebugProviderRequestCaptured",
@@ -2130,7 +2140,7 @@ fn capture_v3_responses_relay_provider_snapshots(
                 endpoint,
                 request_id,
                 "provider-response.json",
-                &provider_response,
+                provider_response,
             ) {
                 return Some(foundation_output_response(project_v3_debug_failure(
                     "V3DebugProviderResponseCaptured",
@@ -2392,11 +2402,7 @@ fn emit_v3_request_start_console_line(
         raw_input_items
     );
     let color_key = resolve_v3_log_session_color_key(headers, payload, request_id);
-    append_v3_human_console_line(state, &line);
-    println!(
-        "{}",
-        colorize_v3_request_console_line(&line, color_key.as_deref())
-    );
+    emit_v3_colorized_request_console_line(state, &line, color_key.as_deref());
 }
 
 #[derive(Clone)]
@@ -2431,50 +2437,21 @@ fn emit_v3_request_route_console_line(
     if !context.state.console_enabled {
         return;
     }
-    let route = observability
-        .routing_group_id
-        .as_deref()
-        .unwrap_or(&context.state.server.routing_group);
-    let pool = observability.pool_id.as_deref().unwrap_or("-");
-    let provider = observability.provider_id.as_deref().unwrap_or("-");
-    let provider_key = observability.provider_key.as_deref().unwrap_or(provider);
-    let model = format_v3_console_model_pair(observability);
-    let provider_type = observability.provider_type.as_deref().unwrap_or("-");
-    let attempts = observability.attempts.unwrap_or(1);
-    let target_path = if observability.target_path.is_empty() {
-        "-".to_string()
-    } else {
-        observability.target_path.join(">")
-    };
-    let unavailable = if observability.unavailable_candidates.is_empty() {
-        "-".to_string()
-    } else {
-        observability.unavailable_candidates.join("|")
-    };
+    let identity = resolve_v3_console_log_identity(context);
+    let route_label = format_v3_console_route_hit_label(&context.state, observability);
+    let provider_target = format_v3_console_provider_target(observability);
+    let reason = format_v3_console_hit_reason(&context.state, observability);
     let line = format!(
-        "[{}] 🎯 [{}] {} request {} route={} pool={} provider={} providerKey={} model={} type={} attempts={} unavailable={} path={} transport={}",
+        "[{}] [virtual-router-hit] {} req={} sid={} {} -> {} reason={}",
         context.state.server.port,
-        context.endpoint,
         console_timestamp_hhmmss(),
         context.request_id,
-        route,
-        pool,
-        provider,
-        provider_key,
-        model,
-        provider_type,
-        attempts,
-        unavailable,
-        target_path,
-        observability.transport
+        identity.session_id,
+        route_label,
+        provider_target,
+        reason
     );
-    let color_key =
-        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
-    append_v3_human_console_line(&context.state, &line);
-    println!(
-        "{}",
-        colorize_v3_request_console_line(&line, color_key.as_deref())
-    );
+    emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
 fn emit_v3_request_complete_console_line(
@@ -2497,7 +2474,7 @@ fn emit_v3_request_complete_console_line(
         .unwrap_or("unreported");
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let line = format!(
-        "[{}] ✅ [{}] {} request {} completed (status={}{} responseStatus={} finishReason={} elapsedMs={:.1} nodes={} transport={})",
+        "[{}] ✅ [{}] {} request {} completed (status={}{} responseStatus={} finish_reason={} elapsedMs={:.1} nodes={} transport={})",
         context.state.server.port,
         context.endpoint,
         console_timestamp_hhmmss(),
@@ -2510,13 +2487,8 @@ fn emit_v3_request_complete_console_line(
         node_trace.len(),
         observability.transport
     );
-    let color_key =
-        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
-    append_v3_human_console_line(&context.state, &line);
-    println!(
-        "{}",
-        colorize_v3_request_console_line(&line, color_key.as_deref())
-    );
+    let identity = resolve_v3_console_log_identity(context);
+    emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
 fn emit_v3_usage_console_line(
@@ -2528,43 +2500,32 @@ fn emit_v3_usage_console_line(
     if !context.state.console_enabled {
         return;
     }
-    let route = observability
-        .routing_group_id
-        .as_deref()
-        .unwrap_or(&context.state.server.routing_group);
-    let provider = observability.provider_id.as_deref().unwrap_or("-");
-    let model = format_v3_console_model_pair(observability);
+    let identity = resolve_v3_console_log_identity(context);
+    let route = format_v3_console_usage_route_label(&context.state, observability);
+    let model = format_v3_console_usage_model_pair(&identity, observability);
     let usage = format_v3_console_usage_summary(observability.usage.as_ref());
     let finish_reason = observability
         .finish_reason
         .as_deref()
         .unwrap_or("unreported");
-    let counts = v3_console_pipeline_counts(node_trace);
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+    let internal_ms = elapsed_ms;
+    let external_ms = 0.0;
     let line = format!(
-        "[{}] [usage] req={} endpoint={} route={} provider={} model={} usage={} finishReason={} time=t:{:.1}ms pipeline=nodes:{} req:{} resp:{} provider:{} error:{}",
+        "[{}] [usage] req={} project={} route={} model={} usage={} time=i:{:.0}ms e:{:.0}ms t:{:.1}ms finish_reason={}",
         context.state.server.port,
-        context.request_id,
-        context.endpoint,
+        format_v3_usage_request_id(&context.request_id),
+        format_v3_console_project_port(identity.project_path.as_deref(), context.state.server.port),
         route,
-        provider,
         model,
         usage,
-        finish_reason,
+        internal_ms,
+        external_ms,
         elapsed_ms,
-        node_trace.len(),
-        counts.request,
-        counts.response,
-        counts.provider,
-        counts.error
+        finish_reason
     );
-    let color_key =
-        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
-    append_v3_human_console_line(&context.state, &line);
-    println!(
-        "{}",
-        colorize_v3_request_console_line(&line, color_key.as_deref())
-    );
+    let _ = node_trace;
+    emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
 fn emit_v3_stopless_console_line(
@@ -2579,15 +2540,16 @@ fn emit_v3_stopless_console_line(
         .as_deref()
         .unwrap_or("unreported");
     let line = format!(
-        "[{}] 🧭 [stopless] {} request {} activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finishReason={} transport={})",
+        "[{}] 🧭 [stopless] {} request {} activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason={} transport={})",
         context.state.server.port,
         console_timestamp_hhmmss(),
         context.request_id,
         finish_reason,
         observability.transport
     );
-    append_v3_human_console_line(&context.state, &line);
-    println!("{}", colorize_v3_stopless_console_line(&line));
+    let colorized = colorize_v3_stopless_console_line(&line);
+    append_v3_human_console_line(&context.state, &colorized);
+    println!("{colorized}");
 }
 
 fn is_v3_stopless_console_activation(observability: &V3RuntimeObservability) -> bool {
@@ -2606,6 +2568,16 @@ fn append_v3_human_console_line(state: &V3ListenerState, line: &str) {
             ))
         );
     }
+}
+
+fn emit_v3_colorized_request_console_line(
+    state: &V3ListenerState,
+    line: &str,
+    color_key: Option<&str>,
+) {
+    let colorized = colorize_v3_request_console_line(line, color_key);
+    append_v3_human_console_line(state, &colorized);
+    println!("{colorized}");
 }
 
 fn emit_v3_observability_console_lines(
@@ -2729,8 +2701,8 @@ impl V3SseConsoleFinalizer {
                 "message": message
             }
         });
-        emit_v3_error_console_line_with_port(
-            &self.context.state.server.port.to_string(),
+        emit_v3_error_console_line_for_state(
+            &self.context.state,
             &self.context.endpoint,
             &self.context.request_id,
             status,
@@ -2738,38 +2710,6 @@ impl V3SseConsoleFinalizer {
             Some(&body),
         );
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct V3ConsolePipelineCounts {
-    request: usize,
-    response: usize,
-    provider: usize,
-    error: usize,
-}
-
-fn v3_console_pipeline_counts(node_trace: &[&'static str]) -> V3ConsolePipelineCounts {
-    let mut counts = V3ConsolePipelineCounts {
-        request: 0,
-        response: 0,
-        provider: 0,
-        error: 0,
-    };
-    for node in node_trace {
-        if node.contains("Req") || node.contains("Request") {
-            counts.request += 1;
-        }
-        if node.contains("Resp") || node.contains("Response") {
-            counts.response += 1;
-        }
-        if node.contains("Provider") || node.contains("Transport") {
-            counts.provider += 1;
-        }
-        if node.contains("Error") {
-            counts.error += 1;
-        }
-    }
-    counts
 }
 
 fn format_v3_console_model_pair(observability: &V3RuntimeObservability) -> String {
@@ -2782,6 +2722,322 @@ fn format_v3_console_model_pair(observability: &V3RuntimeObservability) -> Strin
         (_, Some(wire)) => wire.to_string(),
         _ => "-".to_string(),
     }
+}
+
+#[derive(Debug, Clone)]
+struct V3ConsoleLogIdentity {
+    color_key: Option<String>,
+    session_id: String,
+    project_path: Option<String>,
+    request_model: Option<String>,
+}
+
+fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3ConsoleLogIdentity {
+    let turn_metadata = parse_codex_turn_metadata(&context.headers).ok().flatten();
+    let session_id = first_header_text(
+        &context.headers,
+        &[
+            "session-id",
+            "session_id",
+            "x-session-id",
+            "x-routecodex-session-id",
+            "x-rcc-session-id",
+        ],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
+    .or_else(|| read_first_scope_value(Some(&context.payload), BODY_SESSION_PATHS));
+    let conversation_id = first_header_text(
+        &context.headers,
+        &[
+            "thread-id",
+            "thread_id",
+            "conversation-id",
+            "conversation_id",
+            "x-conversation-id",
+            "x-routecodex-conversation-id",
+        ],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
+    .or_else(|| read_first_scope_value(Some(&context.payload), BODY_CONVERSATION_PATHS));
+    let project_path = first_header_text(
+        &context.headers,
+        &["x-routecodex-workdir", "x-rcc-workdir", "x-workdir"],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_WORKDIR_PATHS))
+    .or_else(|| read_first_scope_value(Some(&context.payload), BODY_WORKDIR_PATHS));
+    let color_key =
+        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    let session_display = session_id
+        .or(conversation_id)
+        .or_else(|| color_key.clone())
+        .unwrap_or_else(|| {
+            format!(
+                "request:{}",
+                format_v3_usage_request_id(&context.request_id)
+            )
+        });
+    V3ConsoleLogIdentity {
+        color_key,
+        session_id: format_v3_console_safe_label(&session_display),
+        project_path,
+        request_model: context
+            .payload
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    }
+}
+
+fn format_v3_console_safe_label(value: &str) -> String {
+    let normalized = value
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_control() || character.is_whitespace() {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if normalized.is_empty() {
+        "-".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn format_v3_console_route_hit_label(
+    state: &V3ListenerState,
+    observability: &V3RuntimeObservability,
+) -> String {
+    let reason = format_v3_console_hit_reason(state, observability);
+    if reason == "provider-request-dry-run" {
+        return reason;
+    }
+    observability
+        .pool_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "dry_run")
+        .or(observability.routing_group_id.as_deref())
+        .unwrap_or(&state.server.routing_group)
+        .to_string()
+}
+
+fn format_v3_console_usage_route_label(
+    state: &V3ListenerState,
+    observability: &V3RuntimeObservability,
+) -> String {
+    let prefix = match observability.execution_mode.trim() {
+        "direct" => "router-direct",
+        "relay" => "router-relay",
+        _ => "router",
+    };
+    format!(
+        "{prefix}:{}",
+        format_v3_console_route_hit_label(state, observability)
+    )
+}
+
+fn format_v3_console_hit_reason(
+    _state: &V3ListenerState,
+    observability: &V3RuntimeObservability,
+) -> String {
+    if observability.pool_id.as_deref() == Some("dry_run")
+        || observability
+            .target_path
+            .iter()
+            .any(|part| part.contains("dry_run"))
+    {
+        return "provider-request-dry-run".to_string();
+    }
+    if let Some(pool) = observability
+        .pool_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return format!("pool:{pool}");
+    }
+    observability
+        .routing_group_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("route:{value}"))
+        .unwrap_or_else(|| "route:selected".to_string())
+}
+
+fn format_v3_console_provider_target(observability: &V3RuntimeObservability) -> String {
+    let (provider_from_key, alias_from_key, model_from_key) =
+        parse_v3_console_provider_key(observability.provider_key.as_deref());
+    let provider = observability
+        .provider_id
+        .as_deref()
+        .or(provider_from_key.as_deref())
+        .unwrap_or("-");
+    let alias = observability
+        .auth_alias
+        .as_deref()
+        .or(alias_from_key.as_deref())
+        .filter(|value| !value.trim().is_empty());
+    let model = observability
+        .wire_model
+        .as_deref()
+        .or(model_from_key.as_deref())
+        .or(observability.model_id.as_deref());
+    let provider_label = match alias {
+        Some(alias) => format!("{provider}[{alias}]"),
+        None => provider.to_string(),
+    };
+    match model {
+        Some(model) if !model.trim().is_empty() && model != "-" => {
+            format!("{provider_label}.{model}")
+        }
+        _ => provider_label,
+    }
+}
+
+fn parse_v3_console_provider_key(
+    provider_key: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let Some(provider_key) = provider_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return (None, None, None);
+    };
+    let parts = provider_key.split(':').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [provider, alias, model, ..] => (
+            Some((*provider).to_string()),
+            Some((*alias).to_string()),
+            Some((*model).to_string()),
+        ),
+        [provider, model] => (
+            Some((*provider).to_string()),
+            None,
+            Some((*model).to_string()),
+        ),
+        [provider] => (Some((*provider).to_string()), None, None),
+        [] => (None, None, None),
+    }
+}
+
+fn format_v3_console_usage_model_pair(
+    identity: &V3ConsoleLogIdentity,
+    observability: &V3RuntimeObservability,
+) -> String {
+    let request_model = identity
+        .request_model
+        .as_deref()
+        .or(observability.model_id.as_deref())
+        .unwrap_or("-");
+    let hit_model = observability
+        .wire_model
+        .as_deref()
+        .or(observability.model_id.as_deref())
+        .unwrap_or("-");
+    if request_model == "-" && hit_model == "-" {
+        format_v3_console_model_pair(observability)
+    } else {
+        format!("{request_model}->{hit_model}")
+    }
+}
+
+fn format_v3_usage_request_id(request_id: &str) -> String {
+    let normalized = request_id.trim();
+    let normalized = if normalized.is_empty() {
+        "unknown-request"
+    } else {
+        normalized
+    };
+    if let Some(sequence) = parse_v3_direct_sequence(normalized, '-') {
+        return sequence;
+    }
+    if let Some(rest) = normalized.strip_prefix("req_") {
+        if let Some(sequence) = parse_v3_direct_sequence(rest, '_') {
+            return sequence;
+        }
+    }
+    if let Some(sequence) = parse_v3_trailing_provider_sequence(normalized) {
+        return sequence;
+    }
+    short_v3_request_tail(normalized, 8)
+}
+
+fn parse_v3_direct_sequence(value: &str, delimiter: char) -> Option<String> {
+    let (left, right) = value.split_once(delimiter)?;
+    if !left.is_empty()
+        && !right.is_empty()
+        && left.chars().all(|character| character.is_ascii_digit())
+        && right.chars().all(|character| character.is_ascii_digit())
+    {
+        Some(format!("{left}-{right}"))
+    } else {
+        None
+    }
+}
+
+fn parse_v3_trailing_provider_sequence(value: &str) -> Option<String> {
+    let without_suffix = value.split(':').next().unwrap_or(value);
+    let mut segments = without_suffix.rsplitn(3, '-');
+    let daily = segments.next()?;
+    let total = segments.next()?;
+    if !daily.is_empty()
+        && !total.is_empty()
+        && daily.chars().all(|character| character.is_ascii_digit())
+        && total.chars().all(|character| character.is_ascii_digit())
+    {
+        Some(format!("{total}-{daily}"))
+    } else {
+        None
+    }
+}
+
+fn short_v3_request_tail(value: &str, max_chars: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return value.to_string();
+    }
+    chars[chars.len() - max_chars..].iter().collect()
+}
+
+fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
+    let project = project_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-");
+    format!("{}:{port}", trim_v3_path_for_log(project, 56))
+}
+
+fn trim_v3_path_for_log(value: &str, max_len: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= max_len {
+        return value.to_string();
+    }
+    let keep = std::cmp::max(8, max_len.saturating_sub(1) / 2);
+    let prefix = value.chars().take(keep).collect::<String>();
+    let suffix = value
+        .chars()
+        .rev()
+        .take(keep)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}…{suffix}")
 }
 
 fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> String {
@@ -2860,21 +3116,25 @@ fn build_v3_foundation_console_observability(
         .body
         .pointer("/dry_run/response_payload")
         .and_then(extract_v3_console_usage_summary);
+    let auth_alias =
+        resolve_v3_foundation_console_auth_alias(&state.manifest, provider_id.as_deref());
     V3RuntimeObservability {
         entry_protocol: "responses".to_string(),
         execution_mode: "direct".to_string(),
         transport,
         routing_group_id: Some(state.server.routing_group.clone()),
         pool_id: Some("dry_run".to_string()),
-        provider_key: provider_id
-            .as_ref()
-            .map(|provider| match model_id.as_deref() {
-                Some(model) => format!("{provider}:dry-run:{model}"),
-                None => provider.clone(),
-            }),
+        provider_key: provider_id.as_ref().map(|provider| {
+            match (auth_alias.as_deref(), model_id.as_deref()) {
+                (Some(alias), Some(model)) => format!("{provider}:{alias}:{model}"),
+                (Some(alias), None) => format!("{provider}:{alias}"),
+                (None, Some(model)) => format!("{provider}:{model}"),
+                (None, None) => provider.clone(),
+            }
+        }),
         provider_type: Some("responses".to_string()),
         provider_id,
-        auth_alias: Some("dry-run".to_string()),
+        auth_alias,
         model_id: model_id.clone(),
         wire_model: model_id,
         provider_status: Some(output.status),
@@ -2886,6 +3146,21 @@ fn build_v3_foundation_console_observability(
         target_path: vec!["dry_run:provider_request".to_string()],
         usage,
     }
+}
+
+fn resolve_v3_foundation_console_auth_alias(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: Option<&str>,
+) -> Option<String> {
+    let provider = manifest.providers.get(provider_id?)?;
+    if provider.auth.entries.len() == 1 {
+        return provider
+            .auth
+            .entries
+            .first()
+            .map(|entry| entry.alias.clone());
+    }
+    None
 }
 
 fn read_v3_console_finish_reason(value: &Value) -> Option<String> {
@@ -3014,6 +3289,46 @@ fn emit_v3_error_console_line_with_port(
     error_chain: &[&'static str],
     body: Option<&Value>,
 ) {
+    let line = format_v3_error_console_line_with_port(
+        port_label,
+        endpoint,
+        request_id,
+        status,
+        error_chain,
+        body,
+    );
+    eprintln!("{}", colorize_v3_error_console_line(&line));
+}
+
+fn emit_v3_error_console_line_for_state(
+    state: &V3ListenerState,
+    endpoint: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) {
+    let line = format_v3_error_console_line_with_port(
+        &state.server.port.to_string(),
+        endpoint,
+        request_id,
+        status,
+        error_chain,
+        body,
+    );
+    let colorized = colorize_v3_error_console_line(&line);
+    append_v3_human_console_line(state, &colorized);
+    eprintln!("{colorized}");
+}
+
+fn format_v3_error_console_line_with_port(
+    port_label: &str,
+    endpoint: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) -> String {
     let error_code = body
         .and_then(|value| value.pointer("/error/code").and_then(Value::as_str))
         .or_else(|| body.and_then(|value| value.pointer("/error/type").and_then(Value::as_str)))
@@ -3026,7 +3341,7 @@ fn emit_v3_error_console_line_with_port(
         .copied()
         .unwrap_or("V3Error06ClientProjected");
     let error_number = compact_v3_error_number(error_chain);
-    let line = format!(
+    format!(
         "[{}] ❌ [{}] {} request {} failed (status={} error={} subcode={} node={}) {}",
         port_label,
         endpoint,
@@ -3037,8 +3352,7 @@ fn emit_v3_error_console_line_with_port(
         error_code,
         error_node,
         message
-    );
-    eprintln!("{}", colorize_v3_error_console_line(&line));
+    )
 }
 
 fn compact_v3_error_number(error_chain: &[&'static str]) -> String {
@@ -3202,6 +3516,7 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "providerStatus"
             | "responseStatus"
             | "finishReason"
+            | "finish_reason"
             | "route"
             | "routeName"
             | "pool"
@@ -3212,7 +3527,10 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "elapsedMs"
             | "nodes"
             | "endpoint"
+            | "project"
             | "req"
+            | "sid"
+            | "reason"
             | "usage"
             | "time"
             | "pipeline"
@@ -4856,6 +5174,38 @@ mod tests {
     }
 
     #[test]
+    fn v3_console_v2_usage_request_id_and_project_helpers_are_stable() {
+        assert_eq!(
+            format_v3_usage_request_id("openai-responses-router-test-20260721T000000000-12-3"),
+            "12-3"
+        );
+        assert_eq!(format_v3_usage_request_id("req_123_456"), "123-456");
+        assert_eq!(format_v3_usage_request_id("abcdef123456"), "ef123456");
+        assert_eq!(
+            format_v3_console_project_port(
+                Some("/Users/fanzhang/Documents/github/routecodex"),
+                5555
+            ),
+            "/Users/fanzhang/Documents/github/routecodex:5555"
+        );
+    }
+
+    #[test]
+    fn v3_console_v2_provider_target_uses_auth_alias_and_wire_model() {
+        let observability = V3RuntimeObservability {
+            provider_id: Some("test".to_string()),
+            auth_alias: Some("key".to_string()),
+            model_id: Some("test".to_string()),
+            wire_model: Some("wire-test".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            format_v3_console_provider_target(&observability),
+            "test[key].wire-test"
+        );
+    }
+
+    #[test]
     fn error_observability_does_not_emit_green_completed_line() {
         let mut observability = V3RuntimeObservability {
             response_status: Some("error".to_string()),
@@ -4875,6 +5225,96 @@ mod tests {
             200,
             &observability
         ));
+    }
+
+    #[test]
+    fn error_projection_appends_human_console_failure_line() {
+        let log_file = std::env::temp_dir().join(format!(
+            "routecodex-v3-error-console-{}-{}.log",
+            std::process::id(),
+            console_timestamp_hhmmss()
+        ));
+        let _ = std::fs::remove_file(&log_file);
+        let mut servers = BTreeMap::new();
+        let server = V3ServerManifest {
+            id: "server".to_string(),
+            enabled: true,
+            bind: "127.0.0.1".to_string(),
+            port: 5555,
+            routing_group: "controlled".to_string(),
+            endpoints: vec!["responses".to_string()],
+            features: BTreeMap::new(),
+            execution: None,
+        };
+        servers.insert(server.id.clone(), server.clone());
+        let manifest = Arc::new(V3Config05ManifestPublished {
+            version: 3,
+            hub_v1: None,
+            servers,
+            providers: BTreeMap::new(),
+            forwarders: BTreeMap::new(),
+            route_groups: BTreeMap::new(),
+            features: BTreeMap::new(),
+            debug: V3DebugManifest {
+                log_console: false,
+                log_file: Some(log_file.to_string_lossy().to_string()),
+                snapshots: false,
+                snapshot_stages: None,
+                dry_run: false,
+                retention: BTreeMap::new(),
+            },
+            error: routecodex_v3_config::V3ErrorManifest {
+                policies: BTreeMap::new(),
+            },
+        });
+        let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
+        let state = V3ListenerState {
+            server,
+            manifest_version: manifest.version,
+            manifest: Arc::clone(&manifest),
+            debug: debug.clone(),
+            console_enabled: true,
+            request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
+            responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
+            responses_relay_local_continuation: Arc::new(
+                V3ResponsesRelayLocalContinuationState::default(),
+            ),
+            responses_relay_stopless_control: Arc::new(
+                V3ResponsesRelayStoplessControlState::default(),
+            ),
+            provider_health: Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
+                &manifest,
+            )),
+        };
+        let trace_scope = state
+            .debug
+            .start_trace("server", "req-error-console", "exec-error-console")
+            .unwrap();
+
+        let response = record_and_emit_v3_error_projection(
+            &state,
+            &trace_scope,
+            "/v1/responses",
+            "req-error-console",
+            500,
+            &V3_ERROR_CHAIN_NODE_IDS,
+            Some(&json!({
+                "error": {
+                    "type":"runtime_error",
+                    "message":"controlled error"
+                }
+            })),
+        );
+
+        assert!(response.is_none());
+        let log = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            log.contains("❌ [/v1/responses]")
+                && log.contains("request req-error-console failed")
+                && log.contains("controlled error"),
+            "human console log must include the visible failed line, not only JSON debug events: {log}"
+        );
+        let _ = std::fs::remove_file(&log_file);
     }
 
     #[test]
@@ -4898,7 +5338,7 @@ mod tests {
         let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
         std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
         let colored = colorize_v3_stopless_console_line(
-            "[5555] 🧭 [stopless] 00:00:00 request req activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finishReason=stop transport=sse)",
+            "[5555] 🧭 [stopless] 00:00:00 request req activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason=stop transport=sse)",
         );
         if let Some(previous) = previous {
             std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", previous);

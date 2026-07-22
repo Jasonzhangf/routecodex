@@ -27,7 +27,20 @@ function setEnv(name: string, value: string | undefined): () => void {
 async function createTempUserConfig(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-port-mode-'));
   const filePath = path.join(dir, 'config.json');
+  const basePort = await allocatePort();
   const config = {
+    httpserver: {
+      host: '127.0.0.1',
+      port: basePort,
+      ports: [
+        {
+          port: basePort,
+          host: '127.0.0.1',
+          mode: 'router',
+          routingPolicyGroup: 'default',
+        },
+      ],
+    },
     virtualrouterMode: 'v1',
     virtualrouter: {
       providers: {
@@ -72,6 +85,7 @@ async function startTestServer(): Promise<{
   const configDir = path.dirname(configPath);
   const home = path.join(configDir, 'home');
   await fs.mkdir(home, { recursive: true });
+  const seededUserConfig = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<string, unknown>;
   const restores = [
     setEnv('HOME', home),
     setEnv('ROUTECODEX_AUTH_DIR', path.join(configDir, 'auth')),
@@ -85,6 +99,7 @@ async function startTestServer(): Promise<{
 
   await writeDaemonLoginRecord('routecodex-test-password-123');
   const server = new RouteCodexHttpServer(createTestConfig(0, configPath, 'test-http-apikey', '0.0.0.0'));
+  server.seedUserConfigForBootstrap(seededUserConfig);
   await server.start();
   const raw = (server as unknown as { server?: http.Server }).server;
   if (!raw) {
@@ -275,6 +290,45 @@ describe('port mode routing admin integration', () => {
     }
   });
 
+  it('registers /_routecodex/admin/ports/:port/stop and stops only the targeted listener', async () => {
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
+    try {
+      const cookie = await setupDaemonAdminAuth(baseUrl);
+
+      const extraPort = await allocatePort();
+      const create = await fetch(`${baseUrl}/admin/ports/${extraPort}`, {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          cookie,
+        },
+        body: JSON.stringify({
+          mode: 'router',
+          host: '127.0.0.1',
+          routingPolicyGroup: 'default',
+        }),
+      });
+      expect(create.status).toBe(200);
+
+      const stop = await fetch(`${baseUrl}/_routecodex/admin/ports/${extraPort}/stop`, {
+        method: 'POST',
+        headers: {
+          'x-routecodex-stop-caller-pid': String(process.pid),
+          'x-routecodex-stop-caller-ts': new Date().toISOString(),
+          'x-routecodex-stop-caller-cwd': process.cwd(),
+          'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024),
+        },
+      });
+      expect(stop.status).toBe(200);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const afterRemove = await probePort(extraPort);
+      expect(afterRemove).toEqual(expect.objectContaining({ ok: false }));
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
   it('dispatches provider-mode same-protocol ports through direct pipeline only', async () => {
     const server = new RouteCodexHttpServer(createTestConfig(0, path.join(os.tmpdir(), 'noop-config.json')));
     const input = {
@@ -294,7 +348,7 @@ describe('port mode routing admin integration', () => {
     (server as any).resolveProviderHandleForBinding = jest.fn(() => ({ providerProtocol: 'openai-chat' }));
     (server as any).getPortConfigForLocalPort = jest
       .fn()
-      .mockReturnValueOnce({ port: 4100, host: '127.0.0.1', mode: 'router' })
+      .mockReturnValueOnce({ port: 4100, host: '127.0.0.1', mode: 'router', sameProtocolBehavior: 'relay' })
       .mockReturnValueOnce({
         port: 4200,
         host: '127.0.0.1',
@@ -348,16 +402,14 @@ describe('port mode routing admin integration', () => {
     expect(result.body).toEqual({ mode: 'hub' });
   });
 
-  it('builds available provider list from user config when runtime views are not populated yet', () => {
+  it('builds available provider list from materialized router artifacts when runtime handles are not populated yet', () => {
     const server = new RouteCodexHttpServer(createTestConfig(0, path.join(os.tmpdir(), 'noop-config.json')));
-    (server as any).userConfig = {
-      virtualrouter: {
+    (server as any).currentRouterArtifacts = {
+      config: {
         providers: {
-          mock: {
-            type: 'mock',
-            models: {
-              dummy: {},
-            },
+          'mock.dummy': {
+            providerType: 'mock',
+            outboundProfile: 'openai-chat',
           },
         },
       },
@@ -372,7 +424,7 @@ describe('port mode routing admin integration', () => {
     );
   });
 
-  it('prefers the runtime bind port over userConfig httpserver.port when ports[] is not configured', () => {
+  it('rejects legacy single-port httpserver config when ports[] is not configured', () => {
     const server = new RouteCodexHttpServer(createTestConfig(10000, path.join(os.tmpdir(), 'noop-config.json')));
     (server as any).userConfig = {
       httpserver: {
@@ -381,12 +433,6 @@ describe('port mode routing admin integration', () => {
       },
     };
 
-    expect(server.getPortConfigs()).toEqual([
-      expect.objectContaining({
-        port: 10000,
-        host: '127.0.0.1',
-        mode: 'router',
-      }),
-    ]);
+    expect(() => server.getPortConfigs()).toThrow('httpserver.ports[] is required');
   });
 });

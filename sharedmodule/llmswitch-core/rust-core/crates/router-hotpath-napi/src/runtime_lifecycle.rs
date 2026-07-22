@@ -235,6 +235,8 @@ struct RuntimeStartRestartTakeoverGuardInput {
     #[serde(default)]
     explicit_restart: Option<bool>,
     #[serde(default)]
+    no_restart: Option<bool>,
+    #[serde(default)]
     exclusive: Option<bool>,
     #[serde(default)]
     daemon_supervisor: Option<bool>,
@@ -601,16 +603,20 @@ pub fn plan_runtime_start_restart_takeover_guard_json(
             ports,
         });
     }
-    if input.explicit_restart == Some(true) {
+    if input.no_restart == Some(true) {
         return to_json(&RuntimeStartRestartTakeoverGuardPlan {
             action: "refuse".to_string(),
-            reason_code: "explicit_start_restart_existing_runtime".to_string(),
+            reason_code: "start_no_restart_requires_stopped_runtime".to_string(),
             ports,
         });
     }
     to_json(&RuntimeStartRestartTakeoverGuardPlan {
-        action: "refuse".to_string(),
-        reason_code: "start_existing_runtime_requires_restart_command".to_string(),
+        action: "allow".to_string(),
+        reason_code: if input.explicit_restart == Some(true) {
+            "explicit_start_restart_takeover_allowed".to_string()
+        } else {
+            "default_start_takeover_allowed".to_string()
+        },
         ports,
     })
 }
@@ -663,31 +669,45 @@ mod tests {
 
         let guard = parse_plan(
             plan_runtime_start_restart_takeover_guard_json(
-                r#"{"explicitRestart":true,"exclusive":false,"daemonSupervisor":false,"occupiedPorts":[5555]}"#
+                r#"{"explicitRestart":true,"noRestart":false,"exclusive":false,"daemonSupervisor":false,"occupiedPorts":[5555]}"#
                     .to_string(),
             )
             .expect("start guard"),
         );
-        assert_eq!(guard["action"], "refuse");
+        assert_eq!(guard["action"], "allow");
         assert_eq!(
             guard["reasonCode"],
-            "explicit_start_restart_existing_runtime"
+            "explicit_start_restart_takeover_allowed"
         );
         assert_eq!(guard["ports"][0], 5555);
 
         let default_start_guard = parse_plan(
             plan_runtime_start_restart_takeover_guard_json(
-                r#"{"explicitRestart":false,"exclusive":false,"daemonSupervisor":false,"occupiedPorts":[5556]}"#
+                r#"{"explicitRestart":false,"noRestart":false,"exclusive":false,"daemonSupervisor":false,"occupiedPorts":[5556]}"#
                     .to_string(),
             )
             .expect("default start guard"),
         );
-        assert_eq!(default_start_guard["action"], "refuse");
+        assert_eq!(default_start_guard["action"], "allow");
         assert_eq!(
             default_start_guard["reasonCode"],
-            "start_existing_runtime_requires_restart_command"
+            "default_start_takeover_allowed"
         );
         assert_eq!(default_start_guard["ports"][0], 5556);
+
+        let no_restart_guard = parse_plan(
+            plan_runtime_start_restart_takeover_guard_json(
+                r#"{"explicitRestart":false,"noRestart":true,"exclusive":false,"daemonSupervisor":false,"occupiedPorts":[5557]}"#
+                    .to_string(),
+            )
+            .expect("no-restart guard"),
+        );
+        assert_eq!(no_restart_guard["action"], "refuse");
+        assert_eq!(
+            no_restart_guard["reasonCode"],
+            "start_no_restart_requires_stopped_runtime"
+        );
+        assert_eq!(no_restart_guard["ports"][0], 5557);
     }
 
     #[test]

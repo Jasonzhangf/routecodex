@@ -40,7 +40,7 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str =
     "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
-const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize = 3;
+const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize = 5;
 const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 = 5_000;
 
 pub type V3ResponsesRelayClientStream =
@@ -68,6 +68,44 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub provider_snapshots: Option<V3ResponsesRelayProviderSnapshots>,
 }
 
+pub struct V3ResponsesRelayLocalStoplessControlInput<'a> {
+    pub state: &'a V3ResponsesRelayLocalContinuationState,
+    pub stopless_control: &'a V3ResponsesRelayStoplessControlState,
+    pub scope: V3ResponsesRelayLocalContinuationScope,
+    pub now_epoch_ms: u64,
+}
+
+impl<'a> V3ResponsesRelayLocalStoplessControlInput<'a> {
+    pub fn new(
+        state: &'a V3ResponsesRelayLocalContinuationState,
+        stopless_control: &'a V3ResponsesRelayStoplessControlState,
+        scope: V3ResponsesRelayLocalContinuationScope,
+        now_epoch_ms: u64,
+    ) -> Self {
+        Self {
+            state,
+            stopless_control,
+            scope,
+            now_epoch_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3ResponsesRelayProviderSnapshotCapture {
+    pub provider_request: bool,
+    pub provider_response: bool,
+}
+
+impl V3ResponsesRelayProviderSnapshotCapture {
+    pub fn new(provider_request: bool, provider_response: bool) -> Self {
+        Self {
+            provider_request,
+            provider_response,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct V3ResponsesRelayProviderSnapshots {
     pub provider_request: Option<Value>,
@@ -86,6 +124,12 @@ impl Default for V3ResponsesRelayRetryPolicy {
             same_candidate_retries: V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT,
             retry_delay_ms: V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS,
         }
+    }
+}
+
+impl V3ResponsesRelayRetryPolicy {
+    pub fn default_floor_delay_ms_for_retry(&self, _retry_number: usize) -> u64 {
+        self.retry_delay_ms
     }
 }
 
@@ -150,6 +194,7 @@ struct V3ResponsesRelayProviderFailureContext<'ctx> {
     provider_semantic_body: &'ctx Value,
     provider_health: &'ctx V3ProviderHealthStore,
     retry_policy: &'ctx V3ResponsesRelayRetryPolicy,
+    deterministic_sample: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +377,54 @@ impl V3ResponsesRelayLocalContinuationState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct V3ResponsesRelayStoplessControlScope {
+    entry_endpoint: String,
+    session_id: String,
+    conversation_id: String,
+    port: u16,
+    routing_group: String,
+}
+
+impl V3ResponsesRelayStoplessControlScope {
+    pub fn new(
+        entry_endpoint: impl Into<String>,
+        session_id: impl Into<String>,
+        conversation_id: impl Into<String>,
+        port: u16,
+        routing_group: impl Into<String>,
+    ) -> Self {
+        Self {
+            entry_endpoint: entry_endpoint.into(),
+            session_id: session_id.into(),
+            conversation_id: conversation_id.into(),
+            port,
+            routing_group: routing_group.into(),
+        }
+    }
+
+    fn has_client_session_scope(&self) -> bool {
+        let session_id = self.session_id.trim();
+        let conversation_id = self.conversation_id.trim();
+        if session_id.is_empty() || conversation_id.is_empty() {
+            return false;
+        }
+        !(session_id == conversation_id && session_id.starts_with("request:"))
+    }
+}
+
+impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayStoplessControlScope {
+    fn from(scope: &V3ResponsesRelayLocalContinuationScope) -> Self {
+        Self::new(
+            scope.entry_endpoint.clone(),
+            scope.session_id.clone(),
+            scope.conversation_id.clone(),
+            scope.port,
+            scope.routing_group.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct V3ResponsesRelayStoplessControlKey {
     entry_endpoint: String,
     session_id: String,
@@ -340,8 +433,8 @@ struct V3ResponsesRelayStoplessControlKey {
     routing_group: String,
 }
 
-impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayStoplessControlKey {
-    fn from(scope: &V3ResponsesRelayLocalContinuationScope) -> Self {
+impl From<&V3ResponsesRelayStoplessControlScope> for V3ResponsesRelayStoplessControlKey {
+    fn from(scope: &V3ResponsesRelayStoplessControlScope) -> Self {
         Self {
             entry_endpoint: scope.entry_endpoint.clone(),
             session_id: scope.session_id.clone(),
@@ -368,7 +461,7 @@ impl V3ResponsesRelayStoplessControlState {
 
     pub fn load_for_scope(
         &self,
-        scope: &V3ResponsesRelayLocalContinuationScope,
+        scope: &V3ResponsesRelayStoplessControlScope,
     ) -> Result<Option<V3StoplessCenterState>, V3ResponsesRelayRuntimeError> {
         Ok(self
             .lock_store()?
@@ -378,7 +471,7 @@ impl V3ResponsesRelayStoplessControlState {
 
     pub fn store_for_scope(
         &self,
-        scope: &V3ResponsesRelayLocalContinuationScope,
+        scope: &V3ResponsesRelayStoplessControlScope,
         state: V3StoplessCenterState,
     ) -> Result<(), V3ResponsesRelayRuntimeError> {
         self.lock_store()?
@@ -388,7 +481,7 @@ impl V3ResponsesRelayStoplessControlState {
 
     pub fn clear_for_scope(
         &self,
-        scope: &V3ResponsesRelayLocalContinuationScope,
+        scope: &V3ResponsesRelayStoplessControlScope,
     ) -> Result<(), V3ResponsesRelayRuntimeError> {
         self.lock_store()?
             .remove(&V3ResponsesRelayStoplessControlKey::from(scope));
@@ -599,7 +692,8 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
             V3ProviderError::InvalidWireBody { request_id }
-            | V3ProviderError::InvalidStreamIntent { request_id } => {
+            | V3ProviderError::InvalidStreamIntent { request_id }
+            | V3ProviderError::ControlFieldInWireBody { request_id, .. } => {
                 self.record_transport_provider_error(attempt, request_id, "unknown", error)
             }
             V3ProviderError::InvalidBaseUrl {
@@ -864,6 +958,8 @@ pub enum V3ResponsesRelayRuntimeError {
     Request(#[from] V3HubRelayRequestError),
     #[error(transparent)]
     Response(#[from] V3HubRelayResponseError),
+    #[error("V3 Responses Relay inbound canonicalization failed: {0}")]
+    InboundCanonical(String),
     #[error("V3 Hub static hook registry failed: {0}")]
     StaticRegistry(String),
     #[error("V3 Responses Relay target resolution failed: {0}")]
@@ -872,6 +968,8 @@ pub enum V3ResponsesRelayRuntimeError {
     Provider(#[from] V3ProviderError),
     #[error("V3 Responses Relay provider compat failed: {0}")]
     ProviderCompat(#[from] V3ProviderCompatError),
+    #[error("V3 Responses Relay provider wire encoding failed: {0}")]
+    ProviderWireEncoding(String),
     #[error("V3 Responses Relay provider health failed: {0}")]
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
@@ -930,8 +1028,8 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_an
             scope,
             now_epoch_ms,
             commit_resp04_effects: true,
-            stopless_control: None,
         }),
+        None,
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
     )
@@ -958,7 +1056,33 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_local_
             scope,
             now_epoch_ms,
             commit_resp04_effects: true,
-            stopless_control: None,
+        }),
+        None,
+        provider_health.store.clone(),
+        V3ResponsesRelayRetryPolicy::default(),
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control<
+    T: ResponsesTransport,
+>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
+    stopless_control: &V3ResponsesRelayStoplessControlState,
+    scope: V3ResponsesRelayStoplessControlScope,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        transport,
+        None,
+        Some(V3ResponsesRelayStoplessControlExecution {
+            control: stopless_control,
+            scope,
+            commit_effects: true,
         }),
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
@@ -973,21 +1097,23 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
+    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
         Some(V3ResponsesRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
+            state: local_stopless.state,
+            scope: local_stopless.scope,
+            now_epoch_ms: local_stopless.now_epoch_ms,
             commit_resp04_effects: true,
-            stopless_control: Some(stopless_control),
+        }),
+        Some(V3ResponsesRelayStoplessControlExecution {
+            control: local_stopless.stopless_control,
+            scope: stopless_scope,
+            commit_effects: true,
         }),
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
@@ -1009,10 +1135,12 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
         input,
         &ReqwestResponsesTransport::default(),
         provider_health,
-        state,
-        stopless_control,
-        scope,
-        now_epoch_ms,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            state,
+            stopless_control,
+            scope,
+            now_epoch_ms,
+        ),
     )
     .await
 }
@@ -1021,12 +1149,8 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-    capture_provider_request: bool,
-    capture_provider_response: bool,
+    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    capture: V3ResponsesRelayProviderSnapshotCapture,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -1036,14 +1160,11 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
             input,
             &transport,
             provider_health,
-            state,
-            stopless_control,
-            scope,
-            now_epoch_ms,
+            local_stopless,
         )
         .await?;
     output.provider_snapshots =
-        Some(snapshots.into_payload(capture_provider_request, capture_provider_response));
+        Some(snapshots.into_payload(capture.provider_request, capture.provider_response));
     Ok(output)
 }
 
@@ -1073,6 +1194,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         input,
         transport,
         None,
+        None,
         provider_health.store,
         retry_policy,
     )
@@ -1092,6 +1214,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         manifest,
         input,
         transport,
+        None,
         None,
         provider_health.store.clone(),
         retry_policy,
@@ -1117,8 +1240,8 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
             scope,
             now_epoch_ms,
             commit_resp04_effects: true,
-            stopless_control: None,
         }),
+        None,
         provider_health.store,
         V3ResponsesRelayRetryPolicy::default(),
     )
@@ -1130,7 +1253,12 @@ struct V3ResponsesRelayLocalContinuationExecution<'state> {
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
     commit_resp04_effects: bool,
-    stopless_control: Option<&'state V3ResponsesRelayStoplessControlState>,
+}
+
+struct V3ResponsesRelayStoplessControlExecution<'state> {
+    control: &'state V3ResponsesRelayStoplessControlState,
+    scope: V3ResponsesRelayStoplessControlScope,
+    commit_effects: bool,
 }
 
 async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
@@ -1138,11 +1266,21 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
+    stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
     provider_health: V3ProviderHealthStore,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
+    let transition_request_id = input.request_id.clone();
+    let transition_updated_at = local
+        .as_ref()
+        .map(|execution| execution.now_epoch_ms)
+        .unwrap_or(v3_responses_relay_now_epoch_ms()?);
+    let stopless_control_has_client_session_scope = stopless_control
+        .as_ref()
+        .map(|execution| execution.scope.has_client_session_scope())
+        .unwrap_or(true);
     let mut trace = Vec::with_capacity(17);
     let transport_intent = if input.payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
@@ -1157,7 +1295,9 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
-    let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
+    let req02 =
+        build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(req01)
+            .map_err(V3ResponsesRelayRuntimeError::InboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
     let base_hub_scope = V3HubContinuationScope::new(
         V3HubEntryProtocol::Responses,
@@ -1204,9 +1344,14 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         V3HubContinuationLookup::new(None, base_hub_scope)
     };
     let request_stopless_control_state =
-        load_v3_responses_relay_stopless_control_state(manifest, local.as_ref())?;
-    let request_hook_profile =
-        responses_relay_request_hook_profile(manifest, request_stopless_control_state.as_ref());
+        load_v3_responses_relay_stopless_control_state(manifest, stopless_control.as_ref())?;
+    let request_hook_profile = responses_relay_request_hook_profile(
+        manifest,
+        request_stopless_control_state.as_ref(),
+        stopless_control_has_client_session_scope,
+        &transition_request_id,
+        transition_updated_at,
+    );
     let request_outcome = compile_v3_hub_relay_request_hooks().run_from_normalized(
         req02,
         &lookup,
@@ -1215,10 +1360,31 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let stopless_state = request_outcome.stopless_state().cloned();
-    if stopless_state.is_none() && request_stopless_control_state.is_some() {
-        clear_v3_responses_relay_stopless_control_state(manifest, local.as_ref())?;
+    apply_v3_responses_relay_stopless_control_request_transition(
+        manifest,
+        stopless_control.as_ref(),
+        request_stopless_control_state.is_some(),
+        stopless_state.as_ref(),
+    )?;
+    macro_rules! try_before_resp03 {
+        ($expr:expr) => {
+            match $expr {
+                Ok(value) => value,
+                Err(error) => {
+                    clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                        manifest,
+                        stopless_control.as_ref(),
+                        stopless_state.as_ref(),
+                    )?;
+                    return Err(error.into());
+                }
+            }
+        };
     }
     let provider_semantic_body = request_outcome.payload().clone();
+    let local_continuation_request_body = request_outcome
+        .responses_original_input_surface_payload()
+        .unwrap_or_else(|| provider_semantic_body.clone());
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -1230,12 +1396,14 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut provider_send_attempts = 0usize;
+    let deterministic_sample = v3_responses_relay_target_selection_sample(&input.request_id);
     let failure_context = V3ResponsesRelayProviderFailureContext {
         manifest,
         server_id: &input.server_id,
         provider_semantic_body: &provider_semantic_body,
         provider_health: &provider_health,
         retry_policy: &retry_policy,
+        deterministic_sample,
     };
     loop {
         let selected = if let Some(selected) = retry_selected.take() {
@@ -1248,12 +1416,23 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 &failed_candidates,
                 &provider_health,
                 v3_responses_relay_now_epoch_ms()?,
+                deterministic_sample,
             ) {
                 Ok(selected) => selected,
                 Err(error) => {
                     if let Some(failure) = pending_provider_failure.take() {
+                        clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                            manifest,
+                            stopless_control.as_ref(),
+                            stopless_state.as_ref(),
+                        )?;
                         return Ok(provider_failure_output(failure, trace, 0));
                     }
+                    clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                        manifest,
+                        stopless_control.as_ref(),
+                        stopless_state.as_ref(),
+                    )?;
                     return Err(error);
                 }
             }
@@ -1268,8 +1447,9 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
-        let provider_wire_protocol =
-            provider_wire_protocol_for_selected_candidate(&selected.candidate)?;
+        let provider_wire_protocol = try_before_resp03!(
+            provider_wire_protocol_for_selected_candidate(&selected.candidate)
+        );
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05.clone(),
             V3HubTargetResolution::Routed,
@@ -1279,20 +1459,23 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         let req07 =
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
         trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = provider_target(manifest, req07.selected_target())?;
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
+        let target = try_before_resp03!(provider_target(manifest, req07.selected_target()));
+        let req_compat = try_before_resp03!(
+            build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+        );
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = _req09.into_provider_semantic_payload();
-        let wire = build_v3_provider_12_responses_wire_payload(
+        let wire = try_before_resp03!(build_v3_provider_12_responses_wire_payload(
             &input.request_id,
             target,
             provider_semantic,
-        )?;
+        ));
         trace.push("V3ProviderReqOutbound08WirePayload");
-        let transport_request =
-            build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire)?;
+        let transport_request = try_before_resp03!(
+            build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire)
+        );
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
@@ -1303,19 +1486,29 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_provider_id,
                     Some(selected_observability),
                 );
-                handle_v3_responses_relay_provider_failure(
-                    &failure_context,
-                    selected,
-                    failure,
-                    &mut V3ResponsesRelayProviderRetryState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        retry_selected: &mut retry_selected,
-                        pending_provider_failure: &mut pending_provider_failure,
-                        trace: &mut trace,
-                    },
-                )
-                .await?;
+                let terminal_failure = try_before_resp03!(
+                    handle_v3_responses_relay_provider_failure(
+                        &failure_context,
+                        selected,
+                        failure,
+                        &mut V3ResponsesRelayProviderRetryState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            retry_selected: &mut retry_selected,
+                            pending_provider_failure: &mut pending_provider_failure,
+                            trace: &mut trace,
+                        },
+                    )
+                    .await
+                );
+                if let Some(failure) = terminal_failure {
+                    clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                        manifest,
+                        stopless_control.as_ref(),
+                        stopless_state.as_ref(),
+                    )?;
+                    return Ok(provider_failure_output(failure, trace, 0));
+                }
                 continue;
             }
             Err(error) => {
@@ -1324,55 +1517,90 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_provider_id,
                     Some(selected_observability),
                 );
-                handle_v3_responses_relay_provider_failure(
-                    &failure_context,
-                    selected,
-                    failure,
-                    &mut V3ResponsesRelayProviderRetryState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        retry_selected: &mut retry_selected,
-                        pending_provider_failure: &mut pending_provider_failure,
-                        trace: &mut trace,
-                    },
-                )
-                .await?;
+                let terminal_failure = try_before_resp03!(
+                    handle_v3_responses_relay_provider_failure(
+                        &failure_context,
+                        selected,
+                        failure,
+                        &mut V3ResponsesRelayProviderRetryState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            retry_selected: &mut retry_selected,
+                            pending_provider_failure: &mut pending_provider_failure,
+                            trace: &mut trace,
+                        },
+                    )
+                    .await
+                );
+                if let Some(failure) = terminal_failure {
+                    clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                        manifest,
+                        stopless_control.as_ref(),
+                        stopless_state.as_ref(),
+                    )?;
+                    return Ok(provider_failure_output(failure, trace, 0));
+                }
                 continue;
             }
         };
         let provider_status = provider_raw.status();
         let provider_id = provider_raw.provider_id().to_string();
-        provider_health
+        try_before_resp03!(provider_health
             .record_provider_success(
                 &selected_target_provider_id,
                 Some(&selected_target_auth_alias),
                 Some(&selected_target_model_id),
                 v3_responses_relay_now_epoch_ms()?,
             )
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string()))?;
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string())));
         match provider_raw.into_body() {
             V3ProviderResponseBody::Json(bytes) => {
-                let provider_value: Value = serde_json::from_slice(&bytes)?;
+                let provider_value: Value = try_before_resp03!(serde_json::from_slice(&bytes));
+                let hook_provider_value =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        try_before_resp03!(project_v3_anthropic_message_as_responses_response(
+                            &provider_value
+                        )
+                        .map_err(|error| {
+                            V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
+                        }))
+                    } else {
+                        provider_value.clone()
+                    };
+                let hook_provider_protocol =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        V3HubProviderWireProtocol::Responses
+                    } else {
+                        provider_wire_protocol
+                    };
                 let (action, finalized_provider_value, response_stopless_state) =
-                    run_json_response_hooks(
-                        &provider_value,
-                        &provider_semantic_body,
-                        manifest,
-                        provider_wire_protocol,
-                        transport_intent,
+                    try_before_resp03!(run_json_response_hooks(
+                        V3ResponsesRelayJsonResponseHookInput {
+                            provider_value: &hook_provider_value,
+                            provider_semantic_body: &provider_semantic_body,
+                            manifest,
+                            provider_protocol: hook_provider_protocol,
+                            transport_intent,
+                            compatibility_profile: selected
+                                .candidate
+                                .compatibility_profile
+                                .as_deref(),
+                            stopless_state: stopless_state.as_ref(),
+                            stopless_control_has_client_session_scope,
+                            transition_request_id: &transition_request_id,
+                            transition_updated_at,
+                        },
                         &mut trace,
-                        selected.candidate.compatibility_profile.as_deref(),
-                        stopless_state.as_ref(),
-                    )?;
+                    ));
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
-                    local.as_ref(),
+                    stopless_control.as_ref(),
                     response_stopless_state,
                 )?;
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
-                    &provider_semantic_body,
+                    &local_continuation_request_body,
                     &finalized_provider_value,
                     action,
                 )?;
@@ -1403,33 +1631,48 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             }
             V3ProviderResponseBody::Sse(stream) => {
                 let stream_observation = V3RuntimeStreamObservation::default();
-                let provider_value =
+                let provider_value = try_before_resp03!(
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
                         provider_wire_protocol,
                         stream,
                         &stream_observation,
                     )
-                    .await?;
+                    .await
+                );
+                let hook_provider_protocol =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        V3HubProviderWireProtocol::Responses
+                    } else {
+                        provider_wire_protocol
+                    };
                 let (action, finalized_provider_value, response_stopless_state) =
-                    run_json_response_hooks(
-                        &provider_value,
-                        &provider_semantic_body,
-                        manifest,
-                        provider_wire_protocol,
-                        transport_intent,
+                    try_before_resp03!(run_json_response_hooks(
+                        V3ResponsesRelayJsonResponseHookInput {
+                            provider_value: &provider_value,
+                            provider_semantic_body: &provider_semantic_body,
+                            manifest,
+                            provider_protocol: hook_provider_protocol,
+                            transport_intent,
+                            compatibility_profile: selected
+                                .candidate
+                                .compatibility_profile
+                                .as_deref(),
+                            stopless_state: stopless_state.as_ref(),
+                            stopless_control_has_client_session_scope,
+                            transition_request_id: &transition_request_id,
+                            transition_updated_at,
+                        },
                         &mut trace,
-                        selected.candidate.compatibility_profile.as_deref(),
-                        stopless_state.as_ref(),
-                    )?;
+                    ));
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
-                    local.as_ref(),
+                    stopless_control.as_ref(),
                     response_stopless_state,
                 )?;
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
-                    &provider_semantic_body,
+                    &local_continuation_request_body,
                     &finalized_provider_value,
                     action,
                 )?;
@@ -1493,18 +1736,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
 fn provider_wire_protocol_for_selected_candidate(
     selected: &routecodex_v3_target::V3TargetCandidate,
 ) -> Result<V3HubProviderWireProtocol, V3ResponsesRelayRuntimeError> {
-    match selected.provider_type.trim() {
-        "responses" | "openai_responses" | "openai-responses" => {
-            Ok(V3HubProviderWireProtocol::Responses)
-        }
-        "openai_chat" | "openai-chat" | "openai_chat_completions" | "openai-chat-completions" => {
-            Ok(V3HubProviderWireProtocol::OpenAiChat)
-        }
-        other => Err(V3ResponsesRelayRuntimeError::Target(format!(
-            "Responses relay selected unsupported provider wire protocol: provider={} type={other}",
-            selected.provider_id
-        ))),
-    }
+    provider_wire_protocol_for_provider_type(&selected.provider_id, &selected.provider_type)
+        .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("Responses relay {error}")))
 }
 
 fn build_v3_provider_transport_request_for_protocol(
@@ -1518,6 +1751,10 @@ fn build_v3_provider_transport_request_for_protocol(
         }
         V3HubProviderWireProtocol::OpenAiChat => {
             build_v3_openai_chat_transport_request_from_v3_provider_08(wire)
+        }
+        V3HubProviderWireProtocol::Anthropic => {
+            build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
+                .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)
         }
         other => Err(V3ResponsesRelayRuntimeError::Target(format!(
             "Responses relay does not support provider transport protocol {other:?}"
@@ -1593,7 +1830,7 @@ async fn handle_v3_responses_relay_provider_failure(
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     failure: V3ResponsesRelayProviderFailure,
     state: &mut V3ResponsesRelayProviderRetryState<'_>,
-) -> Result<(), V3ResponsesRelayRuntimeError> {
+) -> Result<Option<V3ResponsesRelayProviderFailure>, V3ResponsesRelayRuntimeError> {
     let candidate_key = v3_responses_relay_candidate_key(&selected.candidate);
     let reason = failure
         .client_response
@@ -1617,19 +1854,42 @@ async fn handle_v3_responses_relay_provider_failure(
         .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(error.to_string()))?;
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    let alternative_available = resolve_target(
+    let alternative = resolve_target(
         context.manifest,
         context.server_id,
         context.provider_semantic_body,
         &excluded_with_failed,
         context.provider_health,
         v3_responses_relay_now_epoch_ms()?,
-    )
-    .is_ok();
+        context.deterministic_sample,
+    );
+    let alternative_available = alternative.as_ref().is_ok_and(|alternative| {
+        let alternative_key = v3_responses_relay_candidate_key(&alternative.candidate);
+        alternative_key != candidate_key || !alternative.default_floor_protected
+    });
     if alternative_available {
         state.failed_candidates.insert(candidate_key);
         *state.pending_provider_failure = Some(failure);
-        return Ok(());
+        return Ok(None);
+    }
+    if selected.default_floor_protected || selected.candidate.default_pool_member {
+        let retries_done = state
+            .same_candidate_retries
+            .entry(candidate_key.clone())
+            .or_insert(0);
+        if *retries_done >= context.retry_policy.same_candidate_retries {
+            return Ok(Some(failure));
+        }
+        *retries_done = retries_done.saturating_add(1);
+        state.trace.push("V3DefaultFloorBackoffWait");
+        let delay_ms = context
+            .retry_policy
+            .default_floor_delay_ms_for_retry(*retries_done);
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+        *state.retry_selected = Some(selected);
+        return Ok(None);
     }
     let retries_done = state
         .same_candidate_retries
@@ -1642,11 +1902,11 @@ async fn handle_v3_responses_relay_provider_failure(
             tokio::time::sleep(Duration::from_millis(context.retry_policy.retry_delay_ms)).await;
         }
         *state.retry_selected = Some(selected);
-        return Ok(());
+        return Ok(None);
     }
     state.failed_candidates.insert(candidate_key);
     *state.pending_provider_failure = Some(failure);
-    Ok(())
+    Ok(None)
 }
 
 fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
@@ -1718,6 +1978,10 @@ impl ResponsesTransport for V3ResponsesRelayDryRunNoNetworkTransport {
         if let Ok(mut captured) = self.captured_provider_request.lock() {
             *captured = Some(request.redacted_provider_request_projection());
         }
+        let response_payload = v3_responses_relay_dry_run_response_payload_for_request(
+            &request,
+            &self.response_payload,
+        );
         Ok(
             routecodex_v3_provider_responses::V3ProviderResp14Raw::from_json(
                 request.request_id(),
@@ -1727,7 +1991,7 @@ impl ResponsesTransport for V3ResponsesRelayDryRunNoNetworkTransport {
                     name: "content-type".to_string(),
                     value: b"application/json".to_vec(),
                 }],
-                serde_json::to_vec(&self.response_payload).map_err(|error| {
+                serde_json::to_vec(&response_payload).map_err(|error| {
                     V3ProviderError::ResponseBody {
                         request_id: request.request_id().to_string(),
                         provider_id: request.provider_id().to_string(),
@@ -1739,11 +2003,49 @@ impl ResponsesTransport for V3ResponsesRelayDryRunNoNetworkTransport {
     }
 }
 
+fn v3_responses_relay_dry_run_response_payload_for_request(
+    request: &routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+    responses_payload: &Value,
+) -> Value {
+    let text = "routecodex provider-request dry-run stopped before provider send";
+    if request
+        .url()
+        .trim_end_matches('/')
+        .ends_with("/v1/messages")
+    {
+        return json!({
+            "id": format!("dry_run_{}", request.request_id()),
+            "type": "message",
+            "role": "assistant",
+            "model": request.body().get("model").cloned().unwrap_or(Value::Null),
+            "content": [{"type":"text","text":text}],
+            "stop_reason": "end_turn"
+        });
+    }
+    if request
+        .url()
+        .trim_end_matches('/')
+        .ends_with("/chat/completions")
+    {
+        return json!({
+            "id": format!("dry_run_{}", request.request_id()),
+            "object": "chat.completion",
+            "model": request.body().get("model").cloned().unwrap_or(Value::Null),
+            "choices": [{
+                "index": 0,
+                "message": {"role":"assistant","content":text},
+                "finish_reason": "stop"
+            }]
+        });
+    }
+    responses_payload.clone()
+}
+
 pub async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None).await
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None).await
 }
 
 pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
@@ -1761,8 +2063,8 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
             scope,
             now_epoch_ms,
             commit_resp04_effects: false,
-            stopless_control: None,
         }),
+        None,
     )
     .await
 }
@@ -1775,6 +2077,7 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> crate::V3FoundationRuntimeOutput {
+    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
@@ -1783,7 +2086,11 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
             scope,
             now_epoch_ms,
             commit_resp04_effects: false,
-            stopless_control: Some(stopless_control),
+        }),
+        Some(V3ResponsesRelayStoplessControlExecution {
+            control: stopless_control,
+            scope: stopless_scope,
+            commit_effects: false,
         }),
     )
     .await
@@ -1793,6 +2100,7 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
+    stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
 ) -> crate::V3FoundationRuntimeOutput {
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ResponsesRelayDryRunNoNetworkTransport {
@@ -1814,6 +2122,7 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
         input,
         &transport,
         local,
+        stopless_control,
         provider_health.store,
         V3ResponsesRelayRetryPolicy::default(),
     )
@@ -1937,15 +2246,22 @@ pub fn project_v3_responses_relay_runtime_failure(
     }
 }
 
-fn run_json_response_hooks(
-    provider_value: &Value,
-    provider_semantic_body: &Value,
-    manifest: &V3Config05ManifestPublished,
+struct V3ResponsesRelayJsonResponseHookInput<'a> {
+    provider_value: &'a Value,
+    provider_semantic_body: &'a Value,
+    manifest: &'a V3Config05ManifestPublished,
     provider_protocol: V3HubProviderWireProtocol,
     transport_intent: V3HubTransportIntent,
+    compatibility_profile: Option<&'a str>,
+    stopless_state: Option<&'a V3StoplessCenterState>,
+    stopless_control_has_client_session_scope: bool,
+    transition_request_id: &'a str,
+    transition_updated_at: u64,
+}
+
+fn run_json_response_hooks(
+    input: V3ResponsesRelayJsonResponseHookInput<'_>,
     trace: &mut Vec<&'static str>,
-    compatibility_profile: Option<&str>,
-    stopless_state: Option<&V3StoplessCenterState>,
 ) -> Result<
     (
         V3HubContinuationCommit,
@@ -1955,29 +2271,37 @@ fn run_json_response_hooks(
     V3ResponsesRelayRuntimeError,
 > {
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-        provider_value.clone(),
-        V3HubEntryProtocol::Responses,
-        provider_protocol,
-        V3HubContinuationOwnership::New,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        transport_intent,
-        compatibility_profile,
+        input.provider_value.clone(),
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            input.provider_protocol,
+            V3HubContinuationOwnership::New,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            input.transport_intent,
+        )
+        .with_compatibility_profile(input.compatibility_profile),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut resp02 = hooks.normalize(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
-    if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
+    if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
         let converted = build_v3_responses_provider_response_from_openai_chat_payload(
             resp02.provider_payload(),
-            provider_semantic_body,
+            input.provider_semantic_body,
         )?;
         *resp02.provider_payload_mut() = Arc::new(converted);
         resp02.provider_raw_mut().provider_protocol = V3HubProviderWireProtocol::Responses;
     }
     trace.push("V3HubRespInbound02Normalized");
-    let response_hook_profile = responses_relay_response_hook_profile(manifest, stopless_state);
+    let response_hook_profile = responses_relay_response_hook_profile(
+        input.manifest,
+        input.stopless_state,
+        input.stopless_control_has_client_session_scope,
+        input.transition_request_id,
+        input.transition_updated_at,
+    );
     let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
@@ -1995,11 +2319,15 @@ fn run_json_response_hooks(
 fn responses_relay_request_hook_profile(
     manifest: &V3Config05ManifestPublished,
     stopless_state: Option<&V3StoplessCenterState>,
+    stopless_control_has_client_session_scope: bool,
+    transition_request_id: &str,
+    transition_updated_at: u64,
 ) -> V3HubServertoolRequestProfile {
-    if !v3_stopless_center_enabled(manifest) {
+    if !v3_stopless_center_enabled(manifest) || !stopless_control_has_client_session_scope {
         return V3HubServertoolRequestProfile::disabled();
     }
-    let profile = V3HubServertoolRequestProfile::stopless_reasoning_stop();
+    let profile = V3HubServertoolRequestProfile::stopless_reasoning_stop()
+        .with_stopless_transition_context(transition_request_id, transition_updated_at);
     match stopless_state {
         Some(state) => profile.with_stopless_center_state(state.clone()),
         None => profile,
@@ -2009,11 +2337,16 @@ fn responses_relay_request_hook_profile(
 fn responses_relay_response_hook_profile(
     manifest: &V3Config05ManifestPublished,
     stopless_state: Option<&V3StoplessCenterState>,
+    stopless_control_has_client_session_scope: bool,
+    transition_request_id: &str,
+    transition_updated_at: u64,
 ) -> V3HubRelayResponseHookProfile {
-    if !v3_stopless_center_enabled(manifest) {
+    if !v3_stopless_center_enabled(manifest) || !stopless_control_has_client_session_scope {
         return V3HubRelayResponseHookProfile::empty();
     }
-    let profile = V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop();
+    let profile = V3HubRelayResponseHookProfile::empty()
+        .with_stopless_reasoning_stop()
+        .with_stopless_transition_context(transition_request_id, transition_updated_at);
     match stopless_state {
         Some(state) => profile.with_stopless_center_state(state.clone()),
         None => profile,
@@ -2030,62 +2363,106 @@ fn v3_stopless_center_enabled(manifest: &V3Config05ManifestPublished) -> bool {
 
 fn load_v3_responses_relay_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
-    local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
 ) -> Result<Option<V3StoplessCenterState>, V3ResponsesRelayRuntimeError> {
     if !v3_stopless_center_enabled(manifest) {
         return Ok(None);
     }
-    let Some(local) = local else {
+    let Some(stopless_control) = stopless_control else {
         return Ok(None);
     };
-    let Some(control) = local.stopless_control else {
+    if !stopless_control.scope.has_client_session_scope() {
         return Ok(None);
-    };
-    control.load_for_scope(&local.scope)
+    }
+    stopless_control
+        .control
+        .load_for_scope(&stopless_control.scope)
 }
 
 fn store_v3_responses_relay_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
-    local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
     state: V3StoplessCenterState,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     if !v3_stopless_center_enabled(manifest) {
         return Ok(());
     }
-    let Some(local) = local else {
+    let Some(stopless_control) = stopless_control else {
         return Ok(());
     };
-    let Some(control) = local.stopless_control else {
+    if !stopless_control.commit_effects {
         return Ok(());
-    };
-    control.store_for_scope(&local.scope, state)
+    }
+    if !stopless_control.scope.has_client_session_scope() {
+        return Ok(());
+    }
+    stopless_control
+        .control
+        .store_for_scope(&stopless_control.scope, state)
 }
 
 fn clear_v3_responses_relay_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
-    local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     if !v3_stopless_center_enabled(manifest) {
         return Ok(());
     }
-    let Some(local) = local else {
+    let Some(stopless_control) = stopless_control else {
         return Ok(());
     };
-    let Some(control) = local.stopless_control else {
+    if !stopless_control.commit_effects {
         return Ok(());
-    };
-    control.clear_for_scope(&local.scope)
+    }
+    if !stopless_control.scope.has_client_session_scope() {
+        return Ok(());
+    }
+    stopless_control
+        .control
+        .clear_for_scope(&stopless_control.scope)
 }
 
 fn apply_v3_responses_relay_stopless_control_transition(
     manifest: &V3Config05ManifestPublished,
-    local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
     response_stopless_state: Option<V3StoplessCenterState>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     match response_stopless_state {
-        Some(state) => store_v3_responses_relay_stopless_control_state(manifest, local, state),
-        None => clear_v3_responses_relay_stopless_control_state(manifest, local),
+        Some(state) => {
+            store_v3_responses_relay_stopless_control_state(manifest, stopless_control, state)
+        }
+        None => clear_v3_responses_relay_stopless_control_state(manifest, stopless_control),
     }
+}
+
+fn apply_v3_responses_relay_stopless_control_request_transition(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
+    restored_state_loaded: bool,
+    request_stopless_state: Option<&V3StoplessCenterState>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    match request_stopless_state {
+        Some(state) => store_v3_responses_relay_stopless_control_state(
+            manifest,
+            stopless_control,
+            state.clone(),
+        ),
+        None if restored_state_loaded => {
+            clear_v3_responses_relay_stopless_control_state(manifest, stopless_control)
+        }
+        None => Ok(()),
+    }
+}
+
+fn clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
+    request_stopless_state: Option<&V3StoplessCenterState>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    if request_stopless_state.is_none() {
+        return Ok(());
+    }
+    clear_v3_responses_relay_stopless_control_state(manifest, stopless_control)
 }
 
 fn build_v3_responses_provider_response_from_openai_chat_payload(
@@ -2113,6 +2490,11 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
                 .map(str::to_string);
         }
         if let Some(message) = choice.get("message").and_then(Value::as_object) {
+            if let Some(reasoning) =
+                build_v3_responses_reasoning_item_from_openai_chat_message(message)
+            {
+                output.push(reasoning);
+            }
             if let Some(content) = message.get("content").and_then(Value::as_str) {
                 if !content.trim().is_empty() {
                     output_text_parts.push(content.to_string());
@@ -2149,6 +2531,12 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
             .unwrap_or_else(|| Value::String("resp_openai_chat_relay".to_string())),
     );
     response.insert("object".to_string(), Value::String("response".to_string()));
+    if let Some(model) = payload.get("model") {
+        response.insert("model".to_string(), model.clone());
+    }
+    if let Some(created_at) = payload.get("created_at").or_else(|| payload.get("created")) {
+        response.insert("created_at".to_string(), created_at.clone());
+    }
     response.insert("status".to_string(), Value::String(status.to_string()));
     response.insert("output".to_string(), Value::Array(output));
     if !output_text_parts.is_empty() {
@@ -2160,10 +2548,188 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
     if let Some(finish_reason) = finish_reason {
         response.insert("finish_reason".to_string(), Value::String(finish_reason));
     }
-    if let Some(usage) = payload.get("usage") {
-        response.insert("usage".to_string(), usage.clone());
+    if let Some(usage) = payload
+        .get("usage")
+        .and_then(normalize_v3_hub_responses_usage_from_openai_chat_usage)
+    {
+        response.insert("usage".to_string(), usage);
     }
     Ok(Value::Object(response))
+}
+
+fn build_v3_responses_reasoning_item_from_openai_chat_message(
+    message: &Map<String, Value>,
+) -> Option<Value> {
+    let mut summary = Vec::new();
+    let mut encrypted_content = None;
+
+    if let Some(reasoning) = message.get("reasoning") {
+        if let Some(reasoning_row) = reasoning.as_object() {
+            summary = collect_v3_reasoning_summary_entries(reasoning_row.get("summary"));
+            if summary.is_empty() {
+                summary = collect_v3_reasoning_content_entries(reasoning_row.get("content"))
+                    .into_iter()
+                    .map(v3_reasoning_summary_text_entry)
+                    .collect();
+            }
+            encrypted_content = read_v3_trimmed_string(reasoning_row.get("encrypted_content"));
+        } else if let Some(text) = flatten_v3_reasoning_text(reasoning)
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty())
+        {
+            summary.push(v3_reasoning_summary_text_entry(text));
+        }
+    }
+
+    if summary.is_empty() {
+        for key in ["reasoning_content", "reasoning_text"] {
+            if let Some(text) = message
+                .get(key)
+                .and_then(flatten_v3_reasoning_text)
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+            {
+                summary.push(v3_reasoning_summary_text_entry(text));
+                break;
+            }
+        }
+    }
+
+    if summary.is_empty() && encrypted_content.is_none() {
+        return None;
+    }
+
+    let mut item = Map::new();
+    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+    if !summary.is_empty() {
+        item.insert("summary".to_string(), Value::Array(summary));
+    }
+    if let Some(encrypted_content) = encrypted_content {
+        item.insert(
+            "encrypted_content".to_string(),
+            Value::String(encrypted_content),
+        );
+    }
+    Some(Value::Object(item))
+}
+
+fn collect_v3_reasoning_summary_entries(value: Option<&Value>) -> Vec<Value> {
+    collect_v3_reasoning_text_entries(value, Some("summary_text"))
+        .into_iter()
+        .map(v3_reasoning_summary_text_entry)
+        .collect()
+}
+
+fn collect_v3_reasoning_content_entries(value: Option<&Value>) -> Vec<String> {
+    collect_v3_reasoning_text_entries(value, Some("reasoning_text"))
+}
+
+fn collect_v3_reasoning_text_entries(
+    value: Option<&Value>,
+    expected_type: Option<&str>,
+) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    match value {
+        Value::String(text) => trimmed_v3_text(text).into_iter().collect(),
+        Value::Array(entries) => entries
+            .iter()
+            .flat_map(|entry| collect_v3_reasoning_text_entries(Some(entry), expected_type))
+            .collect(),
+        Value::Object(row) => {
+            if let Some(expected_type) = expected_type {
+                let kind = row
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or(expected_type)
+                    .trim()
+                    .to_ascii_lowercase();
+                if kind != expected_type && kind != "text" {
+                    return Vec::new();
+                }
+            }
+            row.get("text")
+                .or_else(|| row.get("content"))
+                .and_then(flatten_v3_reasoning_text)
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+                .into_iter()
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn flatten_v3_reasoning_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => trimmed_v3_text(text),
+        Value::Array(entries) => {
+            let mut joined = String::new();
+            for text in entries
+                .iter()
+                .filter_map(flatten_v3_reasoning_text)
+                .filter(|text| !text.trim().is_empty())
+            {
+                if !joined.is_empty() {
+                    joined.push('\n');
+                }
+                joined.push_str(text.trim());
+            }
+            trimmed_v3_text(joined.as_str())
+        }
+        Value::Object(row) => row
+            .get("text")
+            .or_else(|| row.get("content"))
+            .and_then(flatten_v3_reasoning_text),
+        _ => None,
+    }
+}
+
+fn trimmed_v3_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn v3_reasoning_summary_text_entry(text: String) -> Value {
+    json!({"type":"summary_text","text":text})
+}
+
+fn normalize_v3_hub_responses_usage_from_openai_chat_usage(usage: &Value) -> Option<Value> {
+    let source = usage.as_object()?;
+    let mut response = Map::new();
+    if let Some(value) = source
+        .get("input_tokens")
+        .or_else(|| source.get("prompt_tokens"))
+        .cloned()
+    {
+        response.insert("input_tokens".to_string(), value);
+    }
+    if let Some(value) = source
+        .get("output_tokens")
+        .or_else(|| source.get("completion_tokens"))
+        .cloned()
+    {
+        response.insert("output_tokens".to_string(), value);
+    }
+    if let Some(value) = source.get("total_tokens").cloned() {
+        response.insert("total_tokens".to_string(), value);
+    }
+    if let Some(details) = source
+        .get("input_tokens_details")
+        .or_else(|| source.get("prompt_tokens_details"))
+        .cloned()
+    {
+        response.insert("input_tokens_details".to_string(), details);
+    }
+    if let Some(details) = source
+        .get("output_tokens_details")
+        .or_else(|| source.get("completion_tokens_details"))
+        .cloned()
+    {
+        response.insert("output_tokens_details".to_string(), details);
+    }
+    (!response.is_empty()).then_some(Value::Object(response))
 }
 
 fn build_v3_responses_function_call_from_openai_chat_tool_call(
@@ -2266,11 +2832,19 @@ fn extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
     name: &str,
     arguments: &str,
 ) -> Result<String, V3ResponsesRelayRuntimeError> {
-    let parsed: Value = serde_json::from_str(arguments).map_err(|error| {
-        V3ResponsesRelayRuntimeError::ProviderSse(format!(
-            "OpenAI Chat custom tool_call {name} arguments must be JSON object with string input before Responses projection: {error}"
-        ))
-    })?;
+    let parsed: Value = match serde_json::from_str(arguments) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            if let Some(input) =
+                extract_v3_responses_custom_tool_input_from_relaxed_openai_chat_arguments(arguments)
+            {
+                return Ok(input);
+            }
+            return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                "OpenAI Chat custom tool_call {name} arguments must be JSON object with string input before Responses projection: {error}"
+            )));
+        }
+    };
     let object = parsed.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderSse(format!(
             "OpenAI Chat custom tool_call {name} arguments must be JSON object before Responses projection"
@@ -2285,6 +2859,78 @@ fn extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
                 "OpenAI Chat custom tool_call {name} arguments.input must be string before Responses projection"
             ))
         })
+}
+
+fn extract_v3_responses_custom_tool_input_from_relaxed_openai_chat_arguments(
+    arguments: &str,
+) -> Option<String> {
+    let trimmed = arguments.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return None;
+    }
+    let key = "\"input\"";
+    let key_start = trimmed.find(key)?;
+    if !trimmed[1..key_start].trim().is_empty() {
+        return None;
+    }
+    let after_key_start = key_start + key.len();
+    let after_key = &trimmed[after_key_start..];
+    let colon_offset = after_key.find(':')?;
+    if !after_key[..colon_offset].trim().is_empty() {
+        return None;
+    }
+    let after_colon_start = after_key_start + colon_offset + 1;
+    let after_colon = &trimmed[after_colon_start..];
+    let value_ws_len = after_colon.len() - after_colon.trim_start().len();
+    let opening_quote = after_colon_start + value_ws_len;
+    if trimmed.as_bytes().get(opening_quote) != Some(&b'"') {
+        return None;
+    }
+    let end_brace = trimmed.rfind('}')?;
+    let before_end_brace = &trimmed[..end_brace];
+    let closing_quote = before_end_brace.rfind('"')?;
+    if closing_quote <= opening_quote {
+        return None;
+    }
+    if !trimmed[closing_quote + 1..end_brace].trim().is_empty() {
+        return None;
+    }
+    decode_v3_relaxed_json_string_content(&trimmed[opening_quote + 1..closing_quote])
+}
+
+fn decode_v3_relaxed_json_string_content(content: &str) -> Option<String> {
+    let mut output = String::with_capacity(content.len());
+    let mut chars = content.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            output.push(ch);
+            continue;
+        }
+        let escaped = chars.next()?;
+        match escaped {
+            '"' => output.push('"'),
+            '\\' => output.push('\\'),
+            '/' => output.push('/'),
+            'b' => output.push('\u{0008}'),
+            'f' => output.push('\u{000c}'),
+            'n' => output.push('\n'),
+            'r' => output.push('\r'),
+            't' => output.push('\t'),
+            'u' => {
+                let mut hex = String::with_capacity(4);
+                for _ in 0..4 {
+                    hex.push(chars.next()?);
+                }
+                let code = u32::from_str_radix(&hex, 16).ok()?;
+                output.push(char::from_u32(code)?);
+            }
+            other => {
+                output.push('\\');
+                output.push(other);
+            }
+        }
+    }
+    Some(output)
 }
 
 fn build_v3_relay_observability_from_selected(
@@ -2511,10 +3157,481 @@ async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             )
             .await
         }
+        V3HubProviderWireProtocol::Anthropic => {
+            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+                provider,
+                observation,
+            )
+            .await
+        }
         other => Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
             "Responses relay cannot decode provider SSE protocol {other:?}"
         ))),
     }
+}
+
+#[derive(Default)]
+struct V3AnthropicProviderStreamBlock {
+    kind: Option<String>,
+    id: Option<String>,
+    name: Option<String>,
+    text: String,
+    encrypted_content: Option<String>,
+    input: Option<Value>,
+    input_json_delta: String,
+    stopped: bool,
+}
+
+#[derive(Default)]
+struct V3AnthropicProviderStreamState {
+    message: Map<String, Value>,
+    content_blocks: BTreeMap<usize, V3AnthropicProviderStreamBlock>,
+    usage: Map<String, Value>,
+    message_start_seen: bool,
+    message_stop_seen: bool,
+}
+
+async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+    mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    use futures_util::StreamExt;
+
+    let _owner = V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER;
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut state = V3AnthropicProviderStreamState::default();
+    let mut done_seen = false;
+    while let Some(chunk) = provider.next().await {
+        let chunk = chunk?;
+        let frames = decoder
+            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+        for frame in frames {
+            let Some((_event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
+                continue;
+            };
+            if data == "[DONE]" {
+                if !state.message_stop_seen {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                        "Anthropic provider SSE emitted [DONE] before message_stop".to_string(),
+                    ));
+                }
+                done_seen = true;
+                continue;
+            }
+            if done_seen || state.message_stop_seen {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                    "Anthropic provider SSE emitted data after message_stop".to_string(),
+                ));
+            }
+            let event: Value = serde_json::from_str(&data).map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE event is malformed: {error}"
+                ))
+            })?;
+            characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
+                event.clone(),
+                V3HubProviderWireProtocol::Anthropic,
+                V3HubTransportIntent::Sse,
+            )
+            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+            collect_v3_anthropic_provider_stream_event(event, &mut state)?;
+        }
+    }
+    decoder
+        .finish()
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+    if !state.message_stop_seen {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+            "Anthropic provider SSE ended without message_stop".to_string(),
+        ));
+    }
+    let anthropic_message = build_v3_anthropic_message_from_provider_stream_state(state)?;
+    let response = project_v3_anthropic_message_as_responses_response(&anthropic_message)
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+    observation
+        .record_event(&response)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+    Ok(response)
+}
+
+fn collect_v3_anthropic_provider_stream_event(
+    event: Value,
+    state: &mut V3AnthropicProviderStreamState,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let event_object = event.as_object().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderSse(
+            "Anthropic provider SSE event must be an object".to_string(),
+        )
+    })?;
+    let event_type = event_object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderSse(
+                "Anthropic provider SSE event missing type".to_string(),
+            )
+        })?;
+    match event_type {
+        "message_start" => {
+            if state.message_start_seen {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                    "Anthropic provider SSE emitted duplicate message_start".to_string(),
+                ));
+            }
+            let message = event_object
+                .get("message")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderSse(
+                        "Anthropic provider SSE message_start missing message object".to_string(),
+                    )
+                })?;
+            for key in [
+                "id",
+                "type",
+                "role",
+                "model",
+                "stop_reason",
+                "stop_sequence",
+            ] {
+                if let Some(value) = message.get(key) {
+                    state.message.insert(key.to_string(), value.clone());
+                }
+            }
+            merge_v3_anthropic_provider_stream_usage(&mut state.usage, message.get("usage"))?;
+            state.message_start_seen = true;
+        }
+        "content_block_start" => {
+            require_v3_anthropic_provider_message_start(state, event_type)?;
+            let index = read_v3_anthropic_provider_stream_index(event_object, event_type)?;
+            if state.content_blocks.contains_key(&index) {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE content_block_start duplicated index {index}"
+                )));
+            }
+            let content_block = event_object
+                .get("content_block")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderSse(
+                        "Anthropic provider SSE content_block_start missing content_block object"
+                            .to_string(),
+                    )
+                })?;
+            let kind = read_v3_trimmed_string(content_block.get("type")).ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderSse(
+                    "Anthropic provider SSE content_block_start missing content_block.type"
+                        .to_string(),
+                )
+            })?;
+            let mut block = V3AnthropicProviderStreamBlock {
+                kind: Some(kind.clone()),
+                id: read_v3_trimmed_string(content_block.get("id")),
+                name: read_v3_trimmed_string(content_block.get("name")),
+                encrypted_content: read_v3_trimmed_string(content_block.get("encrypted_content"))
+                    .or_else(|| read_v3_trimmed_string(content_block.get("signature")))
+                    .or_else(|| read_v3_trimmed_string(content_block.get("data"))),
+                input: content_block.get("input").cloned(),
+                ..V3AnthropicProviderStreamBlock::default()
+            };
+            match kind.as_str() {
+                "text" => {
+                    if let Some(text) = content_block.get("text").and_then(Value::as_str) {
+                        block.text.push_str(text);
+                    }
+                }
+                "thinking" | "reasoning" | "redacted_thinking" => {
+                    if let Some(thinking) = content_block
+                        .get("thinking")
+                        .or_else(|| content_block.get("text"))
+                        .and_then(Value::as_str)
+                    {
+                        block.text.push_str(thinking);
+                    }
+                }
+                "tool_use" => {}
+                other => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                        "Anthropic provider SSE content block type {other} is unsupported"
+                    )))
+                }
+            }
+            state.content_blocks.insert(index, block);
+        }
+        "content_block_delta" => {
+            require_v3_anthropic_provider_message_start(state, event_type)?;
+            let index = read_v3_anthropic_provider_stream_index(event_object, event_type)?;
+            let block = state.content_blocks.get_mut(&index).ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE content_block_delta missing start for index {index}"
+                ))
+            })?;
+            if block.stopped {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE content_block_delta followed stop for index {index}"
+                )));
+            }
+            let delta = event_object
+                .get("delta")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderSse(
+                        "Anthropic provider SSE content_block_delta missing delta object"
+                            .to_string(),
+                    )
+                })?;
+            match delta.get("type").and_then(Value::as_str) {
+                Some("text_delta") => {
+                    let text = delta.get("text").and_then(Value::as_str).ok_or_else(|| {
+                        V3ResponsesRelayRuntimeError::ProviderSse(
+                            "Anthropic provider SSE text_delta missing text".to_string(),
+                        )
+                    })?;
+                    block.text.push_str(text);
+                }
+                Some("thinking_delta") => {
+                    let thinking = delta
+                        .get("thinking")
+                        .or_else(|| delta.get("text"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            V3ResponsesRelayRuntimeError::ProviderSse(
+                                "Anthropic provider SSE thinking_delta missing thinking/text"
+                                    .to_string(),
+                            )
+                        })?;
+                    block.text.push_str(thinking);
+                }
+                Some("input_json_delta") => {
+                    let partial_json = delta
+                        .get("partial_json")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            V3ResponsesRelayRuntimeError::ProviderSse(
+                                "Anthropic provider SSE input_json_delta missing partial_json"
+                                    .to_string(),
+                            )
+                        })?;
+                    block.input_json_delta.push_str(partial_json);
+                }
+                Some("signature_delta") => {
+                    if let Some(signature) = delta.get("signature").and_then(Value::as_str) {
+                        let current = block.encrypted_content.get_or_insert_with(String::new);
+                        current.push_str(signature);
+                    }
+                }
+                Some("citations_delta") => {}
+                Some(other) => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                        "Anthropic provider SSE delta type {other} is unsupported"
+                    )))
+                }
+                None => {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                        "Anthropic provider SSE content_block_delta missing delta.type".to_string(),
+                    ))
+                }
+            }
+        }
+        "content_block_stop" => {
+            require_v3_anthropic_provider_message_start(state, event_type)?;
+            let index = read_v3_anthropic_provider_stream_index(event_object, event_type)?;
+            let block = state.content_blocks.get_mut(&index).ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE content_block_stop missing start for index {index}"
+                ))
+            })?;
+            if block.stopped {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE duplicated content_block_stop for index {index}"
+                )));
+            }
+            block.stopped = true;
+        }
+        "message_delta" => {
+            require_v3_anthropic_provider_message_start(state, event_type)?;
+            if let Some(delta) = event_object.get("delta").and_then(Value::as_object) {
+                for key in ["stop_reason", "stop_sequence"] {
+                    if let Some(value) = delta.get(key) {
+                        state.message.insert(key.to_string(), value.clone());
+                    }
+                }
+            }
+            merge_v3_anthropic_provider_stream_usage(&mut state.usage, event_object.get("usage"))?;
+        }
+        "message_stop" => {
+            require_v3_anthropic_provider_message_start(state, event_type)?;
+            state.message_stop_seen = true;
+        }
+        "ping" => {}
+        "error" => {
+            let message = event
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .filter(|message| !message.trim().is_empty())
+                .unwrap_or("Anthropic provider SSE emitted an error event");
+            return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                message.to_string(),
+            ));
+        }
+        other => {
+            return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                "Anthropic provider SSE event type {other} is unsupported"
+            )))
+        }
+    }
+    Ok(())
+}
+
+fn require_v3_anthropic_provider_message_start(
+    state: &V3AnthropicProviderStreamState,
+    event_type: &str,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    if state.message_start_seen {
+        Ok(())
+    } else {
+        Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+            "Anthropic provider SSE emitted {event_type} before message_start"
+        )))
+    }
+}
+
+fn read_v3_anthropic_provider_stream_index(
+    event: &Map<String, Value>,
+    event_type: &str,
+) -> Result<usize, V3ResponsesRelayRuntimeError> {
+    event
+        .get("index")
+        .and_then(Value::as_u64)
+        .map(|index| index as usize)
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                "Anthropic provider SSE {event_type} missing index"
+            ))
+        })
+}
+
+fn merge_v3_anthropic_provider_stream_usage(
+    target: &mut Map<String, Value>,
+    usage: Option<&Value>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(usage) = usage else {
+        return Ok(());
+    };
+    let usage = usage.as_object().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderSse(
+            "Anthropic provider SSE usage must be an object".to_string(),
+        )
+    })?;
+    for (key, value) in usage {
+        target.insert(key.clone(), value.clone());
+    }
+    Ok(())
+}
+
+fn build_v3_anthropic_message_from_provider_stream_state(
+    mut state: V3AnthropicProviderStreamState,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    if !state.message_start_seen {
+        return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+            "Anthropic provider SSE response missing message_start".to_string(),
+        ));
+    }
+    let mut content = Vec::with_capacity(state.content_blocks.len());
+    for (index, block) in state.content_blocks {
+        if !block.stopped {
+            return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                "Anthropic provider SSE content block {index} ended without content_block_stop"
+            )));
+        }
+        match block.kind.as_deref() {
+            Some("text") => content.push(json!({
+                "type":"text",
+                "text":block.text
+            })),
+            Some("thinking" | "reasoning") => {
+                let mut item = json!({
+                    "type":"thinking",
+                    "thinking":block.text
+                });
+                if let Some(encrypted_content) = block.encrypted_content {
+                    item["signature"] = Value::String(encrypted_content);
+                }
+                content.push(item);
+            }
+            Some("redacted_thinking") => {
+                let encrypted_content = block.encrypted_content.ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                        "Anthropic provider SSE redacted_thinking block {index} missing data"
+                    ))
+                })?;
+                content.push(json!({
+                    "type":"redacted_thinking",
+                    "data":encrypted_content
+                }));
+            }
+            Some("tool_use") => {
+                let id = block.id.ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                        "Anthropic provider SSE tool_use block {index} missing id"
+                    ))
+                })?;
+                let name = block.name.ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                        "Anthropic provider SSE tool_use block {index} missing name"
+                    ))
+                })?;
+                let input = if block.input_json_delta.is_empty() {
+                    block.input.unwrap_or_else(|| Value::Object(Map::new()))
+                } else {
+                    serde_json::from_str::<Value>(&block.input_json_delta).map_err(|error| {
+                        V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                            "Anthropic provider SSE tool_use block {index} input_json_delta is malformed: {error}"
+                        ))
+                    })?
+                };
+                if !input.is_object() {
+                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                        "Anthropic provider SSE tool_use block {index} input must be an object"
+                    )));
+                }
+                content.push(json!({
+                    "type":"tool_use",
+                    "id":id,
+                    "name":name,
+                    "input":input
+                }));
+            }
+            Some(other) => {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE content block type {other} is unsupported"
+                )))
+            }
+            None => {
+                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                    "Anthropic provider SSE content block {index} missing type"
+                )))
+            }
+        }
+    }
+    state
+        .message
+        .entry("type".to_string())
+        .or_insert_with(|| Value::String("message".to_string()));
+    state
+        .message
+        .entry("role".to_string())
+        .or_insert_with(|| Value::String("assistant".to_string()));
+    state
+        .message
+        .insert("content".to_string(), Value::Array(content));
+    if !state.usage.is_empty() {
+        state
+            .message
+            .insert("usage".to_string(), Value::Object(state.usage));
+    }
+    Ok(Value::Object(state.message))
 }
 
 #[derive(Default)]
@@ -2593,13 +3710,15 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
                 .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
             collect_openai_chat_stream_event(
                 event,
-                &mut response_id,
-                &mut model,
-                &mut created,
-                &mut usage,
-                &mut choices,
-                &mut terminal_seen,
-                observation,
+                V3OpenAiChatStreamCollectionState {
+                    response_id: &mut response_id,
+                    model: &mut model,
+                    created: &mut created,
+                    usage: &mut usage,
+                    choices: &mut choices,
+                    terminal_seen: &mut terminal_seen,
+                    observation,
+                },
             )?;
         }
     }
@@ -2632,32 +3751,36 @@ fn is_v3_openai_chat_empty_sse_tail_sentinel(event: &Value) -> bool {
             .is_some_and(|choices| choices.is_empty())
 }
 
+struct V3OpenAiChatStreamCollectionState<'a> {
+    response_id: &'a mut Option<String>,
+    model: &'a mut Option<String>,
+    created: &'a mut Option<Value>,
+    usage: &'a mut Option<Value>,
+    choices: &'a mut BTreeMap<usize, V3OpenAiChatStreamChoice>,
+    terminal_seen: &'a mut bool,
+    observation: &'a V3RuntimeStreamObservation,
+}
+
 fn collect_openai_chat_stream_event(
     event: Value,
-    response_id: &mut Option<String>,
-    model: &mut Option<String>,
-    created: &mut Option<Value>,
-    usage: &mut Option<Value>,
-    choices: &mut BTreeMap<usize, V3OpenAiChatStreamChoice>,
-    terminal_seen: &mut bool,
-    observation: &V3RuntimeStreamObservation,
+    state: V3OpenAiChatStreamCollectionState<'_>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     let event_object = event.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderSse(
             "OpenAI Chat provider SSE event must be an object".to_string(),
         )
     })?;
-    if response_id.is_none() {
-        *response_id = read_v3_trimmed_string(event_object.get("id"));
+    if state.response_id.is_none() {
+        *state.response_id = read_v3_trimmed_string(event_object.get("id"));
     }
-    if model.is_none() {
-        *model = read_v3_trimmed_string(event_object.get("model"));
+    if state.model.is_none() {
+        *state.model = read_v3_trimmed_string(event_object.get("model"));
     }
-    if created.is_none() {
-        *created = event_object.get("created").cloned();
+    if state.created.is_none() {
+        *state.created = event_object.get("created").cloned();
     }
     if let Some(next_usage) = event_object.get("usage").filter(|value| !value.is_null()) {
-        *usage = Some(next_usage.clone());
+        *state.usage = Some(next_usage.clone());
     }
     let Some(event_choices) = event_object.get("choices").and_then(Value::as_array) else {
         return Ok(());
@@ -2672,15 +3795,16 @@ fn collect_openai_chat_stream_event(
             .get("index")
             .and_then(Value::as_u64)
             .unwrap_or(0) as usize;
-        let choice = choices.entry(index).or_default();
+        let choice = state.choices.entry(index).or_default();
         if let Some(finish_reason) = choice_object
             .get("finish_reason")
             .filter(|value| !value.is_null())
         {
             choice.finish_reason = Some(finish_reason.clone());
-            *terminal_seen = true;
+            *state.terminal_seen = true;
             if let Some(reason) = finish_reason.as_str() {
-                observation
+                state
+                    .observation
                     .record_finish_reason(reason)
                     .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
             }
@@ -3075,16 +4199,12 @@ fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     use futures_util::stream;
 
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
-    let event_name = match response.get("status").and_then(Value::as_str) {
-        Some("failed" | "incomplete") => "response.failed",
-        Some("requires_action") => "response.requires_action",
-        _ => "response.completed",
-    };
+    let failed = matches!(
+        response.get("status").and_then(Value::as_str),
+        Some("failed" | "incomplete")
+    );
     let mut frames = Vec::new();
-    if matches!(
-        event_name,
-        "response.completed" | "response.requires_action"
-    ) {
+    if !failed {
         if let Some(response_id) = response.get("id").and_then(Value::as_str) {
             frames.push(Ok(build_v3_runtime_sse_json_frame(
                 "response.created",
@@ -3116,11 +4236,30 @@ fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
             }
         }
     }
-    let payload = json!({
-        "type": event_name,
-        "response": response,
-    });
-    frames.push(Ok(build_v3_runtime_sse_json_frame(event_name, &payload)));
+    if failed {
+        frames.push(Ok(build_v3_runtime_sse_json_frame(
+            "response.failed",
+            &json!({
+                "type": "response.failed",
+                "response": response,
+            }),
+        )));
+    } else {
+        frames.push(Ok(build_v3_runtime_sse_json_frame(
+            "response.completed",
+            &json!({
+                "type": "response.completed",
+                "response": response.clone(),
+            }),
+        )));
+        frames.push(Ok(build_v3_runtime_sse_json_frame(
+            "response.done",
+            &json!({
+                "type": "response.done",
+                "response": response,
+            }),
+        )));
+    }
     frames.push(Ok(b"data: [DONE]\n\n".to_vec()));
     Box::pin(stream::iter(frames))
 }
@@ -3151,6 +4290,7 @@ fn resolve_target(
     request_local_excluded_candidates: &BTreeSet<String>,
     provider_health: &V3ProviderHealthStore,
     now_ms: u64,
+    deterministic_sample: u64,
 ) -> Result<routecodex_v3_target::V3Target10ConcreteProviderSelected, V3ResponsesRelayRuntimeError>
 {
     let facts = crate::build_v3_router_request_facts_for_entry(body, "responses");
@@ -3162,12 +4302,12 @@ fn resolve_target(
         .resolve_route_pool_plan(manifest, classified)
         .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("{error:?}")))?;
     let hit = router
-        .hit_opaque_target_plan_once(plan, 0)
+        .hit_opaque_target_plan_once(plan, deterministic_sample)
         .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("{error:?}")))?;
     let target = V3TargetInterpreter::default();
     let kind = target.classify_kind(hit);
     let expanded = target
-        .expand_candidates(manifest, kind, 0)
+        .expand_candidates(manifest, kind, deterministic_sample)
         .map_err(|error| V3ResponsesRelayRuntimeError::Target(error.to_string()))?;
     target
         .select_available(
@@ -3179,6 +4319,15 @@ fn resolve_target(
             now_ms,
         )
         .map_err(|error| V3ResponsesRelayRuntimeError::Target(format!("{error:?}")))
+}
+
+fn v3_responses_relay_target_selection_sample(request_id: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in request_id.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 fn v3_responses_relay_candidate_key(candidate: &routecodex_v3_target::V3TargetCandidate) -> String {
@@ -3381,6 +4530,26 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn target_selection_sample_is_stable_per_request_and_spans_weighted_buckets() {
+        let request_id = "openai-responses-router-gpt-5.5-20260722T143237284-597520-4987";
+        assert_eq!(
+            v3_responses_relay_target_selection_sample(request_id),
+            v3_responses_relay_target_selection_sample(request_id)
+        );
+
+        let buckets = (0..32)
+            .map(|index| {
+                v3_responses_relay_target_selection_sample(&format!("weighted-lb-{index}")) % 2
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            buckets,
+            BTreeSet::from([0, 1]),
+            "request-id sampling must not pin a two-target weighted pool to one provider"
+        );
+    }
+
+    #[test]
     fn usage_summary_counts_cache_reads_but_not_cache_writes() {
         let summary = extract_v3_runtime_usage_summary(&json!({
             "usage": {
@@ -3397,6 +4566,189 @@ mod tests {
         .expect("usage summary");
         assert_eq!(summary.input_tokens, Some(59_842));
         assert_eq!(summary.cached_tokens, Some(41_984));
+    }
+
+    #[test]
+    fn provider_request_dry_run_uses_provider_protocol_matching_terminal_payload() {
+        let request = build_v3_transport_13_responses_http_request_from_parts(
+            "req_dry_anthropic",
+            "anthropic_provider",
+            "https://provider.example/v1/messages",
+            V3ProviderAuthHandle {
+                alias: "test".to_string(),
+                secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".to_string()),
+            },
+            routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse,
+            json!({
+                "model": "claude-test",
+                "messages": [{"role":"user","content":[{"type":"text","text":"hi"}]}],
+                "stream": true
+            }),
+        )
+        .expect("anthropic dry-run request");
+
+        let payload = v3_responses_relay_dry_run_response_payload_for_request(
+            &request,
+            &json!({"object":"response","output":[]}),
+        );
+
+        assert_eq!(payload["type"], "message");
+        assert_eq!(payload["content"][0]["type"], "text");
+        project_v3_anthropic_message_as_responses_response(&payload).expect(
+            "provider-request dry-run terminal payload must match Anthropic response codec",
+        );
+    }
+
+    #[test]
+    fn openai_chat_provider_reasoning_content_projects_before_tool_call() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_reasoning_content",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning_content": "Need inspect before running the tool.",
+                        "tool_calls": [{
+                            "id": "call_reasoning_exec",
+                            "type": "function",
+                            "function": {
+                                "name": "exec",
+                                "arguments": "{\"input\":\"pwd\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            &json!({
+                "tools": [{"type":"custom","name":"exec"}]
+            }),
+        )
+        .expect("OpenAI Chat response must project reasoning to Responses");
+
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["output"][0]["type"], "reasoning");
+        assert_eq!(
+            response["output"][0]["summary"][0]["text"],
+            "Need inspect before running the tool.",
+            "OpenAI Chat reasoning_content must become replay-safe Responses reasoning.summary before tool calls"
+        );
+        assert!(
+            response["output"][0].get("content").is_none(),
+            "private reasoning.content must not leak to client-visible Responses output: {response}"
+        );
+        assert_eq!(response["output"][1]["type"], "custom_tool_call");
+        assert_eq!(response["output"][1]["call_id"], "call_reasoning_exec");
+    }
+
+    #[test]
+    fn openai_chat_provider_structured_reasoning_keeps_summary_and_encrypted_without_content_leak()
+    {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_structured_reasoning",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "visible answer",
+                        "reasoning": {
+                            "summary": [{"type":"summary_text","text":"safe summary"}],
+                            "content": [{"type":"reasoning_text","text":"private chain"}],
+                            "encrypted_content": "enc-opaque"
+                        }
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            &json!({"tools":[]}),
+        )
+        .expect("OpenAI Chat structured reasoning must project to Responses");
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "reasoning");
+        assert_eq!(response["output"][0]["summary"][0]["text"], "safe summary");
+        assert_eq!(response["output"][0]["encrypted_content"], "enc-opaque");
+        assert!(
+            response["output"][0].get("content").is_none(),
+            "Responses reasoning item must not expose private reasoning.content: {response}"
+        );
+        assert_eq!(response["output"][1]["type"], "output_text");
+        assert_eq!(response["output"][1]["text"], "visible answer");
+        assert!(
+            !response.to_string().contains("private chain"),
+            "private reasoning.content must not be serialized into the client payload: {response}"
+        );
+    }
+
+    #[test]
+    fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_usage_shape",
+                "choices": [{
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "prompt_tokens_details": {"cached_tokens": 5},
+                    "completion_tokens": 7,
+                    "completion_tokens_details": {"reasoning_tokens": 2},
+                    "total_tokens": 18
+                }
+            }),
+            &json!({"tools":[]}),
+        )
+        .expect("OpenAI Chat response must project to Responses");
+
+        assert_eq!(response["usage"]["input_tokens"], 11);
+        assert_eq!(
+            response["usage"]["input_tokens_details"]["cached_tokens"],
+            5
+        );
+        assert_eq!(response["usage"]["output_tokens"], 7);
+        assert_eq!(
+            response["usage"]["output_tokens_details"]["reasoning_tokens"],
+            2
+        );
+        assert_eq!(response["usage"]["total_tokens"], 18);
+        assert!(
+            response["usage"].get("prompt_tokens").is_none(),
+            "Hub canonical response usage must not expose OpenAI Chat provider-wire prompt_tokens: {response}"
+        );
+        assert!(
+            response["usage"].get("completion_tokens").is_none(),
+            "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
+        );
+    }
+
+    #[test]
+    fn openai_chat_custom_tool_arguments_extracts_unescaped_raw_input_wrapper() {
+        let raw_input = "python - <<'PY'\nprint(\"hello\")\nPY";
+        let arguments = format!("{{\"input\":\"{raw_input}\"}}");
+
+        let input =
+            extract_v3_responses_custom_tool_input_from_openai_chat_arguments("exec", &arguments)
+                .expect("relaxed custom tool input wrapper");
+
+        assert_eq!(input, raw_input);
+    }
+
+    #[test]
+    fn openai_chat_custom_tool_arguments_rejects_malformed_non_input_wrapper() {
+        let error = extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
+            "exec",
+            "{\"command\":\"print(\"hello\")\"}",
+        )
+        .expect_err("malformed non-input wrapper must fail fast");
+
+        assert!(
+            error
+                .to_string()
+                .contains("arguments must be JSON object with string input"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -3724,7 +5076,8 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("response.completed"));
-        assert_eq!(projected[3].as_ref().unwrap(), "data: [DONE]\n\n");
+        assert!(projected[3].as_ref().unwrap().contains("response.done"));
+        assert_eq!(projected[4].as_ref().unwrap(), "data: [DONE]\n\n");
     }
 
     #[tokio::test]
@@ -3745,5 +5098,114 @@ mod tests {
             response["required_action"]["type"].as_str(),
             Some("submit_tool_outputs")
         );
+        let projected = collect_projected_sse(
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(response),
+        )
+        .await;
+        let text = projected
+            .iter()
+            .map(|chunk| chunk.as_ref().unwrap().as_str())
+            .collect::<String>();
+        assert!(
+            text.contains("event: response.completed"),
+            "client SSE requires_action terminal must include response.completed: {text}"
+        );
+        assert!(
+            text.contains("event: response.done"),
+            "client SSE requires_action terminal must include response.done before [DONE]: {text}"
+        );
+        assert!(
+            !text.contains("event: response.requires_action"),
+            "client SSE must not use the non-terminal requires_action event as stream terminal: {text}"
+        );
+        assert!(
+            text.contains("\"status\":\"requires_action\""),
+            "client SSE terminal event must preserve semantic requires_action status: {text}"
+        );
+        let completed = text
+            .find("event: response.completed")
+            .expect("response.completed event");
+        let done = text
+            .find("event: response.done")
+            .expect("response.done event");
+        let marker = text.find("data: [DONE]").expect("[DONE] marker");
+        assert!(
+            completed < done && done < marker,
+            "Responses client SSE terminal ordering must be response.completed -> response.done -> [DONE]: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_canonicalizes_responses_response_before_chatprocess() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10}}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"V3_ANTHROPIC_\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"SSE_OK\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":2}}\n\n".to_vec()),
+            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .expect("Anthropic provider SSE must canonicalize before Responses Chat Process");
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "message");
+        assert_eq!(
+            response["output"][0]["content"][0]["text"],
+            "V3_ANTHROPIC_SSE_OK"
+        );
+        let snapshot = observation.snapshot().expect("stream observation");
+        assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
+        assert_eq!(snapshot.finish_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_eof_without_message_stop_fails_before_success() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n".to_vec()),
+        ]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Anthropic provider SSE ended without message_stop"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_malformed_tool_json_fails_without_text_downgrade() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"exec_command\",\"input\":{}}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"cmd\\\":\\\"unterminated\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null}}\n\n".to_vec()),
+            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+        ]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("input_json_delta is malformed"));
     }
 }

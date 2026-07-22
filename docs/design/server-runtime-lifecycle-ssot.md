@@ -6,7 +6,7 @@
 
 1. **进程身份不属于文件系统真相**。pid 是 OS 进程属性，需要发信号时动态解析。`server-<port>.pid` 只作为 cache，不作为真源；缺失不应报错，过期必须清理。
 2. **生命周期真相来自控制面**。HTTP server 的 `start/stop/restart/status` 由 `/health` 与 `/shutdown` 控制面表达；guardian 作为多实例的 owner 时，再以 control plane 表达。
-3. **聚合实例 identity + 成员端口是存活证明**。一个 RouteCodex server process 可以监听多个配置端口；canonical restart identity 是这些成员端口共同的 listener PID 集合。单个端口只用于定位、探测和记录，不是独立 restart instance。
+3. **聚合实例 identity + 成员端口是存活证明**。一个 RouteCodex server process 可以监听多个配置端口；canonical restart identity 是这些成员端口共同的 listener PID 集合。`restart` 仍按 aggregate identity 工作；显式 `start/stop --port` 是 listener-scoped 操作，只能释放目标端口，不能用共享 PID 信号误伤 sibling listener。
 4. **状态文件按功能分层**，禁止散落在根目录。`run/` 放运行态瞬时 cache；`state/runtime-lifecycle/` 放实例 registry 与 stop intent；`state/backups/` 放历史 snapshot；`config/archive/` 放历史 config。根目录只留真源。
 5. **每个受管端口只允许映射到一个 aggregate instance 声明**。同一聚合进程可拥有多个端口，但同一端口不能映射到多个 PID identity，也不允许多个 pid cache 叠加。
 6. **stop intent 必须有 reaper**。`daemon-stop-<port>.json` 是 cross-process 信号，不是状态真相。它必须带 TTL，独立 reaper 必须在 TTL 内消费或清理。
@@ -97,13 +97,16 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 `rcc stop --port 5555`：
 
 1. 写 `state/runtime-lifecycle/ports/5555/stop-intent.json`（TTL=60s）。
-2. POST `http://127.0.0.1:5555/shutdown`（带 caller audit headers）。
-3. 等待端口释放（最多 `STOP_WAIT_MS=8000`）。
+2. POST `http://127.0.0.1:5555/_routecodex/admin/ports/5555/stop`（带 caller audit headers），只请求 `PortRegistry.removePort(5555)`。
+3. 等待目标端口释放（最多 `STOP_WAIT_MS=8000`），不停止配置组内 sibling ports。
 4. 端口已释放 → `stopped`，清理 instance registry + pid cache。
 5. 端口未释放：
    - listener identity 重新判定。
-   - trusted RouteCodex → `managed-stop-timeout`，显式报给用户，不靠 stale pid 重杀。
+   - trusted RouteCodex 且 PID 只拥有目标端口 → 允许显式 SIGTERM，再 SIGKILL。
+   - managed PID 同时拥有非目标 listener → fail-fast，禁止用 PID 信号完成单端口 stop。
    - 非 trusted → `port-conflict`，不杀。
+
+`rcc stop`（不带 `--port`）仍按配置解析出的 port-group 逐端口执行组级停止；本节的单端口约束只适用于显式 `--port`。
 
 `rcc restart --port 5555`：
 
@@ -116,15 +119,16 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 7. 完成条件不是 locator 单端口恢复；配置内全部成员端口必须重新 LISTEN、`/health` 成功，且 listener PID identity 一致。
 8. 无 `--port` 时，发现的多个端口只有在 PID identity 唯一时才能自动归并；存在多个 aggregate identity 时显式报歧义，不广播。
 9. 禁止 `restart` 命令自行 spawn `start --restart` 接管；版本落后也必须通过原进程/原 supervisor 重启。
-10. install/release 验证也不得用 `start --restart` 或 `/shutdown` 接管旧 runtime；live runtime 存在时只能调用一次 `rcc restart`，重启后任一成员端口版本/健康不匹配都显式失败。
+10. install/release 验证仍不得把 `start --restart` 当作 aggregate `restart` transport；live runtime 存在时只能调用一次 `rcc restart`。普通 start takeover 只允许释放其目标 port-group，重启后任一成员端口版本/健康不匹配都显式失败。
 
-`rcc start --restart --port 5555`：
+`rcc start --port 5555` / `rcc start --restart --port 5555`：
 
-1. 这不是 restart transport。若目标端口/端口组已有 listener 或健康 RouteCodex runtime，必须在写 stop-intent 和调用端口释放逻辑之前 fail-fast。
-2. 用户需要原 session 内重启时使用 `rcc restart --port 5555`；5555 只是 aggregate locator。
-3. 只有目标确认处于 stopped/free 状态时，`start` 才能继续 launch；若需要显式停止，必须走 `rcc stop` 或明确 destructive/exclusive 流程。
+1. 这不是 `restart` transport，但默认允许对目标端口执行 takeover。目标端口已有 listener 时，先写 stop-intent，再调用 `/_routecodex/admin/ports/:port/stop` 做 graceful stop。
+2. graceful stop 超时后，只能对明确受管且不拥有非目标 listener 的 PID 发送 SIGTERM，再在超时后发送 SIGKILL；共享 sibling 端口的 PID 必须 fail-fast，不能整进程杀掉。
+3. `--no-restart` 是 launch-only 约束：目标端口/端口组已有 listener 时，在 stop-intent、HTTP stop、PID signal 之前拒绝。
+4. 用户需要原 session 内重启时仍使用 `rcc restart --port 5555`；5555 只是 aggregate locator，不得逐成员端口广播 restart。
 
-`rcc start --port 5555`：
+普通 start launch flow：
 
 1. `declare` instance → 写 registry。
 2. spawn server child process。
@@ -189,13 +193,15 @@ declare  -> bind  -> ready  -> healthy  -> degraded  -> shutdown-intent  -> stop
 - 新路径下，start 路径生成 pid.cache，server exit 路径 unlink，stop 路径必消费 stop-intent，reaper 清理 TTL 过期 stop-intent。
 - 红测先红后绿：先写一个 grep 根目录禁止路径的 red test，确认当前根目录命中为红；改造后该 red test 必绿。
 - 真实运行回归：`rcc restart --port <locator-port>` 只产生一次 restart request；随后配置内全部成员端口 `/health` 通过、版本一致、lsof listener PID identity 一致。
-- Live probe：`curl /health` 200，`POST /shutdown` 200，端口在 `STOP_WAIT_MS` 内释放。
+- Live probe：`curl /health` 200，显式 `--port` 使用 `POST /_routecodex/admin/ports/<port>/stop` 后目标端口在 `STOP_WAIT_MS` 内释放且 sibling 端口仍健康；组级 stop 才使用 `POST /shutdown`。
 
 ## 11. 反模式 / 边界
 
 - ❌ 根目录再出现 `server-*.pid` / `daemon-stop-*.json` / `token-stats.json.tmp-*` / `*.bak`。
 - ❌ pid 文件被当成“判断 server 是否在跑”的真源。
-- ❌ start 路径不写 stop intent 消费；stop intent 永久残留。
+- ❌ start takeover 不写 stop intent 消费；stop intent 永久残留。
+- ❌ 显式 `start/stop --port <port>` 调用 aggregate `/shutdown` 或停止 sibling ports。
+- ❌ 共享多个 listener 的 managed PID 被用 SIGTERM/SIGKILL 完成单端口释放。
 - ❌ 一端口多 pid 文件并存；多进程共享同一端口。
 - ❌ 对同一 aggregate listener PID 依次执行 `restart --port 5520`、`restart --port 5555`、`restart --port 10000`。
 - ❌ 只验证 locator 端口健康就宣称 aggregate restart 完成。

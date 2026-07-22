@@ -16,6 +16,7 @@ import { buildInfo } from './build-info.js';
 import { ensureRccUserDirEnvironment } from './config/user-data-paths.js';
 import {
   ensurePortAvailableImpl,
+  findListeningPortsByPidImpl,
   findListeningPidsImpl,
   isServerHealthyQuickImpl,
   killPidBestEffortImpl
@@ -301,6 +302,7 @@ registerStartCommand(program, {
   reportGuardianLifecycle,
   ensurePortAvailable,
   findListeningPids,
+  findListeningPortsByPid,
   killPidBestEffort,
   getModulesConfigPath,
   resolveCliEntryPath: () => path.resolve(__dirname, 'cli.js'),
@@ -340,6 +342,7 @@ registerStopCommand(program, {
   createSpinner,
   logger,
   findListeningPids,
+  findListeningPortsByPid,
   killPidBestEffort,
   sleep,
   stopGuardianDaemon: stopGlobalGuardian,
@@ -377,7 +380,11 @@ registerRestartCommand(program, {
 // offline-log command disabled
 // simple-log command removed
 
-async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: { restart?: boolean } = {}): Promise<void> {
+async function ensurePortAvailable(
+  port: number,
+  parentSpinner: Spinner,
+  opts: { restart?: boolean; targetPorts?: number[] } = {}
+): Promise<void> {
   return ensurePortAvailableImpl({
     port,
     parentSpinner,
@@ -388,6 +395,7 @@ async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: {
     logger,
     createSpinner,
     findListeningPids,
+    findListeningPortsByPid,
     killPidBestEffort,
     isServerHealthyQuick,
     exit: (code) => process.exit(code)
@@ -400,6 +408,14 @@ function findListeningPids(port: number): number[] {
     spawnSyncImpl: spawnSync,
     logger,
     processKill: process.kill.bind(process)
+  });
+}
+
+function findListeningPortsByPid(pid: number): number[] {
+  return findListeningPortsByPidImpl({
+    pid,
+    spawnSyncImpl: spawnSync,
+    logger
   });
 }
 

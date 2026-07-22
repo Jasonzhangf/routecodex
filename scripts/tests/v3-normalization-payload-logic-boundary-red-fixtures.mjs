@@ -29,6 +29,35 @@ const fixtures = [
     diagnostic: /Gemini content shape validation/,
   },
   {
+    name: 'Provider wire canonical guard must not ban client metadata',
+    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+    from: '    "metadata_center",',
+    to: '    "metadata",\n    "metadata_center",',
+    diagnostic: /V3 provider wire canonical control-key denylist: forbidden/,
+  },
+  {
+    name: 'Provider wire canonical guard includes request capability control facts',
+    file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+    from: '    "request_capabilities",\n    "requestCapabilities",',
+    to: '    "requestCapabilities",',
+    diagnostic: /V3 provider wire canonical control-key denylist: missing "request_capabilities"/,
+  },
+  {
+    name: 'Hub side-channel finder delegates to canonical provider-wire guard',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/side_channel.rs',
+    from: `pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str> {
+    find_v3_routecodex_control_payload_key(value)
+}`,
+    to: `pub(crate) fn find_v3_hub_side_channel_key(value: &Value) -> Option<&'static str> {
+    const FORBIDDEN: [&str; 1] = ["metadataCenter"];
+    match value {
+        Value::Object(object) if object.contains_key(FORBIDDEN[0]) => Some(FORBIDDEN[0]),
+        _ => None,
+    }
+}`,
+    diagnostic: /Hub side-channel finder/,
+  },
+  {
     name: 'ProviderReqCompat06 tool governance',
     file: 'docs/architecture/manifests/v3.protocol_normalization_tool_governance_boundary.mainline.yml',
     from: 'node_id: ProviderReqCompat06ProviderCompat\n    phase: request',
@@ -52,49 +81,49 @@ const fixtures = [
   },
   {
     name: 'ReqInbound tool governance',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
-    from: 'V3HubReqInbound02Normalized {\n        previous: input,',
-    to: 'let _tool_calls = "tool_calls";\n    V3HubReqInbound02Normalized {\n        previous: input,',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+    from: 'V3HubReqInbound02Normalized {\n            previous: input,',
+    to: 'let _tool_calls = "tool_calls";\n        V3HubReqInbound02Normalized {\n            previous: input,',
     diagnostic: /ReqInbound02 entry normalization/,
   },
   {
     name: 'RespInbound servertool hook',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
     from: 'let normalized_kind = match input.raw().transport_intent {',
     to: 'let _servertool_hook = "servertool hook";\n    let normalized_kind = match input.raw().transport_intent {',
     diagnostic: /RespInbound02 entry normalization/,
   },
   {
     name: 'ReqOutbound payload schema logic',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
     from: 'V3HubReqOutbound07ProviderSemantic {\n        previous: input,',
     to: 'let _schema = "schema";\n    V3HubReqOutbound07ProviderSemantic {\n        previous: input,',
     diagnostic: /ReqOutbound07 provider semantic projection/,
   },
   {
     name: 'Provider wire apply_patch logic',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs',
     from: 'V3ProviderReqOutbound08WirePayload { previous: input }',
     to: 'let _apply_patch = "apply_patch";\n    V3ProviderReqOutbound08WirePayload { previous: input }',
     diagnostic: /ProviderReqOutbound08 wire boundary/,
   },
   {
     name: 'RespOutbound required_action inference',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
     from: 'V3HubRespOutbound05ClientSemantic { previous: input }',
     to: 'let _required_action = "required_action";\n    V3HubRespOutbound05ClientSemantic { previous: input }',
     diagnostic: /RespOutbound05 client semantic projection/,
   },
   {
     name: 'Server frame stopless logic',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
     from: 'V3ServerRespOutbound06ClientFrame { previous: input }',
     to: 'let _stopless = "stopless";\n    V3ServerRespOutbound06ClientFrame { previous: input }',
     diagnostic: /ServerRespOutbound06 frame projection/,
   },
   {
     name: 'Relay normalize hook logic',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
     from: 'fn normalize_v3_hub_relay_response(\n    input: V3ProviderRespInbound01Raw,\n) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {',
     to: 'fn normalize_v3_hub_relay_response(\n    input: V3ProviderRespInbound01Raw,\n) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {\n    let _hook = "hook";',
     diagnostic: /Relay response normalize wrapper/,
@@ -127,6 +156,7 @@ for (const fixture of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-normalization-red-'));
   try {
     cpSync(resolve(repoRoot, 'v3/crates/routecodex-v3-runtime/src'), join(root, 'v3/crates/routecodex-v3-runtime/src'), { recursive: true });
+    cpSync(resolve(repoRoot, 'v3/crates/routecodex-v3-provider-responses/src'), join(root, 'v3/crates/routecodex-v3-provider-responses/src'), { recursive: true });
     cpSync(resolve(repoRoot, 'docs/architecture/manifests'), join(root, 'docs/architecture/manifests'), { recursive: true });
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');

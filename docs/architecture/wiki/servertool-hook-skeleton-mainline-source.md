@@ -86,13 +86,16 @@ invalid.
 Round 2 always starts with continuation restore:
 
 1. restore current request context/canonical truth;
-2. restore the Round 1 CLI execution result into model-visible stopless truth;
-3. pair it as internal `reasoningStop` call/result semantics, not raw
-   `exec_command` model history;
-4. rewrite the CLI result into model-visible guidance;
-5. write the Rust-produced stopless control signal into
-   `MetadataCenter.runtime_control.stopless` through the bound request-stage
-   MetadataCenter IO shell;
+2. consume the Round 1 CLI execution result only as black-box completion
+   evidence for the client bridge;
+3. remove the `exec_command` shell call/result pair from provider-visible
+   history instead of pairing it as model-visible `reasoningStop` output;
+4. read the Rust-produced StoplessCenter control signal from
+   `MetadataCenter.runtime_control.stopless`;
+5. emit a complete current-turn ordinary user guideline selected by the
+   StoplessCenter policy; it must be transparent to the model and must not
+   mention no-op, CLI, client bridge, `routecodex hook run reasoningStop`, or
+   `finish_reason=stop`;
 6. inject the same per-request stop contract and `reasoningStop` tool again for
    the new round.
 
@@ -113,13 +116,13 @@ The hook skeleton is a request/response processing surface, not a continuation o
 
 Hard rules:
 
-- Request-side and response-side tool rewriting are a paired boundary, not two independent rewrites. The response side projects the shell command before client execution; the request side restores the ordinary tool result back into model-visible built-in tool shape before the request is finalized. If either side moves across the continuation boundary, the next turn sees the wrong shape and the loop becomes misaligned.
+- Request-side and response-side tool rewriting are a paired boundary, not two independent rewrites. The response side projects the shell command before client execution; the request side consumes the ordinary tool result as bridge evidence, removes the shell pair, and emits transparent ordinary user guidance before the request is finalized. If either side moves across the continuation boundary, the next turn sees the wrong shape and the loop becomes misaligned.
 - For continuation-aware turns, the only legal order is: restore/materialize request truth -> run request-side hook restore/rewrite -> stopless/tool governance judgment -> persist canonical continuation truth when the response owner saves. Saving pre-hook truth and restoring post-hook truth, or the reverse, is invalid because request/response tool shapes no longer match.
 - The response-side pair is `ServertoolRespHook03HookResponseInjected -> client-visible exec_command`; the request-side pair is `client-visible exec_command -> ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized`.
 - The Responses continuation owner may only consume the finalized request shape after `ServertoolReqHook04RequestFinalized`; it must never be asked to reconcile a shell projection into a built-in tool result.
-- `ServertoolReqHook01ResultParsed` consumes only the tool result of the **current** request. It does not look up continuation store state, does not synthesize session identity, and must not call into `responses-conversation-store` / `responses_resume` to decide whether to restore anything. The "restore" verb here means "rewrite shell `exec_command` output into model-visible `reasoningStop -> function_call_output` for this turn", not "rehydrate prior continuation history".
+- `ServertoolReqHook01ResultParsed` consumes only the tool result of the **current** request. It does not look up continuation store state, does not synthesize session identity, and must not call into `responses-conversation-store` / `responses_resume` to decide whether to restore anything. The "restore" verb here means "after continuation restore, remove the shell `exec_command` evidence and let StoplessCenter produce transparent current-turn guidance", not "rehydrate prior continuation history" and not "emit model-visible `reasoningStop -> function_call_output` for the no-op".
 - Request-side stopless control is a MetadataCenter control signal, not request truth. Rust ReqChatProcess emits `metadata.runtime_control.stopless`; TS may only write that emitted control into the bound MetadataCenter and must not re-derive repeat count, schema feedback, or stopless state.
-- `ServertoolRespHook01Intercepted` / `ServertoolRespHook02SchemaValidated` / `ServertoolRespHook03HookResponseInjected` never read continuation store, never rewrite `previous_response_id`, and never emit `submit_tool_outputs` shells. Their client-visible shell is always `routecodex hook run <toolName> --input-json <json>`.
+- `ServertoolRespHook01Intercepted` / `ServertoolRespHook02SchemaValidated` / `ServertoolRespHook03HookResponseInjected` never read continuation store, never rewrite `previous_response_id`, and never emit `submit_tool_outputs` shells. Generic servertools may project `routecodex hook run <toolName> --input-json <json>` when their contract has inputs; V3 stopless `reasoningStop` is the no-input exception and projects exactly `routecodex hook run reasoningStop`.
 - Continuation `entryKind` / `continuationOwner` / `sessionId` / `conversationId` keys may be read by hooks only as the current request's metadata context, never as a restoration trigger.
 
 The architecture gate must keep this separation: any hook phase that begins to behave as a continuation owner is a regression and must fail the audit.

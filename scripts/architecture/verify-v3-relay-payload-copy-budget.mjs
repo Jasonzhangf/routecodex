@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 const root = process.cwd();
 const paths = {
   response: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+  responseCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
+  responseInbound02: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
+  responseContinuation04: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs',
   responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
@@ -24,6 +27,9 @@ const text = Object.fromEntries(
 );
 const runtime = [
   text.response,
+  text.responseCommon,
+  text.responseInbound02,
+  text.responseContinuation04,
   text.request,
   text.hooks,
   text.servertoolHooks,
@@ -34,6 +40,12 @@ const runtime = [
   text.geminiRelayRuntime,
 ].join('\n');
 const providerTransport = text.providerResponsesTransport;
+const responseContract = [
+  text.response,
+  text.responseCommon,
+  text.responseInbound02,
+  text.responseContinuation04,
+].join('\n');
 const failures = [];
 
 function fail(message) {
@@ -54,8 +66,8 @@ function countMatches(source, pattern) {
   return [...source.matchAll(pattern)].length;
 }
 
-requireAll(text.response, paths.response, [
-  'struct V3HubResponsePayload(Arc<Value>);',
+requireAll(responseContract, 'V3 split response node contract', [
+  'struct V3HubResponsePayload(pub(crate) Arc<Value>);',
   'Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())',
   'payload: Arc::clone(&finalized_payload),',
   'V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse',
@@ -218,8 +230,8 @@ forbid(
   'full request/context clone',
 );
 forbid(
-  text.response,
-  paths.response,
+  responseContract,
+  'V3 split response node contract',
   /(?:payload|canonical_context)\s*\.clone\s*\(\)/,
   'full response/context clone',
 );

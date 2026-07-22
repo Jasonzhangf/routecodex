@@ -314,6 +314,62 @@ impl ResponsesTransport for StaticSseTransport {
 }
 
 #[tokio::test]
+async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signature() {
+    use futures_util::StreamExt;
+    let transport = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![br#"data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"thought":true,"text":"hidden plan","thoughtSignature":"sig-1"},{"text":"visible"}]},"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":11}}
+
+"#
+        .to_vec()])),
+    };
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-sse-thought-chain".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents":[{"role":"user","parts":[{"text":"stream thought"}]}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert_eq!(
+        &output.node_trace[10..],
+        &[
+            "V3ProviderRespInbound01Raw",
+            "ProviderRespCompat02ProviderCompat",
+            "V3HubRespInbound02Normalized",
+            "V3HubRespChatProcess03Governed",
+            "V3HubRespContinuation04Committed",
+            "V3HubRespOutbound05ClientSemantic",
+            "V3ServerRespOutbound06ClientFrame"
+        ],
+        "native Gemini SSE must enter the same response chain as JSON before client projection"
+    );
+    let stream = match output.client_body {
+        V3GeminiRelayClientBody::Sse(stream) => stream,
+        V3GeminiRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    assert_eq!(events.len(), 1);
+    let event = String::from_utf8(events.into_iter().next().unwrap().unwrap()).unwrap();
+    let payload: Value = serde_json::from_str(event.trim_start_matches("data: ").trim()).unwrap();
+    let part = &payload["candidates"][0]["content"]["parts"][0];
+    assert_eq!(part["thought"], true);
+    assert_eq!(part["text"], "hidden plan");
+    assert_eq!(part["thoughtSignature"], "sig-1");
+    assert_eq!(
+        payload["candidates"][0]["content"]["parts"][1]["text"],
+        "visible"
+    );
+}
+
+#[tokio::test]
 async fn sse_runtime_emits_first_gemini_event_before_provider_terminal_without_materializing() {
     use futures_util::StreamExt;
     let (sender, receiver) = tokio::sync::mpsc::channel(2);
@@ -570,7 +626,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools", "streaming"]
+capabilities = ["text", "tools"]
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-wire", key = "controlled", priority = 1 }}]

@@ -297,7 +297,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools", "streaming"]
+capabilities = ["text", "tools"]
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-wire", key = "controlled", priority = 1 }}]

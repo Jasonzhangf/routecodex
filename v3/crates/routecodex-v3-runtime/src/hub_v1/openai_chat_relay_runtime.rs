@@ -198,12 +198,18 @@ pub async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
                 error_chain: None,
             })
         }
-        V3ProviderResponseBody::Sse(stream) => Ok(V3OpenAiChatRelayRuntimeOutput {
-            status: 200,
-            client_body: V3OpenAiChatRelayClientBody::Sse(project_sse_stream(stream)),
-            node_trace: trace,
-            error_chain: None,
-        }),
+        V3ProviderResponseBody::Sse(stream) => {
+            push_sse_response_chain_trace(&mut trace);
+            Ok(V3OpenAiChatRelayRuntimeOutput {
+                status: 200,
+                client_body: V3OpenAiChatRelayClientBody::Sse(project_sse_stream(
+                    stream,
+                    selected_target_compatibility_profile,
+                )),
+                node_trace: trace,
+                error_chain: None,
+            })
+        }
     }
 }
 
@@ -257,13 +263,15 @@ fn project_json_response(
     )?;
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
-        V3HubEntryProtocol::OpenAiChat,
-        V3HubProviderWireProtocol::OpenAiChat,
-        V3HubContinuationOwnership::New,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        transport_intent,
-        compatibility_profile,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::OpenAiChat,
+            V3HubProviderWireProtocol::OpenAiChat,
+            V3HubContinuationOwnership::New,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            transport_intent,
+        )
+        .with_compatibility_profile(compatibility_profile),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -289,10 +297,12 @@ struct V3OpenAiChatSseState {
     terminal: bool,
     seen_done: bool,
     done: bool,
+    compatibility_profile: Option<String>,
 }
 
 fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    compatibility_profile: Option<String>,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
@@ -304,6 +314,7 @@ fn project_sse_stream(
         terminal: false,
         seen_done: false,
         done: false,
+        compatibility_profile,
     };
     Box::pin(futures_util::stream::unfold(
         state,
@@ -373,18 +384,40 @@ fn enqueue_sse_client_chunks(
             continue;
         }
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
-        validate_v3_openai_chat_provider_response_payload(
-            &payload,
-            V3HubProviderWireProtocol::OpenAiChat,
-            V3HubTransportIntent::Sse,
-        )
-        .map_err(|error| error.to_string())?;
-        state.terminal = openai_chat_sse_payload_has_terminal_finish_reason(&payload)?;
+        let client_payload =
+            project_sse_event_payload(payload, state.compatibility_profile.as_deref())?;
+        state.terminal = openai_chat_sse_payload_has_terminal_finish_reason(&client_payload)?;
         state
             .pending
-            .push_back(Ok(format!("data: {payload}\n\n").into_bytes()));
+            .push_back(Ok(format!("data: {client_payload}\n\n").into_bytes()));
     }
     Ok(())
+}
+
+fn project_sse_event_payload(
+    payload: Value,
+    compatibility_profile: Option<&str>,
+) -> Result<Value, String> {
+    let mut trace = Vec::new();
+    project_json_response(
+        payload,
+        V3HubTransportIntent::Sse,
+        &mut trace,
+        compatibility_profile,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn push_sse_response_chain_trace(trace: &mut Vec<&'static str>) {
+    trace.extend([
+        "V3ProviderRespInbound01Raw",
+        "ProviderRespCompat02ProviderCompat",
+        "V3HubRespInbound02Normalized",
+        "V3HubRespChatProcess03Governed",
+        "V3HubRespContinuation04Committed",
+        "V3HubRespOutbound05ClientSemantic",
+        "V3ServerRespOutbound06ClientFrame",
+    ]);
 }
 
 fn openai_chat_sse_payload_has_terminal_finish_reason(payload: &Value) -> Result<bool, String> {

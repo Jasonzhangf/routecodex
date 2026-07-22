@@ -19,6 +19,7 @@ const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 const START_TAKEOVER_POLL: Duration = Duration::from_millis(150);
 const DEFAULT_START_GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_START_FORCE_KILL_TIMEOUT: Duration = Duration::from_secs(3);
+const RESTART_PLAN_FILE: &str = "restart.plan.json";
 
 #[derive(Debug, Error)]
 pub enum V3LifecycleError {
@@ -104,6 +105,8 @@ pub struct V3ManagedControlRecord {
 #[serde(rename_all = "snake_case")]
 enum ControlOperation {
     Status,
+    Restart,
+    ReleasePorts,
     Stop,
 }
 
@@ -114,6 +117,8 @@ struct ControlRequest {
     instance_id: String,
     start_nonce: String,
     operation: ControlOperation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ports: Option<Vec<u16>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,6 +129,25 @@ struct ControlResponse {
     accepted: bool,
     state: V3ManagedRunState,
     message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct V3ManagedRestartPlanRecord {
+    schema_version: u16,
+    instance_id: String,
+    start_nonce: String,
+    executable_path: String,
+    snapshots: bool,
+    snapshot_stages: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ControlRestartPlan {
+    declaration: V3ManagedInstanceDeclaration,
+    executable_path: PathBuf,
+    snapshots: bool,
+    snapshot_stages: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -279,7 +303,7 @@ impl V3ManagedLifecycle {
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "start")?;
-        release_listener_set_for_start(&instance_dir, &declaration).await?;
+        release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;
         reap_inactive_runtime_files(&instance_dir, &declaration)?;
         write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
         write_status(
@@ -348,7 +372,7 @@ impl V3ManagedLifecycle {
         ensure_private_dir(&instance_dir)?;
         {
             let _lock = acquire_operation_lock(&instance_dir, "start")?;
-            release_listener_set_for_start(&instance_dir, &declaration).await?;
+            release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;
             reap_inactive_runtime_files(&instance_dir, &declaration)?;
             write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
             write_status(
@@ -435,8 +459,43 @@ impl V3ManagedLifecycle {
         executable_path: impl AsRef<Path> + Clone,
         timeout: Duration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
-        self.stop(executable_path.clone(), timeout).await?;
-        self.start(executable_path, timeout).await
+        let (declaration, _) = self.declaration(executable_path.as_ref())?;
+        let instance_dir = self.instance_dir(&declaration.instance_id);
+        let _lock = acquire_operation_lock(&instance_dir, "restart")?;
+        let response = send_restart_control(
+            &instance_dir,
+            &declaration,
+            self.force_snapshots,
+            self.force_snapshot_stages.clone(),
+        )
+        .await?;
+        if !response.accepted {
+            return Err(V3LifecycleError::IdentityMismatch(response.message));
+        }
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Ok(status) = self.query_live(&declaration).await {
+                if status.state == V3ManagedRunState::Running {
+                    return Ok(status);
+                }
+            }
+            let status_path = instance_dir.join("status.json");
+            if status_path.exists() {
+                let status: V3ManagedStatusRecord = read_json(&status_path)?;
+                if status.state == V3ManagedRunState::Failed {
+                    return Err(V3LifecycleError::Validation(status.detail.unwrap_or_else(
+                        || "managed child failed during restart".to_string(),
+                    )));
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(V3LifecycleError::Timeout(format!(
+                    "restart {}",
+                    declaration.instance_id
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     pub async fn run_managed_child(
@@ -461,6 +520,7 @@ impl V3ManagedLifecycle {
         verify_published_declaration(&instance_dir, &declaration)?;
         let start_nonce = new_start_nonce(&declaration.instance_id);
         let socket_path = managed_control_socket_path(&declaration.instance_id);
+        remove_restart_plan_for_previous_control_identity(&instance_dir, &start_nonce)?;
         if socket_path.exists() {
             return Err(V3LifecycleError::IdentityMismatch(format!(
                 "control socket already exists without a verified stopped cleanup: {}",
@@ -533,12 +593,57 @@ impl V3ManagedLifecycle {
             let mut line = String::new();
             BufReader::new(&mut stream).read_line(&mut line).await?;
             let request: ControlRequest = serde_json::from_str(&line)?;
-            let valid = request.schema_version == SCHEMA_VERSION
+            let valid_identity = request.schema_version == SCHEMA_VERSION
                 && request.instance_id == declaration.instance_id
                 && request.start_nonce == start_nonce;
+            let restart_plan = if valid_identity {
+                match control_restart_plan(&instance_dir, &request, &declaration) {
+                    Ok(plan) => plan,
+                    Err(message) => {
+                        let response = ControlResponse {
+                            schema_version: SCHEMA_VERSION,
+                            instance_id: declaration.instance_id.clone(),
+                            accepted: false,
+                            state: V3ManagedRunState::Running,
+                            message,
+                        };
+                        stream.write_all(&serde_json::to_vec(&response)?).await?;
+                        stream.write_all(b"\n").await?;
+                        stream.flush().await?;
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+            let release_ports = if valid_identity {
+                match control_release_ports(&request, &declaration) {
+                    Ok(ports) => ports,
+                    Err(message) => {
+                        let response = ControlResponse {
+                            schema_version: SCHEMA_VERSION,
+                            instance_id: declaration.instance_id.clone(),
+                            accepted: false,
+                            state: V3ManagedRunState::Running,
+                            message,
+                        };
+                        stream.write_all(&serde_json::to_vec(&response)?).await?;
+                        stream.write_all(b"\n").await?;
+                        stream.flush().await?;
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+            let valid = valid_identity;
             let should_stop = valid && request.operation == ControlOperation::Stop;
+            let should_restart = valid && request.operation == ControlOperation::Restart;
+            let should_release_ports = valid && request.operation == ControlOperation::ReleasePorts;
             let state = if should_stop {
                 V3ManagedRunState::Stopping
+            } else if should_restart {
+                V3ManagedRunState::Starting
             } else {
                 V3ManagedRunState::Running
             };
@@ -567,6 +672,50 @@ impl V3ManagedLifecycle {
                     &declaration.instance_id,
                     &socket_path,
                     handle,
+                )
+                .await;
+            }
+            if should_release_ports {
+                let release_ports = release_ports.ok_or_else(|| {
+                    V3LifecycleError::Validation(
+                        "release-ports control request did not carry a port set".to_string(),
+                    )
+                })?;
+                let handle = handle.as_mut().ok_or_else(|| {
+                    V3LifecycleError::Validation(
+                        "managed runtime handle was already consumed".to_string(),
+                    )
+                })?;
+                let released = handle.shutdown_listener_ports(&release_ports).await;
+                let released_set: BTreeSet<u16> = released.into_iter().collect();
+                write_status(
+                    &instance_dir,
+                    &declaration.instance_id,
+                    V3ManagedRunState::Running,
+                    Some(format!(
+                        "released listener ports {}",
+                        format_u16_set(&released_set)
+                    )),
+                )?;
+                continue;
+            }
+            if should_restart {
+                let restart_plan = restart_plan.ok_or_else(|| {
+                    V3LifecycleError::Validation(
+                        "restart control request did not carry an executable plan".to_string(),
+                    )
+                })?;
+                let handle = handle.take().ok_or_else(|| {
+                    V3LifecycleError::Validation(
+                        "managed runtime handle was already consumed".to_string(),
+                    )
+                })?;
+                return restart_managed_runtime_in_place(
+                    &instance_dir,
+                    &socket_path,
+                    handle,
+                    restart_plan,
+                    self.force_console,
                 )
                 .await;
             }
@@ -612,14 +761,119 @@ async fn shutdown_managed_runtime(
     Ok(())
 }
 
+async fn restart_managed_runtime_in_place(
+    instance_dir: &Path,
+    socket_path: &Path,
+    handle: V3ServerAggregateHandle,
+    restart_plan: ControlRestartPlan,
+    console: bool,
+) -> Result<(), V3LifecycleError> {
+    let declaration = &restart_plan.declaration;
+    write_status(
+        instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Starting,
+        Some("exec restart accepted".to_string()),
+    )?;
+    let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
+    handle.shutdown().await;
+    write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
+    let _ = fs::remove_file(instance_dir.join("control.json"));
+    let _ = fs::remove_file(socket_path);
+    let mut command = Command::new(&restart_plan.executable_path);
+    command
+        .arg("server")
+        .arg("run-managed-child")
+        .arg("--config")
+        .arg(&declaration.config_path);
+    if restart_plan.snapshots {
+        command.arg("--snap");
+    }
+    if let Some(stages) = restart_plan.snapshot_stages.as_deref() {
+        command.arg("--snap-stages").arg(stages);
+    }
+    if console {
+        command.arg("--console");
+    }
+    let error = command.exec();
+    let _ = write_status(
+        instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Failed,
+        Some(format!("exec restart failed: {error}")),
+    );
+    Err(V3LifecycleError::Io(error))
+}
+
 async fn send_control(
     instance_dir: &Path,
     declaration: &V3ManagedInstanceDeclaration,
     operation: ControlOperation,
 ) -> Result<ControlResponse, V3LifecycleError> {
+    send_control_with_ports(instance_dir, declaration, operation, None).await
+}
+
+async fn send_release_ports_control(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+    ports: Vec<u16>,
+) -> Result<ControlResponse, V3LifecycleError> {
+    send_control_with_ports(
+        instance_dir,
+        declaration,
+        ControlOperation::ReleasePorts,
+        Some(ports),
+    )
+    .await
+}
+
+async fn send_control_with_ports(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+    operation: ControlOperation,
+    ports: Option<Vec<u16>>,
+) -> Result<ControlResponse, V3LifecycleError> {
     tokio::time::timeout(
         CONTROL_TIMEOUT,
-        send_control_without_timeout(instance_dir, declaration, operation),
+        send_control_without_timeout(instance_dir, declaration, operation, ports),
+    )
+    .await
+    .map_err(|_| {
+        V3LifecycleError::Timeout(format!("control challenge {}", declaration.instance_id))
+    })?
+}
+
+async fn send_restart_control(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+    snapshots: bool,
+    snapshot_stages: Option<String>,
+) -> Result<ControlResponse, V3LifecycleError> {
+    let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
+    let needs_restart_plan = published.executable_path != declaration.executable_path
+        || snapshots
+        || snapshot_stages
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty());
+    let control: V3ManagedControlRecord = read_json(&instance_dir.join("control.json"))?;
+    if needs_restart_plan {
+        write_json_atomic(
+            &instance_dir.join(RESTART_PLAN_FILE),
+            &V3ManagedRestartPlanRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: declaration.instance_id.clone(),
+                start_nonce: control.start_nonce.clone(),
+                executable_path: declaration.executable_path.clone(),
+                snapshots,
+                snapshot_stages,
+            },
+        )?;
+    } else {
+        let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
+    }
+    tokio::time::timeout(
+        CONTROL_TIMEOUT,
+        send_control_without_timeout(instance_dir, declaration, ControlOperation::Restart, None),
     )
     .await
     .map_err(|_| {
@@ -631,6 +885,7 @@ async fn send_control_without_timeout(
     instance_dir: &Path,
     declaration: &V3ManagedInstanceDeclaration,
     operation: ControlOperation,
+    ports: Option<Vec<u16>>,
 ) -> Result<ControlResponse, V3LifecycleError> {
     if !instance_dir.join("pid.cache").exists() || !instance_dir.join("control.json").exists() {
         return Err(V3LifecycleError::NotRunning(
@@ -655,6 +910,7 @@ async fn send_control_without_timeout(
         instance_id: declaration.instance_id.clone(),
         start_nonce: control.start_nonce,
         operation,
+        ports,
     };
     stream.write_all(&serde_json::to_vec(&request)?).await?;
     stream.write_all(b"\n").await?;
@@ -662,6 +918,104 @@ async fn send_control_without_timeout(
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).await?;
     Ok(serde_json::from_str(&line)?)
+}
+
+fn control_restart_plan(
+    instance_dir: &Path,
+    request: &ControlRequest,
+    current: &V3ManagedInstanceDeclaration,
+) -> Result<Option<ControlRestartPlan>, String> {
+    if request.operation != ControlOperation::Restart {
+        return Ok(None);
+    }
+    let plan_path = instance_dir.join(RESTART_PLAN_FILE);
+    let record = if plan_path.exists() {
+        let record: V3ManagedRestartPlanRecord = read_json(&plan_path)
+            .map_err(|error| format!("restart plan record is unreadable: {error}"))?;
+        if record.schema_version != SCHEMA_VERSION
+            || record.instance_id != request.instance_id
+            || record.start_nonce != request.start_nonce
+        {
+            return Err("restart plan record does not match current control identity".to_string());
+        }
+        Some(record)
+    } else {
+        None
+    };
+    let executable_path = record
+        .as_ref()
+        .map(|record| record.executable_path.as_str())
+        .unwrap_or(current.executable_path.as_str());
+    let executable_path = fs::canonicalize(executable_path).map_err(|error| {
+        format!("restart executable path is not a readable executable: {error}")
+    })?;
+    let mut declaration = current.clone();
+    declaration.executable_path = executable_path.display().to_string();
+    if !same_instance_declaration_except_executable_path(current, &declaration) {
+        return Err(
+            "restart executable request changed fields outside executable provenance".to_string(),
+        );
+    }
+    let snapshot_stages = record
+        .as_ref()
+        .and_then(|record| record.snapshot_stages.as_ref())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let snapshots = record.as_ref().is_some_and(|record| record.snapshots);
+    Ok(Some(ControlRestartPlan {
+        declaration,
+        executable_path,
+        snapshots: snapshots || snapshot_stages.is_some(),
+        snapshot_stages,
+    }))
+}
+
+fn control_release_ports(
+    request: &ControlRequest,
+    current: &V3ManagedInstanceDeclaration,
+) -> Result<Option<BTreeSet<u16>>, String> {
+    if request.operation != ControlOperation::ReleasePorts {
+        return Ok(None);
+    }
+    let ports = request
+        .ports
+        .as_ref()
+        .ok_or_else(|| "release-ports control request is missing ports".to_string())?;
+    if ports.is_empty() {
+        return Err("release-ports control request has an empty port set".to_string());
+    }
+    let declared_ports = current
+        .listeners
+        .iter()
+        .map(|listener| listener.port)
+        .collect::<BTreeSet<_>>();
+    let release_ports = ports.iter().copied().collect::<BTreeSet<_>>();
+    let unknown_ports = release_ports
+        .difference(&declared_ports)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if !unknown_ports.is_empty() {
+        return Err(format!(
+            "release-ports control request referenced undeclared listener ports {}",
+            format_u16_set(&unknown_ports)
+        ));
+    }
+    Ok(Some(release_ports))
+}
+
+fn remove_restart_plan_for_previous_control_identity(
+    instance_dir: &Path,
+    start_nonce: &str,
+) -> Result<(), V3LifecycleError> {
+    let path = instance_dir.join(RESTART_PLAN_FILE);
+    if !path.exists() {
+        return Ok(());
+    }
+    let record: V3ManagedRestartPlanRecord = read_json(&path)?;
+    if record.start_nonce != start_nonce {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> Result<(), V3LifecycleError> {
@@ -802,6 +1156,7 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, V3Lifecycle
 }
 
 async fn release_listener_set_for_start(
+    state_root: &Path,
     instance_dir: &Path,
     declaration: &V3ManagedInstanceDeclaration,
 ) -> Result<(), V3LifecycleError> {
@@ -831,19 +1186,35 @@ async fn release_listener_set_for_start(
         return Ok(());
     }
 
-    let terminate_pids = explicit_listener_pids(&declaration.listeners)?;
+    release_foreign_managed_listener_ports_for_start(
+        state_root,
+        &declaration.instance_id,
+        &declaration.listeners,
+        graceful_timeout,
+    )
+    .await?;
+    if wait_for_listener_set_available(&declaration.listeners, graceful_timeout).await {
+        return Ok(());
+    }
+
+    let occupied_ports = occupied_listener_ports(&declaration.listeners);
+    let terminate_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
+    guard_explicit_listener_pids_are_scoped_to_target_ports(&terminate_pids, &occupied_ports)?;
     signal_explicit_listener_pids(&terminate_pids, V3LifecycleSignal::Terminate)?;
     if wait_for_listener_set_available(&declaration.listeners, graceful_timeout).await {
         return Ok(());
     }
 
-    let kill_pids = explicit_listener_pids(&declaration.listeners)?;
+    let occupied_ports = occupied_listener_ports(&declaration.listeners);
+    let kill_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
+    guard_explicit_listener_pids_are_scoped_to_target_ports(&kill_pids, &occupied_ports)?;
     signal_explicit_listener_pids(&kill_pids, V3LifecycleSignal::Kill)?;
     if wait_for_listener_set_available(&declaration.listeners, force_timeout).await {
         return Ok(());
     }
 
-    let remaining = explicit_listener_pids(&declaration.listeners)?;
+    let occupied_ports = occupied_listener_ports(&declaration.listeners);
+    let remaining = explicit_listener_pids_for_ports(&occupied_ports)?;
     Err(V3LifecycleError::Timeout(format!(
         "free managed listener set for start {} remaining_pids={}",
         declaration.instance_id,
@@ -851,10 +1222,71 @@ async fn release_listener_set_for_start(
     )))
 }
 
+async fn release_foreign_managed_listener_ports_for_start(
+    state_root: &Path,
+    current_instance_id: &str,
+    listeners: &[V3ManagedListenerDeclaration],
+    timeout: Duration,
+) -> Result<(), V3LifecycleError> {
+    let target_ports = occupied_listener_ports(listeners);
+    if target_ports.is_empty() {
+        return Ok(());
+    }
+    let instances_root = state_root.join("instances");
+    if !instances_root.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&instances_root)? {
+        let path = entry?.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let declaration_path = path.join("instance.json");
+        if !declaration_path.exists() {
+            continue;
+        }
+        let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
+            continue;
+        };
+        if published.instance_id == current_instance_id {
+            continue;
+        }
+        let release_ports = published
+            .listeners
+            .iter()
+            .map(|listener| listener.port)
+            .filter(|port| target_ports.contains(port))
+            .collect::<BTreeSet<_>>();
+        if release_ports.is_empty() {
+            continue;
+        }
+        let response = send_release_ports_control(
+            &path,
+            &published,
+            release_ports.iter().copied().collect::<Vec<_>>(),
+        )
+        .await;
+        if response.as_ref().is_ok_and(|response| response.accepted)
+            && wait_for_listener_set_available(listeners, timeout).await
+        {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
 fn listener_set_is_available(listeners: &[V3ManagedListenerDeclaration]) -> bool {
     listeners
         .iter()
         .all(|listener| listener_address_is_available(&listener.bind, listener.port))
+}
+
+fn occupied_listener_ports(listeners: &[V3ManagedListenerDeclaration]) -> BTreeSet<u16> {
+    listeners
+        .iter()
+        .filter(|listener| !listener_address_is_available(&listener.bind, listener.port))
+        .map(|listener| listener.port)
+        .collect()
 }
 
 async fn wait_for_listener_set_available(
@@ -873,12 +1305,10 @@ async fn wait_for_listener_set_available(
     }
 }
 
-fn explicit_listener_pids(
-    listeners: &[V3ManagedListenerDeclaration],
-) -> Result<Vec<u32>, V3LifecycleError> {
+fn explicit_listener_pids_for_ports(ports: &BTreeSet<u16>) -> Result<Vec<u32>, V3LifecycleError> {
     let mut pids = BTreeSet::new();
-    for listener in listeners {
-        for pid in listening_pids_for_port(listener.port)? {
+    for port in ports {
+        for pid in listening_pids_for_port(*port)? {
             if pid != std::process::id() {
                 pids.insert(pid);
             }
@@ -922,6 +1352,65 @@ fn listening_pids_for_port(port: u16) -> Result<Vec<u32>, V3LifecycleError> {
         }
     }
     Ok(pids)
+}
+
+fn guard_explicit_listener_pids_are_scoped_to_target_ports(
+    pids: &[u32],
+    target_ports: &BTreeSet<u16>,
+) -> Result<(), V3LifecycleError> {
+    for pid in pids {
+        let listening_ports = listening_ports_for_pid(*pid)?;
+        let extra_ports = listening_ports
+            .difference(target_ports)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if !extra_ports.is_empty() {
+            return Err(V3LifecycleError::Validation(format!(
+                "refusing to signal listener PID {pid} because it also owns non-target listener ports {}; target_ports={}",
+                format_u16_set(&extra_ports),
+                format_u16_set(target_ports)
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn listening_ports_for_pid(pid: u32) -> Result<BTreeSet<u16>, V3LifecycleError> {
+    let pid_arg = pid.to_string();
+    let output = Command::new("lsof")
+        .args(["-nP", "-a", "-p", &pid_arg, "-iTCP", "-sTCP:LISTEN", "-Fn"])
+        .output()
+        .map_err(|error| {
+            V3LifecycleError::Validation(format!(
+                "failed to discover listener ports for PID {pid}: {error}"
+            ))
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() && stdout.trim().is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    if !output.status.success() {
+        return Err(V3LifecycleError::Validation(format!(
+            "failed to discover listener ports for PID {pid}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let mut ports = BTreeSet::new();
+    for line in stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('n'))
+    {
+        let Some(port) = line
+            .rsplit(':')
+            .next()
+            .and_then(|candidate| candidate.parse::<u16>().ok())
+        else {
+            continue;
+        };
+        ports.insert(port);
+    }
+    Ok(ports)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -976,6 +1465,17 @@ fn format_pid_list(pids: &[u32]) -> String {
     }
     pids.iter()
         .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_u16_set(values: &BTreeSet<u16>) -> String {
+    if values.is_empty() {
+        return "none".to_string();
+    }
+    values
+        .iter()
+        .map(u16::to_string)
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -1267,6 +1767,60 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         let rendered = serde_json::to_string(&declaration).unwrap();
         assert!(!rendered.contains("controlled-secret-value"));
         assert!(!rendered.contains("V3_LIFECYCLE_TEST_KEY"));
+    }
+
+    #[test]
+    fn restart_control_operation_is_explicit_protocol() {
+        let request = ControlRequest {
+            schema_version: SCHEMA_VERSION,
+            instance_id: "v3-test".to_string(),
+            start_nonce: "nonce".to_string(),
+            operation: ControlOperation::Restart,
+            ports: None,
+        };
+        let plan = V3ManagedRestartPlanRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: "v3-test".to_string(),
+            start_nonce: "nonce".to_string(),
+            executable_path: "/tmp/rccv3-next".to_string(),
+            snapshots: true,
+            snapshot_stages: Some("provider-request".to_string()),
+        };
+
+        let rendered = serde_json::to_string(&request).unwrap();
+        let rendered_plan = serde_json::to_string(&plan).unwrap();
+
+        assert!(rendered.contains("\"operation\":\"restart\""));
+        assert!(!rendered.contains("/tmp/rccv3-next"));
+        assert!(rendered_plan.contains("\"executable_path\":\"/tmp/rccv3-next\""));
+        assert!(rendered_plan.contains("\"snapshots\":true"));
+        assert!(rendered_plan.contains("\"snapshot_stages\":\"provider-request\""));
+    }
+
+    #[test]
+    fn managed_child_reentry_removes_restart_plan_from_previous_control_identity() {
+        let root = TempDir::new().unwrap();
+        let instance_dir = root.path().join("instance");
+        ensure_private_dir(&instance_dir).unwrap();
+        write_json_atomic(
+            &instance_dir.join(RESTART_PLAN_FILE),
+            &V3ManagedRestartPlanRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: "v3-test".to_string(),
+                start_nonce: "previous-nonce".to_string(),
+                executable_path: "/tmp/rccv3-next".to_string(),
+                snapshots: true,
+                snapshot_stages: None,
+            },
+        )
+        .unwrap();
+
+        remove_restart_plan_for_previous_control_identity(&instance_dir, "fresh-nonce").unwrap();
+
+        assert!(
+            !instance_dir.join(RESTART_PLAN_FILE).exists(),
+            "a successfully re-entered managed child must not retain the consumed restart plan"
+        );
     }
 
     #[test]

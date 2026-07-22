@@ -82,6 +82,14 @@
 - ChatProcess 必须消费 codec 产出的 Hub JSON semantic；stopless/servertool 不得在 raw SSE/handler/outbound 上执行，也不得绕过 `run_json_response_hooks`。
 - Gate 必须同时锁顺序和反向：正向断言相邻函数顺序，反向红测删除 `run_json_response_hooks`、复活 raw `project_sse_stream`、或跳过中间节点会失败。
 
+5.6 V3 Hub v1 node-per-file owner lookup
+- 触发：调试/修复 `v3/crates/routecodex-v3-runtime/src/hub_v1.rs` 或 `hub_v1/*.rs`、V3 Hub mainline map、node topology gate。
+- 规则：`hub_v1.rs` 是 root aggregator，只能 `mod` / `pub use` / `#[cfg(test)] mod tests`；不得写 node struct、builder/parser、跨节点语义转换或资源 mutation。
+- Owner lookup：先查 `docs/architecture/v3-function-map.yml` 的 `node_owner_files`，再查 `docs/architecture/v3-mainline-call-map.yml` 的真实 `caller_file` / `callee_file`，最后打开 split node file 验证 symbol 定义。不能把 root re-export 当 owner 证据。
+- Shared helper 边界：`common.rs`、`side_channel.rs`、`provider_compat_shared.rs`、`responses_openai_codec.rs`、`request_outbound_format.rs` 只能放多节点复用 helper；发现 node-local builder/parser 或非相邻转换进入 helper，先判 topology 合同红。
+- Provider compat：`ProviderReqCompat06ProviderCompat` / `ProviderRespCompat02ProviderCompat` 使用 branch-local contract number，保留当前编号；不得因全局单调编号偏好改名或插 shortcut。
+- 验证：改 Hub v1 node/source map 后必须跑 `npm run verify:v3-hub-v1-node-file-topology` 和 `npm run test:v3-hub-v1-node-file-topology-red-fixtures`；红 fixture 应 mutate 实际 split owner file，不再指向 root aggregator。
+
 6. 每轮只收一个 blocker
 - focused 白盒/黑盒绿了，只能说明这一层过了。
 - 必须立即回整链 gate，暴露下一个真实 blocker。
@@ -149,6 +157,8 @@ Blackbox observable:
 
 ## 当前 stopless 的标准分析法
 
+V3 stopless 先读 `references/95-v3-stopless-sop.md`；该 SOP 优先于本节中的历史 V2 术语。V3 的 `reasoningStop` CLI 是 no-input no-op，状态机真源是 `MetadataCenter.runtime_control.stopless` / StoplessCenter。
+
 先按轮次切，不先按文件切：
 
 ```text
@@ -165,8 +175,9 @@ Round 1 Response
 
 Round 2 Request
   restore continuation first
-  current resume output -> private repeat state
-  CLI call/result -> one ordinary user prompt
+  MetadataCenter StoplessCenter -> private control state
+  current no-op CLI call/result -> completion evidence only
+  state-machine policy -> one ordinary user prompt
   重新注入 system schema
 
 Round 3 Guard
@@ -184,12 +195,12 @@ Round 3 Guard
 6. Schema harvest / parse / malformed classification
 7. Normalize to terminal vs CLI, including `simple_question=true` natural stop
 8. Missing request-truth `sessionId` -> no interception, no stopless state write, diagnostic alarm
-9. Same-session consecutive schema-error counter reset on non-stop/progress/session-change/terminal
+9. Same-session StoplessCenter state reset on non-stop/progress/session-change/terminal
 10. Save canonical continuation after normalize
 11. Restore continuation before request-side hook restore
-12. CLI stdout/current resume -> private repeat state
-13. CLI call/result pair -> ordinary user prompt, no tool-pair restore
-14. `no_schema=3` loop guard
+12. CLI stdout/args never restore state; current no-op output only proves the client tool round completed
+13. CLI call/result pair -> state-machine-selected ordinary user prompt, no tool-pair restore
+14. `no_schema` / `invalid_schema` loop guard closes through StoplessCenter
 
 ### stopless 两端黑盒最小集
 
@@ -205,8 +216,8 @@ Round 3 Guard
 - missing request-truth `sessionId` -> natural stop plus diagnostic alarm, no CLI
 - no schema / invalid / malformed / harvest miss -> `exec_command`
 - 不泄漏 raw `reasoningStop`
-- non-stop/tool progress -> preserve normal tool response and reset stopless repeatCount
-- different `sessionId` -> starts fresh, does not inherit previous repeatCount
+- non-stop/tool progress -> preserve normal tool response and reset StoplessCenter state
+- different `sessionId` -> starts fresh, does not inherit previous StoplessCenter state
 
 3. Provider-facing round 2
 - request 带回修复 guidance
@@ -225,14 +236,14 @@ Round 3 Guard
 ### no schema
 - deny stop
 - project CLI
-- next request 使用确定 no-schema 修复 prompt，说明缺少 stop schema/stopreason，不能退成 `继续。`
+- next request 使用 StoplessCenter 状态机选择确定 no-schema 修复 prompt，说明缺少 stop schema/stopreason，不能把所有状态都退成同一个 `继续。`
 - system instruction 持续提供完整 schema
 
 ### bad schema
 - deny stop
 - project CLI
-- CLI 可返回私有 `schemaFeedback{reasonCode,missingFields}`
-- next request 对 provider 使用字段级修复 prompt；合法 `stopreason=2 + current_goal + next_step` 则原文使用 `next_step`
+- CLI 不返回私有 `schemaFeedback{reasonCode,missingFields}`；这些控制结论只能由 Resp03 写入 MetadataCenter。
+- next request 对 provider 使用状态机选择的字段级修复/继续 prompt；合法 need_continue 只能作为 StoplessCenter 转移，不能通过 CLI stdout/args 传递。
 
 ### harvest miss / parse miss
 - 不允许直接放过

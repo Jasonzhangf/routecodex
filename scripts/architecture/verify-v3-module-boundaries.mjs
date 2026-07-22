@@ -64,7 +64,7 @@ for (const path of all) {
     fail('HTTP listener outside server crate: ' + path);
   }
   if (!isTest && !path.includes('routecodex-v3-config') && !isProviderOwner
-      && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(text)) {
+      && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(productionText)) {
     fail('config authoring file IO outside config crate: ' + path);
   }
   if (!path.includes('routecodex-v3-runtime') && /pub async fn execute_v3_responses_direct_runtime_kernel/.test(text)) {
@@ -110,7 +110,9 @@ if (/serde_json::from_slice|default_tier|providers\.get/.test(hookSource)) {
   fail('hook module contains shared route/response logic instead of orchestration');
 }
 
-const serverSource = files('v3/crates/routecodex-v3-server/src').map(read).join('\n');
+const serverSource = files('v3/crates/routecodex-v3-server/src')
+  .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
+  .join('\n');
 if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {
   fail('Server must project Runtime output and cannot build or classify Error nodes');
 }

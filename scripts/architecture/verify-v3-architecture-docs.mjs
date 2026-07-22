@@ -424,6 +424,8 @@ for (const featureId of ['v3.hub_pipeline_static_skeleton', 'v3.responses_direct
 const h1Feature = array(verificationMap.features)
   .find((entry) => entry.feature_id === 'v3.hub_pipeline_static_skeleton');
 for (const gate of [
+  'npm run verify:v3-hub-v1-node-file-topology',
+  'npm run test:v3-hub-v1-node-file-topology-red-fixtures',
   'npm run verify:v3-p6-freeze',
   'npm run test:v3-p6-freeze-red-fixtures',
   'npm run verify:v3-static-hook-registry',

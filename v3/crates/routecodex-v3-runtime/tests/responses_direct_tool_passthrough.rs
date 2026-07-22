@@ -73,7 +73,7 @@ auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
 responses = { process = "chat", streaming = "always", transport = "http" }
 [providers.p.models.m]
 wire_name = "wire-m"
-capabilities = ["text", "tools", "streaming"]
+capabilities = ["text", "tools", "reasoning"]
 supports_streaming = true
 [route_groups.g.pools.default]
 selection = { strategy = "priority" }

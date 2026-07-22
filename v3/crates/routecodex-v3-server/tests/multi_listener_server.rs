@@ -238,7 +238,7 @@ responses = {{ process = "chat", streaming = "always" }}
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "vision"]
 supports_streaming = true
 supports_thinking = true
 thinking = "optional"
@@ -1073,7 +1073,7 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["canonical_model_id"], "test");
     assert_eq!(model["wire_model"], "wire-test");
     assert_eq!(model["provider_id"], "test");
-    assert_eq!(model["capabilities"], json!(["text", "tools"]));
+    assert_eq!(model["capabilities"], json!(["text", "tools", "vision"]));
     assert_eq!(model["supports_streaming"], true);
     assert_eq!(model["supports_thinking"], true);
     assert_eq!(model["thinking"], "optional");
@@ -1083,8 +1083,8 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["supports_reasoning_summaries"], true);
     assert_eq!(model["supports_parallel_tool_calls"], true);
     assert_eq!(model["supports_search_tool"], false);
-    assert_eq!(model["input_modalities"], json!(["text"]));
-    assert_eq!(model["supports_image_detail_original"], false);
+    assert_eq!(model["input_modalities"], json!(["text", "image"]));
+    assert_eq!(model["supports_image_detail_original"], true);
     assert_eq!(model["experimental_supported_tools"], json!([]));
     assert_eq!(model["context_window"], 128000);
     assert_eq!(model["max_context_window"], 128000);
@@ -1232,21 +1232,29 @@ async fn responses_relay_local_continuation_uses_body_client_metadata_without_in
     let second_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
     assert_eq!(second_capture.body["model"], "wire-test");
-    assert_eq!(
-        second_capture.body["input"],
-        json!([
-            {
+    let second_input = second_capture.body["input"]
+        .as_array()
+        .expect("second provider input must remain Responses input array");
+    assert!(
+        second_input.iter().any(|item| item
+            == &json!({
                 "type":"function_call",
                 "call_id":"call_body_metadata",
                 "name":"lookup_weather",
                 "arguments":"{\"city\":\"Paris\"}"
-            },
-            {
+            })),
+        "{:?}",
+        second_capture.body
+    );
+    assert!(
+        second_input.iter().any(|item| item
+            == &json!({
                 "type":"function_call_output",
                 "call_id":"call_body_metadata",
                 "output":"weather=clear RCCV3_BODY_METADATA_TURN2_OK"
-            }
-        ])
+            })),
+        "{:?}",
+        second_capture.body
     );
     for body in [&first_capture.body, &second_capture.body] {
         assert_eq!(
@@ -1525,7 +1533,14 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 
     let first_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
-    assert_eq!(first_capture.body["input"], "relay json");
+    assert_eq!(
+        first_capture.body["input"],
+        json!([{
+            "type":"message",
+            "role":"user",
+            "content":[{"type":"input_text","text":"relay json"}]
+        }])
+    );
 
     let sse_response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -2818,7 +2833,11 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
     assert_eq!(
         body["providerRequest"]["body"]["input"],
-        "relay dry-run no upstream send"
+        json!([{
+            "type":"message",
+            "role":"user",
+            "content":[{"type":"input_text","text":"relay dry-run no upstream send"}]
+        }])
     );
     assert!(
         !provider_hit,
@@ -3199,11 +3218,16 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
         .json()
         .await
         .unwrap();
-    assert!(
-        !serde_json::to_string(&logs)
-            .unwrap()
-            .contains("V3Server03HttpRequestRaw"),
-        "invalid HTTP input must not enter Runtime"
-    );
+    let serialized_logs = serde_json::to_string(&logs).unwrap();
+    for runtime_node in [
+        "V3HubReqInbound01ClientRaw",
+        "V3HubReqExecution05Planned",
+        "V3ResponsesDirect11Policy",
+    ] {
+        assert!(
+            !serialized_logs.contains(runtime_node),
+            "invalid HTTP input must not enter Runtime node {runtime_node}"
+        );
+    }
     handle.shutdown().await;
 }

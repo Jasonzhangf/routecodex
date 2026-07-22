@@ -3,7 +3,8 @@ use routecodex_v3_runtime::{
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
     characterize_v3_anthropic_hub_semantic_to_provider_wire,
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
-    encode_v3_responses_semantic_as_anthropic_request, V3AnthropicCodecError,
+    encode_v3_responses_semantic_as_anthropic_request,
+    project_v3_anthropic_message_as_responses_response, V3AnthropicCodecError,
     V3AnthropicCodecStage, V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use serde_json::json;
@@ -441,6 +442,39 @@ fn response_characterization_preserves_anthropic_json_tool_use_reasoning_and_cli
         client.trace().stage,
         V3AnthropicCodecStage::HubResponseSemanticToClientProjection
     );
+}
+
+#[test]
+fn response_characterization_preserves_anthropic_redacted_reasoning_as_encrypted_content() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_redacted_reasoning",
+        "type":"message",
+        "role":"assistant",
+        "content":[
+            {"type":"redacted_thinking","data":"redacted-sig-1"},
+            {"type":"thinking","thinking":"visible thought","signature":"thinking-sig-1"},
+            {"type":"text","text":"visible answer"}
+        ],
+        "stop_reason":"end_turn"
+    }))
+    .expect(
+        "Anthropic redacted/thinking signatures must project to replay-safe Responses reasoning",
+    );
+
+    assert_eq!(response["output"][0]["type"], "reasoning");
+    assert_eq!(response["output"][0]["encrypted_content"], "redacted-sig-1");
+    assert!(response["output"][0].get("summary").is_none());
+    assert_eq!(response["output"][1]["type"], "reasoning");
+    assert_eq!(
+        response["output"][1]["summary"][0]["text"],
+        "visible thought"
+    );
+    assert_eq!(response["output"][1]["encrypted_content"], "thinking-sig-1");
+    assert_eq!(
+        response["output"][2]["content"][0]["text"],
+        "visible answer"
+    );
+    assert!(!response.to_string().contains("redacted_thinking"));
 }
 
 #[test]

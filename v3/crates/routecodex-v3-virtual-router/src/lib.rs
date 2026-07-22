@@ -36,6 +36,7 @@ pub struct V3Router05RequestClassified {
 pub struct V3Router06RoutePoolResolved {
     server_id: String,
     routing_group_id: String,
+    facts: V3RouterRequestFacts,
     tiers: Vec<V3Router06SelectionPlanTier>,
 }
 
@@ -69,6 +70,7 @@ pub struct V3Router07OpaqueTargetHitOnce {
     pub target_kind: V3RouteTargetKind,
     pub target_id: Option<String>,
     pub target_plan: Vec<V3Router07OpaqueTargetPlanEntry>,
+    pub request_capabilities: BTreeSet<String>,
     pub hit_count: u8,
 }
 
@@ -228,6 +230,7 @@ impl V3VirtualRouter {
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
             routing_group_id: classified.routing_group_id,
+            facts: classified.facts,
             tiers,
         })
     }
@@ -279,6 +282,7 @@ impl V3VirtualRouter {
             target_kind: first.target_kind.clone(),
             target_id: first.target_id.clone(),
             target_plan,
+            request_capabilities: plan.facts.capabilities,
             hit_count: 1,
         })
     }

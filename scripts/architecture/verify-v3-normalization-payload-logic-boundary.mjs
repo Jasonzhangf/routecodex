@@ -1,16 +1,28 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 const root = process.cwd();
 const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
+const hubSplitDir = 'v3/crates/routecodex-v3-runtime/src/hub_v1';
+const providerWirePath = 'v3/crates/routecodex-v3-provider-responses/src/wire.rs';
 const relayRequestPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs';
 const responsesRelayRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
 const anthropicRelayHooksPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const openaiChatCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs';
 const geminiCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs';
 const protocolBoundaryManifestPath = 'docs/architecture/manifests/v3.protocol_normalization_tool_governance_boundary.mainline.yml';
-const hub = readFileSync(resolve(root, hubPath), 'utf8');
+function readHubSourceSurface() {
+  const rootSource = readFileSync(resolve(root, hubPath), 'utf8');
+  const splitSources = readdirSync(resolve(root, hubSplitDir))
+    .filter((entry) => entry.endsWith('.rs'))
+    .sort()
+    .map((entry) => readFileSync(resolve(root, join(hubSplitDir, entry)), 'utf8'))
+    .join('\n');
+  return `${rootSource}\n${splitSources}`;
+}
+const hub = readHubSourceSurface();
+const providerWire = readFileSync(resolve(root, providerWirePath), 'utf8');
 const relayRequest = readFileSync(resolve(root, relayRequestPath), 'utf8');
 const responsesRelayRuntime = readFileSync(resolve(root, responsesRelayRuntimePath), 'utf8');
 const anthropicRelayHooks = readFileSync(resolve(root, anthropicRelayHooksPath), 'utf8');
@@ -35,6 +47,16 @@ function functionBody(source, marker, label = marker) {
     if (depth === 0) return source.slice(start, index + 1);
   }
   fail(`unterminated boundary function ${label}`);
+}
+
+function constBlock(source, marker, label = marker) {
+  const start = source.indexOf(marker);
+  if (start < 0) fail(`missing boundary const ${label}`);
+  const open = source.indexOf('=', start);
+  if (open < 0) fail(`missing initializer for ${label}`);
+  const end = source.indexOf(';', open);
+  if (end < 0) fail(`unterminated const ${label}`);
+  return source.slice(start, end + 1);
 }
 
 function requireAll(text, owner, phrases) {
@@ -150,6 +172,59 @@ for (const boundary of boundaries) {
   requireAll(boundary.text, boundary.owner, boundary.required);
   forbidAll(boundary.text, boundary.owner, forbiddenLogic);
 }
+
+const canonicalControlKeyConst = constBlock(
+  providerWire,
+  'pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS',
+  'V3 provider wire canonical control-key denylist',
+);
+const canonicalControlKeyFinder = functionBody(
+  providerWire,
+  'pub fn find_v3_routecodex_control_payload_key',
+  'V3 provider wire canonical control-key finder',
+);
+const hubSideChannelFinder = functionBody(
+  hub,
+  'pub(crate) fn find_v3_hub_side_channel_key',
+  'Hub side-channel finder',
+);
+requireAll(canonicalControlKeyConst, 'V3 provider wire canonical control-key denylist', [
+  '"metadata_center"',
+  '"metadataCenter"',
+  '"route_hint"',
+  '"routeHint"',
+  '"request_capabilities"',
+  '"requestCapabilities"',
+  '"required_capabilities"',
+  '"requiredCapabilities"',
+  '"model_capabilities"',
+  '"modelCapabilities"',
+  '"selection_plan"',
+  '"selectionPlan"',
+  '"opaque_target"',
+  '"opaqueTarget"',
+  '"runtime_control"',
+  '"runtimeControl"',
+  '"stopless_center"',
+  '"stoplessCenter"',
+]);
+forbidAll(canonicalControlKeyConst, 'V3 provider wire canonical control-key denylist', [
+  /"metadata"/,
+  /"client_metadata"/,
+]);
+requireAll(canonicalControlKeyFinder, 'V3 provider wire canonical control-key finder', [
+  'V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS',
+  'Value::Array',
+  'Value::Object',
+]);
+requireAll(hubSideChannelFinder, 'Hub side-channel finder', [
+  'find_v3_routecodex_control_payload_key(value)',
+]);
+forbidAll(hubSideChannelFinder, 'Hub side-channel finder', [
+  /\bconst\s+FORBIDDEN\b/,
+  /"metadataCenter"/,
+  /"request_capabilities"/,
+]);
 
 const protocolMappingBoundaries = [
   {

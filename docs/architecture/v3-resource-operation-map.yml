@@ -578,14 +578,24 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.metadata.runtime_control_stopless
-    resource_kind: runtime_control_truth
-    lifecycle: v3.servertool_hook_skeleton_lifecycle
+    resource_kind: metadata_center_control_signal
+    lifecycle: v3.metadata.center.mainline
+    owner_feature_id: v3.servertool_hook_skeleton_lifecycle
     owner_crate: routecodex-v3-runtime
-    owner_node: V3ResponsesRelayStoplessControlState
+    owner_node: StoplessCenterMetadataControl
+    signal_kind: control_signal
+    state_machine_required: true
+    state_fields: [phase, consecutive_stop_count, max_stop_budget, last_stop_kind, need_continue, blocked, terminal, guard_exhausted, next_request_policy, last_request_id, last_response_id, last_transition_reason, updated_at]
+    data_control_separation: required
+    normal_payload_state: forbidden
     identity: [entryEndpoint, sessionId, conversationId, port, routingGroup]
-    allowed_writers: [V3ResponsesRelayStoplessControlState::store_for_scope, V3ResponsesRelayStoplessControlState::clear_for_scope, apply_v3_responses_relay_stopless_control_transition]
-    allowed_readers: [V3ResponsesRelayStoplessControlState::load_for_scope, load_v3_responses_relay_stopless_control_state, V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed]
-    forbidden_writers: [V3HubRespContinuation04Committed, V3LocalContinuationStore, V3RemoteContinuationStore, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, response_projector, sse_framer]
+    implementation_handles: [V3ResponsesRelayStoplessControlState(adapter_runtime_handle), V3ResponsesRelayStoplessControlScope(identity_projection)]
+    allowed_writers: [StoplessCenterMetadataControl::store_for_scope, StoplessCenterMetadataControl::clear_for_scope, V3ResponsesRelayStoplessControlState::store_for_scope, V3ResponsesRelayStoplessControlState::clear_for_scope, apply_v3_responses_relay_stopless_control_transition, apply_v3_responses_relay_stopless_control_request_transition, clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal, V3StoplessResp02RuntimeControlUpdated]
+    allowed_readers: [StoplessCenterMetadataControl::load_for_scope, V3ResponsesRelayStoplessControlState::load_for_scope, load_v3_responses_relay_stopless_control_state, V3StoplessReq01RuntimeControlLoaded, V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed]
+    forbidden_writers: [V3HubRespContinuation04Committed, V3LocalContinuationStore, V3RemoteContinuationStore, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, response_projector, sse_framer, reasoningStop_cli_args, reasoningStop_cli_stdout, reasoningStop_empty_input_json_envelope, client_payload, provider_payload, debug_snapshot, __runtime_json]
+    forbidden_readers: [reasoningStop_cli_stdout_parser, reasoningStop_cli_args_parser, V3HubRespContinuation04Committed, V3LocalContinuationStore, routecodex-v3-provider-responses, routecodex-v3-server, routecodex-v3-debug_snapshot_restore]
+    cli_contract: { carries_scope: false, carries_state: false, parameters: none, transport_envelope: no_input, role: protocol_tool_call_completion_only }
+    process_contract: { central_aggregation_allowed: true, allowed_callers: current_business_sop_declared_nodes_only, relay_required: false, cross_process_shortcut: forbidden }
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -795,6 +805,18 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.lifecycle.restart_plan
+    resource_kind: transient_runtime_control_plan
+    lifecycle: v3.server.managed_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3Lifecycle06LiveControlled
+    identity: [instanceId, startNonce, executablePath, snapshots, snapshotStages]
+    allowed_writers: [send_restart_control]
+    allowed_readers: [control_restart_plan]
+    forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
 
   - resource_id: v3.openai_chat.client_sse_stream
     resource_kind: client_transport_projection
@@ -808,6 +830,23 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     release_point: V3ServerRespOutbound06ClientFrame
+    binding_status: anchored
+
+
+  - resource_id: v3.protocol_conversion.field_parity_contract
+    resource_kind: verification_manifest
+    lifecycle: v3.protocol_conversion_field_parity
+    owner_feature_id: v3.protocol_conversion_field_parity
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ProtocolConversionFieldParityContract
+    identity: [entryProtocol, providerProtocol, clientProjectionProtocol, fieldFamily]
+    allowed_writers: [docs/goals/v3-protocol-conversion-field-parity-test-design.md, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
+    allowed_readers: [docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
+    data_plane_fields: [metadata, client_metadata, stop, thinking, tool_choice, usage, model, created, response_format]
+    control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
+    may_enter_provider_body: false
+    may_enter_client_body: false
     binding_status: anchored
 
   - resource_id: v3.live_provider_compat.matrix

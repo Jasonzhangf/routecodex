@@ -209,12 +209,18 @@ pub async fn execute_v3_gemini_relay_runtime<T: ResponsesTransport>(
                 error_chain: None,
             })
         }
-        V3ProviderResponseBody::Sse(stream) => Ok(V3GeminiRelayRuntimeOutput {
-            status: 200,
-            client_body: V3GeminiRelayClientBody::Sse(project_sse_stream(stream)),
-            node_trace: trace,
-            error_chain: None,
-        }),
+        V3ProviderResponseBody::Sse(stream) => {
+            push_sse_response_chain_trace(&mut trace);
+            Ok(V3GeminiRelayRuntimeOutput {
+                status: 200,
+                client_body: V3GeminiRelayClientBody::Sse(project_sse_stream(
+                    stream,
+                    selected_target_compatibility_profile,
+                )),
+                node_trace: trace,
+                error_chain: None,
+            })
+        }
     }
 }
 
@@ -274,13 +280,15 @@ fn project_json_response(
     )?;
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
-        V3HubEntryProtocol::Gemini,
-        V3HubProviderWireProtocol::Gemini,
-        V3HubContinuationOwnership::New,
-        V3HubExecutionMode::Relay,
-        V3HubInvocationSource::Client,
-        transport_intent,
-        compatibility_profile,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Gemini,
+            V3HubProviderWireProtocol::Gemini,
+            V3HubContinuationOwnership::New,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            transport_intent,
+        )
+        .with_compatibility_profile(compatibility_profile),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -305,10 +313,12 @@ struct V3GeminiSseState {
     pending: VecDeque<Result<Vec<u8>, String>>,
     terminal: bool,
     done: bool,
+    compatibility_profile: Option<String>,
 }
 
 fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    compatibility_profile: Option<String>,
 ) -> V3GeminiRelayClientStream {
     use futures_util::StreamExt;
     let state = V3GeminiSseState {
@@ -319,6 +329,7 @@ fn project_sse_stream(
         pending: VecDeque::new(),
         terminal: false,
         done: false,
+        compatibility_profile,
     };
     Box::pin(futures_util::stream::unfold(
         state,
@@ -374,14 +385,40 @@ fn enqueue_sse_client_chunks(
             return Err("Gemini SSE emitted a frame after terminal finishReason".into());
         }
         let payload: Value = serde_json::from_str(&data).map_err(|error| error.to_string())?;
-        validate_v3_gemini_provider_response_payload(&payload, V3HubProviderWireProtocol::Gemini)
-            .map_err(|error| error.to_string())?;
-        state.terminal = gemini_payload_has_terminal_finish_reason(&payload);
+        let client_payload =
+            project_sse_event_payload(payload, state.compatibility_profile.as_deref())?;
+        state.terminal = gemini_payload_has_terminal_finish_reason(&client_payload);
         state
             .pending
-            .push_back(Ok(format!("data: {payload}\n\n").into_bytes()));
+            .push_back(Ok(format!("data: {client_payload}\n\n").into_bytes()));
     }
     Ok(())
+}
+
+fn project_sse_event_payload(
+    payload: Value,
+    compatibility_profile: Option<&str>,
+) -> Result<Value, String> {
+    let mut trace = Vec::new();
+    project_json_response(
+        payload,
+        V3HubTransportIntent::Sse,
+        &mut trace,
+        compatibility_profile,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn push_sse_response_chain_trace(trace: &mut Vec<&'static str>) {
+    trace.extend([
+        "V3ProviderRespInbound01Raw",
+        "ProviderRespCompat02ProviderCompat",
+        "V3HubRespInbound02Normalized",
+        "V3HubRespChatProcess03Governed",
+        "V3HubRespContinuation04Committed",
+        "V3HubRespOutbound05ClientSemantic",
+        "V3ServerRespOutbound06ClientFrame",
+    ]);
 }
 
 fn gemini_payload_has_terminal_finish_reason(payload: &Value) -> bool {

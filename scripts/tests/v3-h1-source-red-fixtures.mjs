@@ -12,7 +12,7 @@ const fixtures = [
   ['dynamic hook', '\nfn dynamic_hook_discovery() {}\n', /dynamic hook/],
   ['missing-hook fallback', '\nfn default_hook_fallback() {}\n', /fallback/],
   ['Provider network', '\nfn provider_network_shortcut() { let _ = reqwest::Client::new(); }\n', /Provider network/],
-  ['provider-specific branch', '\nfn provider_id_branch() {}\n', /provider-specific/],
+  ['provider-specific branch', '\nfn provider_family_branch() {}\n', /provider-specific/],
   ['second response exit', '\nstruct V3ServerRespOutbound07AlternateResponse;\n', /second response exit/],
   ['non-adjacent builder', '\npub fn build_v3_hub_req_target_06_from_v3_hub_req_inbound_02() {}\n', /non-adjacent/],
   ['missing entry hook', '', /missing static entry hook for V3HubReqInbound01ClientRaw/, hookFile, (source) => source.replace(/    static_hook\(\s*V3HubFixedNode::V3HubReqInbound01ClientRaw,\s*V3HubHookPhase::Entry,?\s*\),\n/, '')],

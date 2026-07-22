@@ -172,6 +172,7 @@ export function planRuntimeRestartRequest(input: {
 
 export function planRuntimeStartRestartTakeoverGuard(input: {
   explicitRestart: boolean;
+  noRestart: boolean;
   exclusive: boolean;
   daemonSupervisor: boolean;
   occupiedPorts: number[];

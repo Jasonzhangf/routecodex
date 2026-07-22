@@ -330,6 +330,108 @@ mod tests {
     }
 
     #[test]
+    fn request_codec_preserves_nameless_builtin_tools_without_shell_conversion() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "gpt-5.5",
+                "stream": true,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "search available tools" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            }
+                        }
+                    },
+                    {
+                        "type": "custom",
+                        "name": "apply_patch",
+                        "description": "Apply a patch"
+                    },
+                    {
+                        "type": "tool_search",
+                        "execution": "client",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": { "type": "string" }
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "type": "web_search",
+                        "external_web_access": true,
+                        "search_content_types": ["text", "image"]
+                    }
+                ],
+                "tool_choice": "auto"
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_builtin_tools" }).to_string()),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let tools = value["request"]["tools"].as_array().expect("request tools");
+        assert_eq!(tools.len(), 4);
+        assert_eq!(
+            tools
+                .iter()
+                .find(|tool| tool["type"] == "tool_search")
+                .expect("tool_search"),
+            &json!({
+                "type": "tool_search",
+                "execution": "client",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string" }
+                    },
+                    "required": ["query"]
+                }
+            })
+        );
+        assert_eq!(
+            tools
+                .iter()
+                .find(|tool| tool["type"] == "web_search")
+                .expect("web_search"),
+            &json!({
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text", "image"]
+            })
+        );
+        let serialized_tools = serde_json::to_string(tools).unwrap();
+        assert!(!serialized_tools.contains("\"script\""));
+        assert_eq!(
+            tools
+                .iter()
+                .filter(|tool| {
+                    tool.get("function")
+                        .and_then(|function| function.get("name"))
+                        .and_then(Value::as_str)
+                        == Some("exec_command")
+                })
+                .count(),
+            0
+        );
+    }
+
+    #[test]
     fn request_codec_restores_context_system_instruction_into_chat_instructions() {
         let payload_row = json!({
             "model": "gpt-4.1",

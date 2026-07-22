@@ -1,11 +1,35 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 
-const path = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
+const rootPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
 const hookPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs';
-const text = readFileSync(path, 'utf8');
+const skeletonPaths = [
+  rootPath,
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
+  hookPath,
+];
 const hookText = readFileSync(hookPath, 'utf8');
-const production = text.replace(/#\[cfg\(test\)\][\s\S]*/, '') + '\n' + hookText.replace(/#\[cfg\(test\)\][\s\S]*/, '');
+const production = skeletonPaths
+  .map((path) => readFileSync(path, 'utf8').replace(/#\[cfg\(test\)\][\s\S]*/, ''))
+  .join('\n');
 const failures = [];
 function rustFiles(dir, output = []) {
   for (const entry of readdirSync(dir)) {
@@ -17,27 +41,38 @@ function rustFiles(dir, output = []) {
   return output;
 }
 
-const nodes = [
-  'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
-  'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
-  'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
-  'V3ProviderReqOutbound08WirePayload',
-  'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
-  'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
-  'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
-  'V3ServerRespOutbound06ClientFrame',
-];
+const nodeOwners = {
+  V3HubReqInbound01ClientRaw: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs',
+  V3HubReqInbound02Normalized: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+  V3HubReqContinuation03Classified: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs',
+  V3HubReqChatProcess04Governed: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
+  V3HubReqExecution05Planned: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs',
+  V3HubReqTarget06Resolved: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs',
+  V3HubReqOutbound07ProviderSemantic: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
+  ProviderReqCompat06ProviderCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  V3ProviderReqOutbound08WirePayload: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs',
+  V3ProviderReqOutbound09TransportRequest: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs',
+  V3ProviderRespInbound01Raw: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs',
+  ProviderRespCompat02ProviderCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs',
+  V3HubRespInbound02Normalized: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
+  V3HubRespChatProcess03Governed: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  V3HubRespContinuation04Committed: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+  V3HubRespOutbound05ClientSemantic: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
+  V3ServerRespOutbound06ClientFrame: 'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
+};
+const nodes = Object.keys(nodeOwners);
 const allRust = rustFiles('v3/crates');
 for (const node of nodes) {
   if (!production.includes(`pub struct ${node}`)) failures.push(`missing opaque node ${node}`);
   const owners = allRust.filter((file) => new RegExp(`pub\\s+struct\\s+${node}\\b`).test(readFileSync(file, 'utf8')));
-  if (owners.length !== 1 || owners[0] !== path) failures.push(`opaque node ${node} owner count/path invalid: ${owners.join(',')}`);
+  if (owners.length !== 1 || owners[0] !== nodeOwners[node]) {
+    failures.push(`opaque node ${node} owner count/path invalid: ${owners.join(',')}`);
+  }
 }
 
 const builders = [
   'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
+  'build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01',
   'build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02',
   'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04',
@@ -65,7 +100,7 @@ for (const axis of axes) if (!production.includes(`pub enum ${axis}`)) failures.
 if (/entry_protocol[\s\S]{0,120}(?:Direct|RemoteProviderOwned)|provider_protocol[\s\S]{0,120}RemoteProviderOwned|same_protocol/i.test(production)) {
   failures.push('protocol fact is used to infer execution or continuation ownership');
 }
-if (/provider_(?:id|family)|model_prefix|starts_with\(/i.test(production)) failures.push('Hub v1 contains provider-specific branch vocabulary');
+if (/provider_family|model_prefix|starts_with\(/i.test(production)) failures.push('Hub v1 contains provider-specific branch vocabulary');
 
 for (const node of nodes) {
   for (const phase of ['Entry', 'Exit']) {

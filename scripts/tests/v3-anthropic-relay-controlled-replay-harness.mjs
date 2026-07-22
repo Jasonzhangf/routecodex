@@ -200,7 +200,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "V3_ANTHROPI
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "reasoning"]
 
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }

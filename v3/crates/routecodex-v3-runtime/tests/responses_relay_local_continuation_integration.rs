@@ -6,14 +6,21 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
     execute_v3_responses_relay_runtime_with_local_continuation,
+    execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control,
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control,
     V3ResponsesRelayClientBody, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayStoplessControlState,
+    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayStoplessControlScope, V3ResponsesRelayStoplessControlState,
+    V3StoplessCenterPhase,
 };
 use serde_json::{json, Value};
-use std::{collections::VecDeque, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 
 struct SequentialJsonTransport {
     captures: Mutex<Vec<Value>>,
@@ -31,6 +38,13 @@ struct ProviderProjectionOpenAiChatSseTransport {
 
 struct StoplessSseTransport {
     captures: Mutex<Vec<Value>>,
+}
+
+struct StoplessInFlightProbeTransport {
+    captures: Mutex<Vec<Value>>,
+    responses: Mutex<VecDeque<Value>>,
+    stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
+    stopless_scope: V3ResponsesRelayStoplessControlScope,
 }
 
 struct ApplyPatchSseTransport {
@@ -131,16 +145,9 @@ fn assert_provider_stopless_guidance(body: &Value) {
             "reasoningStop tool description missing StoplessCenter token {required}: {reasoning_stop_description}"
         );
     }
-    let instructions = body
-        .get("instructions")
-        .and_then(Value::as_str)
-        .expect("stopless provider request must carry short guidance instructions");
-    for required in ["继续完成当前目标", "reasoningStop"] {
-        assert!(
-            instructions.contains(required),
-            "provider instructions missing short StoplessCenter guidance token {required}: {instructions}"
-        );
-    }
+    let instructions = provider_stopless_guidance_text(body)
+        .expect("stopless provider request must carry full guidance instructions");
+    assert_full_stopless_system_guidance(instructions);
     for forbidden in [
         "<rcc_stop_schema>",
         "schemaFeedback",
@@ -155,6 +162,137 @@ fn assert_provider_stopless_guidance(body: &Value) {
             "provider instructions kept old stopless schema/control token {forbidden}: {instructions}"
         );
     }
+}
+
+fn provider_stopless_guidance_text(body: &Value) -> Option<&str> {
+    body.get("instructions")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            body.get("input")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find_map(provider_system_input_text)
+        })
+}
+
+fn provider_system_input_text(item: &Value) -> Option<&str> {
+    if item.get("type").and_then(Value::as_str) != Some("message")
+        || item.get("role").and_then(Value::as_str) != Some("system")
+    {
+        return None;
+    }
+    match item.get("content") {
+        Some(Value::String(text)) => Some(text.as_str()),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .find_map(|part| part.get("text").and_then(Value::as_str)),
+        _ => None,
+    }
+}
+
+fn provider_logical_input_without_stopless_system_prefix(input: &Value) -> Vec<Value> {
+    let items = input
+        .as_array()
+        .expect("provider input must be array for logical input assertion");
+    let skip = items.first().is_some_and(|item| {
+        provider_system_input_text(item).is_some_and(|text| text.contains("当前轮继续推进准则"))
+    });
+    items.iter().skip(usize::from(skip)).cloned().collect()
+}
+
+fn assert_full_stopless_system_guidance(instructions: &str) {
+    for required in [
+        "当前轮继续推进准则",
+        "当前轮",
+        "继续当前目标",
+        "基于已有上下文",
+        "继续推理",
+        "按需调用工具",
+        "完成证据",
+        "阻塞证据",
+        "reasoningStop",
+        "不要自然停止",
+    ] {
+        assert!(
+            instructions.contains(required),
+            "provider system guidance missing full stopless guideline token {required}: {instructions}"
+        );
+    }
+    for forbidden in [
+        "no-op",
+        "CLI",
+        "client tool round",
+        "客户端工具轮",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !instructions.contains(forbidden),
+            "provider-visible system guidance leaked black-box bridge mechanism {forbidden}: {instructions}"
+        );
+    }
+}
+
+fn assert_full_stopless_continuation_prompt(prompt: &str) {
+    for required in [
+        "继续当前目标",
+        "基于已经恢复的完整上下文",
+        "复核当前目标",
+        "已有结论",
+        "未完成事项",
+        "继续推理",
+        "按需调用可用工具",
+        "不要只总结",
+        "目标确实完成并有证据",
+        "reasoningStop",
+        "阻塞",
+        "needs_user_input",
+        "既未完成也未阻塞，继续工作",
+    ] {
+        assert!(
+            prompt.contains(required),
+            "stopless continuation prompt missing transparent guideline token {required}: {prompt}"
+        );
+    }
+    for forbidden in [
+        "no-op",
+        "CLI",
+        "client tool round",
+        "客户端工具轮",
+        "routecodex hook run reasoningStop",
+        "上一轮 reasoningStop CLI",
+        "不是工具结果",
+        "finish_reason=stop",
+        "RouteCodex stopless continuation",
+    ] {
+        assert!(
+            !prompt.contains(forbidden),
+            "provider-visible continuation prompt leaked black-box bridge mechanism {forbidden}: {prompt}"
+        );
+    }
+}
+
+fn assert_full_stopless_continuation_item(item: &Value) {
+    assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
+    assert_full_stopless_continuation_prompt(
+        item.get("content")
+            .and_then(Value::as_str)
+            .expect("stopless continuation user content"),
+    );
+}
+
+fn count_stopless_continuation_items(input: &[Value]) -> usize {
+    input
+        .iter()
+        .filter(|item| item.get("role").and_then(Value::as_str) == Some("user"))
+        .filter_map(|item| item.get("content").and_then(Value::as_str))
+        .filter(|content| {
+            content.contains("继续当前目标")
+                && content.contains("复核当前目标")
+                && content.contains("reasoningStop")
+                && content.contains("needs_user_input")
+        })
+        .count()
 }
 
 fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Value]) {
@@ -369,6 +507,21 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
         Some(&json!("string")),
         "Responses custom exec must preserve freeform input through function.arguments.input: {exec_tool}"
     );
+    let exec_description = exec_tool
+        .pointer("/function/description")
+        .and_then(Value::as_str)
+        .expect("OpenAI Chat exec description");
+    for required in [
+        "Execute freeform script",
+        "Original Responses custom tool format",
+        "\"syntax\":\"lark\"",
+        "raw tool input string",
+    ] {
+        assert!(
+            exec_description.contains(required),
+            "OpenAI Chat custom-tool projection lost Responses custom tool guidance {required}: {exec_description}"
+        );
+    }
     let reasoning_stop_tool = tools
         .iter()
         .find(|tool| tool_name(tool) == Some("reasoningStop"))
@@ -397,13 +550,8 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
         })
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
-        .expect("OpenAI Chat provider body must carry short StoplessCenter guidance in provider-visible system/developer message");
-    for required in ["继续完成当前目标", "reasoningStop"] {
-        assert!(
-            system.contains(required),
-            "OpenAI Chat system guidance missing short StoplessCenter token {required}: {system}"
-        );
-    }
+        .expect("OpenAI Chat provider body must carry full StoplessCenter guidance in provider-visible system/developer message");
+    assert_full_stopless_system_guidance(system);
     for forbidden in [
         "<rcc_stop_schema>",
         "schemaFeedback",
@@ -420,6 +568,79 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
     }
 }
 
+fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
+    body: &Value,
+    expected_original_tools: &[Value],
+) {
+    let tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("OpenAI Chat provider body must expose provider-wire top-level tools");
+    assert_eq!(
+        tools.len(),
+        expected_original_tools.len() + 1,
+        "OpenAI Chat provider tools must only add the internal reasoningStop tool: {tools:?}"
+    );
+    for (index, expected) in expected_original_tools.iter().enumerate() {
+        let actual = &tools[index];
+        assert_eq!(
+            tool_name(actual),
+            expected.get("name").and_then(Value::as_str),
+            "OpenAI Chat tool[{index}] name changed: actual={actual} expected={expected}"
+        );
+        let function = actual
+            .get("function")
+            .and_then(Value::as_object)
+            .expect("OpenAI Chat provider tool must be a function wrapper");
+        if expected.get("type").and_then(Value::as_str) == Some("function") {
+            assert_eq!(
+                function.get("description"),
+                expected.get("description"),
+                "OpenAI Chat function tool[{index}] description changed: actual={actual} expected={expected}"
+            );
+            assert_eq!(
+                function.get("parameters"),
+                expected.get("parameters"),
+                "OpenAI Chat function tool[{index}] parameters changed: actual={actual} expected={expected}"
+            );
+            assert_eq!(
+                function.get("strict"),
+                expected.get("strict"),
+                "OpenAI Chat function tool[{index}] strict flag changed: actual={actual} expected={expected}"
+            );
+        } else {
+            let description = function
+                .get("description")
+                .and_then(Value::as_str)
+                .expect("custom tool description");
+            let expected_description = expected
+                .get("description")
+                .and_then(Value::as_str)
+                .expect("custom tool description");
+            assert!(
+                description.contains(expected_description),
+                "OpenAI Chat custom tool[{index}] must preserve original description: actual={actual} expected={expected}"
+            );
+            let format = serde_json::to_string(expected.get("format").unwrap())
+                .expect("custom tool format must serialize");
+            assert!(
+                description.contains(&format),
+                "OpenAI Chat custom tool[{index}] must carry original Responses format in provider protocol description: actual={actual} expected_format={format}"
+            );
+            assert_eq!(
+                actual.pointer("/function/parameters/properties/input/type"),
+                Some(&json!("string")),
+                "OpenAI Chat custom tool[{index}] must expose raw custom input string: actual={actual}"
+            );
+        }
+    }
+    assert_eq!(
+        tool_name(&tools[expected_original_tools.len()]),
+        Some("reasoningStop"),
+        "OpenAI Chat provider tools must append internal reasoningStop after original tools: {tools:?}"
+    );
+}
+
 #[async_trait]
 impl ResponsesTransport for SequentialJsonTransport {
     async fn send(
@@ -427,6 +648,43 @@ impl ResponsesTransport for SequentialJsonTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         self.captures.lock().unwrap().push(request.body().clone());
+        let response = self.responses.lock().unwrap().pop_front().unwrap();
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&response).unwrap(),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for StoplessInFlightProbeTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let send_index = {
+            let mut captures = self.captures.lock().unwrap();
+            captures.push(request.body().clone());
+            captures.len()
+        };
+        if send_index == 2 {
+            let stored = self
+                .stopless_control
+                .load_for_scope(&self.stopless_scope)
+                .unwrap()
+                .expect("Req04 must persist ProviderTurnInFlight before provider send");
+            assert_eq!(
+                stored.phase(),
+                V3StoplessCenterPhase::ProviderTurnInFlight,
+                "StoplessCenter must leave stale CliNoopProjected and enter ProviderTurnInFlight before provider wire"
+            );
+        }
         let response = self.responses.lock().unwrap().pop_front().unwrap();
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
@@ -481,7 +739,10 @@ impl ResponsesTransport for ProviderProjectionOpenAiChatSseTransport {
             "model":"chat-wire-model",
             "choices":[{
                 "index":0,
-                "delta":{"role":"assistant","content":"stream terminal "},
+                "delta":{
+                    "role":"assistant",
+                    "reasoning_content":"Need chat wire SSE before tool."
+                },
                 "finish_reason":null
             }]
         });
@@ -491,8 +752,16 @@ impl ResponsesTransport for ProviderProjectionOpenAiChatSseTransport {
             "model":"chat-wire-model",
             "choices":[{
                 "index":0,
-                "delta":{"content":"{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"chat sse ok\",\"needs_user_input\":false}"},
-                "finish_reason":"stop"
+                "delta":{"tool_calls":[{
+                    "index":0,
+                    "id":"call_exec_sse",
+                    "type":"function",
+                    "function":{
+                        "name":"exec",
+                        "arguments":"{\"input\":\"text('chat sse ok')\"}"
+                    }
+                }]},
+                "finish_reason":"tool_calls"
             }],
             "usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}
         });
@@ -607,12 +876,193 @@ impl ResponsesTransport for ApplyPatchSseTransport {
 }
 
 #[tokio::test]
+async fn json_stopless_center_persists_without_local_continuation_store() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_stopless_center_metadata_only",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"metadata-center natural stop"}]}]
+        })])),
+    };
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
+    let scope = V3ResponsesRelayStoplessControlScope::new(
+        "/v1/responses",
+        "session-stopless-center-metadata-only",
+        "conversation-stopless-center-metadata-only",
+        5555,
+        "controlled",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-center-metadata-only".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Trigger stopless center without local continuation"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        &stopless_control,
+        scope.clone(),
+    )
+    .await
+    .unwrap();
+
+    match result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            let arguments = stopless_projected_call(&body)["arguments"]
+                .as_str()
+                .expect("projected stopless command arguments");
+            assert!(arguments.contains("routecodex hook run reasoningStop"));
+            assert!(
+                !arguments.contains("--input-json"),
+                "client no-op CLI must be no-input: {arguments}"
+            );
+            for forbidden in [
+                "session-stopless-center-metadata-only",
+                "conversation-stopless-center-metadata-only",
+                "repeatCount",
+                "schemaFeedback",
+                "runtime_control",
+            ] {
+                assert!(
+                    !arguments.contains(forbidden),
+                    "client no-op CLI carried StoplessCenter scope/state {forbidden}: {arguments}"
+                );
+            }
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("metadata-only stopless test must be JSON"),
+    }
+    assert_eq!(
+        stopless_control.len().unwrap(),
+        1,
+        "StoplessCenter control must persist through MetadataCenter control state without local continuation storage"
+    );
+    let stored = stopless_control
+        .load_for_scope(&scope)
+        .unwrap()
+        .expect("StoplessCenter state must be stored for client session scope");
+    assert_eq!(
+        stored.last_request_id(),
+        Some("req-stopless-center-metadata-only")
+    );
+    assert!(
+        stored.updated_at() > 0,
+        "StoplessCenter state must record a transition timestamp"
+    );
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_provider_stopless_guidance(&captures[0]);
+    assert_no_structured_stopless_control_fields(&captures[0], "$provider");
+}
+
+#[tokio::test]
+async fn json_stopless_center_missing_client_session_scope_passes_stop_without_control_write() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_stopless_missing_session",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"missing session natural stop"}]}]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "request:req-stopless-missing-session",
+        "request:req-stopless-missing-session",
+        5555,
+        "controlled",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-missing-session".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"No session id must not start stopless control"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            41_000,
+        ),
+    )
+    .await
+    .unwrap();
+
+    match result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(
+                body["status"], "completed",
+                "missing session scope must pass natural stop through without no-op projection"
+            );
+            let serialized = serde_json::to_string(&body).unwrap();
+            assert!(serialized.contains("missing session natural stop"));
+            for forbidden in [
+                "call_stopless_reasoning",
+                "routecodex hook run reasoningStop",
+            ] {
+                assert!(
+                    !serialized.contains(forbidden),
+                    "missing session scope must not project stopless artifact {forbidden}: {serialized}"
+                );
+            }
+        }
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("missing session stopless boundary test must be JSON")
+        }
+    }
+    assert!(
+        stopless_control.is_empty().unwrap(),
+        "missing session scope must not write StoplessCenter control state"
+    );
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    let provider_request = serde_json::to_string(&captures[0]).unwrap();
+    for forbidden in ["reasoningStop", "当前轮继续推进准则"] {
+        assert!(
+            !provider_request.contains(forbidden),
+            "missing session scope must not inject stopless provider guidance/tool {forbidden}: {provider_request}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
     let original_tools = json!([
         {"type":"function","name":"exec","description":"original exec","parameters":{"type":"object","properties":{},"additionalProperties":true}},
         {"type":"function","name":"wait","description":"original wait","parameters":{"type":"object","properties":{},"additionalProperties":true}}
     ]);
-    let transport = SequentialJsonTransport {
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let stopless_control = Arc::new(V3ResponsesRelayStoplessControlState::default());
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-center-runtime",
+        "conversation-stopless-center-runtime",
+        5555,
+        "controlled",
+    );
+    let transport = StoplessInFlightProbeTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([
             json!({
@@ -632,17 +1082,9 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
                 }]
             }),
         ])),
+        stopless_control: Arc::clone(&stopless_control),
+        stopless_scope: V3ResponsesRelayStoplessControlScope::from(&scope),
     };
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let stopless_control = V3ResponsesRelayStoplessControlState::default();
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
-    let scope = V3ResponsesRelayLocalContinuationScope::responses(
-        "/v1/responses",
-        "session-stopless-center-runtime",
-        "conversation-stopless-center-runtime",
-        5555,
-        "controlled",
-    );
 
     let first = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
         &manifest(),
@@ -658,10 +1100,12 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
         },
         &transport,
         &provider_health,
-        &state,
-        &stopless_control,
-        scope.clone(),
-        30_000,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            stopless_control.as_ref(),
+            scope.clone(),
+            30_000,
+        ),
     )
     .await
     .unwrap();
@@ -672,8 +1116,11 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
             assert_eq!(call["name"], "exec_command");
             let arguments = call["arguments"].as_str().unwrap();
             assert!(arguments.contains("routecodex hook run reasoningStop"));
+            assert!(
+                !arguments.contains("--input-json"),
+                "client no-op CLI must be no-input and must not carry an input envelope: {arguments}"
+            );
             for forbidden in [
-                "--input-json",
                 "repeatCount",
                 "schemaFeedback",
                 "next_step",
@@ -703,10 +1150,12 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
         },
         &transport,
         &provider_health,
-        &state,
-        &stopless_control,
-        scope,
-        31_000,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            stopless_control.as_ref(),
+            scope,
+            31_000,
+        ),
     )
     .await
     .unwrap();
@@ -731,9 +1180,113 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
         assert_no_stopless_shell_artifacts(capture);
         assert_no_structured_stopless_control_fields(capture, "$provider");
     }
+    let second_input = provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
+    assert_eq!(second_input.len(), 2);
     assert_eq!(
-        captures[1]["input"],
-        json!([{"role":"user","content":"Trigger stopless center"}])
+        second_input[0],
+        json!({"role":"user","content":"Trigger stopless center"})
+    );
+    assert_full_stopless_continuation_item(&second_input[1]);
+}
+
+#[tokio::test]
+async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_stopless_error_cleanup_1",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"cleanup first stop"}]}]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-error-cleanup",
+        "conversation-stopless-error-cleanup",
+        5555,
+        "controlled",
+    );
+
+    let first = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-error-cleanup-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"Trigger cleanup stopless"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope.clone(),
+            70_000,
+        ),
+    )
+    .await
+    .unwrap();
+    match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            assert!(serde_json::to_string(&body)
+                .unwrap()
+                .contains("routecodex hook run reasoningStop"));
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first cleanup turn must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(stopless_control.len().unwrap(), 1);
+
+    let target_exhaustion_manifest = manifest_with_unsupported_provider_wire_target();
+
+    let second = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+        &target_exhaustion_manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-error-cleanup-2".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            70_001,
+        ),
+    )
+    .await
+    .expect_err("selected target exhaustion must remain a real runtime error");
+    let error_text = second.to_string();
+    assert!(
+        error_text.contains("target resolution failed")
+            || error_text.contains("V3TargetExhaustion"),
+        "unexpected terminal route error: {second}"
+    );
+    assert!(
+        error_text.contains("unsupported provider wire protocol"),
+        "negative fixture must fail at target/provider-wire selection before provider send: {second}"
+    );
+    assert_eq!(
+        transport.captures.lock().unwrap().len(),
+        1,
+        "terminal target selection error must occur before a second provider send"
+    );
+    assert!(
+        stopless_control.is_empty().unwrap(),
+        "terminal route/provider error after consuming no-op must clear StoplessCenter; stale CliNoopProjected state would make the next client retry re-enter an invalid stopless loop"
     );
 }
 
@@ -773,10 +1326,12 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             },
             &transport,
             &provider_health,
-            &state,
-            &stopless_control,
-            scope.clone(),
-            40_000 + round,
+            V3ResponsesRelayLocalStoplessControlInput::new(
+                &state,
+                &stopless_control,
+                scope.clone(),
+                40_000 + round,
+            ),
         )
         .await
         .unwrap();
@@ -795,10 +1350,12 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         },
         &transport,
         &provider_health,
-        &state,
-        &stopless_control,
-        scope,
-        40_003,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            40_003,
+        ),
     ).await.unwrap();
     match third.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
@@ -809,6 +1366,244 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("guard terminal must be JSON"),
+    }
+    let captures = transport.captures.lock().unwrap();
+    let third_input = captures[2]["input"]
+        .as_array()
+        .expect("third guard provider input");
+    assert_eq!(
+        count_stopless_continuation_items(third_input),
+        1,
+        "stopless continuation guideline is a current-turn prompt and must not accumulate in restored provider history: {third_input:?}"
+    );
+    assert!(stopless_control.is_empty().unwrap());
+}
+
+#[tokio::test]
+async fn provider_request_dry_run_with_stopless_control_is_read_only() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp_stopless_control_dryrun_readonly_1",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"output_text","text":"dry-run readonly first stop"}]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-control-dryrun-readonly",
+        "conversation-stopless-control-dryrun-readonly",
+        5555,
+        "controlled",
+    );
+    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+
+    let first = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-control-dryrun-readonly-1".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":[{"role":"user","content":"dry-run readonly"}],
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope.clone(),
+            90_000,
+        ),
+    )
+    .await
+    .unwrap();
+    let first_body = match first.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("first dry-run readonly turn must be JSON"),
+    };
+    assert_eq!(first_body["status"], "requires_action");
+    let stored_before = stopless_control
+        .load_for_scope(&stopless_scope)
+        .unwrap()
+        .expect("first stopless state");
+    assert_eq!(stored_before.consecutive_stop_count(), 1);
+    assert_eq!(
+        stored_before.phase(),
+        V3StoplessCenterPhase::CliNoopProjected
+    );
+
+    let submit_payload = json!({
+        "model":"client-responses",
+        "previous_response_id": first_body["id"].as_str().unwrap(),
+        "input":[{
+            "type":"function_call_output",
+            "call_id":"call_stopless_reasoning",
+            "output":""
+        }],
+        "stream":false
+    });
+
+    let dry_run =
+        execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
+            &manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: "req-stopless-control-dryrun-readonly-2".into(),
+                payload: submit_payload.clone(),
+            },
+            &state,
+            &stopless_control,
+            scope.clone(),
+            90_100,
+        )
+        .await;
+    assert_eq!(dry_run.status, 200);
+    let stored_after = stopless_control
+        .load_for_scope(&stopless_scope)
+        .unwrap()
+        .expect("dry-run must not clear live stopless state");
+    assert_eq!(
+        stored_after, stored_before,
+        "provider-request dry-run is observational and must not advance StoplessCenter state"
+    );
+
+    let second_dry_run =
+        execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
+            &manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: "req-stopless-control-dryrun-readonly-3".into(),
+                payload: submit_payload,
+            },
+            &state,
+            &stopless_control,
+            scope,
+            90_200,
+        )
+        .await;
+    assert_eq!(second_dry_run.status, 200);
+    let first_provider_request = dry_run
+        .body
+        .get("providerRequest")
+        .expect("first dry-run provider request");
+    let second_provider_request = second_dry_run
+        .body
+        .get("providerRequest")
+        .expect("second dry-run provider request");
+    assert_eq!(
+        first_provider_request, second_provider_request,
+        "repeated provider-request dry-runs against the same live state must produce identical provider requests"
+    );
+    let stored_after_second = stopless_control
+        .load_for_scope(&stopless_scope)
+        .unwrap()
+        .expect("second dry-run must not clear live stopless state");
+    assert_eq!(
+        stored_after_second, stored_before,
+        "repeated provider-request dry-run must remain read-only for StoplessCenter"
+    );
+}
+
+#[tokio::test]
+async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnostic() {
+    let control_only_text = r#"{"stopreason":2,"current_goal":"guard","next_step":"continue"}"#;
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({"id":"resp_guard_diag_1","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard first"}]}),
+            json!({"id":"resp_guard_diag_2","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard second"}]}),
+            json!({"id":"resp_guard_diag_3","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":control_only_text}],"output_text":control_only_text}),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest());
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-guard-pass-through",
+        "conversation-stopless-guard-pass-through",
+        5555,
+        "controlled",
+    );
+
+    for round in 1..=2 {
+        let body = if round == 1 {
+            json!({"model":"client-responses","input":[{"role":"user","content":"guard pass through"}],"stream":false})
+        } else {
+            json!({"model":"client-responses","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
+        };
+        let out = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+            &manifest(),
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: format!("req-stopless-guard-pass-through-{round}"),
+                payload: body,
+            },
+            &transport,
+            &provider_health,
+            V3ResponsesRelayLocalStoplessControlInput::new(
+                &state,
+                &stopless_control,
+                scope.clone(),
+                41_000 + round,
+            ),
+        )
+        .await
+        .unwrap();
+        match out.client_body {
+            V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
+            V3ResponsesRelayClientBody::Sse(_) => panic!("guard pass-through round must be JSON"),
+        }
+    }
+
+    let third = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-stopless-guard-pass-through-3".into(),
+            payload: json!({"model":"client-responses","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            41_003,
+        ),
+    ).await.unwrap();
+    match third.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "completed");
+            assert_eq!(body["finish_reason"], "stop");
+            let serialized = serde_json::to_string(&body).unwrap();
+            assert_eq!(
+                body["output_text"],
+                json!(control_only_text),
+                "guard terminal must stop intercepting and pass through provider finish_reason=stop response"
+            );
+            assert!(
+                !serialized.contains("Stopless 已达到连续自动续轮上限"),
+                "guard terminal must not expose internal stopless budget state: {serialized}"
+            );
+            for forbidden in [
+                "call_stopless_reasoning",
+                "routecodex hook run reasoningStop",
+            ] {
+                assert!(
+                    !serialized.contains(forbidden),
+                    "guard terminal must not project another no-op bridge artifact {forbidden}: {serialized}"
+                );
+            }
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("guard pass-through terminal must be JSON"),
     }
     assert!(stopless_control.is_empty().unwrap());
 }
@@ -845,9 +1640,35 @@ async fn sse_runtime_runs_stopless_center_through_json_hub_pipeline_before_clien
             while let Some(chunk) = stream.next().await {
                 text.push_str(&String::from_utf8(chunk.unwrap()).unwrap());
             }
-            assert!(text.contains("response.requires_action") || text.contains("requires_action"));
+            assert!(
+                text.contains("event: response.completed"),
+                "Responses client SSE must terminate stopless projection with response.completed: {text}"
+            );
+            assert!(
+                text.contains("event: response.done"),
+                "Responses client SSE must emit response.done before [DONE]: {text}"
+            );
+            assert!(
+                !text.contains("event: response.requires_action"),
+                "Responses client SSE must not use response.requires_action as terminal stream event: {text}"
+            );
+            assert!(
+                text.contains("\"status\":\"requires_action\""),
+                "Responses client SSE terminal response must preserve stopless requires_action status: {text}"
+            );
             assert!(text.contains("call_stopless_reasoning"));
             assert!(text.contains("routecodex hook run reasoningStop"));
+            let completed = text
+                .find("event: response.completed")
+                .expect("response completed event");
+            let done = text
+                .find("event: response.done")
+                .expect("response done event");
+            let marker = text.find("data: [DONE]").expect("DONE marker");
+            assert!(
+                completed < done && done < marker,
+                "Responses client SSE terminal ordering must be response.completed -> response.done -> [DONE]: {text}"
+            );
             assert!(!text.contains("--input-json"));
             assert!(!text.contains("repeatCount"));
             assert!(!text.contains("<rcc_stop_schema>"));
@@ -1035,17 +1856,15 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     let body = provider_request
         .get("body")
         .or_else(|| provider_request.get("payload"))
-        .or(Some(provider_request))
-        .unwrap();
-    let input = body["input"]
-        .as_array()
-        .expect("provider request input must be array");
-    assert_eq!(input.len(), 2);
+        .unwrap_or(provider_request);
+    let input = provider_logical_input_without_stopless_system_prefix(&body["input"]);
+    assert_eq!(input.len(), 3);
     assert_eq!(input[0]["type"], "additional_tools");
     assert_eq!(
         input[1]["content"][0]["text"],
         "Trigger stopless with tools"
     );
+    assert_full_stopless_continuation_item(&input[2]);
     assert_additional_tools_preserved_without_shape_rebuild(
         body,
         original_tools.as_array().unwrap(),
@@ -1079,8 +1898,7 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     let second_body = second_provider_request
         .get("body")
         .or_else(|| second_provider_request.get("payload"))
-        .or(Some(second_provider_request))
-        .unwrap();
+        .unwrap_or(second_provider_request);
     assert_eq!(
         second_body["input"], body["input"],
         "provider-request dry-run must be observational only and must not accumulate repeated stopless prompts"
@@ -1157,12 +1975,16 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
                 "Responses Relay client SSE must encode the Hub-finalized apply_patch tool item: {text}"
             );
             assert!(
-                text.contains("event: response.requires_action"),
-                "Responses Relay client SSE must transport the Hub-finalized requires_action frame: {text}"
+                text.contains("event: response.completed"),
+                "Responses Relay client SSE must terminate with response.completed while preserving Hub-finalized requires_action status: {text}"
             );
             assert!(
-                !text.contains("event: response.completed"),
-                "Responses Relay client SSE must not relabel Hub-finalized tool-call continuation as completed: {text}"
+                text.contains("event: response.done"),
+                "Responses Relay client SSE must emit response.done before the [DONE] transport marker: {text}"
+            );
+            assert!(
+                !text.contains("event: response.requires_action"),
+                "Responses Relay client SSE must not use response.requires_action as the terminal stream event: {text}"
             );
             assert!(text.contains("\"status\":\"requires_action\""));
             assert!(text.contains("\"type\":\"custom_tool_call\""));
@@ -1174,6 +1996,20 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
                 "Relay client SSE transport must not raw-pass provider argument event payloads around Hub: {text}"
             );
             assert!(text.contains("[DONE]"));
+            let output_item_done = text
+                .find("event: response.output_item.done")
+                .expect("output item done event");
+            let completed = text
+                .find("event: response.completed")
+                .expect("response completed event");
+            let done = text
+                .find("event: response.done")
+                .expect("response done event");
+            let marker = text.find("data: [DONE]").expect("DONE marker");
+            assert!(
+                output_item_done < completed && completed < done && done < marker,
+                "Responses Relay tool-call SSE order must be output_item.done -> response.completed -> response.done -> [DONE]: {text}"
+            );
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
     }
@@ -1280,21 +2116,21 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(
-        captures[1]["input"],
-        json!([
-            {"role":"user","content":"Lookup alpha"},
-            {
+        provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]),
+        vec![
+            json!({"role":"user","content":"Lookup alpha"}),
+            json!({
                 "type":"function_call",
                 "call_id":"call_local_1",
                 "name":"lookup",
                 "arguments":"{\"q\":\"alpha\"}"
-            },
-            {
+            }),
+            json!({
                 "type":"function_call_output",
                 "call_id":"call_local_1",
                 "output":"alpha"
-            }
-        ])
+            })
+        ]
     );
     assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());
     assert_provider_stopless_guidance(&captures[1]);
@@ -1434,9 +2270,7 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
         "round-2 provider request must not synthesize a sibling top-level tools surface: {}",
         captures[1]
     );
-    let round2_input = captures[1]["input"]
-        .as_array()
-        .expect("round-2 provider input must be array");
+    let round2_input = provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
     assert_eq!(
         round2_input.len(),
         4,
@@ -1569,13 +2403,15 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
-    assert_eq!(captures[1]["input"][0]["role"], "user");
-    assert_eq!(captures[1]["input"][0]["content"], "Patch a file");
-    assert_eq!(captures[1]["input"][1]["type"], "custom_tool_call");
-    assert_eq!(captures[1]["input"][1]["name"], "apply_patch");
-    assert_eq!(captures[1]["input"][1]["input"], patch);
-    assert_eq!(captures[1]["input"][2]["type"], "custom_tool_call_output");
-    let feedback = captures[1]["input"][2]["output"].as_str().unwrap();
+    let logical_input =
+        provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
+    assert_eq!(logical_input[0]["role"], "user");
+    assert_eq!(logical_input[0]["content"], "Patch a file");
+    assert_eq!(logical_input[1]["type"], "custom_tool_call");
+    assert_eq!(logical_input[1]["name"], "apply_patch");
+    assert_eq!(logical_input[1]["input"], patch);
+    assert_eq!(logical_input[2]["type"], "custom_tool_call_output");
+    let feedback = logical_input[2]["output"].as_str().unwrap();
     assert!(feedback.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
     assert!(feedback.contains("Retry with apply_patch only"));
     assert!(!feedback.contains("/tmp/codex-patch-test"));
@@ -1709,8 +2545,10 @@ async fn full_history_paired_tool_output_does_not_require_local_restore() {
     assert!(state.is_empty().unwrap());
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1);
-    assert_eq!(captures[0]["input"][1]["call_id"], "call_full_history");
-    assert_eq!(captures[0]["input"][2]["call_id"], "call_full_history");
+    let logical_input =
+        provider_logical_input_without_stopless_system_prefix(&captures[0]["input"]);
+    assert_eq!(logical_input[1]["call_id"], "call_full_history");
+    assert_eq!(logical_input[2]["call_id"], "call_full_history");
 }
 
 #[tokio::test]
@@ -1726,13 +2564,15 @@ async fn responses_relay_selected_openai_chat_provider_uses_chat_wire_tools_and_
             "type":"function",
             "name":"wait",
             "description":"Wait",
-            "parameters":{"type":"object","properties":{"seconds":{"type":"number"}}}
+            "parameters":{"type":"object","properties":{"seconds":{"type":"number"}}},
+            "strict":false
         },
         {
             "type":"function",
             "name":"request_user_input",
             "description":"Ask",
-            "parameters":{"type":"object","properties":{"prompt":{"type":"string"}}}
+            "parameters":{"type":"object","properties":{"prompt":{"type":"string"}}},
+            "strict":true
         }
     ]);
     let transport = ProviderProjectionJsonTransport {
@@ -1806,6 +2646,10 @@ async fn responses_relay_selected_openai_chat_provider_uses_chat_wire_tools_and_
         "schema guidance for OpenAI Chat provider must be carried by provider-visible system/developer message, not a stray Responses instructions field: {body}"
     );
     assert_provider_chat_stopless_guidance(body);
+    assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
+        body,
+        original_tools.as_array().unwrap(),
+    );
     assert_no_structured_stopless_control_fields(body, "provider.chat");
     let messages = body["messages"]
         .as_array()
@@ -1905,7 +2749,12 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
-    assert_provider_chat_stopless_guidance(provider_projection_body(&captures[0]));
+    let body = provider_projection_body(&captures[0]);
+    assert_provider_chat_stopless_guidance(body);
+    assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
+        body,
+        original_tools.as_array().unwrap(),
+    );
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action", "{body}");
@@ -1920,6 +2769,294 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
         V3ResponsesRelayClientBody::Sse(_) => panic!("custom tool response must be JSON"),
     }
     assert_eq!(state.len().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call_with_unescaped_raw_input(
+) {
+    let original_tools = json!([
+        {
+            "type":"custom",
+            "name":"exec",
+            "description":"Execute freeform script",
+            "format":{"type":"grammar","syntax":"lark","definition":"start: SOURCE\nSOURCE: /[\\s\\S]+/"}
+        }
+    ]);
+    let raw_script = "python - <<'PY'\nprint(\"hello from custom exec\")\nPY";
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"chatcmpl-custom-tool-unescaped",
+            "object":"chat.completion",
+            "choices":[{
+                "index":0,
+                "message":{
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_exec_unescaped",
+                        "type":"function",
+                        "function":{
+                            "name":"exec",
+                            "arguments": format!("{{\"input\":\"{}\"}}", raw_script)
+                        }
+                    }]
+                },
+                "finish_reason":"tool_calls"
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-openai-chat-custom-unescaped",
+        "conversation-openai-chat-custom-unescaped",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            request_id: "req-openai-chat-custom-unescaped".into(),
+            payload: json!({
+                "model":"client-responses",
+                "stream":false,
+                "instructions":"client instruction",
+                "input":[
+                    {"type":"additional_tools","role":"system","tools":original_tools.clone()},
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger custom exec with quoted script"}]}
+                ]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("OpenAI Chat provider custom tool response with unescaped raw input must project back to Responses");
+
+    match result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action", "{body}");
+            assert_eq!(body["output"][0]["type"], "custom_tool_call", "{body}");
+            assert_eq!(
+                body["output"][0]["call_id"], "call_exec_unescaped",
+                "{body}"
+            );
+            assert_eq!(body["output"][0]["name"], "exec", "{body}");
+            assert_eq!(body["output"][0]["input"], raw_script, "{body}");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("custom tool response must be JSON"),
+    }
+    assert_eq!(state.len().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_request_matrix() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"chatcmpl-field-parity-request",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_lookup_matrix",
+                        "type":"function",
+                        "function":{"name":"lookup","arguments":"{\"q\":\"matrix\"}"}
+                    }]
+                },
+                "finish_reason":"tool_calls"
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-responses-openai-chat-field-request",
+        "conversation-responses-openai-chat-field-request",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            request_id: "req-responses-openai-chat-field-request".into(),
+            payload: json!({
+                "model":"client-responses",
+                "stream":false,
+                "instructions":"field parity system",
+                "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"run request matrix"}]}],
+                "tools":[{
+                    "type":"function",
+                    "name":"lookup",
+                    "description":"Lookup docs",
+                    "parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]},
+                    "strict":true
+                }],
+                "tool_choice":{"type":"function","name":"lookup"},
+                "parallel_tool_calls":false,
+                "user":"user-field-matrix",
+                "temperature":0.3,
+                "top_p":0.8,
+                "logit_bias":{"42":1},
+                "seed":123,
+                "response_format":{"type":"json_object"},
+                "max_output_tokens":321,
+                "metadata":{"client":"metadata-kept"},
+                "client_metadata":{"codex":"client-metadata-kept"},
+                "stop":["<END>"]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("Responses -> OpenAI Chat request field parity must execute");
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
+    let body = provider_projection_body(&captures[0]);
+    assert_eq!(body["model"], "chat-wire-model");
+    assert_eq!(body["messages"][0]["role"], "system");
+    assert!(
+        body["messages"][0]["content"]
+            .as_str()
+            .is_some_and(|content| content.starts_with("field parity system")),
+        "client instructions must remain the leading provider system text: {body}"
+    );
+    assert_eq!(body["messages"][1]["content"], "run request matrix");
+    assert_eq!(
+        body["tools"][0]["function"]["parameters"],
+        json!({"type":"object","properties":{"q":{"type":"string"}},"required":["q"]})
+    );
+    assert_eq!(body["tools"][0]["function"]["strict"], true);
+    assert_eq!(
+        body["tool_choice"],
+        json!({"type":"function","name":"lookup"})
+    );
+    assert_eq!(body["parallel_tool_calls"], false);
+    assert_eq!(body["user"], "user-field-matrix");
+    assert_eq!(body["temperature"], 0.3);
+    assert_eq!(body["top_p"], 0.8);
+    assert_eq!(body["logit_bias"], json!({"42":1}));
+    assert_eq!(body["seed"], 123);
+    assert_eq!(body["response_format"], json!({"type":"json_object"}));
+    assert_eq!(body["max_output_tokens"], 321);
+    assert_eq!(body["metadata"], json!({"client":"metadata-kept"}));
+    assert_eq!(
+        body["client_metadata"],
+        json!({"codex":"client-metadata-kept"})
+    );
+    assert_eq!(body["stop"], json!(["<END>"]));
+    match result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action", "{body}");
+            assert_eq!(body["output"][0]["call_id"], "call_lookup_matrix");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("field parity request matrix must be JSON"),
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_response_matrix() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"chatcmpl-field-parity-response",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "created":1234567890,
+            "choices":[{
+                "index":0,
+                "message":{
+                    "role":"assistant",
+                    "content":"visible answer",
+                    "reasoning_content":"safe reason summary",
+                    "tool_calls":[{
+                        "id":"call_lookup_response",
+                        "type":"function",
+                        "function":{"name":"lookup","arguments":"{\"q\":\"response\"}"}
+                    }]
+                },
+                "finish_reason":"tool_calls"
+            }],
+            "usage":{
+                "prompt_tokens":11,
+                "prompt_tokens_details":{"cached_tokens":5},
+                "completion_tokens":7,
+                "completion_tokens_details":{"reasoning_tokens":2},
+                "total_tokens":18
+            }
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-responses-openai-chat-field-response",
+        "conversation-responses-openai-chat-field-response",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            request_id: "req-responses-openai-chat-field-response".into(),
+            payload: json!({
+                "model":"client-responses",
+                "stream":false,
+                "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"run response matrix"}]}],
+                "tools":[{
+                    "type":"function",
+                    "name":"lookup",
+                    "description":"Lookup docs",
+                    "parameters":{"type":"object","properties":{"q":{"type":"string"}}}
+                }]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("OpenAI Chat provider response must project to Responses");
+
+    match result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["id"], "chatcmpl-field-parity-response");
+            assert_eq!(body["model"], "chat-wire-model");
+            assert_eq!(body["created_at"], 1234567890);
+            assert_eq!(body["status"], "requires_action", "{body}");
+            assert_eq!(body["output"][0]["type"], "reasoning");
+            assert_eq!(
+                body["output"][0]["summary"][0]["text"],
+                "safe reason summary"
+            );
+            assert_eq!(body["output"][1]["type"], "output_text");
+            assert_eq!(body["output"][1]["text"], "visible answer");
+            assert_eq!(body["output"][2]["type"], "function_call");
+            assert_eq!(body["output"][2]["call_id"], "call_lookup_response");
+            assert_eq!(body["finish_reason"], "tool_calls");
+            assert_eq!(body["usage"]["input_tokens"], 11);
+            assert_eq!(body["usage"]["output_tokens"], 7);
+            assert_eq!(body["usage"]["total_tokens"], 18);
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("field parity response matrix must be JSON"),
+    }
 }
 
 #[tokio::test]
@@ -1967,10 +3104,12 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
         },
         &transport,
         &provider_health,
-        &state,
-        &stopless_control,
-        scope,
-        12_500,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            12_500,
+        ),
     )
     .await
     .expect("replayed stopless no-op CLI pair must not block provider send");
@@ -2019,12 +3158,26 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
         .expect("provider system/developer guidance");
-    assert!(
-        system.contains("继续完成当前目标") && system.contains("reasoningStop"),
-        "provider wire must carry short stopless guidance, got: {system}"
-    );
+    assert_full_stopless_system_guidance(system);
+    let messages = body["messages"].as_array().expect("provider messages");
+    let continuation_prompt = messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .filter_map(|message| message.get("content").and_then(Value::as_str))
+        .find(|content| content.contains("继续当前目标") && content.contains("复核当前目标"))
+        .expect("provider wire must receive one transparent ordinary continuation user prompt");
+    assert_full_stopless_continuation_prompt(continuation_prompt);
     match result.client_body {
-        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["status"], "requires_action");
+            let arguments = stopless_projected_call(&body)["arguments"]
+                .as_str()
+                .expect("projected stopless arguments");
+            assert!(
+                !arguments.contains("--input-json"),
+                "replayed stopless shell cleanup must not regress into an input-envelope CLI projection: {arguments}"
+            );
+        }
         V3ResponsesRelayClientBody::Sse(_) => panic!("test response must be JSON"),
     }
 }
@@ -2043,13 +3196,15 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
             "type":"function",
             "name":"wait",
             "description":"Wait",
-            "parameters":{"type":"object","properties":{"seconds":{"type":"number"}}}
+            "parameters":{"type":"object","properties":{"seconds":{"type":"number"}}},
+            "strict":false
         },
         {
             "type":"function",
             "name":"request_user_input",
             "description":"Ask",
-            "parameters":{"type":"object","properties":{"prompt":{"type":"string"}}}
+            "parameters":{"type":"object","properties":{"prompt":{"type":"string"}}},
+            "strict":true
         }
     ]);
     let transport = ProviderProjectionOpenAiChatSseTransport {
@@ -2087,18 +3242,20 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
     .await
     .expect("OpenAI Chat provider SSE must re-enter Responses relay Chat Process");
 
-    let captures = transport.captures.lock().unwrap();
-    assert_eq!(
-        captures.len(),
-        1,
-        "provider SSE send cutpoint must be captured"
-    );
-    let projection = &captures[0];
+    let projection = {
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(
+            captures.len(),
+            1,
+            "provider SSE send cutpoint must be captured"
+        );
+        captures[0].clone()
+    };
     assert_eq!(
         projection["url"], "http://chatwire.invalid/v1/chat/completions",
         "streaming responses relay selected openai_chat provider must send OpenAI Chat wire URL: {projection}"
     );
-    let body = provider_projection_body(projection);
+    let body = provider_projection_body(&projection);
     assert_eq!(
         body["stream"],
         json!(true),
@@ -2113,6 +3270,10 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
         "OpenAI Chat provider SSE guidance must be carried by provider-visible messages: {body}"
     );
     assert_provider_chat_stopless_guidance(body);
+    assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
+        body,
+        original_tools.as_array().unwrap(),
+    );
     assert_no_structured_stopless_control_fields(body, "provider.chat.sse");
 
     let observability = result
@@ -2124,15 +3285,15 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
         observability.response_status.as_deref(),
         Some("requires_action")
     );
-    assert_eq!(observability.finish_reason.as_deref(), Some("stop"));
-    assert!(observability.stopless_activation);
+    assert_eq!(observability.finish_reason.as_deref(), Some("tool_calls"));
+    assert!(!observability.stopless_activation);
     let snapshot = result
         .stream_observation
         .as_ref()
         .expect("OpenAI Chat provider SSE result must expose stream observation")
         .snapshot()
         .unwrap();
-    assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("tool_calls"));
     assert_eq!(snapshot.usage.as_ref().unwrap().total_tokens, Some(18));
 
     match result.client_body {
@@ -2143,16 +3304,79 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(
-                text.contains("event: response.requires_action") || text.contains("requires_action"),
-                "Responses client SSE must contain finalized stopless requires_action event: {text}"
+                text.contains("event: response.completed"),
+                "Responses client SSE must terminate OpenAI Chat tool-call projection with response.completed: {text}"
             );
             assert!(
-                text.contains("call_stopless_reasoning"),
-                "Responses client SSE must contain no-op stopless CLI call: {text}"
+                text.contains("event: response.done"),
+                "Responses client SSE must emit response.done before the [DONE] transport marker: {text}"
+            );
+            assert!(
+                !text.contains("event: response.requires_action"),
+                "Responses client SSE must not use response.requires_action as terminal stream event: {text}"
+            );
+            assert!(
+                text.contains("\"status\":\"requires_action\""),
+                "Responses client SSE must preserve Hub canonical requires_action status through downstream framing: {text}"
+            );
+            assert!(
+                text.contains("\"input_tokens\":11"),
+                "Downstream SSE frame must carry Hub canonical input_tokens normalized from OpenAI Chat provider usage: {text}"
+            );
+            assert!(
+                text.contains("\"output_tokens\":7"),
+                "Downstream SSE frame must carry Hub canonical output_tokens normalized from OpenAI Chat provider usage: {text}"
+            );
+            assert!(
+                !text.contains("\"prompt_tokens\""),
+                "Downstream SSE frame must not reintroduce OpenAI Chat provider-wire prompt_tokens: {text}"
+            );
+            assert!(
+                !text.contains("\"completion_tokens\""),
+                "Downstream SSE frame must not reintroduce OpenAI Chat provider-wire completion_tokens: {text}"
+            );
+            assert!(
+                text.contains("\"type\":\"reasoning\""),
+                "Responses client SSE must project OpenAI Chat reasoning_content as a Responses reasoning output item: {text}"
+            );
+            assert!(
+                text.contains("Need chat wire SSE before tool."),
+                "Responses client SSE must preserve OpenAI Chat reasoning_content as replay-safe summary text: {text}"
+            );
+            assert!(
+                !text.contains("reasoning_content"),
+                "Responses client SSE must not leak OpenAI Chat provider-wire reasoning_content field: {text}"
+            );
+            let reasoning_pos = text
+                .find("Need chat wire SSE before tool.")
+                .expect("projected reasoning summary");
+            let tool_pos = text.find("call_exec_sse").expect("projected tool call");
+            assert!(
+                reasoning_pos < tool_pos,
+                "OpenAI Chat provider reasoning must remain before tool call in Responses client SSE: {text}"
+            );
+            assert!(
+                text.contains("call_exec_sse"),
+                "Responses client SSE must preserve the OpenAI Chat provider tool call: {text}"
+            );
+            assert!(
+                !text.contains("call_stopless_reasoning"),
+                "OpenAI Chat tool-call response must not be rewritten as stopless no-op: {text}"
             );
             assert!(
                 text.contains("[DONE]"),
                 "Responses client SSE must transport final done frame: {text}"
+            );
+            let completed = text
+                .find("event: response.completed")
+                .expect("response completed event");
+            let done = text
+                .find("event: response.done")
+                .expect("response done event");
+            let marker = text.find("data: [DONE]").expect("DONE marker");
+            assert!(
+                completed < done && done < marker,
+                "Responses client SSE terminal ordering must be response.completed -> response.done -> [DONE]: {text}"
             );
             for forbidden in [
                 "stopreason",
@@ -2192,7 +3416,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
@@ -2201,6 +3425,17 @@ targets = [{ kind = "provider_model", provider = "controlled", model = "response
         .unwrap(),
     )
     .unwrap()
+}
+
+fn manifest_with_unsupported_provider_wire_target(
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = manifest();
+    manifest
+        .providers
+        .get_mut("controlled")
+        .expect("controlled provider")
+        .provider_type = "unsupported-test-provider".to_string();
+    manifest
 }
 
 fn manifest_openai_chat_wire() -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -2222,7 +3457,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "chat-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "reasoning"]
 [route_groups.chatwire.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "chatwire", model = "chat-wire-model", key = "controlled", priority = 1 }]

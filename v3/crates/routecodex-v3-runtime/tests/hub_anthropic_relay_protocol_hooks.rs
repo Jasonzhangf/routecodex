@@ -79,7 +79,7 @@ fn anthropic_entry_req_inbound_hook_encodes_to_responses_chat_semantic_before_re
     );
     assert_eq!(
         normalized.payload()["reasoning"],
-        json!({"effort":"medium"})
+        json!({"effort":"medium","thinking":{"type":"enabled","budget_tokens":1024}})
     );
     assert_eq!(normalized.entry_protocol(), V3HubEntryProtocol::Anthropic);
     assert_eq!(normalized.node_id(), "V3HubReqInbound02Normalized");

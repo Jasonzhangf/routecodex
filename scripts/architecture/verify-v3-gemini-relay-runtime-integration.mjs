@@ -53,10 +53,6 @@ for (const phrase of [
   'compile_v3_hub_v1_static_registry()',
   'V3HubEntryProtocol::Gemini',
   'V3HubProviderWireProtocol::Gemini',
-  'characterize_v3_gemini_client_input_to_hub_semantic',
-  'characterize_v3_gemini_hub_semantic_to_provider_wire',
-  'characterize_v3_gemini_provider_raw_to_hub_response_semantic',
-  'characterize_v3_gemini_hub_response_semantic_to_client_projection',
   'run_from_normalized',
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',
@@ -148,6 +144,12 @@ for (const phrase of [
   'return "gemini".to_string();',
 ]) requireText(virtualRouter, virtualRouterPath, phrase);
 for (const phrase of ['metadata_center', 'debug_snapshot', 'resource_handle', 'continuation_owner']) requireText(codec, codecPath, phrase);
+for (const phrase of [
+  'characterize_v3_gemini_client_input_to_hub_semantic',
+  'characterize_v3_gemini_hub_semantic_to_provider_wire',
+  'characterize_v3_gemini_provider_raw_to_hub_response_semantic',
+  'characterize_v3_gemini_hub_response_semantic_to_client_projection',
+]) requireText(codec, codecPath, phrase);
 
 const geminiServerProjection = slice(server, 'fn gemini_relay_output_response', 'fn anthropic_relay_output_response');
 forbid(geminiServerProjection, serverPath, [

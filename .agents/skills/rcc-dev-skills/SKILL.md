@@ -74,6 +74,7 @@ description: RouteCodex 调试与架构路由入口
 ## 修改前 / 验证后 必做
 
 - 修改前：必须同时看 `function map` 和 `mainline source`，确认模块边界、允许路径、禁止路径、主线 caller/callee。
+- V3 Hub v1 node-file topology：每个 contract node 的 struct 和相邻 builder/parser 必须在对应 `v3/crates/routecodex-v3-runtime/src/hub_v1/<node>.rs` split owner file；`hub_v1.rs` 只允许 `mod` / `pub use` / `#[cfg(test)] mod tests` 根聚合面。改 V3 Hub v1 map/source/gate 前先跑或补 `verify:v3-hub-v1-node-file-topology`，禁止把 node 实现、map owner 或红测 fixture 指回 root aggregator。
 - 配置/loader/VR/Hub/Pipeline 接线前：必须先完成未接线状态下的模块黑盒与旧配置样本对比，证明新实现能读取/等价处理现有用户配置；黑盒未绿禁止接线、禁止启动/重启 live server。
 - 禁止为绕过代码缺陷去修改 `~/.rcc` 或用户真实配置文件。若现有配置暴露兼容失败，必须回代码唯一 owner 修正；需要清理/迁移用户配置文件时必须先获得 Jason 明确授权。
 - 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
@@ -111,6 +112,7 @@ description: RouteCodex 调试与架构路由入口
 | 2026-05 lessons | `references/91-lessons-2026-05.md` | 5 月沉淀 |
 | 2026-06 lessons | `references/92-lessons-2026-06.md` | 6 月沉淀 |
 | 2026-07 lessons | `references/93-lessons-2026-07.md` | 7 月沉淀 |
+| V3 stopless SOP | `references/95-v3-stopless-sop.md` | V3 stopless 三轮合同、节点检查、provider/client 黑盒、live closeout |
 
 ## 最小使用法
 

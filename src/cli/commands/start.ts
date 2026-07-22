@@ -489,9 +489,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
         };
 
-        // Start is launch-only. Existing runtime replacement must use
-        // `rcc restart`; only explicit --exclusive remains a takeover command.
-        const shouldRestart = options.exclusive === true;
+        const restartExplicitlyDisabled = options.restart === false;
+        const shouldRestart = options.exclusive === true || !restartExplicitlyDisabled;
         const grouped = hasMultiPortConfig
           ? resolvedPortGroup
           : (ctx.isDevPackage
@@ -644,6 +643,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
           const guard = planRuntimeStartRestartTakeoverGuard({
             explicitRestart: options.restart === true,
+            noRestart: restartExplicitlyDisabled,
             exclusive: false,
             daemonSupervisor,
             occupiedPorts: occupied.map((item) => item.port)
@@ -663,9 +663,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               }))
             }
           });
-          spinner.fail(`rcc start refuses to stop existing RouteCodex runtime on port-group: ${guard.ports.join(', ')}`);
-          ctx.logger.error(`Use 'rcc restart --port ${resolvedPort} --host ${serverHost}' for in-session restart.`);
-          ctx.logger.error(`Use 'rcc stop --port ${resolvedPort}' before start only when an explicit stop is intended.`);
+          spinner.fail(`rcc start --no-restart refuses to stop existing RouteCodex runtime on port-group: ${guard.ports.join(', ')}`);
+          ctx.logger.error(`Use plain start without --no-restart to take over the occupied port-group.`);
+          ctx.logger.error(`Use 'rcc stop --port ${resolvedPort}' only when an explicit stop without restart is intended.`);
           ctx.exit(1);
         };
         await refuseStartTakeoverIfOccupied();
@@ -727,14 +727,14 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (shouldRestart && !daemonSupervisor) {
           for (const p of effectivePortGroup) {
             writeDaemonStopIntent(p, {
-              source: 'cli.start.exclusive_takeover',
+              source: options.exclusive === true ? 'cli.start.exclusive_takeover' : 'cli.start.port_takeover',
               routeCodexHomeDir: routeCodexHome,
               pid: process.pid
             });
           }
         }
         for (const p of effectivePortGroup) {
-          await ctx.ensurePortAvailable(p, spinner, { restart: shouldRestart });
+          await ctx.ensurePortAvailable(p, spinner, { restart: shouldRestart, targetPorts: effectivePortGroup });
         }
 
         const isMultiPortGroup = effectivePortGroup.length > 1;

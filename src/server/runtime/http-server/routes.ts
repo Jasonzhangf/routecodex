@@ -819,6 +819,118 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getServerPort: () => (typeof config?.server?.port === 'number' ? config.server.port : undefined)
   });
 
+  app.post('/_routecodex/admin/ports/:port/stop', (req: Request, res: Response) => {
+    const port = Number.parseInt(String(req.params.port || ''), 10);
+    const ip = req.socket?.remoteAddress || '';
+    const stopAudit = {
+      requestTs: new Date().toISOString(),
+      remoteIp: ip,
+      method: req.method,
+      path: req.path,
+      userAgent: req.get('user-agent') || '',
+      forwardedFor: req.get('x-forwarded-for') || '',
+      origin: req.get('origin') || '',
+      referer: req.get('referer') || '',
+      authPresent: Boolean(req.get('authorization') || req.get('x-api-key')),
+      callerPid: (req.get('x-routecodex-stop-caller-pid') || '').slice(0, 64),
+      callerTs: (req.get('x-routecodex-stop-caller-ts') || '').slice(0, 128),
+      callerCwd: (req.get('x-routecodex-stop-caller-cwd') || '').slice(0, 512),
+      callerCmd: (req.get('x-routecodex-stop-caller-cmd') || '').slice(0, 1024)
+    };
+    try {
+      if (!isLocalRequest(req)) {
+        logProcessLifecycleSync({
+          event: 'port_scoped_shutdown_route',
+          source: 'http.routes.port_scoped_shutdown',
+          details: { result: 'forbidden', port, ...stopAudit }
+        });
+        res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+        return;
+      }
+      if (!Number.isInteger(port) || port <= 0) {
+        res.status(400).json({ error: { message: `Invalid port number: ${req.params.port}`, code: 'invalid_port' } });
+        return;
+      }
+      if (!hasShutdownCallerProvenance(stopAudit)) {
+        logProcessLifecycleSync({
+          event: 'port_scoped_shutdown_route',
+          source: 'http.routes.port_scoped_shutdown',
+          details: { result: 'forbidden_missing_caller', port, ...stopAudit }
+        });
+        res.status(403).json({
+          error: {
+            message: 'RouteCodex port-scoped stop requires caller provenance headers',
+            code: 'shutdown_caller_required'
+          }
+        });
+        return;
+      }
+      const registry = typeof options.getPortRegistry === 'function'
+        ? (options.getPortRegistry() as null | {
+          has?: (port: number) => boolean;
+          removePort?: (port: number) => Promise<void>;
+          size?: number;
+        })
+        : null;
+      if (!registry || typeof registry.removePort !== 'function') {
+        res.status(404).json({ error: { message: 'port registry unavailable', code: 'port_registry_unavailable' } });
+        return;
+      }
+      if (typeof registry.has === 'function' && !registry.has(port)) {
+        res.status(404).json({ error: { message: `Port ${port} not found`, code: 'not_found' } });
+        return;
+      }
+
+      logProcessLifecycleSync({
+        event: 'port_scoped_shutdown_route',
+        source: 'http.routes.port_scoped_shutdown',
+        details: { result: 'accepted', port, ...stopAudit }
+      });
+      res.status(200).json({ ok: true, port });
+      setTimeout(() => {
+        registry.removePort!(port)
+          .then(() => {
+            if (typeof registry.size === 'number' && registry.size === 0 && process.env.NODE_ENV !== 'test') {
+              logProcessLifecycleSync({
+                event: 'self_termination',
+                source: 'http.routes.port_scoped_shutdown',
+                details: {
+                  result: 'intent',
+                  reason: 'last_listener_removed',
+                  signal: 'SIGTERM',
+                  targetPid: process.pid,
+                  port,
+                  ...stopAudit
+                }
+              });
+              process.kill(process.pid, 'SIGTERM');
+            }
+          })
+          .catch((error: unknown) => {
+            logProcessLifecycleSync({
+              event: 'port_scoped_shutdown_route',
+              source: 'http.routes.port_scoped_shutdown',
+              details: { result: 'remove_failed', port, error, ...stopAudit }
+            });
+          });
+      }, 50);
+    } catch (error) {
+      logProcessLifecycleSync({
+        event: 'port_scoped_shutdown_route',
+        source: 'http.routes.port_scoped_shutdown',
+        details: { result: 'exception', port, error, ...stopAudit }
+      });
+      try {
+        res.status(500).json({ error: { message: 'port-scoped stop route failed', code: 'port_scoped_shutdown_route_failed' } });
+      } catch (responseError) {
+        logRoutesNonBlockingError('portScopedShutdownRoute.sendErrorOnException', responseError, {
+          path: req.path,
+          method: req.method
+        });
+      }
+    }
+  });
+
   app.post('/shutdown', (req: Request, res: Response) => {
     try {
       const ip = req.socket?.remoteAddress || '';

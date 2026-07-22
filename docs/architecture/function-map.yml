@@ -386,6 +386,7 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
+      - "V3 stopless override: see `.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md` and `feature_id: v3.servertool_hook_skeleton_lifecycle`; V3 `reasoningStop` CLI is no-input no-op and StoplessCenter state lives only in MetadataCenter."
       - "Stopless is not an outbound owner and not an SSE owner. Request-side stopless belongs to the ReqChatProcess entry boundary after `/v1/responses` continuation restore and before normal request governance; response-side stopless belongs to the RespChatProcess exit boundary before continuation save and before RespOutbound."
       - "Response-side stopless projection is a standard `ServertoolRespHook` skeleton step inside `HubRespChatProcess03Governed`, not an inline outbound/SSE patch; TS may only apply Rust effect plans such as MetadataCenter writes."
       - "servertool-core owns stopless CLI continuation planning; stopless must project client-visible exec_command and must not call reenterPipeline."
@@ -394,25 +395,25 @@ owners:
       - "For stopless, the response hook gate reads the assistant text/fence from `finish_reason=stop`; `<rcc_stop_schema>...</rcc_stop_schema>` and standalone stop-schema JSON fences are accepted schema sources."
       - "Managed relay stopless has two separate surfaces: provider-facing/model-visible internal `reasoningStop` is injected exactly once with the stop schema contract on every stopless-managed provider request, while client-visible continuation uses the public CLI alias inside `exec_command(routecodex hook run reasoningStop ...)`."
       - "Stopless must not activate on same-protocol direct/provider-direct response paths; existing runtime metadata routeName is the only allowed discriminator for this bypass."
-      - "If `finish_reason=stop` arrives without schema on consecutive rounds 1 or 2, RouteCodex projects the public `reasoningStop` CLI and the next provider request receives a deterministic no-schema repair prompt; the model-facing schema guide is the complete system instruction plus the internal `reasoningStop` tool schema."
-      - "If `finish_reason=stop` arrives with non-terminal, invalid, or malformed schema on consecutive rounds 1 or 2, RouteCodex projects the public CLI; valid `stopreason=2 + current_goal + next_step` becomes the exact next provider user prompt and does not consume schema-error budget, while invalid/missing fields become deterministic field-level repair prompts."
-      - "Stop schema fields are conditionally required, not globally required: `simple_question=true` allows natural stop for very simple user inputs without `stopreason`; otherwise `stopreason` is unconditional; `stopreason=0` requires `has_evidence=1` plus non-empty `evidence`; `stopreason=1` requires non-empty `reason`, `has_evidence=1`, and non-empty `evidence`; `stopreason=2` requires `current_goal` plus `next_step`; diagnostic fields are optional unless a future rule explicitly makes them conditional."
-      - "For `stopreason=2`, `current_goal` remains required as structured state, but the provider-facing continuation text must use the model's own `next_step` directly, without wrapping it in a hardcoded completion-check prompt. For `blocked + needs_user_input=true`, the finalized client response must include summary/reason/evidence plus the user decision question and stop with `finish_reason=stop`."
-      - "For invalid/malformed schema, the CLI may return private structured control feedback (`reasonCode`, `missingFields`) for ReqChatProcess state, but provider requests must not expose those fields, schemaGuidance, repeatCount, or raw shell/tool history."
+      - "If `finish_reason=stop` arrives without schema on consecutive rounds 1 or 2, RouteCodex projects the public no-input `reasoningStop` CLI and the next provider request receives a StoplessCenter policy-selected, complete, model-transparent current-turn guideline; the model-facing schema guide is the complete system instruction plus the internal `reasoningStop` tool schema."
+      - "If `finish_reason=stop` arrives with non-terminal, invalid, malformed schema, or valid `stopreason=2` / need_continue on consecutive rounds 1 or 2, RouteCodex projects the public no-input CLI; V3 stores classification/policy as StoplessCenter state and ReqChatProcess emits the complete model-transparent current-turn guideline without exposing CLI stdout, `next_step`, repeatCount, schemaFeedback, or bridge mechanism."
+      - "Stop schema fields are conditionally required, not globally required: `simple_question=true` allows natural stop for very simple user inputs without `stopreason`; otherwise `stopreason` is unconditional; `stopreason=0` requires `has_evidence=1` plus non-empty `evidence`; `stopreason=1` requires non-empty `reason`, `has_evidence=1`, and non-empty `evidence`; `stopreason=2` means continue-needed and does not make prompt/control fields part of the provider-visible history; diagnostic fields are optional unless a future rule explicitly makes them conditional."
+      - "For V3 `stopreason=2` / need_continue, provider-facing continuation text is chosen by StoplessCenter `next_request_policy`; do not route it through CLI input/stdout. For `blocked + needs_user_input=true`, the finalized client response must include summary/reason/evidence plus the user decision question and stop with `finish_reason=stop`."
+      - "For invalid/malformed schema, Resp03 writes private structured control feedback into StoplessCenter; CLI must not return or carry `reasonCode`, `missingFields`, `repeatCount`, `next_step`, schemaGuidance, or raw shell/tool history."
       - "If `finish_reason=stop` arrives with schema and the schema satisfies terminal stop conditions, RouteCodex allows the provider response to stop normally."
-      - "When stopless auto-projects the public CLI, its returned result must be consumed during req_chatprocess as private control evidence and rewritten into one ordinary user turn, not preserved as model-owned tool-call history."
+      - "When stopless auto-projects the public CLI, its returned result must be consumed during req_chatprocess as private bridge evidence and rewritten into one model-transparent ordinary user turn, not preserved as model-owned tool-call history and not explained to the model as no-op/CLI/client bridge."
       - "When the client executes the shell projection and submits the result, request-side governance must consume the `exec_command` call/result pair as private current-turn evidence and replace it with one ordinary user message; the raw shell pair and its `function_call_output` must not reach the provider, while the per-request internal `reasoningStop` tool declaration is re-injected exactly once for managed relay only."
       - "Client-visible stopless projection text must be ordinary assistant text (`message.content` / Responses `output_text`), never `reasoning_text` / `reasoning_content` / `reasoning.summary`; provider-facing continuation is an ordinary user message."
       - "For `/v1/responses`, req-side stopless contract cannot rely on `messages` only: the request mainline must preserve the contract in `instructions`, and the responses bridge must materialize that contract back into the outbound chat/system message before provider wire build."
-      - "CLI command and stdout stay status/control-only. Model-facing continuation text is built by ReqChatProcess, and the complete stop schema is supplied only by the provider-visible system instruction."
+      - "V3 CLI command and stdout stay no-input/no-state/no-parse. Model-facing continuation text is built by ReqChatProcess from StoplessCenter as a complete current-turn guideline, and the complete stop schema is supplied only by the provider-visible system instruction plus fresh internal `reasoningStop` tool."
       - "Client-visible exec_command must use the public stopless alias `reasoningStop`; the client payload must not leak internal marker `__servertool_cli_projection`."
-      - "NoSchema is not a schema-less stop contract: model-facing schema guidance is locked by the provider-visible stopless system instruction and internal `reasoningStop` tool schema; CLI stdout keeps private control state such as `input.triggerHint=no_schema` and does not need schemaGuidance."
-      - "NoSchema stopless progression must advance `used/repeatCount` from current request tool_output/runtime metadata truth, not through file persistence or tmux/sessionDir fallback."
+      - "NoSchema is not a schema-less stop contract: model-facing schema guidance is locked by the provider-visible stopless system instruction and internal `reasoningStop` tool schema; V3 CLI stdout carries no private control state."
+      - "NoSchema stopless progression must advance StoplessCenter consecutive_stop_count from MetadataCenter scoped state plus current no-op evidence, not through CLI stdout, file persistence, tmux/sessionDir fallback, or continuation store."
       - "Stopless interception requires current request-truth `sessionId`; if `sessionId` is missing or blank, response-side stopless must not intercept, must not write stopless runtime state, and must emit a visible diagnostic alarm `stopless_missing_session_id` while the response naturally passes through."
-      - "Stopless repeatCount is a same-session consecutive schema-error budget only: non-stop progress, ordinary tool calls, valid terminal schema, `simple_question=true`, and session changes reset the streak; different `sessionId` values must never share accumulated repeatCount."
+      - "Stopless consecutive_stop_count is a same-session state-machine budget only: non-stop progress, ordinary tool calls, valid terminal schema, `simple_question=true`, real user turn, and session changes reset the streak; different `sessionId` values must never share accumulated state."
       - "Response-side stopless activation must read the current request-scoped control slot `MetadataCenter.runtime_control.stopless.active`; tests must cover this live shape, not legacy `requestTruth.runtimeControl` or top-level metadata mirrors."
       - "Legacy shell-projected stop history such as `exec_command(cmd=\"reasoningStop\")`, `reasoning_stop`, and paired tool outputs must be physically removed during req-side normalization instead of replayed into later provider requests."
-      - "Model side must stay unaware of stopless identity. Stopless identity comes from write-once `request_truth.sessionId/requestId`; stopless control and progression come from Rust-produced `MetadataCenter.runtime_control.stopless` plus current request tool_output. `sessionDir`/persisted writeback and `requestTruth.runtimeControl` are forbidden."
+      - "Model side must stay unaware of stopless identity. Stopless identity comes from write-once `request_truth.sessionId/requestId`; stopless control and progression come from Rust-produced `MetadataCenter.runtime_control.stopless`, while current request no-op tool_output is only completion evidence. `sessionDir`/persisted writeback and `requestTruth.runtimeControl` are forbidden."
       - "ReqChatProcess is the standard write origin for stopless runtime control: Rust request governance emits `metadata.runtime_control.stopless`, and the TS request-stage shell may only commit that Rust plan into the bound MetadataCenter with fail-fast binding checks."
       - "Stopless execution/control composition and orchestration planning are owned by the Rust Chat Process engine; TS may only expose unavoidable external IO/native-call shells and must not build stopless context/requestTruth/session truth or reenter for stopless CLI flows."
       - "Retired zero-consumer stop-message auto TS wrapper `native-stop-message-auto-semantics.ts` is physically deleted; tests call direct Rust/NAPI `decideStopMessageAction` and `evaluateStopSchemaGateJson` through test-only helper code, not a runtime TS owner."
@@ -6338,10 +6339,12 @@ owners:
       - src/cli/commands/port-group-resolver.ts
       - src/cli/commands/restart.ts
       - src/cli/register/restart-command.ts
+      - src/utils/managed-server-pids.ts
       - src/cli.ts
       - src/server/runtime/http-server/daemon-admin/restart-handler.ts
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
+      - tests/utils/managed-server-pids.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
       - scripts/install-release.sh
       - docs/goals/runtime-aggregate-restart-test-design.md
@@ -6366,14 +6369,15 @@ owners:
       - "Default start and explicit `start --restart` must not be used as restart-command bypasses. If an existing listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`; only explicit `--exclusive` remains a destructive takeover path."
   - feature_id: runtime.lifecycle.start_command
     status: active
-    summary: "CLI start owns server process launch; default start and explicit start --restart must not hide restart semantics behind takeover"
+    summary: "CLI start owns server process launch and port takeover intent; occupied target ports are released before bind unless --no-restart forbids takeover"
     owner_kind: rust_ssot
-    owner_scope: "start takeover guard decision plan; TS start command only observes listener pids and executes launch/IO"
+    owner_scope: "start takeover guard decision plan; TS start command observes listener pids, writes explicit stop-intent, asks port-utils for target-port release, then executes launch/IO"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
     resource_bindings:
       writes:
         - runtime.pid_cache@ServerPidCacheRecord
         - runtime.instance_record@RuntimeInstanceRecord
+        - runtime.stop_intent@StopIntentRecord
       reads:
         - runtime.stop_intent@StopIntentRecord
         - runtime.instance_record@RuntimeInstanceRecord
@@ -6392,7 +6396,10 @@ owners:
       - src/cli/commands/start.ts
       - src/cli/commands/start-types.ts
       - src/cli/commands/start-utils.ts
+      - src/cli/server/port-utils.ts
+      - src/utils/managed-server-pids.ts
       - tests/cli/start-command.spec.ts
+      - tests/cli/port-utils.spec.ts
       - scripts/install-release.sh
       - tests/scripts/install-release-dependencies.spec.ts
       - docs
@@ -6402,13 +6409,77 @@ owners:
     required_tests:
       - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
       - tests/cli/start-command.spec.ts
+      - tests/cli/port-utils.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Rust guard decides whether explicit `rcc start --restart` may proceed. Existing live runtime/listener must fail before `cli.start.restart_takeover` stop-intent or ensurePortAvailable restart takeover."
+      - "Rust guard now allows default start and explicit `rcc start --restart` to take over occupied target ports; only `--no-restart` refuses before stop-intent or shutdown."
+      - "Takeover must first request port-scoped graceful stop through `/_routecodex/admin/ports/:port/stop`; signal fallback is allowed only for explicit managed PID(s) that do not also listen on non-target ports."
+      - "`--port` is a locator/target for port-scoped release. A managed PID serving sibling ports must not be SIGTERM/SIGKILLed for a single target-port takeover."
+  - feature_id: runtime.lifecycle.port_scoped_start_stop
+    status: active
+    summary: "V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process"
+    owner_kind: mixed_boundary_contract
+    owner_scope: "CLI start/stop and HTTP port registry coordinate port-scoped listener release; Rust owns start takeover guard and lifecycle record plans, TS executes HTTP listener close and explicit safe PID signals only"
+    owner_module: src/cli/server/port-utils.ts
+    resource_bindings:
+      writes:
+        - runtime.stop_intent@StopIntentRecord
+        - runtime.instance_record@RuntimeInstanceRecord
+        - runtime.http_entry_dispatch@PortRegistry
+      reads:
+        - runtime.pid_cache@ServerPidCacheRecord
+        - runtime.http_entry_dispatch@PortRegistry
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - StopCommandContext
+      - PortRegistry
+      - RuntimeStartRestartTakeoverGuardPlan
+    canonical_builders:
+      - ensurePortAvailableImpl
+    allowed_paths:
+      - src/cli/commands/start.ts
+      - src/cli/commands/stop.ts
+      - src/cli/commands/start-types.ts
+      - src/cli/server/port-utils.ts
+      - src/cli.ts
+      - src/server/runtime/http-server/routes.ts
+      - src/server/runtime/http-server/port-registry.ts
+      - src/utils/managed-server-pids.ts
+      - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/runtime_lifecycle.rs
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
+      - tests/cli/port-utils.spec.ts
+      - tests/server/http-server/port-mode-routing.spec.ts
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
+      - docs
+      - .agents/skills/rcc-dev-skills
+    forbidden_paths:
+      - src/providers
+      - src/server/runtime/http-server/executor
+      - v3
+    required_tests:
+      - tests/sharedmodule/runtime-lifecycle-direct-native.spec.ts
+      - tests/cli/start-command.spec.ts
+      - tests/cli/stop-command.spec.ts
+      - tests/cli/port-utils.spec.ts
+      - tests/server/http-server/port-mode-routing.spec.ts
+    required_gates:
+      - npm run build:native-hotpath
+      - npm run verify:runtime-lifecycle-pid-rebase
+      - npm run verify:function-map-compile-gate
+    migration_target: rust
+    notes:
+      - "Default `rcc start` and explicit `rcc start --restart` may release occupied configured target ports; `--no-restart` is the only launch-only refusal path."
+      - "Explicit `rcc stop --port <port>` is port-scoped and must call `/_routecodex/admin/ports/:port/stop`, not aggregate `/shutdown`; no-port stop keeps existing configured group semantics."
+      - "Signal fallback is fail-fast when a managed PID still owns non-target listener ports; do not kill a multi-listener process to satisfy a single-port stop/takeover."
   - feature_id: server.http_runtime_entry
     status: active
     summary: "RouteCodexHttpServer index shell owns port registry and per-port dispatch wiring"
@@ -9054,6 +9125,8 @@ owners:
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -9070,6 +9143,8 @@ owners:
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
       - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs

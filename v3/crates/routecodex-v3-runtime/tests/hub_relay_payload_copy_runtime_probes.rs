@@ -7,8 +7,8 @@ use routecodex_v3_runtime::{
     V3HubContinuationCommit, V3HubContinuationLookup, V3HubContinuationOwnership,
     V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
     V3HubProviderWireProtocol, V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile,
-    V3HubResponseNormalizedKind, V3HubServertoolRequestProfile, V3HubServertoolResponseAction,
-    V3HubTransportIntent,
+    V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind, V3HubServertoolRequestProfile,
+    V3HubServertoolResponseAction, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
 
@@ -59,7 +59,6 @@ fn large_input(label: &str) -> Value {
 #[test]
 fn relay_json_moves_one_business_payload_through_req04() {
     let payload = large_input("json");
-    let expected = large_input("json");
     let outcome = compile_v3_hub_relay_request_hooks()
         .run(
             request_raw(payload),
@@ -68,7 +67,28 @@ fn relay_json_moves_one_business_payload_through_req04() {
         )
         .expect("Relay JSON request probe");
 
-    assert_eq!(outcome.payload(), &expected);
+    let observed = outcome.payload();
+    assert_eq!(
+        outcome.semantic_protocol(),
+        V3HubRequestSemanticProtocol::Chat
+    );
+    assert_eq!(observed["model"], json!("client-alias"));
+    assert_eq!(observed["metadata"], json!({"client_owned": true}));
+    assert!(
+        observed.get("input").is_none(),
+        "ReqInbound02 must move Responses input into Chat canonical messages before Req04"
+    );
+    let messages = observed["messages"]
+        .as_array()
+        .expect("ReqInbound02 Chat canonical messages");
+    assert_eq!(messages.len(), 128);
+    for (index, message) in messages.iter().enumerate() {
+        assert_eq!(message["role"], json!("user"));
+        assert_eq!(
+            message["content"],
+            json!(format!("json-{index}-{}", "x".repeat(256)))
+        );
+    }
     assert_eq!(outcome.continuation(), V3HubContinuationOwnership::New);
 }
 

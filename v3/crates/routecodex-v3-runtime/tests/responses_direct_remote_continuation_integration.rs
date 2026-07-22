@@ -1039,7 +1039,7 @@ auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
 responses = { process = "chat", streaming = "always", transport = "http" }
 [providers.p.models.m]
 wire_name = "wire-m"
-capabilities = ["text", "tools", "streaming"]
+capabilities = ["text", "tools"]
 supports_streaming = true
 [route_groups.g.pools.default]
 selection = { strategy = "priority" }
@@ -1056,7 +1056,7 @@ fn manifest_variant(
     enabled: bool,
     extra_capabilities: &[&str],
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let mut capabilities = vec!["tools", "streaming", "tool_outputs", "remote_continuation"];
+    let mut capabilities = vec!["text", "tools"];
     capabilities.extend_from_slice(extra_capabilities);
     let capabilities = capabilities
         .into_iter()
@@ -1077,16 +1077,16 @@ endpoints = ["responses"]
 enabled = {enabled}
 type = "responses"
 base_url = "http://controlled.invalid/v1"
-default_model = "m"
+	default_model = "gpt-5.5"
 auth = {{ type = "api_key", entries = [{{ alias = "{auth_alias}", env = "TEST_KEY" }}] }}
 responses = {{ process = "chat", streaming = "always", transport = "websocket_v2", websocket_v2_url = "wss://controlled.invalid/v1/responses" }}
-[providers.p.models.m]
-wire_name = "wire-m"
-capabilities = [{capabilities}]
-supports_streaming = true
-[route_groups.g.pools.default]
-selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "{auth_alias}", priority = 1 }}]
+	[providers.p.models."gpt-5.5"]
+	wire_name = "gpt-5.5"
+	capabilities = [{capabilities}]
+	supports_streaming = true
+	[route_groups.g.pools.default]
+	selection = {{ strategy = "priority" }}
+	targets = [{{ kind = "provider_model", provider = "p", model = "gpt-5.5", key = "{auth_alias}", priority = 1 }}]
 "#,
             ),
         )

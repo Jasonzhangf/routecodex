@@ -26,7 +26,7 @@ const failures = [];
 for (const [name, relative, from, to, diagnostic] of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-anthropic-relay-runtime-red-'));
   try {
-    for (const path of [runtime, 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs', server, driver, 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs', 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md', manifest]) {
+    for (const path of [runtime, 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs', server, driver, 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs', 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md', manifest]) {
       cpSync(resolve(repo, path), resolve(root, path), { recursive: true });
     }
     const target = resolve(root, relative);

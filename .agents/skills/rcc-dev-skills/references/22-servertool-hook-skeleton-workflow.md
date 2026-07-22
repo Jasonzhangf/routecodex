@@ -5,7 +5,7 @@
 - 用户要求“全流程 Rust / 0 TS 业务语义 / hook 骨架 / 黑盒闭环”。
 
 ## 核心结论
-- 业务执行生命周期仍是 client-visible CLI：`routecodex hook run <toolName> --input-json <json>`。
+- 业务执行生命周期仍是 client-visible CLI。一般有输入的 hook 使用 `routecodex hook run <toolName> --input-json <json>`；V3 stopless 的 `reasoningStop` 是 no-input no-op，必须使用 `routecodex hook run reasoningStop`，详见 `references/95-v3-stopless-sop.md`。
 - hook 不替代 CLI；hook 只治理请求/响应处理流程。
 - 标准骨架真源：`docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`。
 - 机器真源：`docs/architecture/mainline-call-map.yml` 的 `servertool.hook_skeleton.mainline`。
@@ -14,6 +14,7 @@
 - 归一化节点不做任何业务逻辑。inbound normalization 允许做“入口/上游协议 -> Hub chat process 语义”的相邻协议映射与 shape/字段类型校验；outbound normalization 允许做“Hub chat process 语义 -> provider/客户端入口协议”的相邻协议映射与投影。工具 identity 配对/唯一性/orphan 判定、工具治理和任何 hook 的逻辑 payload 处理都不能出现在归一化阶段。servertool/stopless hook 只能出现在 Chat Process 请求侧和响应侧。
 - provider compat 节点只承载标准 provider 协议与 provider-family 实现差异之间的微调。`ProviderReqCompat` / `ProviderRespCompat` 禁止重做协议映射、工具治理、route/model 选择、fallback/silent repair；只有真实 runtime owner 存在时才可把 manifest 边从 `binding_pending` 提升为 `anchored`。
 - stopless 是 servertool hook skeleton 上的第一个内置 hook，不是独立新骨架。响应侧拦截必须发生在 Chat Process 响应治理后、continuation save 前；请求侧拦截必须发生在 Chat Process 请求入口的 context/continuation restore 后、请求治理完成前。
+- V3 stopless 状态管理归 `MetadataCenter.runtime_control.stopless` / StoplessCenter 状态机；CLI 只闭合客户端工具轮，不能携带或返回 stopless 状态。
 
 ## 标准流程
 1. 先查 owner/map/wiki

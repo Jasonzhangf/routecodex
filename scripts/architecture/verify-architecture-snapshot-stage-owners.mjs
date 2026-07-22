@@ -117,6 +117,16 @@ for (const scanRoot of scanRoots) {
 }
 
 const contractDoc = read('docs/architecture/snapshot-stage-contract.md');
+for (const token of [
+  'diagnostic correlation only',
+  'L8 observability/debug',
+  'L5 Metadata Center',
+  'must never restore or own StoplessCenter control truth',
+]) {
+  if (!contractDoc.includes(token)) {
+    failures.push(`snapshot contract doc missing StoplessCenter observability owner boundary: ${token}`);
+  }
+}
 for (const exact of exactStages) {
   if (!contractDoc.includes(exact)) {
     failures.push(`snapshot contract doc missing exact stage token: ${exact}`);

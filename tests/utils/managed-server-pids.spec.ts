@@ -37,6 +37,19 @@ describe('managed server pid discovery', () => {
     ).toBe(true);
   });
 
+  it('isTrustedRouteCodexCommand accepts installed V3 rccv3 binary entry', () => {
+    expect(
+      isTrustedRouteCodexCommand(
+        '/Users/me/.rcc/install/current/dist/bin/rccv3 start -c /Volumes/extension/.rcc/config.5555.v2.toml --snap'
+      )
+    ).toBe(true);
+    expect(
+      isTrustedRouteCodexCommand(
+        '/Volumes/extension/.rcc/install/releases/routecodex-0.90.3962-2026-07-21T042844Z/dist/bin/rccv3 start -c /Volumes/extension/.rcc/config.5555.v2.toml --snap'
+      )
+    ).toBe(true);
+  });
+
   it('isTrustedRouteCodexCommand rejects unrelated commands', () => {
     expect(isTrustedRouteCodexCommand('/usr/bin/node /tmp/random-script.js')).toBe(false);
   });
@@ -158,6 +171,43 @@ describe('managed server pid discovery', () => {
     });
 
     expect(pids).toEqual([process.pid]);
+  });
+
+  it('listManagedServerPidsByPort accepts installed V3 rccv3 listener from lsof', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-rccv3-'));
+
+    const pids = listManagedServerPidsByPort(5555, {
+      routeCodexHomeDir: home,
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === 58669) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string, args?: string[]) => {
+        if (cmd === 'lsof') {
+          return {
+            stdout: '58669\n',
+            status: 0,
+            error: undefined
+          } as any;
+        }
+        if (cmd === 'ps') {
+          const joined = Array.isArray(args) ? args.join(' ') : '';
+          if (joined.includes('-p 58669')) {
+            return {
+              stdout: '/Users/me/.rcc/install/current/dist/bin/rccv3 start -c /Volumes/extension/.rcc/config.5555.v2.toml --snap',
+              status: 0,
+              error: undefined
+            } as any;
+          }
+          return { stdout: '', status: 1, error: undefined } as any;
+        }
+        throw new Error('unexpected command');
+      }) as any
+    });
+
+    expect(pids).toEqual([58669]);
   });
 
   it('listZombieChildrenByParentPids filters zombie processes by parent pid', () => {

@@ -1,6 +1,6 @@
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ForwarderTargetManifest, V3ResponsesTransportKind,
-    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
+    V3RouteGroupManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
@@ -65,12 +65,14 @@ default_model = "m"
 compatibility_profile = "chat:minimax"
 auth = { type = "api_key", entries = [{ alias = "ka", env = "KEY_A" }] }
 [providers.a.models.m]
+capabilities = ["text", "tools", "multimodal"]
 [providers.b]
 type = "responses"
 base_url = "http://b.invalid/v1"
 default_model = "m"
 auth = { type = "api_key", entries = [{ alias = "kb", env = "KEY_B" }] }
 [providers.b.models.m]
+capabilities = ["text", "tools", "multimodal"]
 [forwarders.inner]
 model = "m"
 selection = { strategy = "priority" }
@@ -192,8 +194,42 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
     }
 
     #[test]
-    fn all_internal_candidates_unavailable_is_explicit_exhaustion() {
-        let exhausted = V3TargetInterpreter::default()
+    fn streaming_is_not_a_candidate_capability_filter() {
+        let expanded = expanded_tools();
+        let mut candidate = expanded
+            .candidates
+            .first()
+            .expect("tools route must expand candidates")
+            .clone();
+        candidate.required_capabilities = vec!["streaming".into()];
+        candidate.model_capabilities = vec!["text".into(), "tools".into()];
+
+        assert!(
+            candidate_satisfies_required_capabilities(&candidate),
+            "stream is a transport intent and must not make an otherwise valid candidate unavailable"
+        );
+    }
+
+    #[test]
+    fn tool_outputs_are_part_of_tool_capability_for_relay_selection() {
+        let expanded = expanded_tools();
+        let mut candidate = expanded
+            .candidates
+            .first()
+            .expect("tools route must expand candidates")
+            .clone();
+        candidate.required_capabilities = vec!["tool_outputs".into()];
+        candidate.model_capabilities = vec!["text".into(), "tools".into()];
+
+        assert!(
+            candidate_satisfies_required_capabilities(&candidate),
+            "tool outputs are the second half of a tools roundtrip and must not require a separate provider config flag"
+        );
+    }
+
+    #[test]
+    fn default_floor_last_candidate_survives_health_cooldown() {
+        let selected = V3TargetInterpreter::default()
             .select_available(
                 expanded(),
                 &Availability {
@@ -201,9 +237,105 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
                 },
                 0,
             )
-            .unwrap_err();
-        assert_eq!(exhausted.route.hit_count, 1);
-        assert_eq!(exhausted.attempted_candidates.len(), 2);
+            .expect("default floor last provider must remain selectable while cooled");
+        assert_eq!(selected.route.hit_count, 1);
+        assert_eq!(selected.candidate.provider_id, "b");
+        assert_eq!(selected.attempts, 2);
+        assert!(selected.default_floor_protected);
+        assert!(selected.candidate.default_pool_member);
+        assert!(selected
+            .candidate
+            .pool_ids
+            .iter()
+            .any(|pool_id| pool_id == "default"));
+    }
+
+    #[test]
+    fn duplicate_optional_candidate_retains_default_floor_provenance() {
+        let expanded = expanded_tools();
+        let first = expanded
+            .candidates
+            .first()
+            .expect("tools route must keep first candidate");
+        assert_eq!(first.provider_id, "a");
+        assert!(
+            first.default_pool_member,
+            "deduped optional candidate must remember default membership"
+        );
+        assert!(first.pool_ids.iter().any(|pool_id| pool_id == "tools"));
+        assert!(first.pool_ids.iter().any(|pool_id| pool_id == "default"));
+    }
+
+    #[test]
+    fn multimodal_route_skips_text_only_candidate_even_when_text_candidate_is_available() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.vision]
+type = "responses"
+base_url = "http://vision.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "VISION_KEY" }] }
+[providers.vision.models.m]
+capabilities = ["text", "multimodal"]
+[providers.text]
+type = "responses"
+base_url = "http://text.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEXT_KEY" }] }
+[providers.text.models.m]
+capabilities = ["text"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "vision", model = "m", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "text", model = "m", key = "key", priority = 2 }
+]
+[route_groups.g.pools.multimodal]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", required_capabilities = ["multimodal"] }
+targets = [
+  { kind = "provider_model", provider = "text", model = "m", key = "key", priority = 1 }
+]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: None,
+                    capabilities: BTreeSet::from(["multimodal".into()]),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        let selected = target
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::from(["vision:key:m".into()]),
+                },
+                0,
+            )
+            .expect("multimodal default floor should protect the last compatible vision target");
+        assert_eq!(selected.candidate.provider_id, "vision");
+        assert!(selected.default_floor_protected);
     }
 
     #[test]
@@ -255,12 +387,16 @@ pub struct V3TargetCandidate {
     pub auth_alias: String,
     pub model_id: String,
     pub wire_model: String,
+    pub model_capabilities: Vec<String>,
     pub base_url: String,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
     pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
+    pub required_capabilities: Vec<String>,
+    pub pool_ids: Vec<String>,
+    pub default_pool_member: bool,
     pub path: Vec<String>,
 }
 
@@ -276,6 +412,7 @@ pub struct V3Target10ConcreteProviderSelected {
     pub candidate: V3TargetCandidate,
     pub unavailable_candidates: Vec<String>,
     pub attempts: usize,
+    pub default_floor_protected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -318,6 +455,14 @@ pub struct V3TargetInterpreter {
     cursors: Arc<Mutex<BTreeMap<String, usize>>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3TargetExpansionScope {
+    path: Vec<String>,
+    pool_ids: Vec<String>,
+    default_pool_member: bool,
+    required_capabilities: Vec<String>,
+}
+
 impl V3TargetInterpreter {
     pub fn resolve_exact_provider_model_auth(
         &self,
@@ -331,7 +476,12 @@ impl V3TargetInterpreter {
             Some(provider_id),
             Some(model_id),
             Some(auth_alias),
-            vec!["continuation:exact_pin".to_string()],
+            V3TargetExpansionScope {
+                path: vec!["continuation:exact_pin".to_string()],
+                pool_ids: vec!["continuation_exact_pin".to_string()],
+                default_pool_member: false,
+                required_capabilities: Vec::new(),
+            },
         )?
         .into_iter()
         .next()
@@ -353,16 +503,27 @@ impl V3TargetInterpreter {
             .get(&classified.route.routing_group_id)
             .ok_or(V3TargetError::SelectedPoolMissing)?;
         let mut candidates = Vec::new();
-        let mut candidate_keys = BTreeSet::new();
+        let mut candidate_indices = BTreeMap::new();
         let mut last_error = None;
+        let route_required_capabilities =
+            selected_route_required_capabilities(group, &classified.route);
         for (plan_index, entry) in classified.route.target_plan.iter().enumerate() {
-            let target = group
+            let pool = group
                 .pools
                 .get(&entry.pool_id)
-                .and_then(|pool| pool.targets.get(entry.target_index));
+                .ok_or(V3TargetError::SelectedPoolMissing)?;
+            let target = pool.targets.get(entry.target_index);
             let Some(target) = target else {
                 last_error = Some(V3TargetError::OpaqueTargetMissing);
                 continue;
+            };
+            let required_capabilities = if entry.pool_id == "default" {
+                route_required_capabilities.clone()
+            } else {
+                pool.match_rule
+                    .as_ref()
+                    .map(|rule| rule.required_capabilities.clone())
+                    .unwrap_or_default()
             };
             let mut visited = BTreeSet::new();
             match self.expand_route_target(
@@ -370,7 +531,12 @@ impl V3TargetInterpreter {
                 target,
                 deterministic_sample.wrapping_add(plan_index as u64),
                 &mut visited,
-                vec![format!("pool:{}", entry.pool_id)],
+                V3TargetExpansionScope {
+                    path: vec![format!("pool:{}", entry.pool_id)],
+                    pool_ids: vec![entry.pool_id.clone()],
+                    default_pool_member: entry.pool_id == "default",
+                    required_capabilities,
+                },
             ) {
                 Ok(expanded) => {
                     for candidate in expanded {
@@ -378,7 +544,10 @@ impl V3TargetInterpreter {
                             "{}:{}:{}",
                             candidate.provider_id, candidate.auth_alias, candidate.model_id
                         );
-                        if candidate_keys.insert(key) {
+                        if let Some(index) = candidate_indices.get(&key).copied() {
+                            merge_candidate_route_provenance(&mut candidates[index], &candidate);
+                        } else {
+                            candidate_indices.insert(key, candidates.len());
                             candidates.push(candidate);
                         }
                     }
@@ -402,7 +571,18 @@ impl V3TargetInterpreter {
         now_ms: u64,
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
+        let mut default_floor_candidate: Option<(usize, V3TargetCandidate)> = None;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
+            if !candidate_satisfies_required_capabilities(candidate) {
+                unavailable.push(format!(
+                    "{}:{}:{}:capability_mismatch",
+                    candidate.provider_id, candidate.auth_alias, candidate.model_id
+                ));
+                continue;
+            }
+            if candidate.default_pool_member {
+                default_floor_candidate = Some((index, candidate.clone()));
+            }
             let projection = availability.availability(
                 &candidate.provider_id,
                 Some(&candidate.auth_alias),
@@ -415,12 +595,22 @@ impl V3TargetInterpreter {
                     candidate: candidate.clone(),
                     unavailable_candidates: unavailable,
                     attempts: index + 1,
+                    default_floor_protected: false,
                 });
             }
             unavailable.push(format!(
                 "{}:{}:{}",
                 candidate.provider_id, candidate.auth_alias, candidate.model_id
             ));
+        }
+        if let Some((index, candidate)) = default_floor_candidate {
+            return Ok(V3Target10ConcreteProviderSelected {
+                route: expanded.route,
+                candidate,
+                unavailable_candidates: unavailable,
+                attempts: index + 1,
+                default_floor_protected: true,
+            });
         }
         Err(V3TargetExhaustion {
             route: Box::new(expanded.route),
@@ -434,7 +624,7 @@ impl V3TargetInterpreter {
         target: &V3RoutePoolTargetManifest,
         sample: u64,
         visited: &mut BTreeSet<String>,
-        path: Vec<String>,
+        scope: V3TargetExpansionScope,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
         match target.kind {
             V3RouteTargetKind::ProviderModel => self.expand_provider(
@@ -442,7 +632,7 @@ impl V3TargetInterpreter {
                 target.provider.as_deref(),
                 target.model.as_deref(),
                 target.key.as_deref(),
-                path,
+                scope,
             ),
             V3RouteTargetKind::Forwarder => self.expand_forwarder(
                 manifest,
@@ -452,7 +642,7 @@ impl V3TargetInterpreter {
                     .ok_or(V3TargetError::ProviderTargetIncomplete)?,
                 sample,
                 visited,
-                path,
+                scope,
             ),
         }
     }
@@ -463,12 +653,12 @@ impl V3TargetInterpreter {
         forwarder_id: &str,
         sample: u64,
         visited: &mut BTreeSet<String>,
-        mut path: Vec<String>,
+        mut scope: V3TargetExpansionScope,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
         if !visited.insert(forwarder_id.to_string()) {
             return Err(V3TargetError::ForwarderCycle(forwarder_id.to_string()));
         }
-        path.push(format!("forwarder:{forwarder_id}"));
+        scope.path.push(format!("forwarder:{forwarder_id}"));
         let forwarder = manifest
             .forwarders
             .get(forwarder_id)
@@ -490,7 +680,7 @@ impl V3TargetInterpreter {
                     target.provider.as_deref(),
                     target.model.as_deref().or(Some(forwarder.model.as_str())),
                     target.key.as_deref(),
-                    path.clone(),
+                    scope.clone(),
                 ),
                 V3RouteTargetKind::Forwarder => self.expand_forwarder(
                     manifest,
@@ -500,7 +690,7 @@ impl V3TargetInterpreter {
                         .ok_or(V3TargetError::ProviderTargetIncomplete)?,
                     sample.wrapping_add(index as u64),
                     visited,
-                    path.clone(),
+                    scope.clone(),
                 ),
             };
             match nested {
@@ -522,7 +712,7 @@ impl V3TargetInterpreter {
         provider_id: Option<&str>,
         model_id: Option<&str>,
         key: Option<&str>,
-        mut path: Vec<String>,
+        mut scope: V3TargetExpansionScope,
     ) -> Result<Vec<V3TargetCandidate>, V3TargetError> {
         let provider_id = provider_id.ok_or(V3TargetError::ProviderTargetIncomplete)?;
         let provider = manifest
@@ -538,7 +728,7 @@ impl V3TargetInterpreter {
                 provider_id: provider_id.to_string(),
                 model_id: model_id.to_string(),
             })?;
-        path.push(format!("provider:{provider_id}"));
+        scope.path.push(format!("provider:{provider_id}"));
         let entries = if let Some(key) = key {
             vec![provider
                 .auth
@@ -560,6 +750,7 @@ impl V3TargetInterpreter {
                 auth_alias: entry.alias.clone(),
                 model_id: model.id.clone(),
                 wire_model: model.wire_name.clone(),
+                model_capabilities: model.capabilities.clone(),
                 base_url: provider.base_url.clone(),
                 responses_transport: provider
                     .responses
@@ -573,7 +764,10 @@ impl V3TargetInterpreter {
                 compatibility_profile: provider.compatibility_profile.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
-                path: path.clone(),
+                required_capabilities: scope.required_capabilities.clone(),
+                pool_ids: scope.pool_ids.clone(),
+                default_pool_member: scope.default_pool_member,
+                path: scope.path.clone(),
             })
             .collect())
     }
@@ -616,5 +810,75 @@ impl V3TargetInterpreter {
             }
         }
         order
+    }
+}
+
+fn selected_route_required_capabilities(
+    group: &V3RouteGroupManifest,
+    route: &V3Router07OpaqueTargetHitOnce,
+) -> Vec<String> {
+    let mut capabilities = BTreeSet::new();
+    for capability in &route.request_capabilities {
+        capabilities.insert(capability.clone());
+    }
+    for entry in &route.target_plan {
+        if entry.pool_id == "default" {
+            continue;
+        }
+        let Some(pool) = group.pools.get(&entry.pool_id) else {
+            continue;
+        };
+        let Some(rule) = &pool.match_rule else {
+            continue;
+        };
+        for capability in &rule.required_capabilities {
+            capabilities.insert(capability.clone());
+        }
+    }
+    capabilities.into_iter().collect()
+}
+
+fn merge_candidate_route_provenance(
+    existing: &mut V3TargetCandidate,
+    duplicate: &V3TargetCandidate,
+) {
+    for pool_id in &duplicate.pool_ids {
+        if !existing.pool_ids.iter().any(|existing| existing == pool_id) {
+            existing.pool_ids.push(pool_id.clone());
+        }
+    }
+    for capability in &duplicate.required_capabilities {
+        if !existing
+            .required_capabilities
+            .iter()
+            .any(|existing| existing == capability)
+        {
+            existing.required_capabilities.push(capability.clone());
+        }
+    }
+    existing.default_pool_member |= duplicate.default_pool_member;
+}
+
+fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> bool {
+    candidate
+        .required_capabilities
+        .iter()
+        .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
+}
+
+fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
+    let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
+    match required {
+        "text" => has("text") || capabilities.is_empty(),
+        "tools" => has("tools"),
+        "search" | "web_search" => has("web_search"),
+        "multimodal" | "vision" => has("multimodal") || has("vision"),
+        "thinking" => has("thinking") || has("reasoning"),
+        "reasoning" => has("reasoning") || has("thinking"),
+        "remote_continuation" => has("remote_continuation"),
+        "local_materialization" => has("local_materialization"),
+        "tool_outputs" => has("tool_outputs") || has("tools"),
+        "coding" | "longcontext" => true,
+        _ => true,
     }
 }

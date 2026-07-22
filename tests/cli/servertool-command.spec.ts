@@ -73,6 +73,52 @@ describe('servertool CLI command', () => {
     }
   });
 
+  it('runs V3 reasoningStop hook as no-input no-op without state stdout', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`unexpected exit ${code}: ${errors.join('\n')}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'hook', 'run', 'reasoningStop']);
+
+    expect(errors).toEqual([]);
+    expect(output).toEqual([]);
+  });
+
+  it('rejects V3 reasoningStop hook input-json envelopes', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const program = new Command();
+    program.exitOverride();
+    createServertoolCommand(program, {
+      log: (line) => output.push(line),
+      error: (line) => errors.push(line),
+      exit: (code) => {
+        throw new Error(`expected exit ${code}`);
+      }
+    });
+
+    await expect(program.parseAsync([
+      'node',
+      'routecodex',
+      'hook',
+      'run',
+      'reasoningStop',
+      '--input-json',
+      '{}'
+    ])).rejects.toThrow('expected exit 1');
+
+    expect(output).toEqual([]);
+    expect(errors.join('\n')).toContain('reasoningStop is a no-input no-op hook');
+  });
+
   it('runs stopless through the standalone Rust binary', async () => {
     const { sessionId, requestId } = uniqueStoplessIdentity();
     const output: string[] = [];

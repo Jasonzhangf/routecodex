@@ -633,6 +633,8 @@ Entry contract: `ServerPidCacheRecord` via `docs/design/server-runtime-lifecycle
 
 ```mermaid
 flowchart LR
+  PortRegistry["PortRegistry"]
+  PortScopedListenerRelease["PortScopedListenerRelease"]
   StartRestartTakeoverGuard["StartRestartTakeoverGuard"]
   StartShutdownHandler["StartShutdownHandler"]
   DaemonRestartLoop["DaemonRestartLoop"]
@@ -658,6 +660,9 @@ flowchart LR
   StartShutdownHandler -->|rtl-11| RuntimeInstanceRecord
   ServerStopCommand -->|rtl-12| RuntimeInstanceRecord
   ServerStartCommand -->|rtl-13| StartRestartTakeoverGuard
+  ServerStartCommand -->|rtl-14| PortScopedListenerRelease
+  ServerStopCommand -->|rtl-15| PortScopedListenerRelease
+  PortScopedListenerRelease -->|rtl-16| PortRegistry
   classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
   classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
   classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -673,6 +678,8 @@ flowchart LR
   class DaemonRestartLoop anchored;
   class StartShutdownHandler anchored;
   class StartRestartTakeoverGuard anchored;
+  class PortScopedListenerRelease anchored;
+  class PortRegistry anchored;
 ```
 
 | step | transition | status | caller -> callee | split binding | owner |
@@ -689,11 +696,14 @@ flowchart LR
 | rtl-10 | `ServerStartCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-11 | `StartShutdownHandler -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
 | rtl-12 | `ServerStopCommand -> RuntimeInstanceRecord` | anchored | `updateRuntimeInstanceStatus -> planRuntimeInstanceStatusUpdate` |  | `runtime.lifecycle.instance_registry`<br/>managed server instance declaration lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/instance.json |
-| rtl-13 | `ServerStartCommand -> StartRestartTakeoverGuard` | anchored | `createStartCommand -> planRuntimeStartRestartTakeoverGuard` |  | `runtime.lifecycle.start_command`<br/>CLI start owns server process launch; default start and explicit start --restart must not hide restart semantics behind takeover |
+| rtl-13 | `ServerStartCommand -> StartRestartTakeoverGuard` | anchored | `createStartCommand -> planRuntimeStartRestartTakeoverGuard` |  | `runtime.lifecycle.start_command`<br/>CLI start owns server process launch and port takeover intent; occupied target ports are released before bind unless --no-restart forbids takeover |
+| rtl-14 | `ServerStartCommand -> PortScopedListenerRelease` | anchored | `createStartCommand -> ensurePortAvailableImpl` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+| rtl-15 | `ServerStopCommand -> PortScopedListenerRelease` | anchored | `createStopCommand -> registerHttpRoutes` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
+| rtl-16 | `PortScopedListenerRelease -> PortRegistry` | anchored | `registerHttpRoutes -> removePort` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
 
 ## stopless.session.mainline
 
-Stopless three-round contract inside Chat Process boundary: every managed relay request injects the stop schema as a system instruction plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the fresh schema/tool contract, and Round-3 passes the original finish_reason=stop through.
+Stopless three-round contract inside Chat Process boundary: every managed relay request injects stopless system guidance plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected complete non-persistent ordinary user continuation guideline plus the fresh tool contract, and guard terminal stops without another CLI projection.
 
 Entry contract: `StoplessResp01StopDetected` via `docs/architecture/wiki/stopless-session-mainline-source.md`
 

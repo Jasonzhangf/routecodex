@@ -1,8 +1,8 @@
 use super::{
     is_v3_client_tool_error_output_at_req04, is_v3_client_tool_error_pair_at_req04,
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
-    V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessCenterState,
-    V3StoplessCenterSteering,
+    V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessCenterNextRequestPolicy,
+    V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Map, Value};
 use servertool_core::stop_visible_text::{
@@ -13,8 +13,20 @@ use std::sync::Arc;
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
 const STOPLESS_DEFAULT_VISIBLE_TEXT: &str = "继续。";
-const STOPLESS_BASE_INSTRUCTION: &str =
-    "继续完成当前目标；基于现有上下文推理并按需调用工具。停止时调用 reasoningStop 说明完成、阻塞或继续。";
+const STOPLESS_BASE_INSTRUCTION: &str = r#"当前轮继续推进准则（仅用于当前轮，不是新的用户目标）：
+- 继续当前目标，基于已有上下文复核目标、已有结论、未完成事项和当前可验证状态。
+- 目标未完成且未阻塞时，继续推理并按需调用工具推进；不要只做总结，也不要把自然停止当作完成。
+- 只有目标确实完成并有完成证据时，才调用 reasoningStop，设置 stopreason=0 并提供 evidence。
+- 只有确实无法继续、需要用户输入或外部条件，并且有阻塞证据时，才调用 reasoningStop，设置 stopreason=1，并提供 reason、evidence、needs_user_input。
+- 如果还需要继续，保持 stopreason=2 的语义并继续实际工作；既未完成也未阻塞时不要自然停止。"#;
+const STOPLESS_NOOP_CONTINUATION_GUIDELINE: &str = r#"继续当前目标。
+
+请基于已经恢复的完整上下文继续推理：
+1. 先复核当前目标、已有结论、未完成事项和当前停下的位置。
+2. 如果还缺事实、需要验证或需要执行操作，按需调用可用工具继续推进，不要只总结。
+3. 只有目标确实完成并有证据时，调用 reasoningStop，设置 stopreason=0，并提供 evidence。
+4. 只有确实阻塞、需要用户输入或外部条件时，调用 reasoningStop，设置 stopreason=1，并提供阻塞原因、evidence、needs_user_input。
+5. 如果还需要继续，调用 reasoningStop 设置 stopreason=2 并说明下一步；如果既未完成也未阻塞，继续工作，不要自然停止。"#;
 
 pub struct V3StoplessResponseHookOutcome {
     pub input: V3HubRespInbound02Normalized,
@@ -53,11 +65,25 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                 })
             }
             V3ReasoningStopDecision::Continue => {
+                let consecutive_stop_count = next_stopless_consecutive_stop_count(profile);
                 let state = V3StoplessCenterState::new(
-                    0,
+                    consecutive_stop_count,
                     stopless_max_natural_stops(profile),
                     V3StoplessCenterSteering::Continue,
-                );
+                )
+                .with_last_request_id(profile.stopless_transition_request_id())
+                .with_last_response_id(stopless_response_id(input.provider_payload()))
+                .with_last_transition_reason("reasoning_stop_continue_cli_projected")
+                .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
+                if state.guard_exhausted() {
+                    let projected =
+                        build_stopless_guard_passthrough_visible_payload(input.provider_payload());
+                    *input.provider_payload_mut() = Arc::new(projected);
+                    return Ok(V3StoplessResponseHookOutcome {
+                        input,
+                        center_state: None,
+                    });
+                }
                 let projected = build_stopless_cli_projection_payload(input.provider_payload());
                 *input.provider_payload_mut() = Arc::new(projected);
                 Ok(V3StoplessResponseHookOutcome {
@@ -66,11 +92,25 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                 })
             }
             V3ReasoningStopDecision::NeedsEvidence => {
+                let consecutive_stop_count = next_stopless_consecutive_stop_count(profile);
                 let state = V3StoplessCenterState::new(
-                    0,
+                    consecutive_stop_count,
                     stopless_max_natural_stops(profile),
                     V3StoplessCenterSteering::ReasoningStopNeedsEvidence,
-                );
+                )
+                .with_last_request_id(profile.stopless_transition_request_id())
+                .with_last_response_id(stopless_response_id(input.provider_payload()))
+                .with_last_transition_reason("reasoning_stop_needs_evidence_cli_projected")
+                .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
+                if state.guard_exhausted() {
+                    let projected =
+                        build_stopless_guard_passthrough_visible_payload(input.provider_payload());
+                    *input.provider_payload_mut() = Arc::new(projected);
+                    return Ok(V3StoplessResponseHookOutcome {
+                        input,
+                        center_state: None,
+                    });
+                }
                 let projected = build_stopless_cli_projection_payload(input.provider_payload());
                 *input.provider_payload_mut() = Arc::new(projected);
                 Ok(V3StoplessResponseHookOutcome {
@@ -96,15 +136,9 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
             center_state: None,
         });
     }
-    let natural_stop_count = profile
-        .stopless_center_state()
-        .map(V3StoplessCenterState::natural_stop_count)
-        .unwrap_or(0)
-        .saturating_add(1);
+    let natural_stop_count = next_stopless_consecutive_stop_count(profile);
     let max_natural_stops = stopless_max_natural_stops(profile);
     if natural_stop_count >= max_natural_stops {
-        let projected = build_stopless_passthrough_visible_payload(input.provider_payload());
-        *input.provider_payload_mut() = Arc::new(projected);
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
@@ -113,12 +147,18 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
     let projected = build_stopless_cli_projection_payload(input.provider_payload());
     *input.provider_payload_mut() = Arc::new(projected);
     Ok(V3StoplessResponseHookOutcome {
+        center_state: Some(
+            V3StoplessCenterState::new(
+                natural_stop_count,
+                max_natural_stops,
+                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+            )
+            .with_last_request_id(profile.stopless_transition_request_id())
+            .with_last_response_id(stopless_response_id(input.provider_payload()))
+            .with_last_transition_reason("natural_stop_cli_projected")
+            .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0)),
+        ),
         input,
-        center_state: Some(V3StoplessCenterState::new(
-            natural_stop_count,
-            max_natural_stops,
-            V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-        )),
     })
 }
 
@@ -126,7 +166,20 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     payload: &mut Value,
     events: &mut Vec<V3HubRelayRequestHookEvent>,
     restored_stopless_center_state: Option<&V3StoplessCenterState>,
+    transition_request_id: Option<&str>,
+    transition_updated_at: Option<u64>,
 ) -> Result<Option<V3StoplessCenterState>, V3HubRelayRequestError> {
+    if payload.get("input").and_then(Value::as_array).is_none()
+        && payload.get("messages").and_then(Value::as_array).is_some()
+    {
+        return apply_v3_stopless_chat_request_hook_at_req04(
+            payload,
+            events,
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        );
+    }
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         inject_stopless_guidance(payload, None)?;
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
@@ -138,13 +191,71 @@ pub fn apply_v3_stopless_request_hook_at_req04(
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(None);
     };
-    let state = restored_stopless_center_state.cloned();
+    let state = restored_stopless_center_state
+        .cloned()
+        .map(|state| state.cli_noop_observed(transition_request_id, transition_updated_at));
+    if state.is_some() {
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessControlLoaded);
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved);
+    }
     strip_active_stopless_pair_and_stale(input, index);
+    let state = state.map(|state| {
+        state.continuation_guidance_prepared(transition_request_id, transition_updated_at)
+    });
+    append_stopless_noop_continuation(input, state.as_ref());
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
     events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
+    if state.is_some() {
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessGuidancePrepared);
+    }
     inject_stopless_guidance(payload, state.as_ref())?;
     events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-    Ok(state)
+    Ok(state
+        .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
+}
+
+fn apply_v3_stopless_chat_request_hook_at_req04(
+    payload: &mut Value,
+    events: &mut Vec<V3HubRelayRequestHookEvent>,
+    restored_stopless_center_state: Option<&V3StoplessCenterState>,
+    transition_request_id: Option<&str>,
+    transition_updated_at: Option<u64>,
+) -> Result<Option<V3StoplessCenterState>, V3HubRelayRequestError> {
+    let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
+        inject_stopless_guidance(payload, None)?;
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
+        return Ok(None);
+    };
+    let Some(index) = active_stopless_chat_cli_output(messages) else {
+        strip_stopless_chat_cli_artifacts(messages);
+        inject_stopless_guidance(payload, None)?;
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
+        return Ok(None);
+    };
+    let state = restored_stopless_center_state
+        .cloned()
+        .map(|state| state.cli_noop_observed(transition_request_id, transition_updated_at));
+    if state.is_some() {
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessControlLoaded);
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved);
+    }
+    strip_active_stopless_chat_pair_and_stale(messages, index);
+    let state = state.map(|state| {
+        state.continuation_guidance_prepared(transition_request_id, transition_updated_at)
+    });
+    messages.push(json!({
+        "role": "user",
+        "content": stopless_continuation_prompt_for_state(state.as_ref())
+    }));
+    events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
+    events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
+    if state.is_some() {
+        events.push(V3HubRelayRequestHookEvent::Req04StoplessGuidancePrepared);
+    }
+    inject_stopless_guidance(payload, state.as_ref())?;
+    events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
+    Ok(state
+        .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
 }
 
 fn output_item_text(item: &Value) -> Option<&str> {
@@ -331,6 +442,22 @@ fn stopless_max_natural_stops(profile: &V3HubRelayResponseHookProfile) -> u32 {
         .max(1)
 }
 
+fn next_stopless_consecutive_stop_count(profile: &V3HubRelayResponseHookProfile) -> u32 {
+    profile
+        .stopless_center_state()
+        .map(V3StoplessCenterState::consecutive_stop_count)
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+fn stopless_response_id(payload: &Value) -> Option<String> {
+    payload
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
 fn build_stopless_terminal_visible_payload_from_reasoning_stop_prefix(
     payload: &Value,
     prefix: String,
@@ -350,11 +477,10 @@ fn finalize_stopless_terminal_responses_payload(payload: &mut Value) {
     let Some(object) = payload.as_object_mut() else {
         return;
     };
-    match object.get("status").and_then(Value::as_str) {
-        Some("requires_action" | "in_progress" | "queued") => {
-            object.insert("status".to_string(), Value::String("completed".to_string()));
-        }
-        _ => {}
+    if let Some("requires_action" | "in_progress" | "queued") =
+        object.get("status").and_then(Value::as_str)
+    {
+        object.insert("status".to_string(), Value::String("completed".to_string()));
     }
     object.remove("required_action");
     object.remove("requiredAction");
@@ -419,6 +545,12 @@ fn build_stopless_passthrough_visible_payload(payload: &Value) -> Value {
         })
         .payload;
     strip_empty_responses_visible_messages(&mut payload);
+    payload
+}
+
+fn build_stopless_guard_passthrough_visible_payload(payload: &Value) -> Value {
+    let mut payload = build_stopless_passthrough_visible_payload(payload);
+    finalize_stopless_terminal_responses_payload(&mut payload);
     payload
 }
 
@@ -575,6 +707,65 @@ fn active_stopless_cli_output(input: &[Value]) -> Option<(usize, &Value)> {
     None
 }
 
+fn active_stopless_chat_cli_output(messages: &[Value]) -> Option<usize> {
+    let mut index = messages.len();
+    while index > 0 {
+        index -= 1;
+        let item = &messages[index];
+        if is_stopless_chat_cli_output(item) {
+            return Some(index);
+        }
+        if is_stopless_chat_cli_call(item) {
+            continue;
+        }
+        if chat_message_is_stopless_reset_boundary(item) {
+            break;
+        }
+    }
+    None
+}
+
+fn is_stopless_chat_cli_output(item: &Value) -> bool {
+    item.get("role").and_then(Value::as_str) == Some("tool")
+        && item
+            .get("tool_call_id")
+            .or_else(|| item.get("call_id"))
+            .and_then(Value::as_str)
+            .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
+}
+
+fn is_stopless_chat_cli_call(item: &Value) -> bool {
+    item.get("role").and_then(Value::as_str) == Some("assistant")
+        && item
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(|calls| {
+                calls.iter().any(|call| {
+                    call.get("id")
+                        .or_else(|| call.get("call_id"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
+                        || call
+                            .pointer("/function/arguments")
+                            .or_else(|| call.get("arguments"))
+                            .and_then(Value::as_str)
+                            .is_some_and(|value| {
+                                value.contains("routecodex hook run reasoningStop")
+                            })
+                })
+            })
+}
+
+fn chat_message_is_stopless_reset_boundary(item: &Value) -> bool {
+    if is_stopless_chat_cli_call(item) || is_stopless_chat_cli_output(item) {
+        return false;
+    }
+    matches!(
+        item.get("role").and_then(Value::as_str),
+        Some("user" | "assistant")
+    )
+}
+
 fn is_stopless_reset_boundary_item(item: &Value) -> bool {
     if is_stopless_cli_artifact(item) {
         return false;
@@ -615,9 +806,31 @@ fn strip_active_stopless_pair_and_stale(input: &mut Vec<Value>, output_index: us
         if is_stopless_cli_artifact(item) {
             continue;
         }
+        if is_stopless_generated_continuation_item(item) {
+            continue;
+        }
         next.push(item.clone());
     }
     *input = next;
+}
+
+fn strip_active_stopless_chat_pair_and_stale(messages: &mut Vec<Value>, output_index: usize) {
+    let call_index = output_index
+        .checked_sub(1)
+        .filter(|index| messages.get(*index).is_some_and(is_stopless_chat_cli_call));
+    let original = std::mem::take(messages);
+    for (index, item) in original.iter().enumerate() {
+        if Some(index) == call_index || index == output_index {
+            continue;
+        }
+        if is_stopless_chat_cli_call(item) || is_stopless_chat_cli_output(item) {
+            continue;
+        }
+        if is_stopless_generated_continuation_item(item) {
+            continue;
+        }
+        messages.push(item.clone());
+    }
 }
 
 fn strip_stopless_cli_artifacts(input: &mut Vec<Value>) {
@@ -630,12 +843,57 @@ fn strip_stopless_cli_artifacts(input: &mut Vec<Value>) {
         if is_stopless_cli_artifact(item) {
             continue;
         }
+        if is_stopless_generated_continuation_item(item) {
+            continue;
+        }
         input.push(item.clone());
     }
 }
 
+fn strip_stopless_chat_cli_artifacts(messages: &mut Vec<Value>) {
+    let original = std::mem::take(messages);
+    for item in original {
+        if is_stopless_chat_cli_call(&item) || is_stopless_chat_cli_output(&item) {
+            continue;
+        }
+        if is_stopless_generated_continuation_item(&item) {
+            continue;
+        }
+        messages.push(item);
+    }
+}
+
+fn append_stopless_noop_continuation(
+    input: &mut Vec<Value>,
+    state: Option<&V3StoplessCenterState>,
+) {
+    input.push(json!({
+        "role": "user",
+        "content": stopless_continuation_prompt_for_state(state)
+    }));
+}
+
 fn is_stopless_cli_artifact(item: &Value) -> bool {
     is_stopless_cli_call(item) || is_stopless_cli_output(item)
+}
+
+fn is_stopless_generated_continuation_item(item: &Value) -> bool {
+    if item.get("role").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let Some(content) = item.get("content").and_then(Value::as_str) else {
+        return false;
+    };
+    is_stopless_generated_continuation_content(content)
+}
+
+fn is_stopless_generated_continuation_content(content: &str) -> bool {
+    let content = content.trim_start();
+    content.starts_with("继续当前目标。")
+        && content.contains("请基于已经恢复的完整上下文继续推理")
+        && content.contains("复核当前目标")
+        && content.contains("reasoningStop")
+        && content.contains("needs_user_input")
 }
 
 fn input_item_is_stopless_cli_projection_message_before_call(
@@ -680,17 +938,14 @@ fn inject_stopless_guidance(
             *existing = if has_current_stopless_instruction(&cleaned) {
                 cleaned
             } else if cleaned.trim().is_empty() {
-                instruction.to_string()
+                instruction
             } else {
-                format!("{}\n{}", cleaned.trim_end(), instruction)
+                format!("{}\n\n{}", cleaned.trim_end(), instruction)
             };
         }
         _ => {
             if let Some(object) = payload.as_object_mut() {
-                object.insert(
-                    "instructions".to_string(),
-                    Value::String(instruction.to_string()),
-                );
+                object.insert("instructions".to_string(), Value::String(instruction));
             } else {
                 return Err(V3HubRelayRequestError::MalformedStoplessToolSurface {
                     field: "payload",
@@ -704,15 +959,62 @@ fn inject_stopless_guidance(
 }
 
 fn has_current_stopless_instruction(existing: &str) -> bool {
-    existing.contains("继续完成当前目标") && existing.contains("reasoningStop")
+    existing.contains("当前轮继续推进准则") && existing.contains("reasoningStop")
 }
 
-fn stopless_instruction_for_state(state: Option<&V3StoplessCenterState>) -> &'static str {
-    match state.map(V3StoplessCenterState::steering) {
-        Some(V3StoplessCenterSteering::ReasoningStopNeedsEvidence) => {
-            "继续完成当前目标；停止时调用 reasoningStop，并写清完成或阻塞的证据。"
+fn stopless_instruction_for_state(state: Option<&V3StoplessCenterState>) -> String {
+    match state.map(V3StoplessCenterState::next_request_policy) {
+        Some(V3StoplessCenterNextRequestPolicy::ContinueWithStrongerInstruction) => {
+            format!(
+                "{}\n\n请更严格地推进到工具动作、明确完成证据、或明确阻塞证据之一，避免空泛总结。",
+                STOPLESS_BASE_INSTRUCTION
+            )
         }
-        _ => STOPLESS_BASE_INSTRUCTION,
+        Some(V3StoplessCenterNextRequestPolicy::AskForCompletionEvidence) => {
+            format!(
+                "{STOPLESS_BASE_INSTRUCTION}\n\n当前完成/阻塞证据不足。如果现在判断完成或阻塞，必须调用 reasoningStop 并给出具体证据；否则继续推进。"
+            )
+        }
+        Some(V3StoplessCenterNextRequestPolicy::AskForBlockedEvidence) => {
+            format!(
+                "{STOPLESS_BASE_INSTRUCTION}\n\n只有在确实无法继续且需要用户或外部状态时才进入 blocked；必须调用 reasoningStop 写清阻塞原因、阻塞证据和需要用户回答的问题。否则继续推进。"
+            )
+        }
+        Some(V3StoplessCenterNextRequestPolicy::StopForUserBlock)
+        | Some(V3StoplessCenterNextRequestPolicy::StopForGuard) => {
+            "当前没有新的用户任务；等待下一条真实用户输入。".to_string()
+        }
+        Some(V3StoplessCenterNextRequestPolicy::ContinueDefault) | None => {
+            STOPLESS_BASE_INSTRUCTION.to_string()
+        }
+    }
+}
+
+fn stopless_continuation_prompt_for_state(state: Option<&V3StoplessCenterState>) -> String {
+    match state.map(V3StoplessCenterState::next_request_policy) {
+        Some(V3StoplessCenterNextRequestPolicy::ContinueWithStrongerInstruction) => {
+            format!(
+                "{}\n\n请更严格地推进到工具动作、明确完成证据、或明确阻塞证据之一，避免空泛总结。",
+                STOPLESS_NOOP_CONTINUATION_GUIDELINE
+            )
+        }
+        Some(V3StoplessCenterNextRequestPolicy::AskForCompletionEvidence) => {
+            format!(
+                "{STOPLESS_NOOP_CONTINUATION_GUIDELINE}\n\n当前完成/阻塞证据不足。如果现在判断完成或阻塞，必须调用 reasoningStop 并给出具体证据；否则继续推进。"
+            )
+        }
+        Some(V3StoplessCenterNextRequestPolicy::AskForBlockedEvidence) => {
+            format!(
+                "{STOPLESS_NOOP_CONTINUATION_GUIDELINE}\n\n只有在确实无法继续且需要用户或外部状态时才进入 blocked；必须调用 reasoningStop 写清阻塞原因、阻塞证据和需要用户回答的问题。否则继续推进。"
+            )
+        }
+        Some(V3StoplessCenterNextRequestPolicy::StopForUserBlock)
+        | Some(V3StoplessCenterNextRequestPolicy::StopForGuard) => {
+            "当前没有新的用户任务；等待下一条真实用户输入。".to_string()
+        }
+        Some(V3StoplessCenterNextRequestPolicy::ContinueDefault) | None => {
+            STOPLESS_NOOP_CONTINUATION_GUIDELINE.to_string()
+        }
     }
 }
 
@@ -721,6 +1023,13 @@ fn strip_legacy_stopless_instruction(existing: &str) -> String {
     for marker in [
         "正常执行当前任务，不要因为 stop schema 合同",
         "上一轮 stop 响应缺少 stop schema",
+        "继续完成当前目标；基于现有上下文推理并按需调用工具。停止时调用 reasoningStop",
+        "继续推进当前目标；不要把 no-op 工具轮当作完成。",
+        "RouteCodex stopless guideline",
+        "RouteCodex stopless continuation",
+        "上一轮 reasoningStop CLI no-op",
+        "继续完成当前目标；如果认为已完成或阻塞，必须调用 reasoningStop",
+        "如果确实阻塞，调用 reasoningStop",
         "<rcc_stop_schema>",
     ] {
         if let Some(index) = cleaned.find(marker) {

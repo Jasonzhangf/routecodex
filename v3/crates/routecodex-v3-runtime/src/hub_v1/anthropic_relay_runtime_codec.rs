@@ -20,28 +20,31 @@ pub fn project_v3_responses_json_as_anthropic_message(
     for item in output {
         match item.get("type").and_then(Value::as_str) {
             Some("reasoning") => {
-                if let Some(text) = item
-                    .get("summary")
-                    .and_then(Value::as_array)
-                    .and_then(|summary| summary.first())
-                    .and_then(|entry| entry.get("text"))
-                    .and_then(Value::as_str)
-                {
-                    content.push(json!({"type":"thinking","thinking":text}));
+                if let Some(summary) = item.get("summary").and_then(Value::as_array) {
+                    for entry in summary {
+                        if let Some(text) = entry.get("text").and_then(Value::as_str) {
+                            content.push(json!({"type":"thinking","thinking":text}));
+                        }
+                    }
                 }
             }
             Some("function_call") => {
                 has_tool = true;
-                let input = item
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .and_then(|arguments| serde_json::from_str(arguments).ok())
-                    .unwrap_or_else(|| json!({}));
+                let input = parse_responses_function_call_arguments(item)?;
                 content.push(json!({
                     "type":"tool_use",
                     "id":item.get("call_id").cloned().unwrap_or(Value::Null),
                     "name":item.get("name").cloned().unwrap_or(Value::Null),
                     "input":input
+                }));
+            }
+            Some("custom_tool_call") => {
+                has_tool = true;
+                content.push(json!({
+                    "type":"tool_use",
+                    "id":item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
+                    "name":item.get("name").cloned().unwrap_or(Value::Null),
+                    "input":responses_custom_tool_call_input(item)?
                 }));
             }
             Some("output_text") => {
@@ -68,13 +71,20 @@ pub fn project_v3_responses_json_as_anthropic_message(
         .and_then(Value::as_str)
         .unwrap_or("response");
     let message_id = response_id.replacen("resp_", "msg_", 1);
-    Ok(json!({
+    let mut message = json!({
         "id":message_id,
         "type":"message",
         "role":"assistant",
-        "stop_reason":if has_tool { "tool_use" } else { "end_turn" },
+        "stop_reason":responses_stop_reason_as_anthropic_stop_reason(object, has_tool),
         "content":content
-    }))
+    });
+    if let Some(model) = object.get("model") {
+        message["model"] = model.clone();
+    }
+    if let Some(usage) = object.get("usage") {
+        message["usage"] = usage.clone();
+    }
+    Ok(message)
 }
 
 pub fn project_v3_responses_error_as_anthropic_error(body: &[u8]) -> Value {
@@ -292,4 +302,53 @@ fn ensure_text_content_block(
     *active_text_index = Some(index);
     *next_index = index + 1;
     index
+}
+
+fn parse_responses_function_call_arguments(item: &Value) -> Result<Value, V3AnthropicCodecError> {
+    let arguments = item
+        .get("arguments")
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "function_call arguments",
+        })?;
+    match arguments {
+        Value::String(raw) => {
+            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
+                field: "function_call arguments",
+            })
+        }
+        Value::Object(_) => Ok(arguments.clone()),
+        _ => Err(V3AnthropicCodecError::MalformedField {
+            field: "function_call arguments",
+        }),
+    }
+}
+
+fn responses_custom_tool_call_input(item: &Value) -> Result<Value, V3AnthropicCodecError> {
+    match item.get("input") {
+        Some(Value::Object(_)) => Ok(item.get("input").cloned().unwrap_or(Value::Null)),
+        Some(Value::String(raw)) => Ok(json!({"input":raw})),
+        Some(other) => Ok(json!({"input":other})),
+        None => Err(V3AnthropicCodecError::MalformedField {
+            field: "custom_tool_call input",
+        }),
+    }
+}
+
+fn responses_stop_reason_as_anthropic_stop_reason(
+    object: &serde_json::Map<String, Value>,
+    has_tool: bool,
+) -> &'static str {
+    if has_tool {
+        return "tool_use";
+    }
+    match object.get("finish_reason").and_then(Value::as_str) {
+        Some("max_tokens" | "length") => "max_tokens",
+        Some("stop_sequence") => "stop_sequence",
+        Some("tool_calls" | "requires_action") => "tool_use",
+        Some("stop" | "end_turn") => "end_turn",
+        _ => match object.get("status").and_then(Value::as_str) {
+            Some("incomplete") => "max_tokens",
+            _ => "end_turn",
+        },
+    }
 }

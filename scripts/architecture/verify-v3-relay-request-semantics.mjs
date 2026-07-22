@@ -4,8 +4,10 @@ import { join, resolve } from 'node:path';
 
 const root = process.cwd();
 const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
+const reqInbound02Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs';
 const requestPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs';
 const hub = readFileSync(resolve(root, hubPath), 'utf8');
+const reqInbound02 = readFileSync(resolve(root, reqInbound02Path), 'utf8');
 const request = readFileSync(resolve(root, requestPath), 'utf8');
 
 function fail(message) {
@@ -46,7 +48,7 @@ function filesBelow(relative) {
   return files;
 }
 
-const req02 = functionBody(hub, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01');
+const req02 = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01');
 const req03 = functionBody(request, 'fn classify_continuation');
 const req04 = functionBody(request, 'fn run_from_normalized_with_events');
 const restore = functionBody(request, 'fn restore_local_context_at_req04');

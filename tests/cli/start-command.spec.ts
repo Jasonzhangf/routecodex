@@ -868,7 +868,7 @@ routingPolicyGroup = "gateway_coding_10000"
     expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBeUndefined();
   });
 
-  it('release foreground start is launch-only by default and preserves explicit --exclusive', async () => {
+  it('release foreground start takes over by default unless --no-restart is explicit', async () => {
     const restartFlags: Array<boolean | undefined> = [];
     const createContext = () => ({
       isDevPackage: false,
@@ -926,11 +926,15 @@ routingPolicyGroup = "gateway_coding_10000"
     createStartCommand(noRestartProgram, createContext());
     await noRestartProgram.parseAsync(['node', 'rcc', 'start', '--no-restart'], { from: 'node' });
 
+    const restartProgram = new Command();
+    createStartCommand(restartProgram, createContext());
+    await restartProgram.parseAsync(['node', 'rcc', 'start', '--restart'], { from: 'node' });
+
     const exclusiveProgram = new Command();
     createStartCommand(exclusiveProgram, createContext());
     await exclusiveProgram.parseAsync(['node', 'rcc', 'start', '--exclusive'], { from: 'node' });
 
-    expect(restartFlags).toEqual([false, false, true]);
+    expect(restartFlags).toEqual([true, false, true, true]);
   });
 
   it('writes daemon stop intent before explicit foreground exclusive takeover', async () => {
@@ -1577,7 +1581,7 @@ port = 5520
     ]);
   });
 
-  it('uses launch-only flow by default', async () => {
+  it('uses takeover flow by default', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
 
@@ -1629,14 +1633,12 @@ port = 5520
 
     await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
-    expect(portChecks[0]?.restart).toBe(false);
+    expect(portChecks[0]?.restart).toBe(true);
   });
 
-  it('refuses explicit --restart takeover when a runtime already listens', async () => {
-    // runtime.lifecycle.start_command: refuseExplicitRestartTakeoverIfOccupied
+  it('allows explicit --restart takeover when a runtime already listens', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
-    const errors: string[] = [];
 
     createStartCommand(program, {
       isDevPackage: true,
@@ -1644,7 +1646,7 @@ port = 5520
       defaultDevPort: 5520,
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
-      logger: { info: () => {}, warning: () => {}, success: () => {}, error: (message: string) => errors.push(message) },
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
       fsImpl: {
         existsSync: () => true,
@@ -1666,7 +1668,6 @@ port = 5520
       ensureLocalTokenPortalEnv: async () => {},
       ensurePortAvailable: async (_port, _spinner, opts) => {
         portChecks.push(opts ?? {});
-        throw new Error('ensurePortAvailable should not run for explicit --restart takeover');
       },
       findListeningPids: () => [1234],
       killPidBestEffort: () => {},
@@ -1687,12 +1688,67 @@ port = 5520
 
     await expect(
       program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--restart'], { from: 'node' })
-    ).rejects.toThrow('exit:1');
-    expect(portChecks).toHaveLength(0);
-    expect(errors.join('\n')).toContain('rcc restart --port 5520');
+    ).resolves.toBe(program);
+    expect(portChecks).toEqual([expect.objectContaining({ restart: true })]);
   });
 
-  it('refuses default start takeover when a runtime already listens', async () => {
+  it('allows default start takeover when a runtime already listens', async () => {
+    const program = new Command();
+    const portChecks: Array<{ restart?: boolean }> = [];
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n',
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/'),
+        dirname: (target: string) => path.posix.dirname(target),
+        basename: (target: string) => path.posix.basename(target)
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async (_port, _spinner, opts) => {
+        portChecks.push(opts ?? {});
+      },
+      findListeningPids: () => [1234],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: () => createFakeChild(1),
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' })
+    ).resolves.toBe(program);
+    expect(portChecks).toEqual([expect.objectContaining({ restart: true })]);
+  });
+
+  it('refuses --no-restart takeover when a runtime already listens', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
     const errors: string[] = [];
@@ -1725,7 +1781,6 @@ port = 5520
       ensureLocalTokenPortalEnv: async () => {},
       ensurePortAvailable: async (_port, _spinner, opts) => {
         portChecks.push(opts ?? {});
-        throw new Error('ensurePortAvailable should not run for default start takeover');
       },
       findListeningPids: () => [1234],
       killPidBestEffort: () => {},
@@ -1745,10 +1800,10 @@ port = 5520
     });
 
     await expect(
-      program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' })
+      program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml', '--no-restart'], { from: 'node' })
     ).rejects.toThrow('exit:1');
     expect(portChecks).toHaveLength(0);
-    expect(errors.join('\n')).toContain('rcc restart --port 5520');
+    expect(errors.join('\n')).toContain('Use plain start without --no-restart to take over the occupied port');
   });
 
   it('uses non-restart flow when --no-restart is provided', async () => {

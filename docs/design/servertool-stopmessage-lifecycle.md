@@ -13,7 +13,7 @@ This document defines the current stopless lifecycle. Stopless is a request-clos
 - req_chatprocess must always inject the complete stop schema as a system instruction for stopless-managed turns.
 - Stopless must emit a client-visible `exec_command` CLI projection for non-terminal stop flows.
 - Stopless must not perform server-side reenter; the client executes the projected CLI and submits its result through the normal request entry.
-- Stopless CLI command and stdout are status/control-only. Model-facing schema guidance exists only in the system instruction.
+- V3 stopless CLI command/stdout are no-input no-op only; they never carry status, control, schema feedback, `next_step`, or prompt text. Model-facing guidance exists only in the system instruction plus the ReqChatProcess-generated ordinary user guideline.
 - The submitted stopless CLI call/result pair is private control evidence. ReqChatProcess must replace it with one ordinary user message and must not replay it as model-owned tool-call history.
 - Internal runtime metadata (`__rt`, snapshot/debug carriers, provider/runtime state) must not appear in client-visible response bodies.
 - Generic servertool CLI projection remains available only for non-stopless client-exec flows such as `servertool_fixture`.
@@ -37,7 +37,7 @@ provider response
         -> classify stop payload
            -> no schema
               -> cli_projection
-              -> emit exec_command(routecodex hook run reasoningStop --input-json status/control)
+              -> emit exec_command(routecodex hook run reasoningStop)
               -> client executes public CLI alias and submits ordinary tool result
               -> req_chatprocess consumes current resume output privately
               -> req_chatprocess removes the shell pair and emits the fixed transparent user prompt
@@ -48,18 +48,17 @@ provider response
               -> return final client response
            -> schema present + terminal-invalid / continue_needed(2)
               -> cli_projection
-              -> emit exec_command(routecodex hook run reasoningStop --input-json status/control)
+              -> emit exec_command(routecodex hook run reasoningStop)
               -> client executes hook
               -> client submits ordinary tool result
-              -> req_chatprocess consumes private feedback/state
-              -> valid next_step becomes the exact user prompt
-              -> missing/invalid next_step becomes the fixed transparent user prompt
+              -> req_chatprocess consumes only no-op evidence and StoplessCenter state
+              -> StoplessCenter policy selects the complete transparent current-turn user guideline
               -> provider sees no stopless result/tool pair
               -> normal request chain
            -> schema present + parse/argument-invalid
               -> cli_projection
               -> schema payload is treated as invalid arguments
-              -> CLI may return private structured classification
+              -> Resp03 classification is stored in StoplessCenter, never in CLI stdout
               -> next turn still goes through req_chatprocess transparent user rewrite
               -> normal request chain
 
@@ -73,9 +72,9 @@ budget guard
 The closed loop is:
 
 1. response-side stop detection projects client-visible `exec_command`
-2. client runs `routecodex hook run reasoningStop` with status/control input
-3. next request brings CLI stdout back as ordinary tool output
-4. ReqChatProcess reads current resume output and MetadataCenter for private state
+2. client runs no-input `routecodex hook run reasoningStop`
+3. next request brings only no-op completion output back as ordinary tool output
+4. ReqChatProcess reads current no-op evidence and MetadataCenter StoplessCenter for private state
 5. req-side rewrite removes the tool pair and emits one ordinary user prompt
 6. req-side system instruction supplies the complete schema contract
 
@@ -98,7 +97,7 @@ When the model tries to stop, the final text must include a stop schema object w
 - `1`: blocked
 - `2`: continue needed
 
-Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` without `next_step` causes `cli_projection` only on consecutive rounds 1 and 2. On consecutive round 3, the Rust loop guard must stop intercepting and pass the original `finish_reason=stop` response to the client; it must not project another CLI or synthesize a budget-exhausted terminal response. Any normal progress, ordinary tool call, valid terminal schema, `simple_question=true`, or session change resets the consecutive counter, so the next missing/invalid stop starts again at `repeatCount=1`. CLI/manual inputs with `repeatCount >= maxRepeats` fail fast. `simple_question=true` is the only schema option that may allow natural stop without `stopreason`; it is reserved for very simple user inputs and must pass through to the client without CLI projection. Valid `stopreason=2` with `next_step` continues with that exact next-step text and does not consume the consecutive invalid/no-schema budget. Valid `stopreason=0` requires `has_evidence=1` plus non-empty `evidence` and becomes `terminal_final`; evidence content is not semantically judged. Valid `stopreason=1` requires only non-empty `reason` and becomes `terminal_final`; `blocked + needs_user_input=true` must return the summary plus the user decision question and stop with `finish_reason=stop`.
+Missing schema, invalid schema, malformed schema arguments, or `stopreason=2`/need_continue causes `cli_projection` only on consecutive rounds 1 and 2. On consecutive round 3, the Rust loop guard must stop intercepting and pass the original `finish_reason=stop` response to the client; it must not project another CLI or synthesize a budget-exhausted terminal response. Any normal progress, ordinary tool call, valid terminal schema, `simple_question=true`, or session change resets the consecutive counter. CLI/manual inputs must not carry `repeatCount` / `maxRepeats`. `simple_question=true` is the only schema option that may allow natural stop without `stopreason`; it is reserved for very simple user inputs and must pass through to the client without CLI projection. Valid `stopreason=2` / need_continue writes StoplessCenter state and the next request uses the complete model-transparent current-turn guideline selected by policy; it does not consume schema-error budget. Valid `stopreason=0` requires `has_evidence=1` plus non-empty `evidence` and becomes `terminal_final`; evidence content is not semantically judged. Valid `stopreason=1` requires non-empty `reason`, `has_evidence=1`, and non-empty `evidence`, and becomes `terminal_final`; `blocked + needs_user_input=true` must return the summary plus the user decision question and stop with `finish_reason=stop`.
 
 ## Validation
 
@@ -111,4 +110,4 @@ Missing schema, invalid schema, malformed schema arguments, or `stopreason=2` wi
 - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit --pretty false`
 - `git diff --check`
 
-Live validation must prove the client-visible response uses CLI projection, the command string/stdout are status/control-only, stopless does not call server-side reenter, and the next provider request contains only the complete system schema plus the ordinary transparent/next-step user prompt.
+Live validation must prove the client-visible response uses no-input CLI projection, the command string/stdout carry no state/control/prompt, stopless does not call server-side reenter, and the next provider request contains only the complete system schema plus the ordinary model-transparent current-turn guideline with no no-op/CLI/client bridge wording.

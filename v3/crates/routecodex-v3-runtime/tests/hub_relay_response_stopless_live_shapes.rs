@@ -75,8 +75,8 @@ fn stopless_live_shape_natural_stop_missing_finish_reason_projects_noop_cli() {
         "routecodex hook run reasoningStop"
     );
     let serialized = serde_json::to_string(payload).unwrap();
+    assert!(!serialized.contains("--input-json"));
     for forbidden in [
-        "--input-json",
         "repeatCount",
         "triggerHint",
         "schemaFeedback",
@@ -162,6 +162,62 @@ fn stopless_live_shape_third_natural_stop_passes_original_text_without_cli() {
 }
 
 #[test]
+fn stopless_live_shape_guard_schema_only_text_passes_through_without_intercept() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let control_only_text =
+        r#"{"stopreason":2,"current_goal":"still running","next_step":"continue"}"#;
+    let resp02 = hooks
+        .normalize(relay_raw(json!({
+            "id":"resp_live_guard_schema_only",
+            "model":"glm-5.2",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":control_only_text}]}],
+            "output_text": control_only_text
+        })))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    2,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+    assert_eq!(resp04.finalized_payload()["finish_reason"], "stop");
+    assert_eq!(
+        resp04.finalized_payload()["output_text"],
+        json!(control_only_text),
+        "guard terminal must stop intercepting and pass through the provider finish_reason=stop response"
+    );
+    assert!(
+        !serialized.contains("Stopless 已达到连续自动续轮上限"),
+        "guard terminal must not expose internal stopless budget state: {serialized}"
+    );
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "guard terminal must not project another no-op bridge artifact {forbidden}: {serialized}"
+        );
+    }
+}
+
+#[test]
 fn stopless_live_shape_reasoning_stop_tool_call_is_the_only_state_source() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
@@ -197,4 +253,62 @@ fn stopless_live_shape_reasoning_stop_tool_call_is_the_only_state_source() {
     let serialized = serde_json::to_string(payload).unwrap();
     assert!(!serialized.contains("call_model_reasoning_stop_live"));
     assert!(!serialized.contains("\"name\":\"reasoningStop\""));
+}
+
+#[test]
+fn stopless_live_shape_guard_reasoning_continue_tool_does_not_project_noop_or_diagnostic() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let visible_text = "我已经说明当前仍需继续，但这里应只透传当前可见文本。";
+    let resp02 = hooks
+        .normalize(relay_raw(json!({
+            "id":"resp_live_reasoning_stop_continue_guard",
+            "object":"response",
+            "status":"requires_action",
+            "output":[
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":visible_text}]},
+                {
+                    "type":"function_call",
+                    "call_id":"call_model_reasoning_stop_live_guard",
+                    "name":"reasoningStop",
+                    "arguments":"{\"stopreason\":2,\"reason\":\"continue\"}"
+                }
+            ]
+        })))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    2,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                )),
+        )
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
+    assert_eq!(resp03.tool_call_count(), 0);
+    let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert!(resp04.stopless_center_state().is_none());
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "completed");
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(serialized.contains(visible_text));
+    for forbidden in [
+        "call_model_reasoning_stop_live_guard",
+        "\"name\":\"reasoningStop\"",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "Stopless 已达到连续自动续轮上限",
+        "续轮上限",
+        "连续 stop 次数",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "guard must not project no-op/internal diagnostic/tool artifact {forbidden}: {serialized}"
+        );
+    }
 }

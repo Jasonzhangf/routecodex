@@ -30,14 +30,14 @@ const fixtures = [
   },
   {
     name: 'full SSE materialize',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker: 'use serde_json::{json, Map, Value};',
     mutation: 'use serde_json::{json, Map, Value};\nfn forbidden_sse_materialize(sse_stream: impl Iterator<Item = Value>) { let _ = sse_stream.collect::<Vec<_>>(); }',
     diagnostic: /forbidden unowned full SSE materialization/,
   },
   {
     name: 'Relay SSE pass-through body kind resurrected',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
     marker: 'V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse',
     mutation: 'V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::SseStreamPassthrough',
     diagnostic: /Relay SSE pass-through body kind/,
@@ -121,7 +121,7 @@ const fixtures = [
   },
   {
     name: 'canonical payload sharing assertion removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
     marker: 'Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())',
     mutation: 'true',
     diagnostic: /missing Arc::ptr_eq/,

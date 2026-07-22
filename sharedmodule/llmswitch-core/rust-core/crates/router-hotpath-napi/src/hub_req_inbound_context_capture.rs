@@ -2,6 +2,7 @@
 use crate::hub_bridge_actions::{
     convert_bridge_input_to_chat_messages_borrowed, BridgeInputToChatBorrowedInput,
 };
+use crate::hub_pipeline_types::is_builtin_tool_type;
 use crate::hub_req_inbound_tool_call_normalization::normalize_apply_patch_output_text;
 use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
@@ -761,6 +762,10 @@ pub(crate) fn map_bridge_tools_to_chat(raw_tools: &[Value]) -> Vec<Value> {
                     mapped.push(Value::Object(namespace_out));
                 }
             }
+            continue;
+        }
+        if is_builtin_tool_type(raw_type.as_str()) {
+            mapped.push(Value::Object(tool_row.clone()));
             continue;
         }
         let mut name = read_trimmed_string(function_row.and_then(|v| v.get("name")))
@@ -2335,6 +2340,33 @@ mod tests {
         assert_eq!(mapped[0]["name"], "mcp__computer_use");
         assert_eq!(mapped[0]["tools"][0]["name"], "get_app_state");
         assert_eq!(mapped[0]["tools"][0]["defer_loading"], Value::Bool(true));
+    }
+
+    #[test]
+    fn map_bridge_tools_to_chat_preserves_builtin_definitions_without_function_wrapping() {
+        let raw_tools = vec![
+            json!({
+                "type": "tool_search",
+                "execution": "client",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string" }
+                    },
+                    "required": ["query"]
+                }
+            }),
+            json!({
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text", "image"]
+            }),
+        ];
+
+        let mapped = map_bridge_tools_to_chat(raw_tools.as_slice());
+
+        assert_eq!(mapped, raw_tools);
+        assert!(mapped.iter().all(|tool| tool.get("function").is_none()));
     }
 
     #[test]

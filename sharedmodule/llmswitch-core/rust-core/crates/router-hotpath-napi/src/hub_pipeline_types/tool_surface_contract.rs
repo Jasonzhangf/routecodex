@@ -309,9 +309,10 @@ fn validate_required_action_tool_calls(
     )
 }
 
-fn is_builtin_tool_type(tool_type: &str) -> bool {
+pub(crate) fn is_builtin_tool_type(tool_type: &str) -> bool {
+    let tool_type = tool_type.trim().to_ascii_lowercase();
     matches!(
-        tool_type,
+        tool_type.as_str(),
         "web_search"
             | "web_search_preview"
             | "code_interpreter"

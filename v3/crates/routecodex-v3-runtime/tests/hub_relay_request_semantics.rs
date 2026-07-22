@@ -3,7 +3,7 @@ use routecodex_v3_runtime::{
     V3HubContinuationLookup, V3HubContinuationOwnership, V3HubContinuationScope,
     V3HubEntryProtocol, V3HubInvocationSource, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
     V3HubRequestSemanticProtocol, V3HubServertoolRequestProfile, V3HubTransportIntent,
-    V3StoplessCenterState, V3StoplessCenterSteering,
+    V3StoplessCenterNextRequestPolicy, V3StoplessCenterState, V3StoplessCenterSteering,
 };
 use serde_json::{json, Value};
 
@@ -54,14 +54,21 @@ fn assert_no_structured_stopless_shell_artifacts(input: &[Value]) {
         );
     }
 }
+
+fn serialized_contains_tool_type(payload: &Value, tool_type: &str) -> bool {
+    serde_json::to_string(payload)
+        .unwrap()
+        .contains(&format!("\"type\":\"{tool_type}\""))
+}
+
 #[test]
 fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let payload = json!({"model":"client-alias","input":[{"role":"user","content":"hi"}],"metadata":{"client":"kept"}});
+    let payload = json!({"model":"client-alias","messages":[{"role":"user","content":"hi"}],"metadata":{"client":"kept"}});
     let governed = hooks
         .run(
-            raw(payload.clone()),
-            &V3HubContinuationLookup::new(None, scope()),
+            raw_for(payload.clone(), V3HubEntryProtocol::OpenAiChat),
+            &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::OpenAiChat)),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -82,12 +89,65 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
             V3HubRelayRequestHookEvent::Req03Entry,
             V3HubRelayRequestHookEvent::Req03Exit,
             V3HubRelayRequestHookEvent::Req04Entry,
+            V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
             V3HubRelayRequestHookEvent::Req04ToolGoverned,
             V3HubRelayRequestHookEvent::Req04HistoryGoverned,
             V3HubRelayRequestHookEvent::ServertoolOptionalNoop,
             V3HubRelayRequestHookEvent::Req04Exit,
         ]
     );
+}
+
+#[test]
+fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_search_before_req04() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "instructions":"You are precise.",
+                "tools":[{"type":"tool_search","name":"tool_search"}],
+                "input":[
+                    {
+                        "type":"additional_tools",
+                        "tools":[{"type":"web_search_preview","name":"web_search"}]
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"search then answer"}]
+                    }
+                ]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+
+    let payload = governed.payload();
+    assert!(
+        payload.get("messages").and_then(Value::as_array).is_some(),
+        "ReqInbound02 must carry Chat canonical messages before Req04: {payload}"
+    );
+    assert!(
+        payload.get("input").is_none(),
+        "ReqInbound02 must not leave Responses input as the live request payload after Chat canonicalization: {payload}"
+    );
+    assert_eq!(payload["messages"][0]["role"], "system");
+    assert_eq!(payload["messages"][1]["role"], "user");
+    assert_eq!(payload["messages"][1]["content"], "search then answer");
+    assert!(
+        serialized_contains_tool_type(payload, "tool_search"),
+        "tool_search must survive inbound as a Chat canonical tool surface: {payload}"
+    );
+    assert!(
+        serialized_contains_tool_type(payload, "web_search_preview"),
+        "additional_tools web search must survive inbound without shell/script conversion: {payload}"
+    );
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(!serialized.contains("\"type\":\"function\""));
+    assert!(!serialized.contains("\"name\":\"exec\""));
+    assert!(!serialized.contains("\"name\":\"script\""));
 }
 
 #[test]
@@ -426,21 +486,26 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
                 }]
             })),
             &lookup,
-            &V3HubServertoolRequestProfile::stopless_reasoning_stop().with_stopless_center_state(
-                V3StoplessCenterState::new(
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
                     1,
                     3,
                     V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                ),
-            ),
+                ))
+                .with_stopless_transition_context("req-stopless-request-state", 42_424),
         )
         .unwrap();
 
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"完成当前目标"}])
-    );
     let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 2);
+    assert_eq!(input[0], json!({"role":"user","content":"完成当前目标"}));
+    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    assert_full_stopless_continuation_prompt(
+        input[1]
+            .get("content")
+            .and_then(Value::as_str)
+            .expect("stopless continuation prompt"),
+    );
     assert_no_structured_stopless_shell_artifacts(input);
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     for forbidden in [
@@ -462,10 +527,7 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
             "provider request leaked old stopless state {forbidden}: {serialized}"
         );
     }
-    assert!(governed.payload()["instructions"]
-        .as_str()
-        .unwrap()
-        .contains("继续完成当前目标"));
+    assert_full_stopless_system_guidance(governed.payload()["instructions"].as_str().unwrap());
     assert!(governed
         .hook_events()
         .contains(&V3HubRelayRequestHookEvent::Req04StoplessResultParsed));
@@ -477,12 +539,185 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
         .contains(&V3HubRelayRequestHookEvent::Req04StoplessToolInjected));
     assert_eq!(
         governed.stopless_state(),
-        Some(&V3StoplessCenterState::new(
-            1,
-            3,
-            V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-        ))
+        Some(
+            &V3StoplessCenterState::new(
+                1,
+                3,
+                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+            )
+            .provider_turn_in_flight(Some("req-stopless-request-state"), Some(42_424))
+        )
     );
+}
+
+#[test]
+fn stopless_request_hook_guidance_varies_by_stopless_center_policy() {
+    let first = run_stopless_noop_with_state(V3StoplessCenterState::new(
+        1,
+        3,
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+    ));
+    let second = run_stopless_noop_with_state(V3StoplessCenterState::new(
+        2,
+        3,
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+    ));
+    let needs_evidence = run_stopless_noop_with_state(V3StoplessCenterState::new(
+        1,
+        3,
+        V3StoplessCenterSteering::ReasoningStopNeedsEvidence,
+    ));
+
+    let first_prompt = last_user_content(first.payload());
+    let second_prompt = last_user_content(second.payload());
+    let evidence_prompt = last_user_content(needs_evidence.payload());
+    let second_payload = serde_json::to_string(second.payload()).unwrap();
+
+    assert_full_stopless_continuation_prompt(&first_prompt);
+    assert_ne!(
+        first_prompt, second_prompt,
+        "second consecutive stop must not reuse a one-size hardcoded continuation prompt"
+    );
+    assert!(
+        !second_prompt.contains("连续第")
+            && !second_prompt.contains("最多")
+            && second_prompt.contains("更严格地推进")
+            && second_prompt.contains("工具动作"),
+        "stronger policy prompt must vary by policy without exposing internal counters or no-op mechanism: {second_prompt}"
+    );
+    for forbidden in ["连续第", "最多", "续轮上限", "连续 stop 次数"] {
+        assert!(
+            !second_payload.contains(forbidden),
+            "provider-facing stopless guidance must not expose internal state token {forbidden}: {second_payload}"
+        );
+    }
+    assert!(
+        evidence_prompt.contains("证据不足")
+            && evidence_prompt.contains("具体证据")
+            && evidence_prompt.contains("reasoningStop"),
+        "needs-evidence policy prompt must ask for terminal evidence: {evidence_prompt}"
+    );
+    assert_eq!(
+        second.stopless_state().unwrap().next_request_policy(),
+        V3StoplessCenterNextRequestPolicy::ContinueWithStrongerInstruction
+    );
+    assert_eq!(
+        needs_evidence
+            .stopless_state()
+            .unwrap()
+            .next_request_policy(),
+        V3StoplessCenterNextRequestPolicy::AskForCompletionEvidence
+    );
+}
+
+fn run_stopless_noop_with_state(
+    state: V3StoplessCenterState,
+) -> routecodex_v3_runtime::V3HubRelayRequestOutcome {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-center"), scope())
+        .with_local_context(
+            "ctx-stopless-center",
+            scope(),
+            stopless_noop_local_context(),
+        );
+    hooks
+        .run(
+            raw(json!({
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_stopless_reasoning",
+                    "output":""
+                }]
+            })),
+            &lookup,
+            &V3HubServertoolRequestProfile::stopless_reasoning_stop()
+                .with_stopless_center_state(state),
+        )
+        .unwrap()
+}
+
+fn last_user_content(payload: &Value) -> String {
+    payload["input"]
+        .as_array()
+        .expect("input array")
+        .iter()
+        .rev()
+        .find(|item| item.get("role").and_then(Value::as_str) == Some("user"))
+        .and_then(|item| item.get("content"))
+        .and_then(Value::as_str)
+        .expect("last user content")
+        .to_string()
+}
+
+fn assert_full_stopless_continuation_prompt(prompt: &str) {
+    for required in [
+        "继续当前目标",
+        "基于已经恢复的完整上下文",
+        "复核当前目标",
+        "已有结论",
+        "未完成事项",
+        "继续推理",
+        "按需调用可用工具",
+        "不要只总结",
+        "目标确实完成并有证据",
+        "reasoningStop",
+        "阻塞",
+        "needs_user_input",
+        "既未完成也未阻塞，继续工作",
+    ] {
+        assert!(
+            prompt.contains(required),
+            "stopless continuation prompt missing transparent guideline token {required}: {prompt}"
+        );
+    }
+    for forbidden in [
+        "no-op",
+        "CLI",
+        "client tool round",
+        "客户端工具轮",
+        "routecodex hook run reasoningStop",
+        "上一轮 reasoningStop CLI",
+        "不是工具结果",
+        "finish_reason=stop",
+        "RouteCodex stopless continuation",
+    ] {
+        assert!(
+            !prompt.contains(forbidden),
+            "provider-visible continuation prompt leaked black-box bridge mechanism {forbidden}: {prompt}"
+        );
+    }
+}
+
+fn assert_full_stopless_system_guidance(instructions: &str) {
+    for required in [
+        "当前轮继续推进准则",
+        "当前轮",
+        "继续当前目标",
+        "基于已有上下文",
+        "继续推理",
+        "按需调用工具",
+        "完成证据",
+        "阻塞证据",
+        "reasoningStop",
+        "不要自然停止",
+    ] {
+        assert!(
+            instructions.contains(required),
+            "stopless system guidance missing full guideline token {required}: {instructions}"
+        );
+    }
+    for forbidden in [
+        "no-op",
+        "CLI",
+        "client tool round",
+        "客户端工具轮",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !instructions.contains(forbidden),
+            "provider-visible system guidance leaked black-box bridge mechanism {forbidden}: {instructions}"
+        );
+    }
 }
 
 #[test]
@@ -512,9 +747,15 @@ fn stopless_request_hook_consumes_noop_cli_without_continuation_state() {
         )
         .unwrap();
 
-    assert_eq!(
-        governed.payload()["input"],
-        json!([{"role":"user","content":"完成当前目标"}])
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert_eq!(input.len(), 2);
+    assert_eq!(input[0], json!({"role":"user","content":"完成当前目标"}));
+    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    assert_full_stopless_continuation_prompt(
+        input[1]
+            .get("content")
+            .and_then(Value::as_str)
+            .expect("stopless continuation prompt without state"),
     );
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     for forbidden in [
@@ -535,7 +776,7 @@ fn stopless_request_hook_consumes_noop_cli_without_continuation_state() {
 }
 
 #[test]
-fn stopless_request_hook_injects_short_guidance_and_exactly_one_internal_tool() {
+fn stopless_request_hook_injects_full_guidance_and_exactly_one_internal_tool() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let payload = json!({
         "input":[{"role":"user","content":"继续做"}],
@@ -550,7 +791,14 @@ fn stopless_request_hook_injects_short_guidance_and_exactly_one_internal_tool() 
         )
         .unwrap();
 
-    assert_eq!(governed.payload()["input"], payload["input"]);
+    assert!(governed.payload()["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(
+            |message| message.get("role").and_then(Value::as_str) == Some("user")
+                && message.get("content").and_then(Value::as_str) == Some("继续做")
+        ));
     let tools = governed.payload()["tools"].as_array().unwrap();
     assert_eq!(tools[0], payload["tools"][0]);
     assert_eq!(
@@ -562,8 +810,18 @@ fn stopless_request_hook_injects_short_guidance_and_exactly_one_internal_tool() 
         "managed relay must append exactly one internal reasoningStop"
     );
     let instructions = governed.payload()["instructions"].as_str().unwrap();
-    assert!(instructions.contains("base instruction"));
-    assert!(instructions.contains("继续完成当前目标"));
+    assert!(governed.payload()["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(
+            |message| message.get("role").and_then(Value::as_str) == Some("system")
+                && message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| content.contains("base instruction"))
+        ));
+    assert_full_stopless_system_guidance(instructions);
     for forbidden in [
         "<rcc_stop_schema>",
         "schemaFeedback",
@@ -575,7 +833,7 @@ fn stopless_request_hook_injects_short_guidance_and_exactly_one_internal_tool() 
     ] {
         assert!(
             !instructions.contains(forbidden),
-            "short guidance kept old schema/control wording {forbidden}: {instructions}"
+            "full guidance kept old schema/control wording {forbidden}: {instructions}"
         );
     }
 }
@@ -606,9 +864,13 @@ fn stopless_request_hook_injects_into_additional_tools_without_rebuilding_shape(
         )
         .unwrap();
 
-    assert!(governed.payload().get("tools").is_none());
-    assert_eq!(governed.payload()["input"][1], payload["input"][1]);
-    let tools = governed.payload()["input"][0]["tools"].as_array().unwrap();
+    assert!(governed.payload().get("input").is_none());
+    assert_eq!(governed.payload()["messages"][0]["role"], "user");
+    assert_eq!(
+        governed.payload()["messages"][0]["content"],
+        "keep codex tool declarations"
+    );
+    let tools = governed.payload()["tools"].as_array().unwrap();
     assert_eq!(
         &tools[..original_tools.as_array().unwrap().len()],
         original_tools.as_array().unwrap().as_slice(),

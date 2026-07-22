@@ -9,7 +9,7 @@
 - 状态 key 只能是 `session:<sessionId>`；若调用方缺失稳定 `sessionId`，stopless/CLI/runtime 必须 fail-fast，禁止自行补会话身份后继续伪闭环。
 - 禁止用 `tmuxSessionId`、`conversationId`、`default`、`stopMessageClientInject*` 作为 stopless 状态 fallback。
 - 当 stopless 触发时，服务端必须投影一个客户端可见 `exec_command`；不得直接 `reenterPipeline`。
-- CLI command/stdout 只允许承载状态和控制字段；不得承载 provider-facing continuationPrompt/schemaGuidance/raw prompt text。
+- V3 stopless CLI command/stdout 是 no-input no-op，只用于闭合客户端工具轮；不得承载状态、控制字段、provider-facing continuationPrompt、schemaGuidance 或 raw prompt text。
 - schema 引导只存在于 system prompt；下一轮 provider user prompt 由 ReqChatProcess 直接生成。
 - 泛化 servertool CLI projection 仍可服务非 stopless 的 client-exec 路径，例如 `servertool_fixture`；stopless 使用同一 CLI 投影总线，但拥有独立 gate。
 
@@ -20,11 +20,11 @@
 - `/goal active` 和 plan mode 跳过 stopless gate，按普通响应返回。
 - 其他请求进入 Rust stop gate / stop schema gate。
 - 缺失 schema 时，触发 zero-arg CLI stop hook，要求补 schema。
-- schema 非法、参数非法、`stopreason=2` 或其他不满足停止条件时，触发带 schema 入参的 CLI stop hook；hook 返回里必须明确给出解析结果、错误字段/错误值、以及模型下一次需要如何修正 schema。
+- schema 非法、参数非法、`stopreason=2` 或其他不满足停止条件时，Resp03 把分类结果写入 MetadataCenter StoplessCenter，并触发 no-input CLI stop hook；CLI 不接收 schema 入参，也不返回下一轮 prompt/state。
 - `stopreason=0|1` 且 schema 满足停止条件时允许最终停止；这条不要求模型必须先主动调用 hook，只要求 schema 合法。
-- 同一 session 连续第 1、2 次 missing/invalid schema stop 时拦截并投影 CLI，`repeatCount` 分别为 `1`、`2`。
+- 同一 session 连续第 1、2 次 missing/invalid schema stop 时拦截并投影 no-input CLI；连续次数只存在于 StoplessCenter 状态机，不进入 CLI。
 - 同一 session 连续第 3 次 missing/invalid schema stop 达到上限时不再拦截、不再投影 CLI，也不合成 terminal summary；必须把本轮原始 `finish_reason=stop` 响应直接放行给客户端。
-- CLI/手工入口收到 `repeatCount >= maxRepeats` 必须 fail-fast；禁止 clamp 或伪造 `budget_exhausted` 成功输出。
+- CLI/手工入口不得携带 `repeatCount` / `maxRepeats`；若出现这些控制字段必须 fail-fast，禁止 clamp 或伪造 `budget_exhausted` 成功输出。
 
 ## 3. 状态与次数控制
 
@@ -45,7 +45,7 @@ Provider response
   -> HubRespChatProcess03Governed
   -> Rust stopless/stop schema decision
   -> stopless action = cli_projection
-  -> client-visible exec_command(routecodex hook run reasoningStop --input-json status/control)
+  -> client-visible exec_command(routecodex hook run reasoningStop)
   -> client submits ordinary exec_command output
   -> ReqChatProcess reads current responsesResume/MetadataCenter truth
   -> stopless call/result pair is removed
@@ -58,7 +58,7 @@ Provider response
 - `StoplessOrchestrationAction` 只能是 `terminal_final` 或 `cli_projection`。
 - TS `engine.ts` 只能消费 Rust plan，并调用 CLI projection 或 terminal side effect；不得重建 scope、fallback、reenter、projection seed 或 stop schema 判断。
 - stop schema guidance 只能存在于 system prompt 和 managed relay 的 fresh internal `reasoningStop` tool schema；不得存在于 CLI 命令、CLI stdout 或 provider-facing shell/tool history。
-- missing/invalid schema 时，下一轮 provider user prompt 使用固定透明提示；`stopreason=2 + next_step` 时使用 `next_step` 原文。
+- missing/invalid schema 或 `stopreason=2` / need_continue 时，下一轮 provider user prompt 使用 StoplessCenter policy 生成的完整模型透明 current-turn guideline；不得把 no-op/CLI/client bridge 或 `finish_reason=stop` 机制写给模型。
 - 自动 stopless CLI 的 call/result pair 必须在下一轮 provider projection 前物理移除，不得恢复成内部工具配对。
 - 最新真实 user turn 是硬清零边界：如果真实 user 位于历史 stopless pair 之后，所有 inbound normalization、continuation-history collapse 和 provider codec 都必须保留该 user 原文，删除更早的 stopless pair，且不得重建透明续轮提示。
 - `/v1/responses` bridge 使用 embedded `responsesContext.toolsNormalized` 时必须剥离旧的 `reasoningStop`、`reasoning_stop`、`stop_message_auto` 内部工具声明，同时保留 `exec_command` 等正常客户端工具；managed relay 的 fresh internal `reasoningStop` 只能由 ReqChatProcess 本轮重新注入 exactly once。

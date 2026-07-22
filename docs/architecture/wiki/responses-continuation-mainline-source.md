@@ -98,7 +98,7 @@ Round 1 response side:
 1. Provider request must already contain the stop contract guidance and the model-visible `reasoningStop` tool when stopless is active.
 2. If provider returns `finish_reason=stop`, response governance evaluates the stop schema from assistant text (`<rcc_stop_schema>...</rcc_stop_schema>` or accepted fenced schema).
 3. If provider returns tool calls, response governance evaluates `reasoningStop.arguments` as the stop schema source.
-4. Missing, empty, malformed, invalid, or non-terminal schema must be converted into the client-visible shell projection: `required_action.submit_tool_outputs.tool_calls[].name=exec_command`, with command `routecodex hook run reasoningStop ...`.
+4. Missing, empty, malformed, invalid, or non-terminal schema must be converted into the client-visible shell projection: `required_action.submit_tool_outputs.tool_calls[].name=exec_command`, with command `routecodex hook run reasoningStop`.
 5. Valid terminal schema may pass terminal response projection without forcing the shell projection.
 6. Continuation save must happen after the response hook/projection has produced the canonical client-visible response truth. Saving raw pre-hook `reasoningStop` as the canonical client continuation truth is invalid.
 7. Client delivery happens after that save point; save belongs to chat-process closeout, not SSE.
@@ -107,9 +107,9 @@ Round 2 request side:
 
 1. `/v1/responses/{responseId}/submit_tool_outputs` is first resolved by Responses continuation owner using explicit current request evidence.
 2. Relay continuation restore/materialize must produce canonical current request truth before stopless request hook restore runs.
-3. The submitted client `exec_command` output from `routecodex hook run reasoningStop ...` must be restored into model-visible stopless truth.
-4. That restored truth must be paired back to internal `reasoningStop` call/result semantics for the model-facing request, while the CLI stdout is rewritten into model-visible guidance.
-5. Provider-facing request must then contain the restored `reasoningStop` semantics, updated schema guidance, and the normal client tool surface required for the next turn.
+3. The submitted client `exec_command` output from `routecodex hook run reasoningStop` is only black-box bridge evidence.
+4. Stopless request governance must remove the shell call/result pair and must not restore it as model-visible `reasoningStop` call/result history.
+5. Provider-facing request must then contain a StoplessCenter-selected, model-transparent ordinary user guideline, a fresh internal `reasoningStop` tool declaration, updated system guidance, and the normal client tool surface required for the next turn.
 6. Request-side hook restore must not decide continuation owner, and continuation restore must not parse stopless schema.
 
 Round 3 loop guard:
@@ -152,7 +152,7 @@ The blackbox gate for stopless continuation must lock semantic fields at each ma
 | `ChatProcReqContinuation01EntryEvidence` | current request has explicit `responseId`/`previous_response_id`/`tool_outputs`; endpoint identity is known | session-only or scope-only continuation hit |
 | `ChatProcReqContinuation02OwnerResolved` | `continuationOwner` is `relay` or `direct` from current evidence plus saved owner truth | hook/stopless code deciding owner |
 | `ChatProcReqContinuation03CanonicalRestored` | relay restore returns `payload.input`, `payload.previous_response_id`, `payload.tools`, `context.input`, `context.toolsRaw`, port/group scope | restored payload missing tools or built from stale pre-hook response |
-| `ChatProcReqContinuation04HookRestored` | stopless CLI output becomes model-visible `reasoningStop` history/guidance for the current turn | raw `exec_command` shell transcript becoming model truth |
+| `ChatProcReqContinuation04HookRestored` | stopless CLI output is consumed as bridge evidence; provider-visible history receives only transparent ordinary user guidance plus a fresh internal `reasoningStop` tool declaration | raw `exec_command` shell transcript or no-op/CLI bridge wording becoming model truth |
 | `ChatProcReqContinuation05Governed` | provider request has stop guidance, `reasoningStop` tool when active, normal client tools, and no internal metadata carriers | provider request missing stop contract or missing client tool surface |
 | `ChatProcRespContinuation06ResponseGoverned` | response hook has evaluated `finish_reason=stop` schema text or `reasoningStop.arguments`; denied stop is projected to client `exec_command` | raw internal `reasoningStop` leaking to client as executable tool |
 | `ChatProcRespContinuation07CanonicalSaved` | saved response body is the post-governed canonical response body with `response.id`, `required_action`, projected tool calls, and merged tool definitions | saving pre-projection provider/raw shell truth |

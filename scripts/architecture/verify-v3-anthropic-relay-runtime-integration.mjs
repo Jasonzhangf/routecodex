@@ -4,6 +4,8 @@ import YAML from 'yaml';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
 const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
+const reqTarget06Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs';
+const providerReq09Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs';
 const codecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const driverPath = 'v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs';
@@ -12,6 +14,11 @@ const designPath = 'docs/goals/v3-anthropic-relay-runtime-integration-test-desig
 const manifestPath = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
 const runtime = readFileSync(runtimePath, 'utf8');
 const hub = readFileSync(hubPath, 'utf8');
+const requestNodeSurface = [
+  hub,
+  readFileSync(reqTarget06Path, 'utf8'),
+  readFileSync(providerReq09Path, 'utf8'),
+].join('\n');
 const codec = readFileSync(codecPath, 'utf8');
 const server = readFileSync(serverPath, 'utf8');
 const driver = readFileSync(driverPath, 'utf8');
@@ -99,7 +106,7 @@ for (const phrase of [
 for (const phrase of [
   'selected_target: routecodex_v3_target::V3TargetCandidate',
   'fn into_provider_semantic_payload(',
-]) requireText(hub, hubPath, phrase);
+]) requireText(requestNodeSurface, `${hubPath}+node files`, phrase);
 
 requireOrder(runtime, runtimePath, [
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(',

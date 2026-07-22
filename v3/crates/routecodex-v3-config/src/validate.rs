@@ -608,8 +608,10 @@ fn compile_providers(
                 )));
             }
             let auth = compile_auth(&id, provider.auth)?;
-            let models = compile_models(&id, provider.models)?;
-            let responses = compile_provider_responses(&id, provider.responses, &models)?;
+            let provider_type = provider.provider_type;
+            let mut models = compile_models(&id, provider.models)?;
+            let responses = compile_provider_responses(&id, provider.responses)?;
+            apply_implicit_provider_model_capabilities(&provider_type, &mut models);
             let health = compile_provider_health(&id, provider.health)?;
             let compatibility_profile =
                 normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
@@ -618,7 +620,7 @@ fn compile_providers(
                 V3ProviderManifest {
                     id,
                     enabled: provider.enabled,
-                    provider_type: provider.provider_type,
+                    provider_type,
                     base_url: provider.base_url.trim_end_matches('/').to_string(),
                     default_model: provider.default_model,
                     auth,
@@ -643,20 +645,8 @@ fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Optio
 fn compile_provider_responses(
     provider_id: &str,
     responses: Option<V3ProviderResponsesAuthoringConfig>,
-    models: &BTreeMap<String, V3ProviderModelManifest>,
 ) -> Result<Option<V3ProviderResponsesAuthoringConfig>, V3ConfigError> {
-    let requires_remote_continuation = models.values().any(|model| {
-        model
-            .capabilities
-            .iter()
-            .any(|capability| capability == "remote_continuation")
-    });
     let Some(responses) = responses else {
-        if requires_remote_continuation {
-            return Err(validation(format!(
-                "provider {provider_id} remote_continuation requires responses websocket_v2 transport"
-            )));
-        }
         return Ok(None);
     };
 
@@ -665,11 +655,6 @@ fn compile_provider_responses(
             if responses.websocket_v2_url.is_some() {
                 return Err(validation(format!(
                     "provider {provider_id} HTTP transport cannot declare websocket_v2_url"
-                )));
-            }
-            if requires_remote_continuation {
-                return Err(validation(format!(
-                    "provider {provider_id} remote_continuation requires responses websocket_v2 transport"
                 )));
             }
         }
@@ -698,6 +683,41 @@ fn compile_provider_responses(
     }
 
     Ok(Some(responses))
+}
+
+fn apply_implicit_provider_model_capabilities(
+    provider_type: &str,
+    models: &mut BTreeMap<String, V3ProviderModelManifest>,
+) {
+    if provider_type != "responses" {
+        return;
+    }
+    for model in models.values_mut() {
+        if is_gpt_series_provider_model(model) {
+            ensure_model_capability(model, "text");
+            ensure_model_capability(model, "remote_continuation");
+            ensure_model_capability(model, "tool_outputs");
+        }
+    }
+}
+
+fn is_gpt_series_provider_model(model: &V3ProviderModelManifest) -> bool {
+    is_gpt_series_model_id(&model.id) || is_gpt_series_model_id(&model.wire_name)
+}
+
+fn is_gpt_series_model_id(model_id: &str) -> bool {
+    let normalized = model_id.trim().to_ascii_lowercase();
+    normalized == "gpt" || normalized.starts_with("gpt-")
+}
+
+fn ensure_model_capability(model: &mut V3ProviderModelManifest, capability: &str) {
+    if !model
+        .capabilities
+        .iter()
+        .any(|existing| existing == capability)
+    {
+        model.capabilities.push(capability.to_string());
+    }
 }
 
 fn compile_provider_health(
@@ -804,6 +824,11 @@ fn compile_models(
         }
         let mut capabilities = BTreeSet::new();
         for capability in &model.capabilities {
+            if capability == "streaming" {
+                return Err(validation(format!(
+                    "provider {provider_id} model {id} capability streaming is a transport intent, not a model capability; use supports_streaming"
+                )));
+            }
             if !matches!(
                 capability.as_str(),
                 "text"
@@ -817,7 +842,6 @@ fn compile_models(
                     | "remote_continuation"
                     | "local_materialization"
                     | "tool_outputs"
-                    | "streaming"
             ) {
                 return Err(validation(format!(
                     "provider {provider_id} model {id} declares unknown capability {capability}"
@@ -1127,6 +1151,15 @@ fn compile_pool_match(
     }
     let models =
         unique_sorted_nonempty_values(group_id, pool_id, "models", authoring.models, None)?;
+    if authoring
+        .required_capabilities
+        .iter()
+        .any(|capability| capability == "streaming")
+    {
+        return Err(validation(format!(
+            "route group {group_id} pool {pool_id} required_capabilities streaming is a transport intent, not a route capability"
+        )));
+    }
     let required_capabilities = unique_sorted_nonempty_values(
         group_id,
         pool_id,
@@ -1146,7 +1179,6 @@ fn compile_pool_match(
             "remote_continuation",
             "local_materialization",
             "tool_outputs",
-            "streaming",
         ]),
     )?;
     let entry_protocol = match authoring.entry_protocol {

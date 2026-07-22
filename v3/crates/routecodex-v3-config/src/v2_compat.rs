@@ -169,11 +169,29 @@ fn compile_v2_servers(
 fn available_entry_protocols(
     providers: &BTreeMap<String, V3ProviderAuthoringConfig>,
 ) -> BTreeSet<String> {
-    providers
-        .values()
-        .filter(|provider| provider.enabled)
-        .map(|provider| provider.provider_type.clone())
-        .collect()
+    let mut protocols = BTreeSet::new();
+    for provider in providers.values().filter(|provider| provider.enabled) {
+        match provider.provider_type.as_str() {
+            "anthropic" => {
+                protocols.insert("anthropic".to_string());
+                protocols.insert("responses".to_string());
+            }
+            "openai_chat" => {
+                protocols.insert("openai_chat".to_string());
+                protocols.insert("responses".to_string());
+            }
+            "responses" => {
+                protocols.insert("responses".to_string());
+            }
+            "gemini" => {
+                protocols.insert("gemini".to_string());
+            }
+            value => {
+                protocols.insert(value.to_string());
+            }
+        }
+    }
+    protocols
 }
 
 fn default_v2_hub_v1_authoring() -> V3HubV1AuthoringConfig {
@@ -530,10 +548,17 @@ fn compile_v2_providers(
     forwarders: &BTreeMap<String, V3ForwarderAuthoringConfig>,
 ) -> Result<BTreeMap<String, V3ProviderAuthoringConfig>, V3ConfigError> {
     let mut referenced = BTreeSet::new();
+    let mut referenced_models = BTreeMap::<String, BTreeSet<String>>::new();
     for forwarder in forwarders.values() {
         for target in &forwarder.targets {
             if let Some(provider) = &target.provider {
                 referenced.insert(provider.clone());
+                if let Some(model) = &target.model {
+                    referenced_models
+                        .entry(provider.clone())
+                        .or_default()
+                        .insert(model.clone());
+                }
             }
         }
     }
@@ -602,7 +627,10 @@ fn compile_v2_providers(
                     base_url: provider.base_url,
                     default_model: provider.default_model,
                     auth,
-                    models: compile_v2_provider_models(provider.models),
+                    models: compile_v2_provider_models(
+                        provider.models,
+                        referenced_models.get(&provider_id),
+                    ),
                     responses,
                     concurrency: provider.concurrency.map(|concurrency| {
                         V3ProviderConcurrencyAuthoringConfig {
@@ -724,9 +752,13 @@ fn materialize_v2_secret_token_file(
 
 fn compile_v2_provider_models(
     models: BTreeMap<String, V2ProviderModelConfig>,
+    referenced_models: Option<&BTreeSet<String>>,
 ) -> BTreeMap<String, V3ProviderModelAuthoringConfig> {
     models
         .into_iter()
+        .filter(|(id, _)| {
+            referenced_models.is_none_or(|referenced_models| referenced_models.contains(id))
+        })
         .map(|(id, model)| {
             (
                 id.clone(),

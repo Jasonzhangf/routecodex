@@ -36,19 +36,28 @@ impl ResponsesTransport for JsonTransport {
                 "id":"chatcmpl-json-1",
                 "object":"chat.completion",
                 "model":"chat-wire-model",
+                "created":1234567890,
                 "choices":[{
                     "index":0,
                     "message":{
                         "role":"assistant",
                         "content":null,
+                        "refusal":null,
                         "tool_calls":[
                             {"id":"call_a","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"alpha\"}"}},
                             {"id":"call_b","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"beta\"}"}}
                         ]
                     },
+                    "logprobs":{"content":[]},
                     "finish_reason":"tool_calls"
                 }],
-                "usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}
+                "usage":{
+                    "prompt_tokens":10,
+                    "prompt_tokens_details":{"cached_tokens":6},
+                    "completion_tokens":4,
+                    "completion_tokens_details":{"reasoning_tokens":2},
+                    "total_tokens":14
+                }
             }))
             .unwrap(),
         ))
@@ -57,6 +66,15 @@ impl ResponsesTransport for JsonTransport {
 
 #[tokio::test]
 async fn json_runtime_executes_one_hub_lifecycle_and_preserves_chat_semantics() {
+    run_openai_chat_same_protocol_field_parity_request_response_matrix().await;
+}
+
+#[tokio::test]
+async fn openai_chat_same_protocol_field_parity_request_response_matrix() {
+    run_openai_chat_same_protocol_field_parity_request_response_matrix().await;
+}
+
+async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     let transport = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -71,6 +89,18 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_chat_semantics() 
             {"role":"tool","tool_call_id":"prior_a","content":"old-result"}
         ],
         "tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],
+        "tool_choice":{"type":"function","function":{"name":"lookup"}},
+        "parallel_tool_calls":false,
+        "stop":["<END>"],
+        "temperature":0.4,
+        "top_p":0.7,
+        "presence_penalty":0.1,
+        "frequency_penalty":0.2,
+        "logit_bias":{"42":1},
+        "seed":777,
+        "response_format":{"type":"json_object"},
+        "stream_options":{"include_usage":true},
+        "user":"chat-user",
         "stream":false,
         "metadata":{"client_visible":"kept"}
     });
@@ -94,6 +124,21 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_chat_semantics() 
     assert_eq!(captured["model"], "chat-wire-model");
     assert_eq!(captured["messages"], payload["messages"]);
     assert_eq!(captured["tools"], payload["tools"]);
+    assert_eq!(captured["tool_choice"], payload["tool_choice"]);
+    assert_eq!(
+        captured["parallel_tool_calls"],
+        payload["parallel_tool_calls"]
+    );
+    assert_eq!(captured["stop"], payload["stop"]);
+    assert_eq!(captured["temperature"], payload["temperature"]);
+    assert_eq!(captured["top_p"], payload["top_p"]);
+    assert_eq!(captured["presence_penalty"], payload["presence_penalty"]);
+    assert_eq!(captured["frequency_penalty"], payload["frequency_penalty"]);
+    assert_eq!(captured["logit_bias"], payload["logit_bias"]);
+    assert_eq!(captured["seed"], payload["seed"]);
+    assert_eq!(captured["response_format"], payload["response_format"]);
+    assert_eq!(captured["stream_options"], payload["stream_options"]);
+    assert_eq!(captured["user"], payload["user"]);
     assert_eq!(captured["metadata"], payload["metadata"]);
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 17);
@@ -109,7 +154,29 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_chat_semantics() 
         V3OpenAiChatRelayClientBody::Json(value) => value,
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON client body"),
     };
+    assert_eq!(client_response["model"], "chat-wire-model");
+    assert_eq!(client_response["created"], 1234567890);
     assert_eq!(client_response["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        client_response["choices"][0]["message"]["tool_calls"][1]["id"],
+        "call_b"
+    );
+    assert_eq!(
+        client_response["choices"][0]["message"]["refusal"],
+        Value::Null
+    );
+    assert_eq!(
+        client_response["choices"][0]["logprobs"],
+        json!({"content":[]})
+    );
+    assert_eq!(
+        client_response["usage"]["prompt_tokens_details"]["cached_tokens"],
+        6
+    );
+    assert_eq!(
+        client_response["usage"]["completion_tokens_details"]["reasoning_tokens"],
+        2
+    );
     assert_eq!(client_response["usage"]["total_tokens"], 14);
 }
 
@@ -234,6 +301,74 @@ async fn sse_runtime_preserves_split_frames_tool_delta_terminal_and_done_order()
         "tool_calls"
     );
     assert_eq!(events[3], "data: [DONE]\n\n");
+}
+
+#[tokio::test]
+async fn sse_runtime_enters_response_chat_process_and_preserves_reasoning_content() {
+    use futures_util::StreamExt;
+    let transport = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![br#"data: {"id":"chatcmpl-reasoning","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"private chain"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-reasoning","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"visible answer"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+        .to_vec()])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest(),
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-sse-reasoning-chain".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"think then answer"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert_eq!(
+        &output.node_trace[10..],
+        &[
+            "V3ProviderRespInbound01Raw",
+            "ProviderRespCompat02ProviderCompat",
+            "V3HubRespInbound02Normalized",
+            "V3HubRespChatProcess03Governed",
+            "V3HubRespContinuation04Committed",
+            "V3HubRespOutbound05ClientSemantic",
+            "V3ServerRespOutbound06ClientFrame"
+        ],
+        "native OpenAI Chat SSE must enter the same response chain as JSON before client projection"
+    );
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let events = stream.collect::<Vec<_>>().await;
+    let events = events
+        .into_iter()
+        .map(Result::unwrap)
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 3);
+    let reasoning_payload: Value =
+        serde_json::from_str(events[0].trim_start_matches("data: ").trim()).unwrap();
+    assert_eq!(
+        reasoning_payload["choices"][0]["delta"]["reasoning_content"],
+        "private chain"
+    );
+    let text_payload: Value =
+        serde_json::from_str(events[1].trim_start_matches("data: ").trim()).unwrap();
+    assert_eq!(
+        text_payload["choices"][0]["delta"]["content"],
+        "visible answer"
+    );
+    assert_eq!(events[2], "data: [DONE]\n\n");
 }
 
 type ControlledSseReceiver = tokio::sync::mpsc::Receiver<Result<Vec<u8>, V3ProviderError>>;
@@ -417,7 +552,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 [providers.controlled.models.chat-wire-model]
 wire_name = "chat-wire-model"
 supports_streaming = true
-capabilities = ["text", "tools", "streaming"]
+capabilities = ["text", "tools"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }]

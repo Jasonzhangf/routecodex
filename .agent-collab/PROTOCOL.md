@@ -84,6 +84,10 @@ Shared JSON state must not be edited by multiple black-box workers. Shared progr
 
 Heartbeat timeout only means `stale`. A stale heartbeat is not automatic takeover permission.
 
+The RouteCodex stale timeout is 24 hours. A non-terminal claim whose latest claim owner,
+heartbeat, event, or evidence update is older than 24 hours must be marked `stale`.
+Completed and released claims remain terminal records and are not rewritten as `stale`.
+
 Stale heartbeat does not authorize high-risk takeover of production writes, deletes, migrations, releases, auth, secrets, payment-related work, global install mutation, or live runtime mutation. High-risk takeover needs explicit Jason approval or a separate checked handoff decision.
 
 ## Repairable Blockers

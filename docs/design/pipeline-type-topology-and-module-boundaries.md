@@ -87,6 +87,56 @@ metadataToProviderOptions
 3. 迁移时先加新类型骨架和 red test，再逐步移动实现，最后物理删除旧壳。
 4. 任何把 `ChatProcess` 简写回泛化 `Process` 的改动视为拓扑退化。
 
+### 2.4 V3 Hub v1 node-file topology（硬规则）
+
+`v3/crates/routecodex-v3-runtime/src/hub_v1.rs` 是 V3 Hub v1 的根聚合面，只允许：
+
+- `mod` 声明；
+- `pub use` / `pub(crate) use` re-export；
+- `#[cfg(test)] mod tests;`；
+- 明确写入 map 的极薄 registry glue（当前无 node-local 实现）。
+
+禁止在 `hub_v1.rs` 长期放置 contract node `struct` / `enum`、builder/parser、跨节点语义转换、resource/control mutation、隐藏 provider/runtime orchestration，或把已拆出的 node 实现复制回 root。根文件只暴露模块表面，不是 node owner。
+
+V3 Hub v1 每个 contract node 必须有且只有一个 split owner file。命名使用 `snake_case_node_id_with_stage_number`，builder/parser 与目标 node 同文件：
+
+| node | owner file | owning builder/parser |
+| --- | --- | --- |
+| `V3HubReqInbound01ClientRaw` | `hub_v1/req_inbound_01_client_raw.rs` | `build_v3_hub_req_inbound_01_client_raw` |
+| `V3HubReqInbound02Normalized` | `hub_v1/req_inbound_02_normalized.rs` | `build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01` |
+| `V3HubReqContinuation03Classified` | `hub_v1/req_continuation_03_classified.rs` | `build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02` |
+| `V3HubReqChatProcess04Governed` | `hub_v1/req_chat_process_04_governed.rs` | `build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03` |
+| `V3HubReqExecution05Planned` | `hub_v1/req_execution_05_planned.rs` | `build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04` |
+| `V3HubReqTarget06Resolved` | `hub_v1/req_target_06_resolved.rs` | `build_v3_hub_req_target_06_from_v3_hub_req_execution_05` |
+| `V3HubReqOutbound07ProviderSemantic` | `hub_v1/req_outbound_07_provider_semantic.rs` | `build_v3_hub_req_outbound_07_from_v3_hub_req_target_06` |
+| `ProviderReqCompat06ProviderCompat` | `hub_v1/provider_req_compat_06_provider_compat.rs` | `build_provider_req_compat_06_from_v3_hub_req_outbound_07` |
+| `V3ProviderReqOutbound08WirePayload` | `hub_v1/provider_req_outbound_08_wire_payload.rs` | `build_v3_provider_req_outbound_08_from_provider_req_compat_06` |
+| `V3ProviderReqOutbound09TransportRequest` | `hub_v1/provider_req_outbound_09_transport_request.rs` | `build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08` |
+| `V3ProviderRespInbound01Raw` | `hub_v1/provider_resp_inbound_01_raw.rs` | `build_v3_provider_resp_inbound_01_raw` |
+| `ProviderRespCompat02ProviderCompat` | `hub_v1/provider_resp_compat_02_provider_compat.rs` | `build_provider_resp_compat_02_from_v3_provider_resp_inbound_01` |
+| `V3HubRespInbound02Normalized` | `hub_v1/resp_inbound_02_normalized.rs` | `build_v3_hub_resp_inbound_02_from_provider_resp_compat_02` |
+| `V3HubRespChatProcess03Governed` | `hub_v1/resp_chat_process_03_governed.rs` | `build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02` |
+| `V3HubRespContinuation04Committed` | `hub_v1/resp_continuation_04_committed.rs` | `build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03` |
+| `V3HubRespOutbound05ClientSemantic` | `hub_v1/resp_outbound_05_client_semantic.rs` | `build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04` |
+| `V3ServerRespOutbound06ClientFrame` | `hub_v1/server_resp_outbound_06_client_frame.rs` | `build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05` |
+
+Shared helper owner boundary:
+
+- `common.rs` owns shared enums/value types used by multiple nodes. It must not own node builders/parsers.
+- `side_channel.rs` owns side-channel key helpers only. It must not build provider/client normal payload.
+- `provider_compat_shared.rs` owns provider-compat shared protocol helpers only. It must not own Hub node transitions or tool governance.
+- `responses_openai_codec.rs` owns Responses/OpenAI shared codec helpers called by node files. It must not become lifecycle owner.
+- `request_outbound_format.rs` owns provider-standard request-format helpers. It must not hide non-adjacent transitions or own node-local builder/parser behavior.
+
+Provider compat numbering is branch-local contract numbering, not global monotonic order. `ProviderReqCompat06ProviderCompat` branches from `V3HubReqOutbound07ProviderSemantic` into provider-compat space before `V3ProviderReqOutbound08WirePayload`; `ProviderRespCompat02ProviderCompat` branches from `V3ProviderRespInbound01Raw` before `V3HubRespInbound02Normalized`. The number is part of that branch-local contract and must not be renumbered, reused, or treated as a shortcut around adjacent topology.
+
+Map/gate lock:
+
+- `docs/architecture/v3-mainline-call-map.yml` must bind `caller_file` / `callee_file` to the actual split owner file where the symbol is defined. `hub_v1.rs` may appear only for true root module export/registry symbols.
+- `docs/architecture/v3-function-map.yml` must distinguish `module_export_owner_file` from `node_owner_files` and `shared_helper_owner_files`.
+- `docs/architecture/v3-verification-map.yml` must require `verify:v3-hub-v1-node-file-topology` and `test:v3-hub-v1-node-file-topology-red-fixtures`.
+- Red fixtures must fail when a node builder is moved back to root, a duplicate node/builder appears, a node owner file is deleted, a shared helper grows node-local builders, provider compat branch numbering becomes ambiguous, or mainline map points a split builder back to `hub_v1.rs`.
+
 ## 3. 请求链拓扑
 
 请求链是唯一进入 provider 的正常数据链，必须单向：

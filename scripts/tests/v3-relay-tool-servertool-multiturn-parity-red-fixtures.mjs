@@ -7,7 +7,9 @@ import { spawnSync } from 'node:child_process';
 const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs');
 const copyPaths = [
-  'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
@@ -48,31 +50,42 @@ const cases = [
   },
   {
     name: 'tool kind classifier removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
     marker: 'pub(crate) fn classify_v3_hub_relay_tool_kind',
     mutation: 'pub(crate) fn classify_tool_kind_removed',
     diagnostic: /classify_v3_hub_relay_tool_kind/,
   },
   {
     name: 'apply_patch response freeform projection removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
     marker: 'fn project_v3_apply_patch_freeform_calls_at_resp03',
     mutation: 'project_v3_apply_patch_projection_removed',
     diagnostic: /project_v3_apply_patch_freeform_calls_at_resp03/,
   },
   {
     name: 'Resp04 non-terminal tool-call canonicalization removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
     marker: 'fn canonicalize_v3_hub_resp04_finalized_payload',
     mutation: 'fn resp04_tool_call_payload_projection_removed',
     diagnostic: /canonicalize_v3_hub_resp04_finalized_payload/,
   },
   {
-    name: 'SSE requires_action transport event relabeled as completed',
+    name: 'Responses client SSE completed terminal relabeled as requires_action',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'Some("requires_action") => "response.requires_action"',
-    mutation: 'Some("requires_action") => "response.completed"',
-    diagnostic: /response\.requires_action/,
+    marker:
+      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.completed",',
+    mutation:
+      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.requires_action",',
+    diagnostic: /response\.completed|response\.requires_action client SSE terminal projection/,
+  },
+  {
+    name: 'Responses client SSE done terminal removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker:
+      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",',
+    mutation:
+      'frames.push(Ok(build_v3_runtime_sse_json_frame(\n            "response.closed",\n            &json!({\n                "type": "response.closed",',
+    diagnostic: /response\.done/,
   },
   {
     name: 'SSE transport revives tool-call semantic finish inference',
@@ -113,23 +126,23 @@ const cases = [
   {
     name: 'Codex additional_tools shape blackbox removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'json_stopless_preserves_codex_additional_tools_across_continuation',
+    marker: 'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
     mutation: 'json_stopless_additional_tools_shape_test_removed',
-    diagnostic: /json_stopless_preserves_codex_additional_tools_across_continuation/,
+    diagnostic: /json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs/,
   },
   {
-    name: 'budget-exhausted provider tool-call client semantic blackbox removed',
+    name: 'stopless natural-stop guard client semantic blackbox removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'json_stopless_budget_exhausted_provider_tool_call_returns_requires_action',
+    marker: 'json_stopless_center_natural_stop_guard_passes_cleaned_original_response',
     mutation: 'json_stopless_budget_tool_call_semantic_test_removed',
-    diagnostic: /json_stopless_budget_exhausted_provider_tool_call_returns_requires_action/,
+    diagnostic: /json_stopless_center_natural_stop_guard_passes_cleaned_original_response/,
   },
   {
-    name: 'apply_patch SSE tool-call continuation no-relabel assertion removed',
+    name: 'apply_patch SSE rejects requires_action terminal assertion removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'Responses Relay client SSE must not relabel Hub-finalized tool-call continuation as completed',
-    mutation: 'apply_patch sse relabel assertion removed',
-    diagnostic: /tool-call continuation/,
+    marker: 'Responses Relay client SSE must not use response.requires_action as the terminal stream event',
+    mutation: 'apply_patch SSE terminal assertion removed',
+    diagnostic: /response\.requires_action as the terminal stream event/,
   },
   {
     name: 'Codex additional_tools original JSON path assertion removed',

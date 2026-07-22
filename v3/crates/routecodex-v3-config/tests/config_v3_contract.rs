@@ -293,18 +293,8 @@ fn validates_provider_model_and_forwarder_references() {
 }
 
 #[test]
-fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
-    let http_only = FULL_CONFIG.replace(
-        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
-        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
-    );
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&http_only).unwrap())
-        .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("remote_continuation requires responses websocket_v2 transport"));
-
-    let missing_endpoint = http_only.replace(
+fn responses_websocket_v2_transport_options_are_validated() {
+    let missing_endpoint = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
         "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\" }",
     );
@@ -324,7 +314,7 @@ fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
         .to_string()
         .contains("HTTP transport cannot declare websocket_v2_url"));
 
-    let websocket = http_only.replace(
+    let websocket = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
         "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
     );
@@ -335,6 +325,41 @@ fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
     assert_eq!(
         responses.websocket_v2_url.as_deref(),
         Some("wss://provider.invalid/v1/responses")
+    );
+}
+
+#[test]
+fn gpt_responses_models_publish_remote_continuation_without_explicit_capability_config() {
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+    let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
+    assert!(
+        capabilities
+            .iter()
+            .any(|capability| capability == "remote_continuation"),
+        "GPT Responses model must derive remote_continuation without explicit config: {capabilities:?}"
+    );
+    assert!(
+        capabilities.iter().any(|capability| capability == "tool_outputs"),
+        "GPT Responses model remote_continuation must derive tool_outputs without explicit config: {capabilities:?}"
+    );
+
+    let explicit_http = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
+
+    let non_responses = FULL_CONFIG.replacen("type = \"responses\"", "type = \"openai_chat\"", 1);
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&non_responses).unwrap())
+            .unwrap();
+    let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
+    assert!(
+        !capabilities
+            .iter()
+            .any(|capability| capability == "remote_continuation"),
+        "GPT model must not derive remote_continuation outside Responses protocol: {capabilities:?}"
     );
 }
 
@@ -648,6 +673,29 @@ fn rejects_unknown_hub_capability_and_execution_declarations() {
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap()).unwrap_err();
     assert!(err.to_string().contains("hub_v1 server"));
     assert!(err.to_string().contains("unknown value automatic"));
+}
+
+#[test]
+fn rejects_streaming_as_model_or_route_capability() {
+    let streaming_model_capability = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"streaming\"]",
+    );
+    let err = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&streaming_model_capability).unwrap(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("streaming is a transport"));
+
+    let streaming_route_capability = FULL_CONFIG.replace(
+        "required_capabilities = [\"tools\"]",
+        "required_capabilities = [\"tools\", \"streaming\"]",
+    );
+    let err = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&streaming_route_capability).unwrap(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("streaming is a transport"));
 }
 
 #[test]
@@ -972,6 +1020,79 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
 }
 
 #[test]
+fn v2_compat_keeps_responses_endpoint_for_minimax_only_5555() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-minimax-only-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "minimax",
+        "anthropic",
+        "https://minimax.invalid/anthropic",
+        "MiniMax-M3",
+        &["MiniMax-M3", "MiniMax-M2.7", "minimax-m3"],
+    );
+
+    let path = root.join("config.toml");
+    fs::write(&path, V2_5555_MINIMAX_ONLY_CONFIG).unwrap();
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let server = &manifest.servers["gateway_priority_5555"];
+    assert_eq!(server.endpoints, ["responses", "anthropic"]);
+
+    let hub = manifest
+        .hub_v1
+        .as_ref()
+        .expect("v2 root must publish hub_v1");
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/responses")
+        .is_some_and(|binding| binding.entry_protocol == "responses"
+            && binding.execution_mode.as_str() == "relay"));
+    assert!(hub
+        .entry_protocol_binding_for_endpoint("/v1/messages")
+        .is_some_and(|binding| binding.entry_protocol == "anthropic"));
+    assert!(
+        !server
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint == "openai_chat" || endpoint == "gemini"),
+        "minimax-only projection must not expose OpenAI Chat or Gemini endpoint protocols"
+    );
+
+    let provider = &manifest.providers["minimax"];
+    assert_eq!(provider.provider_type, "anthropic");
+    assert_eq!(
+        provider.models.keys().cloned().collect::<Vec<_>>(),
+        ["MiniMax-M3"],
+        "V2 projection must not expose provider-local models that no active 5555 route can select"
+    );
+
+    let group = &manifest.route_groups["gateway_priority_5555"];
+    for route in [
+        "thinking",
+        "coding",
+        "longcontext",
+        "tools",
+        "search",
+        "web_search",
+        "multimodal",
+        "default",
+    ] {
+        assert_route_targets(
+            group.pools[route]
+                .targets
+                .iter()
+                .map(|target| target.id.as_deref().unwrap())
+                .collect(),
+            &["fwd.minimax.MiniMax-M3"],
+        );
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn v2_compat_projects_responses_websocket_v2_transport_and_remote_capabilities() {
     let root =
         std::env::temp_dir().join(format!("routecodex-v3-v2-compat-ws-{}", std::process::id()));
@@ -988,13 +1109,7 @@ fn v2_compat_projects_responses_websocket_v2_transport_and_remote_capabilities()
 transport = "websocket_v2"
 websocket_v2_url = "wss://provider.invalid/openai/v1/responses"
 "#,
-            capabilities: &[
-                "text",
-                "reasoning",
-                "tools",
-                "remote_continuation",
-                "tool_outputs",
-            ],
+            capabilities: &["text", "reasoning", "tools"],
         },
     );
     let path = root.join("config.toml");
@@ -1015,10 +1130,10 @@ websocket_v2_url = "wss://provider.invalid/openai/v1/responses"
         provider.models["gpt-5.6-sol"].capabilities,
         [
             "reasoning",
-            "remote_continuation",
             "text",
-            "tool_outputs",
-            "tools"
+            "tools",
+            "remote_continuation",
+            "tool_outputs"
         ]
     );
 
@@ -1026,9 +1141,9 @@ websocket_v2_url = "wss://provider.invalid/openai/v1/responses"
 }
 
 #[test]
-fn v2_compat_rejects_remote_continuation_on_http_only_provider() {
+fn v2_compat_projects_gpt_responses_remote_capabilities_without_websocket() {
     let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-v2-compat-http-remote-{}",
+        "routecodex-v3-v2-compat-http-gpt-remote-{}",
         std::process::id()
     ));
     fs::create_dir_all(&root).unwrap();
@@ -1041,22 +1156,28 @@ fn v2_compat_rejects_remote_continuation_on_http_only_provider() {
         &["gpt-5.6-sol"],
         V2ProviderOptions {
             responses_extra: "",
-            capabilities: &[
-                "text",
-                "reasoning",
-                "tools",
-                "remote_continuation",
-                "tool_outputs",
-            ],
+            capabilities: &["text", "reasoning", "tools"],
         },
     );
     let path = root.join("config.toml");
     fs::write(&path, V2_SINGLE_RESPONSES_CONFIG).unwrap();
 
-    let error = V3ConfigStore::new(&path).load_snapshot().unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("remote_continuation requires responses websocket_v2 transport"));
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let provider = &manifest.providers["cc-sol"];
+    assert_eq!(
+        provider.responses.as_ref().unwrap().transport.as_str(),
+        "http"
+    );
+    assert_eq!(
+        provider.models["gpt-5.6-sol"].capabilities,
+        [
+            "reasoning",
+            "text",
+            "tools",
+            "remote_continuation",
+            "tool_outputs"
+        ]
+    );
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -1227,6 +1348,66 @@ priority = 1
 [[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
 priority = 100
 targets = ["fwd.free.gpt-5.6-sol"]
+"#;
+
+const V2_5555_MINIMAX_ONLY_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.minimax.MiniMax-M3"]
+protocol = "anthropic"
+model = "MiniMax-M3"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.minimax.MiniMax-M3".targets]]
+providerId = "minimax"
+priority = 1
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.thinking]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.coding]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.longcontext]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.search]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.web_search]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.multimodal]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.minimax.MiniMax-M3"]
 "#;
 
 const V2_5555_CONFIG: &str = r#"

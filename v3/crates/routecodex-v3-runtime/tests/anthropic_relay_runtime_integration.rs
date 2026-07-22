@@ -8,7 +8,7 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime, project_v3_responses_json_as_anthropic_message,
     project_v3_responses_sse_as_anthropic_events, V3AnthropicRelayRuntimeInput,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Mutex;
 
 struct JsonTransport {
@@ -43,6 +43,31 @@ impl ResponsesTransport for JsonTransport {
     }
 }
 
+struct MatrixJsonTransport {
+    captured: Mutex<Option<Value>>,
+    response: Value,
+}
+
+#[async_trait]
+impl ResponsesTransport for MatrixJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.captured.lock().unwrap() = Some(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&self.response).unwrap(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
     let transport = JsonTransport {
@@ -71,7 +96,7 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
             "model":"responses-wire-model",
             "input":[{"role":"user","content":[{"type":"input_text","text":"Lookup alpha"}]}],
             "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
-            "reasoning":{"effort":"medium"},
+            "reasoning":{"effort":"medium","thinking":{"type":"enabled","budget_tokens":512}},
             "stream":false
         })
     );
@@ -86,6 +111,172 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
+}
+
+#[tokio::test]
+async fn anthropic_responses_field_parity_request_matrix() {
+    let transport = MatrixJsonTransport {
+        captured: Mutex::new(None),
+        response: json!({
+            "id":"resp_request_matrix",
+            "status":"completed",
+            "output":[{"type":"output_text","text":"matrix ok"}],
+            "usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}
+        }),
+    };
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest(),
+        V3AnthropicRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-anthropic-field-matrix".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "system":"system alpha\n\nsystem beta",
+                "messages":[
+                    {
+                        "role":"user",
+                        "content":[
+                            {"type":"text","text":"Describe image"},
+                            {"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}
+                        ]
+                    },
+                    {
+                        "role":"assistant",
+                        "content":[
+                            {"type":"tool_use","id":"call_lookup","name":"lookup","input":{"q":"alpha"}}
+                        ]
+                    },
+                    {
+                        "role":"user",
+                        "content":[
+                            {"type":"tool_result","tool_use_id":"call_lookup","content":[{"type":"text","text":"lookup result"}]}
+                        ]
+                    }
+                ],
+                "tools":[{
+                    "name":"lookup",
+                    "description":"Lookup docs",
+                    "input_schema":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}
+                }],
+                "tool_choice":{"type":"tool","name":"lookup"},
+                "thinking":{"type":"enabled","budget_tokens":1024},
+                "metadata":{"client":"kept"},
+                "temperature":0.2,
+                "top_p":0.9,
+                "top_k":5,
+                "max_tokens":123,
+                "stop_sequences":["</stop>"],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    let body = transport.captured.lock().unwrap().clone().unwrap();
+    assert_eq!(body["model"], "responses-wire-model");
+    assert!(body.get("instructions").is_none());
+    assert_eq!(body["input"][0]["type"], "message");
+    assert_eq!(body["input"][0]["role"], "system");
+    assert_eq!(
+        body["input"][0]["content"][0],
+        json!({"type":"input_text","text":"system alpha\n\nsystem beta"})
+    );
+    assert_eq!(body["input"][1]["role"], "user");
+    assert_eq!(
+        body["input"][1]["content"][0],
+        json!({"type":"input_text","text":"Describe image"})
+    );
+    assert_eq!(
+        body["input"][1]["content"][1],
+        json!({"type":"input_image","image_url":"data:image/png;base64,AAA"})
+    );
+    assert_eq!(body["input"][2]["type"], "function_call");
+    assert_eq!(body["input"][2]["call_id"], "call_lookup");
+    assert_eq!(body["input"][2]["name"], "lookup");
+    assert_eq!(body["input"][2]["arguments"], "{\"q\":\"alpha\"}");
+    assert_eq!(body["input"][3]["type"], "function_call_output");
+    assert_eq!(body["input"][3]["call_id"], "call_lookup");
+    assert_eq!(body["input"][3]["output"], "lookup result");
+    assert_eq!(body["tools"][0]["type"], "function");
+    assert_eq!(body["tools"][0]["name"], "lookup");
+    assert_eq!(body["tools"][0]["description"], "Lookup docs");
+    assert_eq!(
+        body["tools"][0]["parameters"],
+        json!({"type":"object","properties":{"q":{"type":"string"}},"required":["q"]})
+    );
+    assert_eq!(
+        body["tool_choice"],
+        json!({"type":"function","name":"lookup"})
+    );
+    assert_eq!(body["reasoning"]["effort"], "medium");
+    assert_eq!(
+        body["reasoning"]["thinking"],
+        json!({"type":"enabled","budget_tokens":1024})
+    );
+    assert_eq!(body["metadata"], json!({"client":"kept"}));
+    assert_eq!(body["temperature"], 0.2);
+    assert_eq!(body["top_p"], 0.9);
+    assert_eq!(body["top_k"], 5);
+    assert_eq!(body["max_output_tokens"], 123);
+    assert_eq!(body["stop"], json!(["</stop>"]));
+    assert_eq!(body["stream"], false);
+    assert_eq!(output.status, 200);
+}
+
+#[test]
+fn anthropic_responses_field_parity_response_matrix() {
+    let projected = project_v3_responses_json_as_anthropic_message(&json!({
+        "id":"resp_response_matrix",
+        "model":"responses-wire-model",
+        "status":"completed",
+        "output":[
+            {"type":"reasoning","summary":[
+                {"type":"summary_text","text":"first thought"},
+                {"type":"summary_text","text":"second thought"}
+            ]},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]},
+            {"type":"output_text","text":" world"},
+            {"type":"function_call","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"beta\"}"},
+            {"type":"custom_tool_call","call_id":"call_raw","name":"exec","input":"raw script"}
+        ],
+        "usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}
+    }))
+    .unwrap();
+    assert_eq!(projected["id"], "msg_response_matrix");
+    assert_eq!(projected["model"], "responses-wire-model");
+    assert_eq!(projected["role"], "assistant");
+    assert_eq!(projected["stop_reason"], "tool_use");
+    assert_eq!(projected["usage"]["input_tokens"], 13);
+    assert_eq!(projected["usage"]["output_tokens"], 8);
+    assert_eq!(projected["usage"]["total_tokens"], 21);
+    assert_eq!(
+        projected["content"],
+        json!([
+            {"type":"thinking","thinking":"first thought"},
+            {"type":"thinking","thinking":"second thought"},
+            {"type":"text","text":"hello"},
+            {"type":"text","text":" world"},
+            {"type":"tool_use","id":"call_lookup","name":"lookup","input":{"q":"beta"}},
+            {"type":"tool_use","id":"call_raw","name":"exec","input":{"input":"raw script"}}
+        ])
+    );
+}
+
+#[test]
+fn anthropic_responses_field_parity_rejects_malformed_function_arguments() {
+    let error = project_v3_responses_json_as_anthropic_message(&json!({
+        "id":"resp_bad_args",
+        "status":"completed",
+        "output":[
+            {"type":"function_call","call_id":"call_bad","name":"lookup","arguments":"{\"q\":"}
+        ]
+    }))
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("function_call arguments"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
@@ -240,7 +431,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "reasoning", "streaming"]
+capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]

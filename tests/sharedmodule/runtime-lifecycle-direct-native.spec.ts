@@ -160,8 +160,8 @@ describe('runtime lifecycle direct native plans', () => {
       occupiedPorts: [5520]
     });
     expect(guard).toMatchObject({
-      action: 'refuse',
-      reasonCode: 'explicit_start_restart_existing_runtime',
+      action: 'allow',
+      reasonCode: 'explicit_start_restart_takeover_allowed',
       ports: [5520]
     });
 
@@ -172,9 +172,22 @@ describe('runtime lifecycle direct native plans', () => {
       occupiedPorts: [5521]
     });
     expect(defaultStartGuard).toMatchObject({
-      action: 'refuse',
-      reasonCode: 'start_existing_runtime_requires_restart_command',
+      action: 'allow',
+      reasonCode: 'default_start_takeover_allowed',
       ports: [5521]
+    });
+
+    const noRestartGuard = callNativeJson('planRuntimeStartRestartTakeoverGuardJson', {
+      explicitRestart: false,
+      noRestart: true,
+      exclusive: false,
+      daemonSupervisor: false,
+      occupiedPorts: [5522]
+    } as any);
+    expect(noRestartGuard).toMatchObject({
+      action: 'refuse',
+      reasonCode: 'start_no_restart_requires_stopped_runtime',
+      ports: [5522]
     });
   });
 });

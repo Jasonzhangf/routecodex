@@ -1,6 +1,111 @@
 lifecycle_id: v3.servertool_hook_skeleton_lifecycle
 owner_feature_id: v3.servertool_hook_skeleton_lifecycle
-summary: V3 StoplessCenter first built-in servertool hook. Stopless runs only inside Chat Process: Resp03 updates runtime_control StoplessCenter and projects no-op CLI/terminal text before continuation commit; Req04 consumes no-op CLI as current-turn evidence and reads StoplessCenter from runtime_control before request tool governance.
+summary: "V3 StoplessCenter first built-in servertool hook. StoplessCenter is a Metadata Center control-signal state machine for the Stopless feature. Stopless runs only inside declared Chat Process SOP nodes: Resp03 updates runtime_control StoplessCenter and projects no-input no-op CLI or terminal/pass-through results before continuation commit; Req04 consumes no-op CLI as current-turn evidence and reads StoplessCenter from runtime_control before request tool governance."
+guidance_rewrite:
+  node_id: V3StoplessReq03GuidanceToolInjected
+  prompt_kind: complete_non_persistent_current_turn_guideline
+  terse_continue_prompt: forbidden
+  history_persistence: forbidden
+  stale_generated_guideline_cleanup: required
+  model_visible_bridge_transparency: required
+  must_include:
+    - continue from restored context
+    - review current objective, existing conclusions, unfinished work, and current stop point
+    - use available tools when progress needs facts or actions
+    - call reasoningStop for complete or blocked only with evidence
+    - keep working when neither complete nor blocked
+  forbidden_model_visible:
+    - no-op
+    - CLI
+    - client tool round
+    - routecodex hook run reasoningStop
+    - finish_reason=stop
+    - consecutive stop count
+    - stop budget
+    - guard exhausted
+state_machine:
+  id: v3.stopless_center.state_machine
+  owner_node: StoplessCenterMetadataControl
+  initial_state: Idle
+  persisted_states:
+    - CliNoopProjected
+    - ProviderTurnInFlight
+  transient_states:
+    - RespStopObserved
+    - CliNoopObserved
+    - ContinuationGuidancePrepared
+    - TerminalCompleted
+    - TerminalBlocked
+    - GuardTerminal
+  terminal_states:
+    - TerminalCompleted
+    - TerminalBlocked
+    - GuardTerminal
+  states:
+    - { id: Idle, kind: reset, visible_to_client: false, visible_to_provider: false, stored: false, description: "No active stopless control state for this scoped session." }
+    - { id: ProviderTurnInFlight, kind: active, visible_to_client: false, visible_to_provider: false, stored: true, description: "A managed relay provider turn is in flight with transparent stopless guidance and exactly one internal reasoningStop declaration." }
+    - { id: RespStopObserved, kind: transient, visible_to_client: false, visible_to_provider: false, stored: false, description: "Resp03 observed a natural stop, invalid/no evidence reasoningStop, or explicit continue signal before deciding projection or pass-through." }
+    - { id: CliNoopProjected, kind: active, visible_to_client: true, visible_to_provider: false, stored: true, description: "Resp03 preserved visible assistant text and projected no-input exec_command for client tool-round closure." }
+    - { id: CliNoopObserved, kind: transient, visible_to_client: false, visible_to_provider: false, stored: false, description: "Req04 after continuation restore observed the current no-op output only as tool-round completion evidence." }
+    - { id: ContinuationGuidancePrepared, kind: transient, visible_to_client: false, visible_to_provider: true, stored: false, description: "Req04 removed no-op shell artifacts and stale generated stopless guidelines, then prepared one ordinary, transparent provider-facing current-turn continuation guideline." }
+    - { id: TerminalCompleted, kind: terminal, visible_to_client: true, visible_to_provider: false, stored: false, description: "Resp03 accepted reasoningStop completion only when evidence is present, stripped internal tool artifacts, and cleared StoplessCenter." }
+    - { id: TerminalBlocked, kind: terminal, visible_to_client: true, visible_to_provider: false, stored: false, description: "Resp03 accepted reasoningStop blocked only when reason and evidence are present, stripped internal tool artifacts, and cleared StoplessCenter or waits for a real user turn." }
+    - { id: GuardTerminal, kind: terminal, visible_to_client: true, visible_to_provider: false, stored: false, description: "The configured consecutive-stop guard is reached; current provider stop passes through without no-op or internal diagnostic and StoplessCenter is cleared." }
+  transitions:
+    - { id: stsm-01, from: Idle, to: ProviderTurnInFlight, event: managed_relay_req04_without_active_noop, class: normal, action: "Inject transparent base guidance and exactly one reasoningStop tool; no StoplessCenter write unless a prior state is being consumed." }
+    - { id: stsm-02, from: ProviderTurnInFlight, to: Idle, event: resp03_non_stop_progress_or_ordinary_tool_call, class: normal, action: "Clear scoped StoplessCenter; preserve normal response/tool progression." }
+    - { id: stsm-03, from: ProviderTurnInFlight, to: TerminalCompleted, event: resp03_reasoning_stop_finished_with_evidence, class: normal, action: "Strip internal reasoningStop artifact, preserve/replace visible completion text, clear state, no CLI projection." }
+    - { id: stsm-04, from: ProviderTurnInFlight, to: TerminalBlocked, event: resp03_reasoning_stop_blocked_with_reason_and_evidence, class: normal, action: "Strip internal reasoningStop artifact, preserve blocked text, clear or wait-user state, no CLI projection." }
+    - { id: stsm-05, from: ProviderTurnInFlight, to: RespStopObserved, event: resp03_natural_stop_or_invalid_or_need_continue, class: normal, action: "Classify stop kind and compute next consecutive stop count in MetadataCenter control, not from text/CLI/stdout." }
+    - { id: stsm-06, from: RespStopObserved, to: CliNoopProjected, event: budget_remaining, class: normal, action: "Store scoped StoplessCenter state and project client-visible no-input exec_command while preserving assistant visible text." }
+    - { id: stsm-07, from: CliNoopProjected, to: CliNoopObserved, event: req04_after_restore_current_noop_output_seen, class: normal, action: "Consume no-op output only as current-turn evidence; do not parse stdout or args." }
+    - { id: stsm-08, from: CliNoopObserved, to: ContinuationGuidancePrepared, event: req04_shell_artifacts_removed, class: normal, action: "Remove matching stopless shell call/output, stale internal artifacts, and previously generated stopless continuation guidelines; append exactly one transparent current-turn guideline." }
+    - { id: stsm-09, from: ContinuationGuidancePrepared, to: ProviderTurnInFlight, event: req04_guidance_and_tool_injected, class: normal, action: "Store scoped ProviderTurnInFlight state, then re-inject transparent guidance and exactly one internal reasoningStop tool before VR/provider wire." }
+    - { id: stsm-10, from: RespStopObserved, to: GuardTerminal, event: budget_exhausted, class: abnormal, action: "Do not project another no-op; pass through current finish_reason=stop response without guard/budget/counter diagnostic and clear state." }
+    - { id: stsm-11, from: CliNoopProjected, to: Idle, event: latest_real_user_turn_after_noop_or_scope_change, class: abnormal, action: "Reset scoped StoplessCenter and remove only stale stopless shell artifacts; preserve the real user turn verbatim." }
+    - { id: stsm-12, from: ProviderTurnInFlight, to: Idle, event: provider_or_route_terminal_error_before_resp03, class: abnormal, action: "Project the real error through ErrorErr chain; stopless must not synthesize success/fallback/diagnostic or retain stale client-visible bridge state." }
+    - { id: stsm-13, from: Idle, to: Idle, event: direct_provider_direct_disabled_or_missing_client_session_scope, class: abnormal, action: "No stopless guidance/tool/projection/control write; pass provider response through the normal path." }
+edge_flow_docs:
+  generated_markdown: docs/architecture/wiki/stopless-session-mainline-source.md
+  generated_html: docs/architecture/wiki/html/stopless-session-mainline-source.html
+  generator: scripts/architecture/render-v3-stopless-state-machine-docs.mjs
+  verifier: scripts/architecture/verify-v3-stopless-state-machine-docs.mjs
+control_owner:
+  resource_id: v3.metadata.runtime_control_stopless
+  belongs_to: Metadata Center
+  feature_owner: Stopless feature
+  semantic_owner_node: StoplessCenterMetadataControl
+  implementation_handles:
+    - V3ResponsesRelayStoplessControlState
+    - V3ResponsesRelayStoplessControlScope
+  signal_kind: control_signal
+  state_machine_required: true
+  state_fields: [phase, consecutive_stop_count, max_stop_budget, last_stop_kind, need_continue, blocked, terminal, guard_exhausted, next_request_policy, last_request_id, last_response_id, last_transition_reason, updated_at]
+  data_control_separation: required
+  normal_payload_state: forbidden
+  cli_contract:
+    carries_scope: false
+    carries_state: false
+    parameters: none
+    transport_envelope: no_input
+    role: protocol_tool_call_completion_only
+  process_contract:
+    central_aggregation_allowed: true
+    allowed_callers: only_resources_declared_by_current_business_sop_pipeline
+    relay_required: false
+    cross_process_shortcut: forbidden
+  forbidden_truth_sources:
+    - CLI args or stdout
+    - empty CLI JSON envelope
+    - client/provider normal payload
+    - local continuation context/store
+    - debug snapshot metadata or __runtime.json
+dry_run_contract:
+  provider_request_dry_run_reads_stopless_control: true
+  provider_request_dry_run_writes_stopless_control: forbidden
+  provider_request_dry_run_clears_stopless_control: forbidden
+  local_continuation_resp04_effects: forbidden
+  repeated_dry_run_same_state_provider_request: identical
 entrypoint:
   node_id: V3HubReqChatProcess04Governed
 return_path:
@@ -27,6 +132,10 @@ edges:
   - { step_id: v3-servertool-stopless-resp-03, from_node: V3StoplessResp02RuntimeControlUpdated, to_node: V3StoplessResp03NoopCliOrTerminalProjected, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
   - { step_id: v3-servertool-stopless-resp-04, from_node: V3StoplessResp03NoopCliOrTerminalProjected, to_node: V3HubRespContinuation04Committed, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
 verification_gates:
+  - npm run verify:v3-stopless-state-machine-docs
+  - npm run test:v3-stopless-state-machine-docs-red-fixtures
+  - npm run verify:v3-stopless-resource-control
+  - npm run test:v3-stopless-resource-control-red-fixtures
   - npm run verify:v3-normalization-payload-logic-boundary
   - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture
