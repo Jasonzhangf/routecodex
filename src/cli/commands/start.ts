@@ -685,19 +685,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             let acquiredAfterWait = false;
             let nextWaitLogAt = Date.now();
             while (Date.now() < deadline) {
-              for (const host of buildLocalProbeHostCandidates(serverHost)) {
-                const probe = await probeRouteCodexHealth({
-                  fetchImpl: ctx.fetch,
-                  host,
-                  port: resolvedPort,
-                  timeoutMs: 800
-                });
-                if (probe.ok) {
-                  spinner.succeed(`RouteCodex is already running on ${serverHost}:${resolvedPort}`);
-                  ctx.logger.info(`Configuration loaded from: ${configPath}`);
-                  ctx.exit(0);
-                }
-              }
               const retryLock = acquireStartPortGroupLock({
                 fsImpl,
                 pathImpl,

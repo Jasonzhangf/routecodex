@@ -421,6 +421,12 @@ impl V3ServerAggregateHandle {
         }
         released
     }
+
+    pub fn has_active_listener(&self) -> bool {
+        self.listeners
+            .iter()
+            .any(|listener| listener.shutdown.is_some())
+    }
 }
 
 pub async fn spawn_v3_server_aggregate(
@@ -791,7 +797,14 @@ async fn pending_endpoint(
     } else {
         None
     };
-    emit_v3_request_start_console_line(&state, &path, &request_id, &request_headers, &payload);
+    emit_v3_request_start_console_line(
+        &state,
+        &entry_protocol,
+        &path,
+        &request_id,
+        &request_headers,
+        &payload,
+    );
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Direct
@@ -817,6 +830,7 @@ async fn pending_endpoint(
         let observability = build_v3_foundation_console_observability(&state, &output);
         let console_context = build_v3_console_emission_context(
             &state,
+            &entry_protocol,
             &path,
             &request_id,
             &request_headers,
@@ -902,6 +916,7 @@ async fn pending_endpoint(
         let observability = build_v3_foundation_console_observability(&state, &output);
         let console_context = build_v3_console_emission_context(
             &state,
+            &entry_protocol,
             &path,
             &request_id,
             &request_headers,
@@ -1150,6 +1165,7 @@ async fn pending_endpoint(
         }
         let console_context = build_v3_console_emission_context(
             &state,
+            &entry_protocol,
             &path,
             &request_id,
             &request_headers,
@@ -2379,6 +2395,7 @@ fn gemini_error_body_for_console(body: &V3GeminiRelayClientBody) -> Option<&Valu
 
 fn emit_v3_request_start_console_line(
     state: &V3ListenerState,
+    entry_protocol: &str,
     endpoint: &str,
     request_id: &str,
     headers: &HeaderMap,
@@ -2390,9 +2407,9 @@ fn emit_v3_request_start_console_line(
     let stream = payload.get("stream").and_then(Value::as_bool) == Some(true);
     let accepts_sse = request_accepts_sse(headers) || stream;
     let raw_input_items = response_input_item_count(payload.get("input"));
-    let line = format!(
-        "[{}] ▶ [{}] {} request {} started (stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none)",
-        state.server.port,
+    let project_path = resolve_v3_console_project_path(headers, payload);
+    let content = format!(
+        "▶ [{}] {} request {} started (stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none)",
         endpoint,
         console_timestamp_hhmmss(),
         request_id,
@@ -2401,6 +2418,12 @@ fn emit_v3_request_start_console_line(
         raw_input_items,
         raw_input_items
     );
+    let line = format_v3_console_monitor_line(
+        &state.server.port.to_string(),
+        entry_protocol,
+        project_path.as_deref(),
+        &content,
+    );
     let color_key = resolve_v3_log_session_color_key(headers, payload, request_id);
     emit_v3_colorized_request_console_line(state, &line, color_key.as_deref());
 }
@@ -2408,6 +2431,7 @@ fn emit_v3_request_start_console_line(
 #[derive(Clone)]
 struct V3ConsoleEmissionContext {
     state: Arc<V3ListenerState>,
+    entry_protocol: String,
     endpoint: String,
     request_id: String,
     headers: HeaderMap,
@@ -2416,6 +2440,7 @@ struct V3ConsoleEmissionContext {
 
 fn build_v3_console_emission_context(
     state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
     endpoint: &str,
     request_id: &str,
     headers: &HeaderMap,
@@ -2423,6 +2448,7 @@ fn build_v3_console_emission_context(
 ) -> V3ConsoleEmissionContext {
     V3ConsoleEmissionContext {
         state: Arc::clone(state),
+        entry_protocol: entry_protocol.to_string(),
         endpoint: endpoint.to_string(),
         request_id: request_id.to_string(),
         headers: headers.clone(),
@@ -2441,9 +2467,8 @@ fn emit_v3_request_route_console_line(
     let route_label = format_v3_console_route_hit_label(&context.state, observability);
     let provider_target = format_v3_console_provider_target(observability);
     let reason = format_v3_console_hit_reason(&context.state, observability);
-    let line = format!(
-        "[{}] [virtual-router-hit] {} req={} sid={} {} -> {} reason={}",
-        context.state.server.port,
+    let content = format!(
+        "[virtual-router-hit] {} req={} sid={} {} -> {} reason={}",
         console_timestamp_hhmmss(),
         context.request_id,
         identity.session_id,
@@ -2451,6 +2476,7 @@ fn emit_v3_request_route_console_line(
         provider_target,
         reason
     );
+    let line = format_v3_console_line_for_identity(context, &identity, &content);
     emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
@@ -2473,9 +2499,9 @@ fn emit_v3_request_complete_console_line(
         .as_deref()
         .unwrap_or("unreported");
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
-    let line = format!(
-        "[{}] ✅ [{}] {} request {} completed (status={}{} responseStatus={} finish_reason={} elapsedMs={:.1} nodes={} transport={})",
-        context.state.server.port,
+    let identity = resolve_v3_console_log_identity(context);
+    let content = format!(
+        "✅ [{}] {} request {} completed (status={}{} responseStatus={} finish_reason={} elapsedMs={:.1} nodes={} transport={})",
         context.endpoint,
         console_timestamp_hhmmss(),
         context.request_id,
@@ -2487,7 +2513,7 @@ fn emit_v3_request_complete_console_line(
         node_trace.len(),
         observability.transport
     );
-    let identity = resolve_v3_console_log_identity(context);
+    let line = format_v3_console_line_for_identity(context, &identity, &content);
     emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
@@ -2511,9 +2537,8 @@ fn emit_v3_usage_console_line(
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let internal_ms = elapsed_ms;
     let external_ms = 0.0;
-    let line = format!(
-        "[{}] [usage] req={} project={} route={} model={} usage={} time=i:{:.0}ms e:{:.0}ms t:{:.1}ms finish_reason={}",
-        context.state.server.port,
+    let content = format!(
+        "[usage] req={} project={} route={} model={} usage={} time=i:{:.0}ms e:{:.0}ms t:{:.1}ms finish_reason={}",
         format_v3_usage_request_id(&context.request_id),
         format_v3_console_project_port(identity.project_path.as_deref(), context.state.server.port),
         route,
@@ -2524,6 +2549,7 @@ fn emit_v3_usage_console_line(
         elapsed_ms,
         finish_reason
     );
+    let line = format_v3_console_line_for_identity(context, &identity, &content);
     let _ = node_trace;
     emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
@@ -2539,14 +2565,15 @@ fn emit_v3_stopless_console_line(
         .finish_reason
         .as_deref()
         .unwrap_or("unreported");
-    let line = format!(
-        "[{}] 🧭 [stopless] {} request {} activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason={} transport={})",
-        context.state.server.port,
+    let identity = resolve_v3_console_log_identity(context);
+    let content = format!(
+        "🧭 [stopless] {} request {} activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason={} transport={})",
         console_timestamp_hhmmss(),
         context.request_id,
         finish_reason,
         observability.transport
     );
+    let line = format_v3_console_line_for_identity(context, &identity, &content);
     let colorized = colorize_v3_stopless_console_line(&line);
     append_v3_human_console_line(&context.state, &colorized);
     println!("{colorized}");
@@ -2561,8 +2588,12 @@ fn append_v3_human_console_line(state: &V3ListenerState, line: &str) {
         eprintln!(
             "{}",
             colorize_v3_error_console_line(&format!(
-                "[{}] ❌ [debug] {} request debug-log failed (status=500 error=V3E00 subcode=debug_sink node=V3DebugEventLedgerRecorded) {}",
-                state.server.port,
+                "{} ❌ {} request debug-log failed (status=500 error=V3E00 subcode=debug_sink node=V3DebugEventLedgerRecorded) {}",
+                format_v3_console_monitor_prefix(
+                    &state.server.port.to_string(),
+                    "debug",
+                    None
+                ),
                 console_timestamp_hhmmss(),
                 error
             ))
@@ -2763,14 +2794,11 @@ fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3Cons
     .flatten()
     .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
     .or_else(|| read_first_scope_value(Some(&context.payload), BODY_CONVERSATION_PATHS));
-    let project_path = first_header_text(
+    let project_path = resolve_v3_console_project_path_with_metadata(
         &context.headers,
-        &["x-routecodex-workdir", "x-rcc-workdir", "x-workdir"],
-    )
-    .ok()
-    .flatten()
-    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_WORKDIR_PATHS))
-    .or_else(|| read_first_scope_value(Some(&context.payload), BODY_WORKDIR_PATHS));
+        &context.payload,
+        turn_metadata.as_ref(),
+    );
     let color_key =
         resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
     let session_display = session_id
@@ -2794,6 +2822,78 @@ fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3Cons
             .filter(|value| !value.is_empty())
             .map(str::to_string),
     }
+}
+
+fn resolve_v3_console_project_path(headers: &HeaderMap, payload: &Value) -> Option<String> {
+    let turn_metadata = parse_codex_turn_metadata(headers).ok().flatten();
+    resolve_v3_console_project_path_with_metadata(headers, payload, turn_metadata.as_ref())
+}
+
+fn resolve_v3_console_project_path_with_metadata(
+    headers: &HeaderMap,
+    payload: &Value,
+    turn_metadata: Option<&Value>,
+) -> Option<String> {
+    first_header_text(
+        headers,
+        &["x-routecodex-workdir", "x-rcc-workdir", "x-workdir"],
+    )
+    .ok()
+    .flatten()
+    .or_else(|| read_first_scope_value(turn_metadata, TURN_METADATA_WORKDIR_PATHS))
+    .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
+}
+
+fn format_v3_console_line_for_identity(
+    context: &V3ConsoleEmissionContext,
+    identity: &V3ConsoleLogIdentity,
+    content: &str,
+) -> String {
+    format_v3_console_monitor_line(
+        &context.state.server.port.to_string(),
+        &context.entry_protocol,
+        identity.project_path.as_deref(),
+        content,
+    )
+}
+
+fn format_v3_console_monitor_line(
+    port_label: &str,
+    entry_protocol: &str,
+    project_path: Option<&str>,
+    content: &str,
+) -> String {
+    format!(
+        "{} {}",
+        format_v3_console_monitor_prefix(port_label, entry_protocol, project_path),
+        content
+    )
+}
+
+fn format_v3_console_monitor_prefix(
+    port_label: &str,
+    entry_protocol: &str,
+    project_path: Option<&str>,
+) -> String {
+    format!(
+        "[{}] [{}] cwd={}",
+        format_v3_console_safe_label(port_label),
+        format_v3_console_entry_protocol_label(entry_protocol),
+        format_v3_console_cwd(project_path)
+    )
+}
+
+fn format_v3_console_entry_protocol_label(entry_protocol_or_endpoint: &str) -> String {
+    let entry = match entry_protocol_or_endpoint.trim() {
+        "/v1/responses" => "responses",
+        "/v1/messages" => "anthropic",
+        "/v1/chat/completions" => "openai_chat",
+        "/v1beta/models"
+        | "/v1beta/models:generateContent"
+        | "/v1beta/models:streamGenerateContent" => "gemini",
+        value => value,
+    };
+    format_v3_console_safe_label(entry)
 }
 
 fn format_v3_console_safe_label(value: &str) -> String {
@@ -3014,12 +3114,22 @@ fn short_v3_request_tail(value: &str, max_chars: usize) -> String {
     chars[chars.len() - max_chars..].iter().collect()
 }
 
-fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
+fn format_v3_console_cwd(project_path: Option<&str>) -> String {
     let project = project_path
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("-");
-    format!("{}:{port}", trim_v3_path_for_log(project, 56))
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.display().to_string())
+        })
+        .unwrap_or_else(|| "-".to_string());
+    trim_v3_path_for_log(&project, 80)
+}
+
+fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
+    format!("{}:{port}", format_v3_console_cwd(project_path))
 }
 
 fn trim_v3_path_for_log(value: &str, max_len: usize) -> String {
@@ -3341,9 +3451,8 @@ fn format_v3_error_console_line_with_port(
         .copied()
         .unwrap_or("V3Error06ClientProjected");
     let error_number = compact_v3_error_number(error_chain);
-    format!(
-        "[{}] ❌ [{}] {} request {} failed (status={} error={} subcode={} node={}) {}",
-        port_label,
+    let content = format!(
+        "❌ [{}] {} request {} failed (status={} error={} subcode={} node={}) {}",
         endpoint,
         console_timestamp_hhmmss(),
         request_id,
@@ -3352,7 +3461,8 @@ fn format_v3_error_console_line_with_port(
         error_code,
         error_node,
         message
-    )
+    );
+    format_v3_console_monitor_line(port_label, endpoint, None, &content)
 }
 
 fn compact_v3_error_number(error_chain: &[&'static str]) -> String {
@@ -3528,6 +3638,7 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "nodes"
             | "endpoint"
             | "project"
+            | "cwd"
             | "req"
             | "sid"
             | "reason"
@@ -3717,12 +3828,23 @@ fn hsl_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (u8, u8, u8) {
 fn console_timestamp_hhmmss() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() % 86_400)
+        .map(|duration| duration.as_secs() as libc::time_t)
         .unwrap_or(0);
-    let hour = seconds / 3_600;
-    let minute = (seconds % 3_600) / 60;
-    let second = seconds % 60;
-    format!("{hour:02}:{minute:02}:{second:02}")
+    console_timestamp_hhmmss_for_epoch_seconds(seconds).unwrap_or_else(|_| {
+        let seconds = u64::try_from(seconds).unwrap_or(0) % 86_400;
+        let hour = seconds / 3_600;
+        let minute = (seconds % 3_600) / 60;
+        let second = seconds % 60;
+        format!("{hour:02}:{minute:02}:{second:02}")
+    })
+}
+
+fn console_timestamp_hhmmss_for_epoch_seconds(seconds: libc::time_t) -> Result<String, String> {
+    let local = format_v3_tm(seconds, true)?;
+    Ok(format!(
+        "{:02}:{:02}:{:02}",
+        local.hour, local.minute, local.second
+    ))
 }
 
 fn request_accepts_sse(headers: &HeaderMap) -> bool {
@@ -5128,6 +5250,41 @@ fn json_response(status: u16, body: serde_json::Value) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    static TEST_TZ_LOCK: StdMutex<()> = StdMutex::new(());
+
+    unsafe extern "C" {
+        fn tzset();
+    }
+
+    struct TestTzGuard {
+        previous_tz: Option<std::ffi::OsString>,
+    }
+
+    impl TestTzGuard {
+        fn set(value: &str) -> Self {
+            let previous_tz = std::env::var_os("TZ");
+            std::env::set_var("TZ", value);
+            unsafe {
+                tzset();
+            }
+            Self { previous_tz }
+        }
+    }
+
+    impl Drop for TestTzGuard {
+        fn drop(&mut self) {
+            if let Some(previous_tz) = self.previous_tz.take() {
+                std::env::set_var("TZ", previous_tz);
+            } else {
+                std::env::remove_var("TZ");
+            }
+            unsafe {
+                tzset();
+            }
+        }
+    }
 
     #[test]
     fn usage_summary_prints_cache_hit_rate() {
@@ -5164,6 +5321,10 @@ mod tests {
         );
     }
 
+    fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
+        format!("{}:{port}", format_v3_console_cwd(project_path))
+    }
+
     #[test]
     fn request_id_tokens_are_stable_and_path_safe() {
         assert_eq!(
@@ -5188,6 +5349,49 @@ mod tests {
             ),
             "/Users/fanzhang/Documents/github/routecodex:5555"
         );
+    }
+
+    #[test]
+    fn console_timestamp_uses_local_timezone() {
+        let _guard = TEST_TZ_LOCK.lock().unwrap();
+        let _tz = TestTzGuard::set("Asia/Shanghai");
+        let clock = v3_request_id_clock_now().unwrap();
+        let local_hhmmss = clock.local_timestamp.get(9..15).unwrap();
+        let expected = format!(
+            "{}:{}:{}",
+            &local_hhmmss[0..2],
+            &local_hhmmss[2..4],
+            &local_hhmmss[4..6]
+        );
+        assert_eq!(console_timestamp_hhmmss(), expected);
+    }
+
+    #[test]
+    fn console_prefix_orders_port_entry_cwd_before_content() {
+        let expected_cwd = std::env::current_dir().unwrap().display().to_string();
+        assert_eq!(
+            format_v3_console_project_port(None, 5555),
+            format!("{expected_cwd}:5555")
+        );
+        let line = format_v3_error_console_line_with_port(
+            "5555",
+            "responses",
+            "req-prefix",
+            500,
+            &V3_ERROR_CHAIN_NODE_IDS,
+            Some(&json!({
+                "error": {
+                    "type": "runtime_error",
+                    "message": "controlled"
+                }
+            })),
+        );
+        assert!(
+            line.starts_with(&format!("[5555] [responses] cwd={expected_cwd} ")),
+            "console prefix must be port, protocol entry, cwd, then content: {line}"
+        );
+        assert!(line.contains("❌ [responses]"));
+        assert!(line.contains("request req-prefix failed"));
     }
 
     #[test]

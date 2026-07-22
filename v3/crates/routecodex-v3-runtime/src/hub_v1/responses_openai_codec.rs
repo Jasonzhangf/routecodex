@@ -21,6 +21,8 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         }
     };
     let mut messages = Vec::new();
+    let mut pending_tool_message_index: Option<usize> = None;
+    let mut pending_tool_call_ids: Vec<String> = Vec::new();
     if let Some(instructions) = root
         .get("instructions")
         .and_then(Value::as_str)
@@ -53,17 +55,32 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     tools.push(tool.clone());
                 }
             }
-            "message" => messages.push(build_v3_openai_chat_message_from_responses_message(item)?),
+            "message" => append_v3_openai_chat_message_preserving_tool_adjacency(
+                &mut messages,
+                &mut pending_tool_message_index,
+                &pending_tool_call_ids,
+                build_v3_openai_chat_message_from_responses_message(item)?,
+            )?,
             "reasoning" => {}
             "function_call" | "tool_call" | "custom_tool_call" => {
-                messages.push(build_v3_openai_chat_assistant_tool_call_message(item)?);
+                append_v3_openai_chat_tool_call_message(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &mut pending_tool_call_ids,
+                    build_v3_openai_chat_assistant_tool_call_message(item)?,
+                )?;
             }
             "function_call_output"
             | "tool_call_output"
             | "custom_tool_call_output"
             | "tool_result"
             | "tool_message" => {
-                messages.push(build_v3_openai_chat_tool_result_message(item)?);
+                append_v3_openai_chat_tool_result_message(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &mut pending_tool_call_ids,
+                    build_v3_openai_chat_tool_result_message(item)?,
+                )?;
             }
             other => {
                 return Err(format!(
@@ -106,6 +123,214 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         }
     }
     Ok(Value::Object(request))
+}
+
+fn append_v3_openai_chat_message_preserving_tool_adjacency(
+    messages: &mut Vec<Value>,
+    pending_tool_message_index: &mut Option<usize>,
+    pending_tool_call_ids: &[String],
+    message: Value,
+) -> Result<(), String> {
+    if let Some(index) = *pending_tool_message_index {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user")
+            .trim();
+        if role.eq_ignore_ascii_case("assistant") {
+            merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
+            return Ok(());
+        }
+        if v3_openai_chat_message_has_visible_payload(&message) {
+            return Err(format!(
+                "OpenAI Chat provider encoding cannot place {role} message before pending tool results: {}",
+                pending_tool_call_ids.join(",")
+            ));
+        }
+    }
+    messages.push(message);
+    Ok(())
+}
+
+fn append_v3_openai_chat_tool_call_message(
+    messages: &mut Vec<Value>,
+    pending_tool_message_index: &mut Option<usize>,
+    pending_tool_call_ids: &mut Vec<String>,
+    message: Value,
+) -> Result<(), String> {
+    let call_ids = collect_v3_openai_chat_tool_call_ids(&message);
+    if call_ids.is_empty() {
+        messages.push(message);
+        return Ok(());
+    }
+    if let Some(index) = *pending_tool_message_index {
+        merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
+    } else {
+        messages.push(message);
+        *pending_tool_message_index = Some(messages.len() - 1);
+    }
+    for call_id in call_ids {
+        if !pending_tool_call_ids.iter().any(|entry| entry == &call_id) {
+            pending_tool_call_ids.push(call_id);
+        }
+    }
+    Ok(())
+}
+
+fn append_v3_openai_chat_tool_result_message(
+    messages: &mut Vec<Value>,
+    pending_tool_message_index: &mut Option<usize>,
+    pending_tool_call_ids: &mut Vec<String>,
+    message: Value,
+) -> Result<(), String> {
+    let call_id = message
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(call_id) = call_id {
+        if let Some(position) = pending_tool_call_ids
+            .iter()
+            .position(|entry| entry == &call_id)
+        {
+            messages.push(message);
+            pending_tool_call_ids.remove(position);
+            if pending_tool_call_ids.is_empty() {
+                *pending_tool_message_index = None;
+            }
+            return Ok(());
+        }
+    }
+    messages.push(message);
+    Ok(())
+}
+
+fn merge_v3_openai_chat_message_into_pending_tool_message(
+    messages: &mut [Value],
+    index: usize,
+    source: &Value,
+) -> Result<(), String> {
+    let target = messages
+        .get_mut(index)
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            "OpenAI Chat provider encoding pending tool message is not an object".to_string()
+        })?;
+    if let Some(source_tool_calls) = source.get("tool_calls").and_then(Value::as_array) {
+        let target_tool_calls = target
+            .entry("tool_calls".to_string())
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or_else(|| {
+                "OpenAI Chat provider encoding pending tool_calls is not an array".to_string()
+            })?;
+        target_tool_calls.extend(source_tool_calls.iter().cloned());
+    }
+    if let Some(source_content) = source.get("content") {
+        merge_v3_openai_chat_message_content(target, source_content);
+    }
+    if let Some(source_reasoning) = source
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let existing = target
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_default();
+        let merged = if existing.trim().is_empty() {
+            source_reasoning.to_string()
+        } else {
+            format!("{existing}\n{source_reasoning}")
+        };
+        target.insert("reasoning_content".to_string(), Value::String(merged));
+    }
+    Ok(())
+}
+
+fn merge_v3_openai_chat_message_content(target: &mut Map<String, Value>, source_content: &Value) {
+    if v3_openai_chat_content_is_empty(source_content) {
+        return;
+    }
+    let Some(existing) = target.get_mut("content") else {
+        target.insert("content".to_string(), source_content.clone());
+        return;
+    };
+    if v3_openai_chat_content_is_empty(existing) {
+        *existing = source_content.clone();
+        return;
+    }
+    match (existing, source_content) {
+        (Value::String(existing_text), Value::String(source_text)) => {
+            if !existing_text.trim().is_empty() && !source_text.trim().is_empty() {
+                existing_text.push('\n');
+            }
+            existing_text.push_str(source_text);
+        }
+        (existing_value, source_value) => {
+            let mut parts = v3_openai_chat_content_to_parts(existing_value);
+            parts.extend(v3_openai_chat_content_to_parts(source_value));
+            *existing_value = Value::Array(parts);
+        }
+    }
+}
+
+fn v3_openai_chat_content_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(text) => text.trim().is_empty(),
+        Value::Array(parts) => parts.is_empty(),
+        _ => false,
+    }
+}
+
+fn v3_openai_chat_content_to_parts(value: &Value) -> Vec<Value> {
+    match value {
+        Value::Array(parts) => parts.clone(),
+        Value::String(text) => {
+            if text.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![json!({"type":"text","text":text})]
+            }
+        }
+        Value::Null => Vec::new(),
+        other => vec![other.clone()],
+    }
+}
+
+fn v3_openai_chat_message_has_visible_payload(message: &Value) -> bool {
+    message
+        .get("content")
+        .is_some_and(|content| !v3_openai_chat_content_is_empty(content))
+        || message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(|tool_calls| !tool_calls.is_empty())
+}
+
+fn collect_v3_openai_chat_tool_call_ids(message: &Value) -> Vec<String> {
+    message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|tool_calls| {
+            tool_calls
+                .iter()
+                .filter_map(|call| {
+                    call.get("id")
+                        .or_else(|| call.get("call_id"))
+                        .or_else(|| call.get("tool_call_id"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(

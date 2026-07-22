@@ -313,6 +313,78 @@ async fn sse_is_streamed_as_validated_raw_events_and_malformed_sse_fails_explici
 }
 
 #[tokio::test]
+async fn sse_request_accepts_json_provider_response_as_json_raw_body() {
+    let (base_url, mut captures, shutdown) = start_upstream().await;
+    std::env::set_var("V3_GENERAL_SSE_JSON_KEY", "secret-sse-json");
+    let transport = ReqwestResponsesTransport::default();
+
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-sse-json",
+        target(
+            "stream-json-relay",
+            &base_url,
+            "model-stream-json",
+            "stream-json",
+            "V3_GENERAL_SSE_JSON_KEY",
+        ),
+        json!({"model":"client","input":"hello","stream":true,"case":"json"}),
+    )
+    .unwrap();
+    let raw = transport
+        .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(raw.body_kind(), V3ProviderResponseBodyKind::Json);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&raw.into_body_bytes().await.unwrap()).unwrap(),
+        json!({"id":"resp_json","output_text":"ok"})
+    );
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(capture.accept.as_deref(), Some("text/event-stream"));
+    assert_eq!(capture.body["stream"], true);
+
+    std::env::remove_var("V3_GENERAL_SSE_JSON_KEY");
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn json_request_rejects_sse_provider_response_without_switching_response_kind() {
+    let (base_url, mut captures, shutdown) = start_upstream().await;
+    std::env::set_var("V3_GENERAL_JSON_SSE_KEY", "secret-json-sse");
+    let transport = ReqwestResponsesTransport::default();
+
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-json-sse",
+        target(
+            "json-stream-relay",
+            &base_url,
+            "model-json-stream",
+            "json-stream",
+            "V3_GENERAL_JSON_SSE_KEY",
+        ),
+        json!({"model":"client","input":"hello","case":"sse"}),
+    )
+    .unwrap();
+    let error = transport
+        .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        V3ProviderError::UnexpectedContentType {
+            expected: "JSON",
+            ..
+        }
+    ));
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(capture.accept.as_deref(), Some("application/json"));
+    assert!(capture.body.get("stream").is_none());
+
+    std::env::remove_var("V3_GENERAL_JSON_SSE_KEY");
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() {
     let (base_url, mut captures, shutdown) = start_upstream().await;
     let transport = ReqwestResponsesTransport::default();

@@ -1473,6 +1473,78 @@ fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
 }
 
 #[test]
+fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let shared_port = free_port();
+    let inactive_port_a = free_port();
+    let inactive_port_b = free_port();
+    let foreground_config = write_config_with_server_b_enabled(
+        &root,
+        "foreground-single.v3.toml",
+        [shared_port, inactive_port_a],
+        false,
+    );
+    let background_config = write_config_with_server_b_enabled(
+        &root,
+        "background-single.v3.toml",
+        [shared_port, inactive_port_b],
+        false,
+    );
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let mut foreground = spawn_top_level_start(binary, &state_root, &foreground_config);
+    wait_port(shared_port, true);
+    assert_eq!(
+        top_level_status_json(binary, &state_root, &foreground_config)["state"],
+        "running"
+    );
+
+    let background_start = run(binary, &state_root, &background_config, "start");
+    assert!(
+        background_start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&background_start.stderr)
+    );
+    wait_port(shared_port, true);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if foreground.try_wait().unwrap().is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = run(binary, &state_root, &background_config, "stop");
+            let _ = run(binary, &state_root, &foreground_config, "stop");
+            panic!(
+                "foreground owner must exit when a foreign background start releases its final listener port"
+            );
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    let foreground_output = foreground.wait_with_output().unwrap();
+    assert!(
+        foreground_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&foreground_output.stderr)
+    );
+    let foreground_status = run_top_level(binary, &state_root, &foreground_config, "status");
+    assert!(foreground_status.status.success());
+    assert_eq!(last_json(&foreground_status)["state"], "stopped");
+
+    let background_status = status_json(binary, &state_root, &background_config);
+    assert_eq!(background_status["state"], "running");
+    let stop = run(binary, &state_root, &background_config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    wait_port(shared_port, false);
+}
+
+#[test]
 fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");

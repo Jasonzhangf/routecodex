@@ -425,6 +425,72 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
 }
 
 #[tokio::test]
+async fn responses_relay_client_sse_request_projects_sse_even_when_provider_returns_json() {
+    let transport = SingleJsonCaptureTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_sse_request_json_provider",
+            "status":"completed",
+            "output":[{"type":"output_text","text":"json upstream"}],
+            "usage":{"input_tokens":8,"output_tokens":2,"total_tokens":10}
+        }),
+    };
+
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-relay-client-sse-provider-json".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"provider may return json",
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    assert_eq!(output.node_trace, EXPECTED_RELAY_TRACE);
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("client SSE projection must keep console observability");
+    assert_eq!(
+        observability.transport, "sse",
+        "transport observability must describe the client response projection, not downgrade to provider JSON"
+    );
+    assert_eq!(observability.response_status.as_deref(), Some("completed"));
+    match output.client_body {
+        V3ResponsesRelayClientBody::Sse(mut stream) => {
+            let mut forwarded = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                forwarded.extend(chunk.expect("JSON provider response must project as client SSE"));
+            }
+            let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("event: response.created"));
+            assert!(text.contains("event: response.output_item.done"));
+            assert!(text.contains("event: response.completed"));
+            assert!(text.contains("event: response.done"));
+            assert!(text.contains("data: [DONE]"));
+            assert!(text.contains("json upstream"));
+        }
+        V3ResponsesRelayClientBody::Json(_) => {
+            panic!("client stream=true must not be downgraded to JSON when provider returned JSON")
+        }
+    }
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(
+        captures[0]["stream"], true,
+        "provider request side must still ask upstream for stream/SSE"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_responses_target_builds_responses_standard_payload_from_chat_canonical() {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
@@ -443,7 +509,20 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
             payload: json!({
                 "model":"gpt-5.5",
                 "stream":false,
-                "tools":[{"type":"tool_search","name":"tool_search"}],
+                "tools":[
+                    {
+                        "type":"tool_search",
+                        "execution":"client",
+                        "description":"Search deferred tools",
+                        "parameters":{
+                            "type":"object",
+                            "properties":{"query":{"type":"string"},"limit":{"type":"number"}},
+                            "required":["query"],
+                            "additionalProperties":false
+                        }
+                    },
+                    {"type":"web_search","external_web_access":true}
+                ],
                 "input":[{
                     "type":"message",
                     "role":"user",
@@ -489,7 +568,8 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
 }
 
 #[tokio::test]
-async fn responses_relay_openai_chat_target_preserves_tool_search_without_compat_rejection() {
+async fn responses_relay_openai_chat_target_projects_responses_builtin_tools_to_chat_functions_without_script_conversion(
+) {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
         response: json!({
@@ -512,7 +592,20 @@ async fn responses_relay_openai_chat_target_preserves_tool_search_without_compat
             payload: json!({
                 "model":"gpt-5.5",
                 "stream":false,
-                "tools":[{"type":"tool_search","name":"tool_search"}],
+                "tools":[
+                    {
+                        "type":"tool_search",
+                        "execution":"client",
+                        "description":"Search deferred tools",
+                        "parameters":{
+                            "type":"object",
+                            "properties":{"query":{"type":"string"},"limit":{"type":"number"}},
+                            "required":["query"],
+                            "additionalProperties":false
+                        }
+                    },
+                    {"type":"web_search","external_web_access":true}
+                ],
                 "input":[{
                     "type":"message",
                     "role":"user",
@@ -539,27 +632,141 @@ async fn responses_relay_openai_chat_target_preserves_tool_search_without_compat
         body.get("messages").and_then(Value::as_array).is_some(),
         "OpenAI Chat target must receive Chat standard messages: {body}"
     );
-    assert_eq!(body["tools"][0]["type"], "tool_search");
     let serialized = serde_json::to_string(body).unwrap();
     assert!(!serialized.contains("unsupported Responses tool type"));
+    assert!(!serialized.contains("\"type\":\"tool_search\""));
+    assert!(!serialized.contains("\"type\":\"web_search\""));
     let tools = body
         .get("tools")
         .and_then(Value::as_array)
         .expect("OpenAI Chat target tools");
     assert!(
-        !tools.iter().any(|tool| {
-            tool.get("type").and_then(Value::as_str) == Some("function")
-                && tool
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-                    == Some("tool_search")
-        }),
-        "tool_search must not be converted to an OpenAI Chat function tool: {body}"
+        tools.len() >= 2,
+        "OpenAI Chat target must include projected builtin tools and may include governed internal tools: {body}"
+    );
+    assert!(tools
+        .iter()
+        .all(|tool| tool.get("type").and_then(Value::as_str) == Some("function")));
+    let tool_search = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "tool_search")
+        .expect("tool_search must project as OpenAI Chat function tool");
+    assert_eq!(
+        tool_search["function"]["parameters"]["required"][0],
+        "query"
+    );
+    assert_eq!(
+        tool_search["function"]["description"],
+        "Search deferred tools"
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "web_search"),
+        "web_search must also avoid Responses-native tool type on OpenAI Chat wire: {body}"
     );
     assert!(!serialized.contains("\"name\":\"exec\""));
     assert!(!serialized.contains("\"name\":\"script\""));
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_target_keeps_tool_result_immediately_after_tool_call() {
+    let transport = SingleJsonCaptureTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"chatcmpl_tool_pair_order",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{"role":"assistant","content":"ok"},
+                "finish_reason":"stop"
+            }],
+            "usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &openai_chat_target_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-openai-chat-tool-pair-order".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "tools":[{
+                    "type":"function",
+                    "name":"exec_command",
+                    "description":"run command",
+                    "parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}
+                }],
+                "input":[
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"start"}]
+                    },
+                    {
+                        "type":"function_call",
+                        "id":"fc_call_order",
+                        "call_id":"call_order",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"pwd\"}"
+                    },
+                    {
+                        "type":"message",
+                        "role":"assistant",
+                        "content":[{"type":"output_text","text":"I will inspect the result next."}]
+                    },
+                    {
+                        "type":"function_call_output",
+                        "id":"fc_call_order",
+                        "call_id":"call_order",
+                        "output":"ok"
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    }
+                ]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    let body = captures.first().expect("provider request body");
+    let messages = body["messages"]
+        .as_array()
+        .expect("OpenAI Chat provider messages");
+    let tool_call_index = messages
+        .iter()
+        .position(|message| {
+            message["tool_calls"].as_array().is_some_and(|tool_calls| {
+                tool_calls
+                    .iter()
+                    .any(|call| call["id"].as_str() == Some("call_order"))
+            })
+        })
+        .expect("assistant tool call message");
+    assert_eq!(
+        messages[tool_call_index]["content"],
+        "I will inspect the result next.",
+        "assistant text between Responses function_call and function_call_output must stay on the same Chat assistant tool-call turn"
+    );
+    let tool_result = messages
+        .get(tool_call_index + 1)
+        .expect("tool result must immediately follow assistant tool call");
+    assert_eq!(tool_result["role"], "tool");
+    assert_eq!(tool_result["tool_call_id"], "call_order");
+    let next_user = messages
+        .get(tool_call_index + 2)
+        .expect("user turn must remain after the tool result");
+    assert_eq!(next_user["role"], "user");
+    assert_eq!(next_user["content"], "continue");
 }
 
 struct CompletedTextSseTransport;
@@ -661,6 +868,47 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
         snapshot.usage.as_ref().and_then(|usage| usage.total_tokens),
         Some(20)
     );
+}
+
+#[tokio::test]
+async fn responses_relay_client_json_request_projects_json_even_when_provider_returns_sse() {
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-relay-client-json-provider-sse".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"provider may stream",
+                "stream":false
+            }),
+        },
+        &CompletedTextSseTransport,
+    )
+    .await
+    .unwrap();
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("client JSON projection must keep console observability");
+    assert_eq!(
+        observability.transport, "json",
+        "client stream=false must not be upgraded to SSE just because provider returned SSE"
+    );
+    assert!(
+        output.stream_observation.is_none(),
+        "client JSON projection must not leave a server-side SSE closeout finalizer pending"
+    );
+    match output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            assert_eq!(body["id"], "resp_completed_text_sse");
+            assert_eq!(body["status"], "completed");
+            assert_eq!(body["output"][0]["text"], "done");
+        }
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("client stream=false must not be upgraded to SSE when provider returned SSE")
+        }
+    }
 }
 
 struct ServertoolContinuationTransport {

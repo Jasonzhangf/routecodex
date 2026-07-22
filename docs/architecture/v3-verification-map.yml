@@ -800,6 +800,8 @@ features:
       - Provider wire moves the request body, changes only selected wire model, and preserves client extensions
       - Provider transport resolves env and token-file auth only at send boundary
       - Provider raw response preserves JSON bytes and validated SSE event bytes
+      - Provider HTTP transport accepts application/json raw response bodies for SSE-intent requests while preserving request-side Accept/stream SSE intent
+      - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
       - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
       - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
     required_contract:
@@ -1444,6 +1446,7 @@ features:
       - Responses Relay provider-facing JSON blackbox preserves tools and sends restored function_call immediately before current function_call_output
       - wrong Responses Relay call_id fails before provider send and preserves the saved continuation context
       - servertool response hook profile is consumed by Runtime response governance
+      - Responses Relay separates provider request transport intent, provider response body kind, and client response projection intent; client `stream=true` remains SSE even if provider raw body is JSON, and client `stream=false` remains JSON even if a controlled provider raw body is SSE
       - provider error enters Error01-06 without Resp01 success projection
       - provider/client payloads do not leak session continuation metadata_center resource or routecodex control fields
     required_gates:

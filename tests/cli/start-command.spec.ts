@@ -1162,7 +1162,7 @@ port = 5520
     fs.mkdirSync(lockDir, { recursive: true });
     fs.writeFileSync(
       path.join(lockDir, '4444-5520.lock'),
-      JSON.stringify({ pid: 999999, ports: [4444, 5520], startedAtMs: Date.now() }),
+      JSON.stringify({ pid: process.pid, ports: [4444, 5520], startedAtMs: Date.now() }),
       'utf8'
     );
     const checkedPorts: number[] = [];
@@ -1204,7 +1204,7 @@ port = 5520
         }
       });
 
-      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--exclusive'], { from: 'node' })).rejects.toThrow('exit:0');
+      await expect(program.parseAsync(['node', 'rcc', 'start', '--config', configPath, '--exclusive'], { from: 'node' })).rejects.toThrow('exit:1');
       expect(checkedPorts).toEqual([]);
     } finally {
       if (previousRccHome === undefined) {
@@ -1634,6 +1634,61 @@ port = 5520
     await program.parseAsync(['node', 'routecodex', 'start', '--config', '/tmp/config.toml'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
     expect(portChecks[0]?.restart).toBe(true);
+  });
+
+  it('does not treat healthy running server as success while waiting on stale takeover lock', async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-start-lock-running-'));
+    const configPath = path.join(tempHome, 'config.toml');
+    const modulesPath = path.join(tempHome, 'modules.json');
+    fs.writeFileSync(configPath, '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n');
+    fs.writeFileSync(modulesPath, '{}');
+    const lockDir = path.join(tempHome, '.rcc', 'state', 'runtime-lifecycle', 'start-locks');
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, '5520.lock'), JSON.stringify({ pid: 99999999, ports: [5520], startedAtMs: Date.now() }), 'utf8');
+
+    const program = new Command();
+    const portChecks: Array<{ port: number; restart?: boolean }> = [];
+    const successes: string[] = [];
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => ({ ...createStubSpinner(), succeed: (message?: string) => { if (message) successes.push(message); } }),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: { RCC_START_LOCK_WAIT_MS: '1000' },
+      fsImpl: fs,
+      pathImpl: path,
+      homedir: () => tempHome,
+      tmpdir: () => tempHome,
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensurePortAvailable: async (port, _spinner, opts) => {
+        portChecks.push({ port, restart: opts?.restart });
+      },
+      findListeningPids: () => [1234],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => modulesPath,
+      resolveServerEntryPath: () => path.join(tempHome, 'index.js'),
+      spawn: () => createFakeChild(1),
+      fetch: (async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ server: 'routecodex', status: 'ok' })
+      })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'start', '--config', configPath], { from: 'node' })
+    ).resolves.toBe(program);
+    expect(portChecks).toEqual([{ port: 5520, restart: true }]);
+    expect(successes.some((message) => message.includes('already running'))).toBe(false);
   });
 
   it('allows explicit --restart takeover when a runtime already listens', async () => {

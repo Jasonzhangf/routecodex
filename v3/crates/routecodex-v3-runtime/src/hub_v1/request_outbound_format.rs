@@ -585,6 +585,10 @@ fn normalize_openai_chat_provider_tool(tool: &Value) -> Value {
     match row.get("type").and_then(Value::as_str) {
         Some("function") => normalize_openai_chat_function_tool(row),
         Some("custom") => normalize_openai_chat_custom_tool(row),
+        Some("tool_search") => normalize_openai_chat_builtin_tool_search_tool(row),
+        Some("web_search" | "web_search_preview") => {
+            normalize_openai_chat_builtin_web_search_tool(row)
+        }
         _ => tool.clone(),
     }
 }
@@ -638,6 +642,81 @@ fn normalize_openai_chat_custom_tool(row: &Map<String, Value>) -> Value {
                             "input": {"type": "string"}
                         },
                         "required": ["input"]
+                    }),
+                ),
+            ])),
+        ),
+    ]))
+}
+
+fn normalize_openai_chat_builtin_tool_search_tool(row: &Map<String, Value>) -> Value {
+    let description = row
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            "Search deferred tool metadata. Return JSON arguments matching the declared schema."
+                .to_string()
+        });
+    let parameters = row
+        .get("parameters")
+        .cloned()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| {
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "limit": { "type": "number" }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            })
+        });
+    Value::Object(Map::from_iter([
+        ("type".to_string(), Value::String("function".to_string())),
+        (
+            "function".to_string(),
+            Value::Object(Map::from_iter([
+                ("name".to_string(), Value::String("tool_search".to_string())),
+                ("description".to_string(), Value::String(description)),
+                ("parameters".to_string(), parameters),
+            ])),
+        ),
+    ]))
+}
+
+fn normalize_openai_chat_builtin_web_search_tool(row: &Map<String, Value>) -> Value {
+    let description = row
+        .get("description")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            "Request web search action metadata using JSON arguments. Prefer query for search."
+                .to_string()
+        });
+    Value::Object(Map::from_iter([
+        ("type".to_string(), Value::String("function".to_string())),
+        (
+            "function".to_string(),
+            Value::Object(Map::from_iter([
+                ("name".to_string(), Value::String("web_search".to_string())),
+                ("description".to_string(), Value::String(description)),
+                (
+                    "parameters".to_string(),
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string" },
+                            "queries": { "type": "array", "items": { "type": "string" } },
+                            "url": { "type": "string" },
+                            "pattern": { "type": "string" },
+                            "action": {
+                                "type": "string",
+                                "enum": ["search", "open_page", "find_in_page"]
+                            }
+                        },
+                        "additionalProperties": true
                     }),
                 ),
             ])),

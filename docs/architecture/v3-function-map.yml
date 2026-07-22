@@ -420,6 +420,8 @@ features:
       - build_v3_transport_13_responses_http_request_from_v3_provider_12
       - ReqwestResponsesTransport::send
       - V3ProviderResp14Raw::from_json
+      - general_provider::sse_request_accepts_json_provider_response_as_json_raw_body
+      - general_provider::json_request_rejects_sse_provider_response_without_switching_response_kind
     allowed_paths:
       - v3/crates/routecodex-v3-provider-responses
       - v3/crates/routecodex-v3-runtime/src/hooks.rs
@@ -2074,6 +2076,8 @@ features:
       - responses_relay_output_response
       - hub_relay_runtime_closeout::controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit
       - hub_relay_runtime_closeout::responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes
+      - hub_relay_runtime_closeout::responses_relay_client_sse_request_projects_sse_even_when_provider_returns_json
+      - hub_relay_runtime_closeout::responses_relay_client_json_request_projects_json_even_when_provider_returns_sse
       - multi_listener_server::responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse
       - multi_listener_server::responses_relay_provider_request_dry_run_header_returns_final_request_without_upstream_send
       - hub_relay_runtime_closeout::local_continuation_servertool_roundtrip_is_runtime_e2e

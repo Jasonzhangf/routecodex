@@ -681,13 +681,38 @@ impl V3ManagedLifecycle {
                         "release-ports control request did not carry a port set".to_string(),
                     )
                 })?;
-                let handle = handle.as_mut().ok_or_else(|| {
+                let aggregate_handle = handle.as_mut().ok_or_else(|| {
                     V3LifecycleError::Validation(
                         "managed runtime handle was already consumed".to_string(),
                     )
                 })?;
-                let released = handle.shutdown_listener_ports(&release_ports).await;
+                let released = aggregate_handle
+                    .shutdown_listener_ports(&release_ports)
+                    .await;
                 let released_set: BTreeSet<u16> = released.into_iter().collect();
+                if !aggregate_handle.has_active_listener() {
+                    write_status(
+                        &instance_dir,
+                        &declaration.instance_id,
+                        V3ManagedRunState::Stopping,
+                        Some(format!(
+                            "released final listener ports {}; managed foreground exiting",
+                            format_u16_set(&released_set)
+                        )),
+                    )?;
+                    let handle = handle.take().ok_or_else(|| {
+                        V3LifecycleError::Validation(
+                            "managed runtime handle was already consumed".to_string(),
+                        )
+                    })?;
+                    return shutdown_managed_runtime(
+                        &instance_dir,
+                        &declaration.instance_id,
+                        &socket_path,
+                        handle,
+                    )
+                    .await;
+                }
                 write_status(
                     &instance_dir,
                     &declaration.instance_id,

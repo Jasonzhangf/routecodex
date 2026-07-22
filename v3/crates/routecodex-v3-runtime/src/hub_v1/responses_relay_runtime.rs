@@ -18,7 +18,7 @@ use routecodex_v3_provider_responses::{
     V3ProviderAuthSecretHandle, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderError, V3ProviderHealthStore, V3ProviderResp14Raw,
     V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
-    V3Transport13ResponsesHttpRequest,
+    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
@@ -1282,17 +1282,15 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         .map(|execution| execution.scope.has_client_session_scope())
         .unwrap_or(true);
     let mut trace = Vec::with_capacity(17);
-    let transport_intent = if input.payload.get("stream").and_then(Value::as_bool) == Some(true) {
-        V3HubTransportIntent::Sse
-    } else {
-        V3HubTransportIntent::Json
-    };
+    let client_response_transport_intent =
+        v3_responses_relay_transport_intent_from_stream_field(&input.payload);
+    let provider_request_transport_intent = client_response_transport_intent;
     let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
         V3HubInvocationSource::Client,
-        transport_intent,
+        client_response_transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
     let req02 =
@@ -1442,7 +1440,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         }
         provider_send_attempts = provider_send_attempts.saturating_add(1);
         let mut selected_observability =
-            build_v3_relay_observability_from_selected(&selected, transport_intent);
+            build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
         selected_observability.attempts = Some(provider_send_attempts);
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
@@ -1475,6 +1473,12 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         trace.push("V3ProviderReqOutbound08WirePayload");
         let transport_request = try_before_resp03!(
             build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire)
+        );
+        try_before_resp03!(
+            validate_v3_responses_relay_provider_request_transport_intent(
+                provider_request_transport_intent,
+                transport_request.stream_intent(),
+            )
         );
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_raw = match transport.send(transport_request).await {
@@ -1580,7 +1584,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             provider_semantic_body: &provider_semantic_body,
                             manifest,
                             provider_protocol: hook_provider_protocol,
-                            transport_intent,
+                            provider_response_transport_intent: V3HubTransportIntent::Json,
                             compatibility_profile: selected
                                 .candidate
                                 .compatibility_profile
@@ -1607,7 +1611,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
-                observability.transport = "json".to_string();
+                observability.transport =
+                    v3_transport_intent_label(client_response_transport_intent).to_string();
                 let response_status = read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
@@ -1619,9 +1624,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 observability.stopless_activation =
                     response_has_stopless_activation(&finalized_provider_value);
+                let client_body = project_v3_responses_relay_client_body(
+                    client_response_transport_intent,
+                    finalized_provider_value,
+                );
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
-                    client_body: V3ResponsesRelayClientBody::Json(finalized_provider_value),
+                    client_body,
                     node_trace: trace,
                     error_chain: None,
                     observability: Some(observability),
@@ -1652,7 +1661,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             provider_semantic_body: &provider_semantic_body,
                             manifest,
                             provider_protocol: hook_provider_protocol,
-                            transport_intent,
+                            provider_response_transport_intent: V3HubTransportIntent::Sse,
                             compatibility_profile: selected
                                 .candidate
                                 .compatibility_profile
@@ -1685,7 +1694,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
-                observability.transport = "sse".to_string();
+                observability.transport =
+                    v3_transport_intent_label(client_response_transport_intent).to_string();
                 let response_status = read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
@@ -1715,17 +1725,23 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     });
                 observability.stopless_activation =
                     response_has_stopless_activation(&finalized_provider_value);
+                let client_response_is_sse =
+                    client_response_transport_intent == V3HubTransportIntent::Sse;
+                let client_body = project_v3_responses_relay_client_body(
+                    client_response_transport_intent,
+                    finalized_provider_value,
+                );
                 return Ok(V3ResponsesRelayRuntimeOutput {
                     status: 200,
-                    client_body: V3ResponsesRelayClientBody::Sse(
-                        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
-                            finalized_provider_value,
-                        ),
-                    ),
+                    client_body,
                     node_trace: trace,
                     error_chain: None,
                     observability: Some(observability),
-                    stream_observation: Some(stream_observation),
+                    stream_observation: if client_response_is_sse {
+                        Some(stream_observation)
+                    } else {
+                        None
+                    },
                     provider_snapshots: None,
                 });
             }
@@ -2251,7 +2267,7 @@ struct V3ResponsesRelayJsonResponseHookInput<'a> {
     provider_semantic_body: &'a Value,
     manifest: &'a V3Config05ManifestPublished,
     provider_protocol: V3HubProviderWireProtocol,
-    transport_intent: V3HubTransportIntent,
+    provider_response_transport_intent: V3HubTransportIntent,
     compatibility_profile: Option<&'a str>,
     stopless_state: Option<&'a V3StoplessCenterState>,
     stopless_control_has_client_session_scope: bool,
@@ -2278,7 +2294,7 @@ fn run_json_response_hooks(
             V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
-            input.transport_intent,
+            input.provider_response_transport_intent,
         )
         .with_compatibility_profile(input.compatibility_profile),
     );
@@ -2514,7 +2530,7 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
     let status = if output.iter().any(|item| {
         matches!(
             item.get("type").and_then(Value::as_str),
-            Some("function_call" | "tool_call" | "custom_tool_call")
+            Some("function_call" | "tool_call" | "custom_tool_call" | "tool_search_call")
         )
     }) || finish_reason.as_deref() == Some("tool_calls")
     {
@@ -2785,12 +2801,105 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "input":input
         }));
     }
+    if name == "tool_search" {
+        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
+        return Ok(json!({
+            "type":"tool_search_call",
+            "call_id":call_id,
+            "execution":"client",
+            "arguments":arguments
+        }));
+    }
+    if name == "web_search" {
+        let action = build_v3_responses_web_search_action_from_openai_chat_arguments(arguments)?;
+        return Ok(json!({
+            "type":"web_search_call",
+            "id":call_id,
+            "status":"completed",
+            "action":action
+        }));
+    }
     Ok(json!({
         "type":"function_call",
         "call_id":call_id,
         "name":name,
         "arguments":arguments
     }))
+}
+
+fn parse_v3_openai_chat_tool_call_arguments_object(
+    name: &str,
+    arguments: &str,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    let trimmed = arguments.trim();
+    let parsed = if trimmed.is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str::<Value>(trimmed).map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderSse(format!(
+                "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection: {error}"
+            ))
+        })?
+    };
+    if parsed.is_object() {
+        return Ok(parsed);
+    }
+    Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+        "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
+    )))
+}
+
+fn build_v3_responses_web_search_action_from_openai_chat_arguments(
+    arguments: &str,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    let parsed = parse_v3_openai_chat_tool_call_arguments_object("web_search", arguments)?;
+    let object = parsed.as_object().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::ProviderSse(
+            "OpenAI Chat web_search arguments must be a JSON object before Responses projection"
+                .to_string(),
+        )
+    })?;
+    let action = object
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            if object.get("url").and_then(Value::as_str).is_some() {
+                if object.get("pattern").and_then(Value::as_str).is_some() {
+                    "find_in_page"
+                } else {
+                    "open_page"
+                }
+            } else {
+                "search"
+            }
+        });
+    match action {
+        "open_page" => Ok(json!({
+            "type":"open_page",
+            "url": object.get("url").and_then(Value::as_str).unwrap_or_default()
+        })),
+        "find_in_page" => Ok(json!({
+            "type":"find_in_page",
+            "url": object.get("url").and_then(Value::as_str).unwrap_or_default(),
+            "pattern": object.get("pattern").and_then(Value::as_str).unwrap_or_default()
+        })),
+        _ => {
+            let query = object
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let mut action = Map::from_iter([
+                ("type".to_string(), Value::String("search".to_string())),
+                ("query".to_string(), Value::String(query.to_string())),
+            ]);
+            if let Some(queries) = object.get("queries").and_then(Value::as_array) {
+                action.insert("queries".to_string(), Value::Array(queries.clone()));
+            }
+            Ok(Value::Object(action))
+        }
+    }
 }
 
 fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSet<String> {
@@ -2969,6 +3078,44 @@ fn v3_transport_intent_label(intent: V3HubTransportIntent) -> &'static str {
     match intent {
         V3HubTransportIntent::Json => "json",
         V3HubTransportIntent::Sse => "sse",
+    }
+}
+
+fn v3_responses_relay_transport_intent_from_stream_field(payload: &Value) -> V3HubTransportIntent {
+    if payload.get("stream").and_then(Value::as_bool) == Some(true) {
+        V3HubTransportIntent::Sse
+    } else {
+        V3HubTransportIntent::Json
+    }
+}
+
+fn validate_v3_responses_relay_provider_request_transport_intent(
+    expected: V3HubTransportIntent,
+    actual: V3ResponsesStreamIntent,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let actual = match actual {
+        V3ResponsesStreamIntent::Json => V3HubTransportIntent::Json,
+        V3ResponsesStreamIntent::Sse => V3HubTransportIntent::Sse,
+    };
+    if actual == expected {
+        return Ok(());
+    }
+    Err(V3ResponsesRelayRuntimeError::ProviderWireEncoding(format!(
+        "Responses Relay provider request transport intent mismatch: expected {} but built {}",
+        v3_transport_intent_label(expected),
+        v3_transport_intent_label(actual)
+    )))
+}
+
+fn project_v3_responses_relay_client_body(
+    client_response_transport_intent: V3HubTransportIntent,
+    finalized_response: Value,
+) -> V3ResponsesRelayClientBody {
+    match client_response_transport_intent {
+        V3HubTransportIntent::Json => V3ResponsesRelayClientBody::Json(finalized_response),
+        V3HubTransportIntent::Sse => V3ResponsesRelayClientBody::Sse(
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(finalized_response),
+        ),
     }
 }
 
@@ -4547,6 +4694,85 @@ mod tests {
             BTreeSet::from([0, 1]),
             "request-id sampling must not pin a two-target weighted pool to one provider"
         );
+    }
+
+    #[test]
+    fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id":"chatcmpl_tool_search_call",
+                "choices":[{
+                    "message":{
+                        "role":"assistant",
+                        "content":"",
+                        "tool_calls":[{
+                            "id":"call_search_tools",
+                            "type":"function",
+                            "function":{
+                                "name":"tool_search",
+                                "arguments":"{\"query\":\"ssh-manager\",\"limit\":8}"
+                            }
+                        }]
+                    },
+                    "finish_reason":"tool_calls"
+                }]
+            }),
+            &json!({
+                "tools":[{
+                    "type":"function",
+                    "function":{
+                        "name":"tool_search",
+                        "parameters":{"type":"object"}
+                    }
+                }]
+            }),
+        )
+        .expect("OpenAI Chat function tool_search must project back to Responses tool_search_call");
+
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["output"][0]["type"], "tool_search_call");
+        assert_eq!(response["output"][0]["call_id"], "call_search_tools");
+        assert_eq!(response["output"][0]["execution"], "client");
+        assert_eq!(response["output"][0]["arguments"]["query"], "ssh-manager");
+        assert_eq!(response["output"][0]["arguments"]["limit"], 8);
+        assert!(
+            !serde_json::to_string(&response)
+                .unwrap()
+                .contains("function_call"),
+            "tool_search must not return to Codex as a generic function_call: {response}"
+        );
+    }
+
+    #[test]
+    fn openai_chat_web_search_function_call_projects_to_responses_web_search_call() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id":"chatcmpl_web_search_call",
+                "choices":[{
+                    "message":{
+                        "role":"assistant",
+                        "content":"",
+                        "tool_calls":[{
+                            "id":"call_web_search",
+                            "type":"function",
+                            "function":{
+                                "name":"web_search",
+                                "arguments":"{\"query\":\"RouteCodex docs\"}"
+                            }
+                        }]
+                    },
+                    "finish_reason":"tool_calls"
+                }]
+            }),
+            &json!({"tools":[{"type":"function","function":{"name":"web_search"}}]}),
+        )
+        .expect("OpenAI Chat function web_search must project back to Responses web_search_call");
+
+        assert_eq!(response["output"][0]["type"], "web_search_call");
+        assert_eq!(response["output"][0]["id"], "call_web_search");
+        assert_eq!(response["output"][0]["status"], "completed");
+        assert_eq!(response["output"][0]["action"]["type"], "search");
+        assert_eq!(response["output"][0]["action"]["query"], "RouteCodex docs");
     }
 
     #[test]

@@ -432,23 +432,28 @@ impl ProviderResponsesTransport {
             });
         }
 
+        if response_content_type
+            .as_deref()
+            .is_some_and(|value| value.starts_with("application/json"))
+        {
+            let body =
+                read_response_body_bytes(response, &request_id, &provider_id, cancellation).await?;
+            return Ok(V3ProviderResp14Raw::from_json(
+                request_id,
+                provider_id,
+                status,
+                headers,
+                body,
+            ));
+        }
+
         match stream_intent {
-            V3ResponsesStreamIntent::Json
-                if response_content_type
-                    .as_deref()
-                    .is_some_and(|value| value.starts_with("application/json")) =>
-            {
-                let body =
-                    read_response_body_bytes(response, &request_id, &provider_id, cancellation)
-                        .await?;
-                Ok(V3ProviderResp14Raw::from_json(
-                    request_id,
-                    provider_id,
-                    status,
-                    headers,
-                    body,
-                ))
-            }
+            V3ResponsesStreamIntent::Json => Err(V3ProviderError::UnexpectedContentType {
+                request_id,
+                provider_id,
+                expected: "JSON",
+                content_type: response_content_type,
+            }),
             V3ResponsesStreamIntent::Sse
                 if response_content_type
                     .as_deref()
@@ -468,12 +473,6 @@ impl ProviderResponsesTransport {
                     stream,
                 ))
             }
-            V3ResponsesStreamIntent::Json => Err(V3ProviderError::UnexpectedContentType {
-                request_id,
-                provider_id,
-                expected: "JSON",
-                content_type: response_content_type,
-            }),
             V3ResponsesStreamIntent::Sse => Err(V3ProviderError::UnexpectedContentType {
                 request_id,
                 provider_id,

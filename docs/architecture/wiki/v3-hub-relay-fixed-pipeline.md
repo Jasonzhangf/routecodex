@@ -105,6 +105,9 @@ Relay is borrow-first and move-at-boundary:
 - Hub Relay runtime closeout: `v3.hub_relay_runtime_closeout` binds controlled JSON/SSE E2E,
   local continuation E2E, servertool response hook profile, Error01-06, side-channel isolation,
   copy-budget probes, Responses Relay source server entry, and one `V3ServerRespOutbound06ClientFrame` response exit.
+- Responses Relay transport split: provider request transport intent, provider response body kind,
+  and client response projection intent are separate; `stream=true` asks upstream for SSE but still
+  accepts provider JSON as Resp01 JSON, and client `stream=true` always projects client SSE frames.
 - Responses Relay JSON local continuation is provider-facing black-box verified: Resp04 saves the
   function call, the next Req04 restores it before the current `function_call_output`, `tools`
   remains intact, and a wrong `call_id` fails before provider send without consuming saved state.
