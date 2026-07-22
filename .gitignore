@@ -107,6 +107,12 @@ vendor/llmswitch-core/
 .agent-collab/merge-queue/
 .agent-collab/KILL_SWITCH
 
+# Agent collaboration local pointer files. Truth lives under ignored runs/claims;
+# these per-worktree cursors must not dirty git status.
+.agent-collab/current*run_id
+.agent-collab/current*.run_dir
+.agent-collab/.last-*
+
 # Local agent skills (local only)
 .agents/
 sharedmodule/llmswitch-core/router_hotpath_napi.node
