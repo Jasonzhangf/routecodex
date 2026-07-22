@@ -32486,3 +32486,8 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - During final dirty-worktree review, `routecodex-v3-provider-responses --test general_provider` exposed a stale negative test: provider transport now deliberately flushes an EOF trailing SSE frame, so `data: ...\n` is no longer a transport-level malformed SSE error.
 - Forward fix: updated the general provider blackbox to assert trailing-frame flush as positive evidence and added an invalid UTF-8 SSE case as the transport-level negative lock. This preserves the new boundary: provider transport may flush a complete trailing frame, protocol decoders still own terminality.
 - Verification: provider general test PASS 6/6; full `routecodex-v3-sse` + `routecodex-v3-provider-responses` tests PASS 37/37.
+
+## 2026-07-23T01:02+08:00 V3 routing facts tool-surface red test closeout
+- During post-commit clean check, `nodes.rs` carried uncommitted routing-fact red tests proving Codex `additional_tools` did not set `tools/coding/search` capabilities and top-level `web_search` did not set `web_search`.
+- Source fix: `build_v3_router_request_facts_for_entry` now collects tool names from top-level `tools`, Responses `input[].type=additional_tools.tools`, and stringified input, then maps Codex coding tools to `coding`, `tool_search` to `search`, and `web_search/web_search_preview` to `web_search` before pool matching.
+- Verification: `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib v3_routing_facts_mark_ -- --nocapture` PASS 3/3; `rustfmt --edition 2021 --check v3/crates/routecodex-v3-runtime/src/nodes.rs` PASS.

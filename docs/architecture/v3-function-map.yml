@@ -539,6 +539,7 @@ features:
       - git diff --check
     required_contract:
       - "Request image/media facts are normal request data and must enter V3RouterRequestFacts as multimodal/vision before pool matching."
+      - "Request tool facts include top-level tools and Responses additional_tools; Codex coding tools set coding, tool_search sets search, and web_search/web_search_preview set web_search before pool matching."
       - "V3Router07OpaqueTargetHitOnce carries request capabilities to Target so a thinking/tool route cannot select a text-only provider for an image request."
       - "Target candidate dedupe preserves pool provenance, required capabilities, and default-pool membership; default's final compatible provider remains selectable under health cooldown."
     runtime_status: owner_queryability_bound_to_existing_p5_source

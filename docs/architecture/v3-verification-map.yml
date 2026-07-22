@@ -913,6 +913,7 @@ features:
       - Router cannot import Provider availability and Target cannot mutate Provider health
       - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
       - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
+      - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools, tool_search, and web_search surfaces become routing capabilities before pool matching
       - Target dedupe retains optional/default provenance and protects the default floor's final compatible provider
     required_gates:
       - npm run test:v3-p5-router-target

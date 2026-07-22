@@ -110,12 +110,21 @@ pub fn build_v3_router_request_facts_for_entry(
     entry_protocol: &str,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
-    if body
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| !tools.is_empty())
-    {
+    let tool_names = collect_v3_request_tool_names(body);
+    if !tool_names.is_empty() {
         capabilities.insert("tools".to_string());
+    }
+    if tool_names.iter().any(|name| is_v3_coding_tool_name(name)) {
+        capabilities.insert("coding".to_string());
+    }
+    if tool_names.iter().any(|name| name == "tool_search") {
+        capabilities.insert("search".to_string());
+    }
+    if tool_names
+        .iter()
+        .any(|name| matches!(name.as_str(), "web_search" | "web_search_preview"))
+    {
+        capabilities.insert("web_search".to_string());
     }
     if body.get("reasoning").is_some() {
         capabilities.insert("reasoning".to_string());
@@ -149,6 +158,87 @@ pub fn build_v3_router_request_facts_for_entry(
         capabilities,
         input_tokens: estimate_v3_routing_input_tokens(body),
     }
+}
+
+fn collect_v3_request_tool_names(body: &Value) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    collect_v3_tool_names_from_tools(body.get("tools"), &mut names);
+    collect_v3_tool_names_from_input(body.get("input"), &mut names);
+    names
+}
+
+fn collect_v3_tool_names_from_input(input: Option<&Value>, names: &mut BTreeSet<String>) {
+    match input {
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_v3_tool_names_from_input_item(item, names);
+            }
+        }
+        Some(Value::Object(_)) => {
+            if let Some(item) = input {
+                collect_v3_tool_names_from_input_item(item, names);
+            }
+        }
+        Some(Value::String(raw)) => {
+            if let Ok(parsed) = serde_json::from_str::<Value>(raw.trim()) {
+                collect_v3_tool_names_from_input(Some(&parsed), names);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_v3_tool_names_from_input_item(item: &Value, names: &mut BTreeSet<String>) {
+    let Some(object) = item.as_object() else {
+        return;
+    };
+    if object
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == "additional_tools")
+        || object.contains_key("tools")
+    {
+        collect_v3_tool_names_from_tools(object.get("tools"), names);
+    }
+}
+
+fn collect_v3_tool_names_from_tools(tools: Option<&Value>, names: &mut BTreeSet<String>) {
+    let Some(Value::Array(tools)) = tools else {
+        return;
+    };
+    for tool in tools {
+        collect_v3_tool_name(tool, names);
+    }
+}
+
+fn collect_v3_tool_name(tool: &Value, names: &mut BTreeSet<String>) {
+    for candidate in [
+        tool.get("name"),
+        tool.pointer("/function/name"),
+        tool.get("type"),
+    ] {
+        let Some(name) = candidate.and_then(Value::as_str) else {
+            continue;
+        };
+        let normalized = name.trim().to_ascii_lowercase();
+        if normalized.is_empty() || normalized == "function" || normalized == "custom" {
+            continue;
+        }
+        names.insert(normalized);
+    }
+}
+
+fn is_v3_coding_tool_name(name: &str) -> bool {
+    matches!(
+        name,
+        "exec"
+            | "exec_command"
+            | "write_stdin"
+            | "apply_patch"
+            | "update_plan"
+            | "request_user_input"
+            | "view_image"
+    )
 }
 
 fn estimate_v3_routing_input_tokens(body: &Value) -> u64 {
@@ -362,6 +452,60 @@ mod tests {
         assert!(
             !facts.capabilities.contains("streaming"),
             "stream is a transport intent, not a routing/model capability"
+        );
+    }
+
+    #[test]
+    fn v3_routing_facts_mark_codex_tool_surface_as_coding() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "role": "developer",
+                    "tools": [
+                        {"type":"function","name":"exec_command"},
+                        {"type":"function","name":"apply_patch"},
+                        {"type":"function","name":"tool_search"}
+                    ],
+                    "type": "additional_tools"
+                },
+                {"role":"user","content":"继续实现并验证"}
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+
+        assert!(facts.capabilities.contains("tools"));
+        assert!(
+            facts.capabilities.contains("coding"),
+            "Codex coding tool surfaces must route through the coding pool, not generic tools only: {:?}",
+            facts.capabilities
+        );
+        assert!(
+            facts.capabilities.contains("search"),
+            "tool_search remains visible for search-specific requests, but coding precedence can outrank it"
+        );
+    }
+
+    #[test]
+    fn v3_routing_facts_mark_search_tool_surface_without_coding() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "tools": [
+                {"type":"function","name":"web_search"},
+                {"type":"function","name":"lookup"}
+            ],
+            "input": [{"role":"user","content":"search only"}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+
+        assert!(facts.capabilities.contains("tools"));
+        assert!(facts.capabilities.contains("web_search"));
+        assert!(
+            !facts.capabilities.contains("coding"),
+            "search-only tool surfaces must not be collapsed into coding: {:?}",
+            facts.capabilities
         );
     }
 
