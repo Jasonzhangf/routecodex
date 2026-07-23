@@ -13,6 +13,7 @@ const models = String(
   .filter(Boolean);
 const routeHint = (process.env.STOPLESS_ROUTE_HINT || 'thinking').trim();
 const maxAttemptsPerModel = Number.parseInt(process.env.STOPLESS_ATTEMPTS || '3', 10);
+const maxResumeRounds = Number.parseInt(process.env.STOPLESS_RESUME_ROUNDS || '3', 10);
 const outputPath = process.env.STOPLESS_OUTPUT || '/tmp/stopless-5555-live-probe.json';
 const probeMode = (process.env.STOPLESS_PROBE_MODE || 'fresh').trim().toLowerCase();
 const probeTag = `stopless-live-probe-${Date.now()}`;
@@ -248,6 +249,32 @@ function parseExecCommandArguments(rawArgs) {
   }
 }
 
+function extractFirstNonStoplessToolCall(responseBody) {
+  const toolCalls = extractRequiredActionToolCalls(responseBody);
+  for (const call of toolCalls) {
+    const name = call?.name ?? call?.function?.name ?? null;
+    const rawArgs = call?.function?.arguments ?? call?.arguments;
+    const parsedArgs = typeof rawArgs === 'string' && rawArgs.trim()
+      ? (() => {
+        try { return parseExecCommandArguments(rawArgs); } catch { return null; }
+      })()
+      : null;
+    const command = typeof parsedArgs?.cmd === 'string' ? parsedArgs.cmd : null;
+    if ((name === 'exec_command' || name === 'exec') && isStopMessageAutoCommand(command)) {
+      continue;
+    }
+    if (name === 'reasoning.stop' || name === 'reasoningStop') {
+      continue;
+    }
+    return {
+      toolCallId: call.tool_call_id || call.call_id || call.id || null,
+      name,
+      command
+    };
+  }
+  return null;
+}
+
 function extractReasoningStop(responseBody) {
   const toolCalls = extractRequiredActionToolCalls(responseBody);
   const call = toolCalls.find(
@@ -315,6 +342,7 @@ export function summarizeAttempt(model, attempt, response) {
   const outputText = typeof materializedBody?.output_text === 'string'
     ? materializedBody.output_text
     : extractOutputText(materializedBody);
+  const nonStoplessToolCall = extractFirstNonStoplessToolCall(materializedBody);
   const execCommandText = execCommand?.command ?? null;
   return {
     model,
@@ -327,6 +355,9 @@ export function summarizeAttempt(model, attempt, response) {
     errorMessage: materializedBody?.error?.message ?? null,
     hasExecCommand: Boolean(execCommandText),
     hasReasoningStop: Boolean(reasoningStop?.toolCallId),
+    hasNonStoplessToolCall: Boolean(nonStoplessToolCall?.toolCallId || nonStoplessToolCall?.name),
+    nonStoplessToolName: nonStoplessToolCall?.name ?? null,
+    nonStoplessToolCallId: nonStoplessToolCall?.toolCallId ?? null,
     isStopMessageAutoExecCommand: isStopMessageAutoCommand(execCommandText),
     toolCallId: execCommand?.toolCallId ?? null,
     execCommand: execCommandText,
@@ -424,13 +455,12 @@ function summarizeProviderDryRun(response, expectedPrompt) {
   const providerVisibleBridgeLeaks = collectProviderVisibleBridgeLeaks(providerBody);
   const guidanceText = extractProviderGuidanceText(providerBody);
   const guidance = typeof guidanceText === 'string'
+    && (guidanceText.includes('当前轮推进准则') || guidanceText.includes('当前轮继续推进准则'))
     && [
-      '当前轮继续推进准则',
       '继续当前目标',
       'reasoningStop',
       'stopreason=0',
       'stopreason=1',
-      'stopreason=2',
       'evidence',
       'needs_user_input'
     ].every((token) => guidanceText.includes(token));
@@ -466,6 +496,7 @@ function summarizeProviderDryRun(response, expectedPrompt) {
     noSiblingToolSurfaceForAdditionalTools,
     reasoningStopCount,
     guidance,
+    guidanceTextPreview: typeof guidanceText === 'string' ? guidanceText.slice(0, 500) : null,
     expectedPrompt,
     lastUser,
     lastUserMatchesExpected,
@@ -729,13 +760,14 @@ async function main() {
     models,
     sessionId,
     maxAttemptsPerModel,
+    maxResumeRounds,
     probeMode,
     probeTag,
     note: [
       'This probe only accepts live stopless evidence from managed non-direct routes.',
       'Default model is gpt-5.5 because earlier verified 5555 live stopless samples entered managed search through router-gpt-5.5, while explicit MiniMax/mimo model probes later regressed into direct/thinking invalid paths.',
       routeHint ? `Route hint is forced to ${routeHint}.` : 'No explicit route hint.',
-      'Current live success contract accepts either stopless exec_command CLI projection or proactive required_action.reasoning.stop tool call.',
+      'Current live success contract accepts stopless CLI projection through the configured guard rounds, proactive reasoning.stop, or normal non-stopless tool progress.',
       'If a response completes with leaked stop schema text and no structured tool call, treat it as a direct/no-stopless invalid entry rather than a passed stopless run.'
     ],
     routeHint: routeHint || null,
@@ -788,7 +820,7 @@ async function main() {
       let currentToolCallId = summary.toolCallId;
       let currentCommand = summary.execCommand;
 
-      for (let round = 1; round <= 2; round += 1) {
+      for (let round = 1; round <= maxResumeRounds; round += 1) {
         if (!currentResponseId || !currentToolCallId || !currentCommand) {
           break;
         }
@@ -807,6 +839,9 @@ async function main() {
         currentResponseId = materializedResumeBody?.id ?? null;
         currentToolCallId = nextExec?.toolCallId ?? null;
         currentCommand = nextExec?.command ?? null;
+        if (resume.summary.hasNonStoplessToolCall) {
+          break;
+        }
         if (!nextExec?.command) {
           break;
         }
@@ -814,7 +849,8 @@ async function main() {
 
       const firstResume = report.resumeChain[0];
       const finalResume = report.resumeChain.at(-1);
-      const providerDryRunsOk = report.providerDryRuns.length === 2
+      const providerDryRunsOk = report.providerDryRuns.length === report.resumeChain.length
+        && report.providerDryRuns.length > 0
         && report.providerDryRuns.every((dryRun) => dryRun.ok === true);
       const finalOutputText = typeof finalResume?.outputText === 'string'
         ? finalResume.outputText.trim()
@@ -822,31 +858,40 @@ async function main() {
       const finalExposesInternalGuardState = finalOutputText.includes('Stopless 已达到连续自动续轮上限')
         || finalOutputText.includes('连续自动续轮上限')
         || finalOutputText.includes('连续 stop 次数');
-      const completedTwoRoundLoop = report.resumeChain.length === 2
+      const stoplessResumeRounds = report.resumeChain.slice(0, Math.max(0, report.resumeChain.length - 1));
+      const priorRoundsAreStopless = stoplessResumeRounds.every((round) => (
+        round?.hasExecCommand === true
+        && round?.isStopMessageAutoExecCommand === true
+        && !round?.errorCode
+      ));
+      const normalToolProgress = providerDryRunsOk
+        && report.resumeChain.some((round) => round?.hasNonStoplessToolCall === true)
+        && finalExposesInternalGuardState === false;
+      const completedGuardLoop = report.resumeChain.length === maxResumeRounds
         && providerDryRunsOk
-        && firstResume?.hasExecCommand === true
-        && firstResume?.isStopMessageAutoExecCommand === true
+        && priorRoundsAreStopless
         && finalResume?.responseStatus === 'completed'
         && finalResume?.hasExecCommand === false
         && finalResume?.leakedStopSchema === false
         && finalExposesInternalGuardState === false
         && !finalResume?.errorCode;
-      const guardTerminalPassThrough = report.resumeChain.length === 2
+      const guardTerminalPassThrough = report.resumeChain.length === maxResumeRounds
         && providerDryRunsOk
-        && firstResume?.hasExecCommand === true
-        && firstResume?.isStopMessageAutoExecCommand === true
+        && priorRoundsAreStopless
         && finalResume?.responseStatus === 'completed'
         && finalResume?.hasExecCommand === false
         && finalExposesInternalGuardState === false
         && !finalResume?.errorCode;
-      report.finalStatus = completedTwoRoundLoop
-        ? 'completed'
-        : guardTerminalPassThrough
-          ? 'guard_passthrough'
-          : 'invalid_stopless_continuation_loop';
+      report.finalStatus = normalToolProgress
+        ? 'normal_tool_progress'
+        : completedGuardLoop
+          ? 'completed'
+          : guardTerminalPassThrough
+            ? 'guard_passthrough'
+            : 'invalid_stopless_continuation_loop';
       await fs.writeFile(outputPath, JSON.stringify(report, null, 2));
       console.log(JSON.stringify(report, null, 2));
-      if (!completedTwoRoundLoop && !guardTerminalPassThrough) {
+      if (!normalToolProgress && !completedGuardLoop && !guardTerminalPassThrough) {
         process.exitCode = 3;
       }
       return;

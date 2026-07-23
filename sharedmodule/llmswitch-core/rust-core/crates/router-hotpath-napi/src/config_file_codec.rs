@@ -192,6 +192,10 @@ pub fn load_routecodex_config_json(input_json: &str) -> Result<String, String> {
     let routing_policy_group_value: Value = serde_json::from_str(&routing_policy_group)
         .map_err(|err| format!("[config] failed to decode routing policy group: {err}"))?;
     let mut options = serde_json::Map::new();
+    options.insert(
+        "includeAllRoutingPolicyGroups".to_string(),
+        Value::Bool(true),
+    );
     if let Some(group) = routing_policy_group_value
         .get("routingPolicyGroup")
         .and_then(Value::as_str)

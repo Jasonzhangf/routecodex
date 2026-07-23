@@ -359,6 +359,8 @@ features:
       - v3-rd-09
       - v3-rd-13
       - v3-rd-14
+      - v3-rd-15
+      - v3-rd-16
     entry_symbols:
       - execute_v3_responses_direct_runtime_kernel
       - execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
@@ -1425,6 +1427,7 @@ features:
       - v3.request.normal_payload
       - v3.target.concrete_provider
       - v3.response.provider_raw
+      - v3.response.client_payload
       - v3.provider.responses_transport_capability
       - v3.provider.responses_websocket_connection
     mainline_bindings:
@@ -1433,6 +1436,8 @@ features:
       - v3-rci-ws-01
       - v3-rci-03
       - v3-rci-04
+      - v3-rci-05
+      - v3-rci-06
     entry_symbols:
       - V3ResponsesDirectContinuationState
       - V3ResponsesDirectContinuationScope
@@ -2364,9 +2369,10 @@ features:
       - current 5555 V3 multi-provider profile health and pool status are recorded in .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log
       - current Anthropic Messages JSON dry-run/live evidence is recorded under .agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/
       - current Anthropic Messages SSE dry-run/live evidence is recorded under .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/
+      - current Responses Relay client-facing WebSocket v2 text and two-turn tool-loop evidence is recorded under .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/
+      - current remote continuation exact-pin provider/profile inventory is recorded in .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-remote-continuation-inventory.json
     pending_runtime:
       - remaining live provider replay matrix
-      - inbound Responses WebSocket live replay
       - Gemini Generate Content live replay
       - two-turn remote continuation exact-pin replay
       - natural or authorized live 401 403 5xx timeout provider-error samples
@@ -2377,7 +2383,7 @@ features:
     status: controlled_runtime_proxy_verified
     change_risk: high
     owner_kind: rust_server_transport_shell
-    owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell. It parses response.create, calls the existing Responses Direct Runtime entry, and projects Runtime JSON/SSE output as WebSocket events without owning provider socket state or continuation semantics."
+    owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell. It parses response.create, dispatches to the configured Responses entry binding (Direct or Relay), and projects Runtime JSON/SSE output as WebSocket events without owning provider socket state or continuation semantics."
     owner_crates: [routecodex-v3-server]
     owner_files:
       - v3/crates/routecodex-v3-server/src/lib.rs
@@ -2400,6 +2406,8 @@ features:
       - responses_websocket_endpoint
       - responses_websocket_create_payload
       - execute_responses_direct_server_frame
+      - execute_responses_relay_websocket_output
+      - send_responses_relay_websocket_output
       - send_responses_websocket_sse_stream
     allowed_paths:
       - v3/crates/routecodex-v3-server/Cargo.toml
@@ -2442,10 +2450,14 @@ features:
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
       - git diff --check
-    runtime_status: controlled_server_websocket_proxy_verified
+    runtime_status: controlled_and_current_5555_relay_websocket_live_verified
+    runtime_evidence:
+      - .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_probe_after_restart_20260723T030907Z.json
+      - .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_tool_loop_after_restart_20260723T031352Z.json
     pending_runtime:
-      - live provider compatibility
-      - global install restart release and production cutover
+      - provider-owned remote continuation exact-pin live replay
+      - provider-side Responses WebSocket endpoint compatibility
+      - full production cutover
 
   - feature_id: v3.resource_relation_edge_lock
     owner_kind: v3_architecture_gate

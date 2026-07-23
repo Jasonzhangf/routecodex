@@ -106,6 +106,32 @@ const cases = [
     diagnostic: /Anthropic Messages current 5555 case must be live_verified and ready anthropic_messages_json_http/,
   },
   {
+    name: 'Responses Relay WebSocket live evidence downgraded',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      const target = doc.cases.find((entry) => entry.id === 'responses_relay_websocket_v2');
+      target.live_evidence = {
+        status: 'pending',
+        refs: [],
+        blockers: ['live_inbound_websocket_provider_replay_pending'],
+      };
+      target.production = {
+        status: 'blocked',
+        blockers: ['live_inbound_websocket_replay_pending'],
+      };
+    },
+    diagnostic: /Responses Relay WebSocket v2 must cite current managed 5555 live_verified evidence and be ready/,
+  },
+  {
+    name: 'remote continuation exact-pin blocker removed',
+    file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
+    mutateYaml: (doc) => {
+      doc.production_blockers = doc.production_blockers
+        .filter((entry) => entry.blocker_id !== 'remote_continuation_exact_pin_provider_profile_unavailable');
+    },
+    diagnostic: /missing explicit remote continuation exact-pin provider\/profile blocker/,
+  },
+  {
     name: 'live evidence confused with controlled evidence',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
     mutateYaml: (doc) => {

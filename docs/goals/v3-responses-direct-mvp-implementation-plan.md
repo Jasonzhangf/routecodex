@@ -144,11 +144,13 @@ V3ResponsesDirect11Policy
 V3Provider12ResponsesWirePayload
 V3Transport13ResponsesHttpRequest
 V3ProviderResp14Raw
+V3DirectResp14ProviderProjectionPrepared
+V3DirectResp15ClientPayloadReady
 V3Resp15ClientPayload
 V3Server16HttpFrame
 ```
 
-P0-P5 own nodes `03-10`; P6 owns only adjacent transitions `10->11->12->13->14->15->16`.
+P0-P5 own nodes `03-10`; P6 owns only adjacent transitions `10->11->12->13->14->DirectResp14ProviderProjectionPrepared->DirectResp15ClientPayloadReady->15->16`.
 Only adjacent builders are allowed. Do not add cross-node `From` conversions or duplicate DTO shapes.
 
 ### 6. Implement Static Hook Registry

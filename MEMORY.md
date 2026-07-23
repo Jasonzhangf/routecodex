@@ -3818,6 +3818,7 @@
 
 ## 2026-07-19 5520 cc/asxs 502 live closeout and local-health fix
 - Incident `openai-responses-router-gpt-5.5-20260719T081510544-570996-943`: cc returned HTTP_502 `Upstream access forbidden`, then RouteCodex switched to asxs and the client closed before terminal.
+
 - Exact sample inspection showed the provider body was clean Responses payload: no top-level `reasoning_effort` / `reasoningEffort`, no `namespace`, and no internal metadata/control leak.
 - Direct upstream replay of the exact provider body with the configured cc key (`CC_OAI_KEY`) returned HTTP 200 and completed; server-like headers also returned 200/deltas. A wrong-key replay with `CRS_OAI_KEY1` returned 401 and must not be used as cc truth.
 - Managed `routecodex restart --port 5520` cleared only process-local provider health; 4444/5520/10000 stayed healthy at `0.90.3950`. After restart, live `cc.gpt-5.5` small SSE completed HTTP 200, and replaying the exact target body through 5520 selected `cc[key1].gpt-5.5` and completed HTTP 200 with `response.completed` + `[DONE]` (`req=571004-951`, in 229027 / out 5341, no 502). That restart was diagnostic evidence, not a durable fix.
@@ -4293,3 +4294,89 @@ Tags: #v3 #5555 #live-compat-matrix #anthropic-messages #multi-provider #restart
 - Verified fact: GLMRelay/OpenAI Chat rejects scalar `"[REDACTED]"` placeholders inside function-tool JSON Schema positions such as `parameters.properties.max_output_tokens` / `parameters.properties.token_budget`; valid schema nodes must be JSON objects or boolean schemas. MiniMax can tolerate the invalid shape, so routing changes can reveal provider-wire schema defects.
 - Fix truth: `v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs` normalizes only redacted JSON Schema placeholders in OpenAI Chat function `parameters` schema positions to boolean schema `true`; it must not remove tools or normalize ordinary descriptions/text.
 - Closeout proof: evidence run `.agent-collab/runs/20260722T184300Z-Macstudio.local-46514-v3-openai-chat-redacted-tool-schema/` includes red/green source tests, runtime closeout test, V3 build/install/restart via `routecodex restart --port 5555`, old sample `...603662-996` dry-run/live replay, and second-round submit proving full prompts/tools plus exactly-one `reasoningStop` with live real `exec_command` tool calls from GLM.
+
+## 2026-07-23 — V3 5555 stopless tool visibility closeout
+- V3 live diagnostic route forcing must use `X-Route-Hint`; putting `routeHint` in client payload `metadata` is a side-channel leak and correctly fails fast.
+- Current 5555 stopless/tool visibility evidence under `.agent-collab/runs/20260722T192205Z-Macstudio.local-67311-continue-stopless/` proves provider-visible tools are preserved: `provider-request.json` stores final sends under `attempts[].request.body.tools`, and latest live samples show `exec`, `wait`, `request_user_input`, plus exactly one `reasoningStop`.
+- A repeated `reasoningStop` / `invalid_stopless_continuation_loop` outcome is not by itself evidence that tools were stripped. First prove provider-visible tools are absent; if they are present, debug stopless terminal policy/probe contract instead of patching SSE, RespOutbound, handler, or continuation store.
+
+## 2026-07-23 Stopless live probe guard contract
+- Verified: V3 stopless live guard on 5555 permits initial CLI projection plus two further stopless resume projections, then the third submit round can pass through provider stop as guard terminal. Live evidence: .agent-collab/runs/20260722T195429Z-Macstudio.local-81016-stopless-loop/stopless-5555-live-probe-after-fix-2.json finalStatus=guard_passthrough.
+- Probe rule: do not require  in guidance text;  is locked by the  tool schema, while guidance text only needs current-turn action policy plus completion/block evidence requirements.
+
+## 2026-07-23 Correction: Stopless live probe guard contract literals
+- Supersedes the immediately previous `2026-07-23 Stopless live probe guard contract` probe-rule line where inline-code literals were shell-expanded away.
+- Verified: V3 stopless live guard on 5555 permits initial CLI projection plus two further stopless resume projections, then the third submit round can pass through provider stop as guard terminal. Evidence: `.agent-collab/runs/20260722T195429Z-Macstudio.local-81016-stopless-loop/stopless-5555-live-probe-after-fix-2.json` with `finalStatus=guard_passthrough`.
+- Probe rule: do not require `stopreason=2` in guidance text; `stopreason=2` is locked by the `reasoningStop` tool schema, while guidance text only needs current-turn action policy plus completion/block evidence requirements.
+
+## 2026-07-23 Correction: preserve all non-injected client tool failure feedback
+- This supersedes the 2026-07-18 stopless poisoned-loop statement that Req04 should drop ordinary client tool-error pairs. That cleanup rule was wrong.
+- A model-generated tool call and the client's matching output are canonical transcript truth even when the client output says `failed to parse function arguments`, `unsupported call:`, unknown tool, schema rejection, or execution failure. The feedback must reach the model so it can correct the next call.
+- Req04 may remove only RouteCodex-injected stopless artifacts: `call_stopless_reasoning`, the `routecodex hook run reasoningStop` no-op output, and the generated stopless continuation guideline. It must not remove ordinary calls, outputs, or pairs by matching error text.
+- Root-cause evidence: old sample `...20260723T035848346-603944-1278` contained assistant call `call_0800a0de61d2470a885168cc` plus client parse-error output. The old cleaner removed the output but retained the call, causing repeated `OpenAI Chat provider encoding cannot place user message before pending tool results`.
+- Verified fix commit `c2627b507`: installed `0.90.3971`, managed `routecodex restart --port 5555`, V3 health `responses_v3_5555`; exact old-sample dry-run preserved the call and matching error output, and exact live replay returned HTTP 200/SSE `requires_action` with a new real `exec_command` call. Evidence: `.agent-collab/runs/20260723T003131Z-Macstudio.local-7615-preserve-noninjected-tool-errors/`.
+
+## 2026-07-23 Correction: provider errors fix bad request fields first
+- Supersedes the transient “Anthropic codec malformed replay args” interpretation that suggested preserving malformed `function_call.arguments` under invented `{"arguments": raw}` or deleting the ordinary call/output pair. Those directions were wrong.
+- Provider/upstream/codec field errors must be debugged from canonical request -> provider-bound request, then fixed at the first owner that creates or fails to remove the bad field. Success means the original request no longer generates/sends the offending provider field, not that the error is projected differently or hidden later.
+- Final V2-aligned rule for this incident: preserve the ordinary model-generated call and matching client parse-error output; Anthropic provider-wire conversion maps unparsable ordinary `function_call.arguments` to object `tool_use.input={}` so the original request no longer emits the malformed provider field. Do not delete the feedback pair, wrap raw arguments under an invented key, or change error projection/SSE/routing.
+
+## 2026-07-23 V3 live sample provenance guard
+- When a `~/.rcc/codex-samples/.../request.json` looks unreasonable, first classify its provenance before blaming Codex/client conversion or a live user session. Check `.agent-collab/runs/*` payload files, Codex session JSONL command records, exact normalized JSON hash, and server log method/transport lines.
+- Sample `openai-responses-router-gpt-5.5-20260723T104533654-604752-2086` is confirmed synthetic: previous worker run `20260723T021413Z-Macstudio.local-50987-anthropic-codec-cwd` wrote `live-cwd-error-payload.json` with `call_id=missing_call` and posted it via HTTP `curl` dry-run to `127.0.0.1:5555/v1/responses` (`x-routecodex-dry-run: provider-request`, `x-routecodex-workdir: /Volumes/extension/code/OneStop`). Server log lines 7516-7517 show HTTP POST, not WebSocket. Treat this sample as probe pollution, not a real Codex 5.5 continuation/request-generation defect.
+- For WebSocket/continuation regressions, prove the source transport from logs and probe code: WS probes must show `response.create` with either a new user input or a continuation carrying `previous_response_id` plus the model-returned call_id. A lone synthetic `function_call_output` with `missing_call` and no scope is a guard-test payload, not WebSocket evidence.
+
+## 2026-07-23 V3 caller-flow direct projection gate
+- V3 architecture review now has an auto-generated top-down caller-flow surface at `docs/architecture/wiki/v3-mainline-caller-flow.md` and rendered HTML at `docs/architecture/wiki/html/v3-mainline-caller-flow.html`, sourced from `docs/architecture/v3-mainline-call-map.yml`.
+- Direct provider/runtime response must not jump from `V3ProviderResp14Raw`, `V3HubRespContinuation04Committed`, RespInbound, or RespChatProcess nodes directly to client/server projection. Direct-only response projection must pass through explicit internal nodes such as `V3DirectResp14ProviderProjectionPrepared -> V3DirectResp15ClientPayloadReady -> V3Resp15ClientPayload` before server frame.
+- Gate truth: `npm run verify:v3-mainline-caller-flow` checks generated graph sync, missing caller/callee fields, map-level forbidden direct projection edges, and source registered-hook declarations that map `V3ProviderResp14Raw -> V3Resp15ClientPayload`. Red fixture gate is `npm run test:v3-mainline-caller-flow-red-fixtures`.
+- The first run intentionally red-found two real gaps: `v3-rd-13 V3ProviderResp14Raw -> V3Resp15ClientPayload` and `v3-rci-04 V3HubRespContinuation04Committed -> V3Resp15ClientPayload`; after splitting Direct internal edges, the auto audit reports no forbidden direct response projection edges and no forbidden source registered direct response edges.
+
+## 2026-07-23 V3 caller-flow HTML review surface readability rule
+- `docs/architecture/wiki/html/v3-mainline-caller-flow.html` must be generated from `docs/architecture/v3-mainline-call-map.yml` edge truth, not hand-maintained screenshots or summaries.
+- For human audit, the page needs a large top-down main skeleton first, then expandable/standalone branch diagrams. Per-branch diagrams should use contract nodes (`from_node -> to_node`) as graph nodes and keep function caller/callee/source details in tables; rendering every caller function as a Mermaid node makes the graph horizontal, tiny, and not reviewable.
+- `npm run render:v3-mainline-caller-flow` is the single render command for both Markdown and HTML. `npm run verify:v3-mainline-caller-flow` must fail if either artifact drifts.
+
+## 2026-07-23 Correction: V3 restart is not start/bootstrap
+- Supersedes the earlier 2026-07-23 note that said V3 lifecycle `restart` bootstraps when instance/control/pid state is absent. That behavior caused owner/log mismatch: restart could create a separate managed listener instead of operating on the verified foreground/managed owner.
+- Verified source rule: `V3ManagedLifecycle::restart` must require existing managed truth (`instance.json`, `pid.cache`, `control.json`) and otherwise return `NotRunning` without publishing instance/status or spawning a child. It may recover only stale owned unreachable non-terminal state after owner/state checks pass.
+- Evidence: `.agent-collab/runs/20260723T035721Z-Macstudio.local-56043-restart-owner-mismatch/diagnosis-contract.json`; lifecycle red/green `restart_without_current_instance_state_fails_without_bootstrap`; `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle` 13/13 PASS; managed lifecycle architecture gate, red fixtures, module boundaries, lifecycle-package fmt, and diff-check PASS. Full workspace gates remain subject to unrelated dirty runtime work.
+
+## 2026-07-23 - V2 config startup legacy port compatibility
+- Confirmed: V2 startup config compatibility belongs to `config.user_config_materialization` Rust owner, not TS startup or user config mutation.
+- Legacy `[httpserver] port = <n>` is an authoring surface that may be projected into runtime `httpserver.ports[]` only when `ports` is absent. Explicit `httpserver.ports = []` remains invalid.
+- Startup fixes must prove installed loader/start path consumes the projected runtime shape while config file checksums remain unchanged.
+
+## 2026-07-23 - v2 default startup config projection truth
+- V2 startup must not require users to rewrite legacy single-port authoring config. `[httpserver].port` is an authoring compatibility input; runtime truth is deterministic `httpserver.ports[]` projected by Rust materialization without mutating `/Volumes/extension/.rcc/config.toml` or `/Users/fanzhang/.rcc/config.toml`.
+- Default placeholder routes such as `test.bar` must not empty the installed provider registry or block server startup. Runtime materialization may keep valid installed provider profiles even when authored route references are placeholders, and VR routing bootstrap skips unknown provider placeholder targets without synthesizing provider/model targets. Actual route unavailability remains a request-time route availability concern.
+- Verified 2026-07-23 with installed 0.90.3971 native artifact: loader showed port 5555, providerCount 38, authored `test.bar` unchanged; `rcc start -c /Volumes/extension/.rcc/config.toml` started and `/health` returned ready=true; config file SHA256 hashes unchanged.
+
+## 2026-07-23 Correction: V2 config.toml must stay multi-port
+- Supersedes the earlier 2026-07-23 v2 default startup repair note that treated legacy `[httpserver].port` as enough to synthesize runtime `httpserver.ports[]` and skipped unknown placeholder providers. That direction was wrong.
+- Standard V2 config truth is multi-port `[[httpserver.ports]]`; `[httpserver].port` is only a legacy/basic field and must not replace the multi-port listener/routingPolicyGroup semantics.
+- If default `config.toml` is a simplified `bad-canary`/`test.bar` probe file, the correct diagnosis is config source pollution / wrong selected config, not code-side single-port projection or VR bootstrap placeholder skipping.
+
+## 2026-07-23 V2 multi-port provider materialization truth
+- V2 `config.toml` remains multi-port (`[[httpserver.ports]]`). Do not collapse it to single-port or treat `[httpserver].port` as the semantic replacement.
+- If a provider file exists under `~/.rcc/provider/<id>/config.v2.toml` but startup reports `unknown provider <id>`, first check native config materialization/provider registry scope. The root cause can be loader materializing only the primary routingPolicyGroup, not missing provider config.
+- Initial live config load must materialize providers for all configured router policy groups; per-group bootstrap may then compile from materialized userConfig without reloading provider root.
+
+## 2026-07-23 Correction: 5520 V2 config free-to-paid direct forwarders
+- Supersedes the earlier same-day memory/note that said 5520 had already been restored correctly. That was incomplete: active config still pointed `gateway_priority_5520` at `fwd.temp.gpt-5.5-thinking-xhigh`, GPT-5.4/5.4-mini, GLM, and MiniMax targets.
+- Verified active truth: 5520 must remain in the multi-port V2 config and route free -> paid via direct forwarders. Free targets are `cc.gpt-5.5` and `cc-sol.gpt-5.6-sol`; paid targets are `asxs.gpt-5.5` then `55ai.gpt-5.5`. Do not restore this from old full-file backups; patch only the target port/group/forwarder blocks from the latest trusted sample.
+- Closeout evidence: `.agent-collab/runs/20260723T055237Z-Macstudio.local-211-5520-config-repair/` records toml semantic validation and installed loader validation for `/Users/fanzhang/.rcc/config.toml` and `/Volumes/extension/.rcc/config.toml`; loader resolves providers `cc`, `cc-sol`, `asxs`, `55ai` and 5520 routes contain no `fwd.temp`, GLM, MiniMax, `1token`, `XL/XLC`, or `mimo` in the group.
+
+## 2026-07-23 SSE transport-only owner cleanup
+- SSE is transport-only. Real framing/UTF-8/line/frame/buffer/unterminated failures stay in SSE transport; provider response body read failures stay in provider raw/body owner; already-framed `data` JSON/event/terminal/tool/reasoning/finish failures stay in provider response event codec owner.
+- Do not use `malformed SSE` as owner proof. First split transport/body/event-codec/error-policy ownership, then move the error to the nearest adjacent owner and keep SSE crate/server handler opaque.
+- Verified with new runtime fixtures: invalid SSE framing still projects as transport malformed SSE, while provider body read and event payload JSON failures no longer do.
+
+## 2026-07-23: V3 architecture review surface graph rule
+- V3 Hub Pipeline audit HTML must show request and response as separate top-down graphs generated from real `v3-mainline-call-map.yml` chains. Request graph source is `v3.hub_pipeline.v1.request` and must include provider request compat before provider wire. Response graph source is `v3.hub_pipeline.v1.response` and must include provider response compat before RespInbound; Direct projection nodes must not be mixed into the Relay response skeleton.
+- Error handling is a required resource graph, not a side-channel summary. The review surface must show Error01-06 resources plus provider health/availability resources from `v3-resource-operation-map.yml`; `side-channel` is only the carrier mechanism.
+Tags: #v3-architecture #review-surface #request-response-split #error-resources
+
+## 2026-07-23 V3 provider-request dry-run interpretation
+- V3 provider-request dry-run runs the real route/outbound/provider-request chain until the no-network transport cutpoint, then injects a protocol-shaped fake provider response so the client projection can close. For route/provider-request validation, treat `providerRequest` / `dry_run.provider_request` as evidence; do not treat `dry_run.response_payload` fake assistant text as provider truth.
+- If `/v1/messages` dry-run reports `Anthropic Relay does not support provider transport protocol OpenAiChat`, first check the loaded route manifest: Anthropic entry pools must not route to a mixed OpenAI+Anthropic forwarder unless the target interpreter filters by provider wire protocol before selection. Config-only fixes require live V3 restart/reload before dry-run reflects them.

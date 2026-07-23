@@ -1279,6 +1279,77 @@ impl ResponsesTransport for ResponsesDefaultFloorFailsThenSucceedsTransport {
     }
 }
 
+struct ResponsesSseBodyReadErrorTransport;
+
+#[async_trait]
+impl ResponsesTransport for ResponsesSseBodyReadErrorTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([Err(
+                V3ProviderError::ResponseBody {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "controlled response body read failure".to_string(),
+                },
+            )])),
+        ))
+    }
+}
+
+struct ResponsesSseInvalidUtf8Transport;
+
+#[async_trait]
+impl ResponsesTransport for ResponsesSseInvalidUtf8Transport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([Ok(b"data: \xff\n\n".to_vec())])),
+        ))
+    }
+}
+
+struct ResponsesSseMalformedEventJsonTransport;
+
+#[async_trait]
+impl ResponsesTransport for ResponsesSseMalformedEventJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([Ok(
+                b"event: response.output_item.added\ndata: {\"item\"\n\n".to_vec(),
+            )])),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn responses_relay_provider_context_error_reselects_next_candidate_before_projection() {
     let transport = ResponsesContextErrorThenSuccessTransport {
@@ -1612,6 +1683,127 @@ fn responses_relay_default_floor_backoff_sequence_is_fixed_five_seconds() {
         retry_delay_ms: 0,
     };
     assert_eq!(no_sleep_policy.default_floor_delay_ms_for_retry(1), 0);
+}
+
+#[tokio::test]
+async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malformed_sse() {
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &responses_single_limited_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-sse-body-read-error".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same payload",
+                "stream":true
+            }),
+        },
+        &ResponsesSseBodyReadErrorTransport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+            retry_delay_ms: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 502);
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("provider failure must project a JSON error body")
+    };
+    let message = body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .expect("projected provider error message");
+    assert!(
+        !message.contains("malformed SSE"),
+        "SSE transport must not own provider response body/event codec failures: {message}"
+    );
+    assert!(
+        message.contains("response body failed")
+            || message.contains("provider response event codec failed"),
+        "provider response failure must stay in response/body codec owner: {message}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &responses_single_limited_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-sse-invalid-utf8".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same payload",
+                "stream":true
+            }),
+        },
+        &ResponsesSseInvalidUtf8Transport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+            retry_delay_ms: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 502);
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("provider failure must project a JSON error body")
+    };
+    let message = body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .expect("projected provider error message");
+    assert!(
+        message.contains("malformed SSE"),
+        "actual frame/UTF-8 failures remain SSE transport-owned: {message}"
+    );
+    assert!(
+        message.contains("provider SSE transport failed"),
+        "transport error must name transport owner: {message}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse() {
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &responses_single_limited_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-responses-sse-malformed-event-json".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same payload",
+                "stream":true
+            }),
+        },
+        &ResponsesSseMalformedEventJsonTransport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+            retry_delay_ms: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 502);
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("provider failure must project a JSON error body")
+    };
+    let message = body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .expect("projected provider error message");
+    assert!(
+        !message.contains("malformed SSE"),
+        "provider event payload JSON/schema failures are codec-owned, not SSE transport-owned: {message}"
+    );
+    assert!(
+        message.contains("provider response event codec failed"),
+        "event payload JSON/schema failures must name provider event codec owner: {message}"
+    );
 }
 
 #[test]

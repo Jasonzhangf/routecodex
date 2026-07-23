@@ -150,11 +150,20 @@ fn compile_routecodex_runtime_manifest(input: &Value) -> Result<Value, String> {
         requested_group.as_deref(),
         include_all_routing_policy_groups,
     )?;
-    let mut referenced_provider_ids = resolve_referenced_provider_ids_from_routing(&routing);
+    let provider_scope_routing = if include_all_routing_policy_groups {
+        Some(extract_routing_from_user_config(user_config, None, true)?)
+    } else {
+        None
+    };
+    let provider_scope_routing_ref = provider_scope_routing.as_ref().unwrap_or(&routing);
+    let mut referenced_provider_ids =
+        resolve_referenced_provider_ids_from_routing(provider_scope_routing_ref);
     for provider_id in resolve_provider_ids_from_provider_ports(user_config) {
         referenced_provider_ids.insert(provider_id);
     }
     let referenced_forwarder_ids = resolve_referenced_forwarder_ids_from_routing(&routing);
+    let provider_scope_forwarder_ids =
+        resolve_referenced_forwarder_ids_from_routing(provider_scope_routing_ref);
     let forwarders_source = extract_forwarders_from_user_config(user_config);
     if let Some(source) = &forwarders_source {
         for forwarder_id in source.keys() {
@@ -165,7 +174,7 @@ fn compile_routecodex_runtime_manifest(input: &Value) -> Result<Value, String> {
                 ));
             }
         }
-        for ref_id in &referenced_forwarder_ids {
+        for ref_id in referenced_forwarder_ids.union(&provider_scope_forwarder_ids) {
             if !source.contains_key(ref_id) {
                 return Err(format!(
                     "[forwarder-config] routing references unknown forwarder '{}'",

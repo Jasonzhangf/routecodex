@@ -1,0 +1,19 @@
+schema_version: 1
+source_map: docs/architecture/v3-mainline-call-map.yml
+review_surface:
+  html: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+  renderer: scripts/architecture/v3-mainline-caller-flow-lib.mjs
+policy:
+  resources_and_edges_are_required: true
+  unaudited_items_can_change_with_normal_architecture_gates: true
+  audited_locked_items_require_jason_manual_authorization: true
+  debug_first_checks_locked_sop: true
+  after_debug_create_or_update_sop: true
+manual_review_instruction:
+  - Open the HTML review surface.
+  - Review the main skeleton, then the relevant standalone branch graph.
+  - Provide feedback with chain_id and step_id when an edge/resource/owner is wrong.
+  - When Jason explicitly approves a chain, add it to locked_items with the current chain fingerprint.
+  - Changing a locked item requires a manual_authorizations record approved_by Jason.
+locked_items: []
+manual_authorizations: []

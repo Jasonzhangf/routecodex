@@ -6,8 +6,8 @@ Provider WebSocket state remains owned by v3.responses_websocket_v2_transport_ha
 Mainline:
 
 - V3ResponsesInboundWs01ClientUpgrade: GET /v1/responses upgrades only when OpenAI-Beta contains responses_websockets=2026-02-06.
-- V3ResponsesInboundWs02CreateEventParsed: one client response.create event is parsed, its type field is removed, and the remaining data-plane payload enters the existing Responses Direct Runtime.
-- V3Server03HttpRequestRaw through V3Resp15ClientPayload: the existing execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug owner runs the normal Direct path with the server-scoped provider health store.
+- V3ResponsesInboundWs02CreateEventParsed: one client response.create event is parsed, its type field is removed, and the remaining data-plane payload enters the configured Responses Direct or Relay Runtime.
+- V3Server03HttpRequestRaw through the client response payload: the configured Responses binding owner runs the normal Direct or Relay path with the server-scoped provider health store.
 - V3ResponsesInboundWs04ClientEventProjected: JSON Runtime output becomes response.completed; Runtime SSE output is decoded incrementally and projected as WebSocket text events.
 
 Boundaries:

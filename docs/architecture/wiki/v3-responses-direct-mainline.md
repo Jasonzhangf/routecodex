@@ -41,8 +41,10 @@ flowchart LR
   D11 --> P12[V3Provider12ResponsesWirePayload]
   P12 --> P13[V3Transport13ResponsesHttpRequest]
   P13 --> PR14[V3ProviderResp14Raw]
-  PR14 --> RC4[V3HubRespContinuation04Committed]
-  RC4 --> O15[V3Resp15ClientPayload]
+  PR14 --> DP14[V3DirectResp14ProviderProjectionPrepared]
+  DP14 --> RC4[V3HubRespContinuation04Committed]
+  RC4 --> DP15[V3DirectResp15ClientPayloadReady]
+  DP15 --> O15[V3Resp15ClientPayload]
   O15 --> S16[V3Server16HttpFrame]
 ```
 
@@ -55,7 +57,7 @@ Responses Direct remote continuation is now source-bound on the same fixed Runti
 turn uses Virtual Router once. A turn carrying `previous_response_id` instead loads the immutable
 direct locator at `V3HubReqContinuation03Classified`, validates capability revision, resolves the
 exact provider/model/auth pin at `V3HubReqTarget06Resolved`, and rejoins the same Direct request,
-transport, response projection, Resp04, and client exit. It never enters Relay/local materialization,
+transport, provider projection preparation, Resp04, client-payload-ready, and client exit. It never enters Relay/local materialization,
 Virtual Router, or target-local reselection.
 
 The Server owns no continuation store logic. All listeners share one Runtime state, while the

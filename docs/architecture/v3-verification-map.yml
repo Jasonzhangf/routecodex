@@ -1601,8 +1601,8 @@ features:
       - every case separates controlled_evidence from live_evidence and cannot claim production ready without both
       - error matrix covers 401 402 403 429 5xx SSE body-level failure malformed provider body timeout disconnect and cancel
       - /v1/models capability case lists Codex request-builder fields
-      - current multi-provider 5555 profile records Anthropic Messages JSON and SSE as live_verified with dry-run no-send plus live terminal evidence
-      - production blockers remain explicit for Responses Relay WebSocket v2 Gemini live replay remote continuation and the remaining live error matrix
+      - current multi-provider 5555 profile records Anthropic Messages JSON and SSE plus Responses Relay client WebSocket v2 as live_verified with live terminal evidence
+      - production blockers remain explicit for Gemini live replay remote continuation and the remaining live error matrix
     required_gates:
       - npm run verify:v3-live-provider-compat-parity
       - npm run test:v3-live-provider-compat-parity-red-fixtures
@@ -1617,14 +1617,14 @@ features:
       - git diff --check
     completion_rule:
       source: "Complete when manifest verifier red fixtures maps wiki and architecture gates prove the matrix contract and blocker projection."
-      runtime: "Partial live 5555 closeout records authorized global install/managed restart evidence plus current multi-provider Responses and Anthropic JSON/SSE live replay without config or credential mutation."
+      runtime: "Partial live 5555 closeout records authorized global install/managed restart evidence plus current multi-provider Responses JSON/SSE/client WebSocket and Anthropic JSON/SSE live replay without config or credential mutation."
       forbidden_claim: "Do not claim full V3 production readiness, full live provider compatibility, Gemini live replay, remaining error matrix closeout, P6 deletion, or cutover unless every production-ready case has controlled and live evidence."
 
   - feature_id: v3.responses_inbound_websocket_proxy
-    status: controlled_runtime_proxy_verified
+    status: controlled_and_current_5555_relay_websocket_live_verified
     change_risk: high
     owner_kind: rust_server_transport_shell
-    owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell into the existing Responses Direct Runtime and Provider path."
+    owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell into the configured Responses Direct or Relay Runtime and Provider path."
     owner_modules:
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
@@ -1640,7 +1640,7 @@ features:
       - docs/architecture/v3-mainline-call-map.yml
     required_unit:
       - WebSocket handshake rejects plain GET without upgrade and missing OpenAI-Beta responses_websockets=2026-02-06 while preserving ping/pong transport behavior
-      - controlled JSON WebSocket response.create enters the existing Responses Direct Runtime and returns response.completed
+      - controlled JSON WebSocket response.create enters the configured Responses Runtime and returns response.completed
       - controlled binary JSON response.create enters the same Runtime path
       - controlled stream=true response.create projects Runtime SSE output as WebSocket events without full materialization
       - malformed client WebSocket event fails before provider send; missing type, unsupported response.cancel, and nested response.create response payload also fail before provider send
@@ -1664,8 +1664,8 @@ features:
       - git diff --check
     completion_rule:
       source: "Complete when controlled WebSocket JSON/SSE/malformed tests, source verifier, red fixtures, maps, architecture/resource/module/rust-only/fmt/clippy/workspace gates, and diff check pass."
-      runtime: "Controlled Server WebSocket proxy only; no live provider compatibility, global install, restart, release, or production cutover is claimed."
-      forbidden_claim: "Do not claim provider WebSocket endpoint compatibility, production readiness, live config mutation, global install, restart, release, or P6 deletion."
+      runtime: "Controlled Server WebSocket proxy plus current 5555 Responses Relay client-facing WebSocket v2 text and two-turn tool-loop live replay are verified after global install and managed restart."
+      forbidden_claim: "Do not claim provider-owned remote continuation exact-pin live replay, provider-side WebSocket endpoint compatibility, live config mutation, production cutover, or P6 deletion."
 
   - feature_id: v3.resource_relation_edge_lock
     status: source_gate_verified

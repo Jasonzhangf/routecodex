@@ -40,6 +40,7 @@ const requiredNodes = [
   'V3Target09CandidateSetExpanded', 'V3Target10ConcreteProviderSelected',
   'V3ResponsesDirect11Policy', 'V3Provider12ResponsesWirePayload',
   'V3Transport13ResponsesHttpRequest', 'V3ProviderResp14Raw',
+  'V3DirectResp14ProviderProjectionPrepared', 'V3DirectResp15ClientPayloadReady',
   'V3Resp15ClientPayload', 'V3Server16HttpFrame',
   'V3DebugTraceContextStarted', 'V3DebugEventLedgerRecorded',
   'V3DebugRawCaptureStored', 'V3DebugSnapshotSessionRegistered',
@@ -74,6 +75,7 @@ const yaml = (file) => {
 const array = (value) => Array.isArray(value) ? value : [];
 const p6AnchoredStepIds = new Set([
   'v3-rd-09', 'v3-rd-10', 'v3-rd-11', 'v3-rd-12', 'v3-rd-13', 'v3-rd-14',
+  'v3-rd-15', 'v3-rd-16',
 ]);
 const p6AnchoredResourceIds = new Set([
   'v3.responses_direct.policy',

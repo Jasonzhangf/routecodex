@@ -89,8 +89,8 @@ cases:
     scenario_groups: [tool, error]
     owner_feature_id: v3.responses_inbound_websocket_proxy
     controlled_evidence: { status: controlled_verified, refs: [docs/goals/v3-responses-inbound-websocket-proxy-plan.md, docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md], gates: [npm run test:v3-responses-inbound-websocket-proxy, npm run verify:v3-responses-inbound-websocket-proxy] }
-    live_evidence: { status: pending, refs: [], blockers: [live_inbound_websocket_provider_replay_pending] }
-    production: { status: blocked, blockers: [live_inbound_websocket_replay_pending] }
+    live_evidence: { status: live_verified, refs: [.agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_probe_after_restart_20260723T030907Z.json, .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_tool_loop_after_restart_20260723T031352Z.json, .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-health.json, .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-port-status.json], blockers: [] }
+    production: { status: ready, blockers: [] }
   - id: anthropic_messages_json_http
     endpoint: anthropic_messages
     protocol: anthropic
@@ -222,15 +222,16 @@ capability_cases:
     selector_absence_fields: [use_responses_lite, tool_mode]
 production_blockers:
   - { blocker_id: live_provider_replay_matrix_pending, owner_feature_id: v3.live_provider_compat_parity_closeout, evidence: docs/goals/v3-live-provider-compat-parity-closeout-plan.md }
+  - { blocker_id: remote_continuation_exact_pin_provider_profile_unavailable, owner_feature_id: v3.responses_direct_remote_continuation_integration, evidence: .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-remote-continuation-inventory.json }
   - { blocker_id: gemini_generate_content_live_replay_pending, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: docs/architecture/manifests/v3.live_provider_compat.parity.yml }
   - { blocker_id: final_5555_profile_gemini_endpoint_not_enabled, owner_feature_id: v3.gemini_relay_runtime_integration, evidence: .agent-collab/runs/20260716T092257Z-Macstudio.local-29305-geminilive/logs/clean-live/live_gemini_json_sse_after_restart_60d0c90f4.txt }
 current_5555_profile_audit:
-  timestamp: 2026-07-22T17:22:53Z
+  timestamp: 2026-07-23T03:15:26Z
   status: current_5555_multi_provider_profile_partial_verified
   routecodex_version: 0.90.3971
   server_id: responses_v3_5555
   manifest_version: 3
-  lifecycle_command_used_for_this_audit: none
+  lifecycle_command_used_for_this_audit: routecodex restart --port 5555
   allowed_lifecycle_command_if_needed: routecodex restart --port 5555
   forbidden_lifecycle_commands_used: []
   endpoints_enabled: [responses, anthropic]
@@ -253,7 +254,20 @@ current_5555_profile_audit:
     messages_json_live_200: .agent-collab/runs/20260722T155834Z-Macstudio.local-4466-2caf-v3-p0-response-error/live-messages-json2-20260722T164155Z.summary.json
     messages_sse_dryrun_no_send: .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-dryrun-messages-sse-20260722T172253Z.summary.json
     messages_sse_live_200: .agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-messages-sse-20260722T172233Z.summary.json
-  finding: Current 5555 is a V3 multi-provider profile with responses and anthropic endpoints enabled. Anthropic Messages JSON and SSE are live_verified on current 5555; the old Anthropic endpoint_not_enabled blocker is stale and must not be reintroduced. Gemini remains outside the current 5555 endpoint profile. No provider config or credential was mutated, no live config was changed, and no start/server-start/run-managed-child lifecycle command was used for this audit.
+    responses_relay_ws_text_live_200: .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_probe_after_restart_20260723T030907Z.json
+    responses_relay_ws_tool_loop_live_200: .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_tool_loop_after_restart_20260723T031352Z.json
+    remote_continuation_current_inventory: .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-remote-continuation-inventory.json
+  finding: >-
+    Current 5555 is a V3 multi-provider profile with responses and anthropic endpoints enabled.
+    Anthropic Messages JSON and SSE are live_verified on current 5555; Responses Relay
+    client-facing WebSocket v2 text and two-turn tool-loop replay are live_verified after global
+    install plus managed restart. The old Anthropic endpoint_not_enabled blocker is stale and
+    must not be reintroduced. Gemini remains outside the current 5555 endpoint profile. Remote
+    continuation exact-pin remains blocked by current provider/profile availability: active providers
+    are openai_chat/anthropic without Responses websocket_v2 transport, websocket_v2_url,
+    remote_continuation, or tool_outputs capability. No provider config or credential was mutated,
+    no live config was changed, and no start/server-start/run-managed-child lifecycle command was
+    used for this audit.
 live_read_only_audit:
   timestamp: 2026-07-16T12:21:44Z
   command_scope: globally installed rccv3 managed 5555; live provider replay for /v1/models, Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE, OpenAI Chat Relay JSON/SSE, plus post-60d0c90f4 Gemini JSON/SSE blocker replay on /Volumes/extension/.rcc/config.5555.v2.toml; Responses Direct fresh replay used a temporary native V3 direct config generated from the current V2 config, then removed after restoring /Volumes/extension/.rcc/config.5555.v2.toml
@@ -288,6 +302,7 @@ completion_boundary:
   production_ready_claim: false
   remote_continuation_two_turn_live: false
   remote_continuation_provider_ws_probe: .agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json
+  remote_continuation_current_5555_inventory: .agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-remote-continuation-inventory.json
   remote_continuation_provider_ws_opened_count: 0
   live_config_mutation: false
   start_lifecycle_used_for_item3: false

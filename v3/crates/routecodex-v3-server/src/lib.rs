@@ -40,9 +40,10 @@ use routecodex_v3_runtime::{
     V3ResponsesDirectRuntimeSharedState, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeInput,
-    V3ResponsesRelayRuntimeOutput, V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
-    V3RuntimeStreamObservation, V3RuntimeUsageSummary,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayStoplessControlState, V3RuntimeObservability, V3RuntimeStreamObservation,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -739,6 +740,7 @@ async fn pending_endpoint(
                     V3Server16Body::Json(value) => Some(value),
                     V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
                 },
+                None,
             ) {
                 return response;
             }
@@ -806,6 +808,7 @@ async fn pending_endpoint(
         &request_headers,
         &payload,
     );
+    let request_console_project_path = resolve_v3_console_project_path(&request_headers, &payload);
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Direct
@@ -881,11 +884,12 @@ async fn pending_endpoint(
         ) {
             Ok(scope) => scope,
             Err(message) => {
-                return error_output_response_for_server(
+                return error_output_response_for_server_with_project_path(
                     &state.server,
                     &path,
                     &request_id,
                     project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    request_console_project_path.as_deref(),
                 );
             }
         };
@@ -1030,6 +1034,7 @@ async fn pending_endpoint(
                 output.status,
                 error_chain,
                 openai_chat_error_body_for_console(&output.client_body),
+                request_console_project_path.as_deref(),
             ) {
                 return response;
             }
@@ -1060,6 +1065,7 @@ async fn pending_endpoint(
                 output.status,
                 error_chain,
                 Some(&output.client_response),
+                request_console_project_path.as_deref(),
             ) {
                 return response;
             }
@@ -1090,6 +1096,7 @@ async fn pending_endpoint(
                 output.status,
                 error_chain,
                 gemini_error_body_for_console(&output.client_body),
+                request_console_project_path.as_deref(),
             ) {
                 return response;
             }
@@ -1106,11 +1113,12 @@ async fn pending_endpoint(
         ) {
             Ok(scope) => scope,
             Err(message) => {
-                return error_output_response_for_server(
+                return error_output_response_for_server_with_project_path(
                     &state.server,
                     &path,
                     &request_id,
                     project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    request_console_project_path.as_deref(),
                 );
             }
         };
@@ -1213,6 +1221,7 @@ async fn pending_endpoint(
                 output.status,
                 error_chain,
                 relay_error_body_for_console(&output.client_body),
+                request_console_project_path.as_deref(),
             ) {
                 return response;
             }
@@ -1272,12 +1281,18 @@ async fn pending_endpoint(
         ) {
             return response;
         }
-        emit_v3_frame_error_console_line(&state.server, &path, &request_id, &frame);
+        emit_v3_frame_error_console_line(
+            &state.server,
+            &path,
+            &request_id,
+            &frame,
+            request_console_project_path.as_deref(),
+        );
         responses_direct_output_response(frame)
     } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
         let pending_not_implemented = execution_mode.as_str();
         let Some(pending_owner) = pending_owner_symbol else {
-            return error_output_response_for_server(
+            return error_output_response_for_server_with_project_path(
                 &state.server,
                 &path,
                 &request_id,
@@ -1287,6 +1302,7 @@ async fn pending_endpoint(
                         "entry protocol {entry_protocol} pending binding lacks explicit pending owner"
                     ),
                 ),
+                request_console_project_path.as_deref(),
             );
         };
         let output = execute_v3_foundation_pending_runtime(
@@ -1317,7 +1333,7 @@ async fn pending_endpoint(
             &pending_owner,
         )
     } else {
-        error_output_response_for_server(
+        error_output_response_for_server_with_project_path(
             &state.server,
             &path,
             &request_id,
@@ -1328,6 +1344,7 @@ async fn pending_endpoint(
                     execution_mode.as_str()
                 ),
             ),
+            request_console_project_path.as_deref(),
         )
     }
 }
@@ -1356,6 +1373,7 @@ fn allocate_v3_console_request_id(
             output.status,
             &output.error_chain,
             Some(&output.body),
+            None,
         );
         Box::new(foundation_output_response(output))
     })
@@ -1419,6 +1437,53 @@ async fn responses_websocket_endpoint(
     headers: HeaderMap,
     ws: Option<WebSocketUpgrade>,
 ) -> Response<Body> {
+    let Some(binding) = state
+        .manifest
+        .hub_v1
+        .as_ref()
+        .and_then(|hub| hub.entry_protocol_binding_for_endpoint("/v1/responses"))
+    else {
+        let request_id = match allocate_v3_console_request_id(&state, "/v1/responses", None) {
+            Ok(request_id) => request_id,
+            Err(response) => return *response,
+        };
+        return error_output_response_for_server(
+            &state.server,
+            "/v1/responses",
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                "endpoint path /v1/responses has no entry protocol binding",
+            ),
+        );
+    };
+    let entry_protocol = binding.entry_protocol.clone();
+    let execution_mode = binding.execution_mode;
+    let pending_owner_symbol = binding.pending_owner_symbol.clone();
+    if entry_protocol != "responses"
+        || !state
+            .server
+            .endpoints
+            .iter()
+            .any(|declared| declared == &entry_protocol)
+    {
+        let request_id = match allocate_v3_console_request_id(&state, "/v1/responses", None) {
+            Ok(request_id) => request_id,
+            Err(response) => return *response,
+        };
+        return error_output_response_for_server(
+            &state.server,
+            "/v1/responses",
+            &request_id,
+            project_http_input_error(
+                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                format!(
+                    "endpoint protocol {entry_protocol} is not enabled on server {}",
+                    state.server.id
+                ),
+            ),
+        );
+    }
     let Some(ws) = ws else {
         let request_id = match allocate_v3_console_request_id(&state, "/v1/responses", None) {
             Ok(request_id) => request_id,
@@ -1449,13 +1514,17 @@ async fn responses_websocket_endpoint(
             ),
         );
     }
-    ws.on_upgrade(move |socket| responses_websocket_session(state, headers, socket))
+    ws.on_upgrade(move |socket| {
+        responses_websocket_session(state, headers, execution_mode, pending_owner_symbol, socket)
+    })
 }
 
 // feature_id: v3.responses_inbound_websocket_proxy
 async fn responses_websocket_session(
     state: Arc<V3ListenerState>,
     headers: HeaderMap,
+    execution_mode: V3EntryProtocolExecutionMode,
+    pending_owner_symbol: Option<String>,
     mut socket: WebSocket,
 ) {
     while let Some(message) = socket.next().await {
@@ -1475,20 +1544,29 @@ async fn responses_websocket_session(
             Message::Pong(_) => continue,
             Message::Close(_) => break,
         };
-        if handle_responses_websocket_message(&state, &headers, &mut socket, &bytes)
-            .await
-            .is_err()
+        if handle_responses_websocket_message_with_mode(
+            &state,
+            &headers,
+            &mut socket,
+            &bytes,
+            execution_mode,
+            pending_owner_symbol.clone(),
+        )
+        .await
+        .is_err()
         {
             break;
         }
     }
 }
 
-async fn handle_responses_websocket_message(
+async fn handle_responses_websocket_message_with_mode(
     state: &Arc<V3ListenerState>,
     headers: &HeaderMap,
     socket: &mut WebSocket,
     bytes: &[u8],
+    execution_mode: V3EntryProtocolExecutionMode,
+    pending_owner_symbol: Option<String>,
 ) -> Result<(), ()> {
     let payload = match responses_websocket_create_payload(bytes) {
         Ok(payload) => payload,
@@ -1510,17 +1588,87 @@ async fn handle_responses_websocket_message(
         }
     };
     let execution_id = state.debug.next_execution_id(&state.server.id);
-    let frame = execute_responses_direct_server_frame(
-        state,
+    match execution_mode {
+        V3EntryProtocolExecutionMode::Direct => {
+            let frame = execute_responses_direct_server_frame(
+                state,
+                headers,
+                "WEBSOCKET".to_string(),
+                "/v1/responses".to_string(),
+                request_id,
+                execution_id,
+                payload,
+            )
+            .await;
+            send_responses_websocket_frame(socket, frame).await
+        }
+        V3EntryProtocolExecutionMode::Relay => {
+            let output =
+                execute_responses_relay_websocket_output(state, headers, request_id, payload).await;
+            send_responses_relay_websocket_output(socket, output).await
+        }
+        V3EntryProtocolExecutionMode::PendingNotImplemented => {
+            let owner = pending_owner_symbol
+                .as_deref()
+                .unwrap_or("missing_pending_owner");
+            send_responses_websocket_error(
+                socket,
+                "runtime_error",
+                format!("Responses WebSocket binding is pending owner {owner}"),
+            )
+            .await
+        }
+    }
+}
+
+async fn execute_responses_relay_websocket_output(
+    state: &Arc<V3ListenerState>,
+    headers: &HeaderMap,
+    request_id: String,
+    payload: Value,
+) -> V3ResponsesRelayRuntimeOutput {
+    let continuation_scope = match build_responses_relay_local_continuation_scope(
         headers,
-        "WEBSOCKET".to_string(),
-        "/v1/responses".to_string(),
-        request_id,
-        execution_id,
-        payload,
+        &request_id,
+        &state.server,
+        "/v1/responses",
+        &payload,
+    ) {
+        Ok(scope) => scope,
+        Err(message) => {
+            return project_v3_responses_relay_runtime_failure(
+                V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
+            );
+        }
+    };
+    let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_millis() as u64,
+        Err(error) => {
+            return project_v3_responses_relay_runtime_failure(
+                V3ResponsesRelayRuntimeError::ProviderWireEncoding(format!(
+                    "system time precedes Unix epoch: {error}"
+                )),
+            );
+        }
+    };
+    match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
+        &state.manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: state.server.id.clone(),
+            request_id,
+            payload,
+        },
+        &state.provider_health,
+        &state.responses_relay_local_continuation,
+        &state.responses_relay_stopless_control,
+        continuation_scope,
+        now_epoch_ms,
     )
-    .await;
-    send_responses_websocket_frame(socket, frame).await
+    .await
+    {
+        Ok(output) => output,
+        Err(error) => project_v3_responses_relay_runtime_failure(error),
+    }
 }
 
 fn responses_websocket_create_payload(bytes: &[u8]) -> Result<serde_json::Value, String> {
@@ -1629,6 +1777,111 @@ async fn send_responses_websocket_sse_stream(
                     format!("{}: {}", error.code, error.message),
                 )
                 .await;
+            }
+        };
+        let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {
+            Ok(frames) => frames,
+            Err(error) => {
+                return send_responses_websocket_error(
+                    socket,
+                    "runtime_stream_error",
+                    format!("runtime SSE decode failed: {error}"),
+                )
+                .await;
+            }
+        };
+        for frame in frames {
+            match responses_websocket_event_text_from_sse_fields(frame.frame().fields()) {
+                Ok(Some(text)) => {
+                    if socket.send(Message::Text(text)).await.is_err() {
+                        return Err(());
+                    }
+                }
+                Ok(None) => return Ok(()),
+                Err(message) => {
+                    return send_responses_websocket_error(socket, "runtime_stream_error", message)
+                        .await;
+                }
+            }
+        }
+    }
+    match decoder.finish() {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            send_responses_websocket_error(
+                socket,
+                "runtime_stream_error",
+                format!("runtime SSE stream did not terminate cleanly: {error}"),
+            )
+            .await
+        }
+    }
+}
+
+async fn send_responses_relay_websocket_output(
+    socket: &mut WebSocket,
+    output: V3ResponsesRelayRuntimeOutput,
+) -> Result<(), ()> {
+    if !output.error_chain.as_ref().is_none_or(Vec::is_empty) || output.status >= 400 {
+        let message = match output.client_body {
+            V3ResponsesRelayClientBody::Json(value) => value
+                .pointer("/error/message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("V3 Responses Relay runtime error")
+                .to_string(),
+            V3ResponsesRelayClientBody::Sse(_) => {
+                "V3 Responses Relay runtime stream error".to_string()
+            }
+        };
+        return send_responses_websocket_error(socket, "runtime_error", message).await;
+    }
+    match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => {
+            let event = json!({"type": "response.completed", "response": value});
+            send_responses_websocket_json(socket, &event).await
+        }
+        V3ResponsesRelayClientBody::Sse(stream) => {
+            send_responses_relay_websocket_sse_stream(socket, stream).await
+        }
+    }
+}
+
+async fn send_responses_relay_websocket_sse_stream(
+    socket: &mut WebSocket,
+    mut stream: V3ResponsesRelayClientStream,
+) -> Result<(), ()> {
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    loop {
+        let next_chunk = tokio::select! {
+            client_message = socket.next() => {
+                match client_message {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            return Err(());
+                        }
+                        continue;
+                    }
+                    Some(Ok(Message::Pong(_))) => continue,
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(()),
+                    Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) => {
+                        return send_responses_websocket_error(
+                            socket,
+                            "invalid_client_event",
+                            "response.create is already in flight",
+                        )
+                        .await;
+                    }
+                }
+            }
+            chunk = stream.next() => chunk,
+        };
+        let Some(chunk) = next_chunk else {
+            break;
+        };
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                return send_responses_websocket_error(socket, "runtime_stream_error", error).await;
             }
         };
         let frames = match decoder.push(build_v3_sse_transport_in_01_raw_chunk(&chunk)) {
@@ -1875,6 +2128,7 @@ fn record_and_emit_v3_error_projection(
     status: u16,
     error_chain: &[&'static str],
     body: Option<&Value>,
+    project_path: Option<&str>,
 ) -> Option<Response<Body>> {
     if let Err(error) = state.debug.record_node_event(
         trace_scope,
@@ -1891,7 +2145,15 @@ fn record_and_emit_v3_error_projection(
             error,
         )));
     }
-    emit_v3_error_console_line_for_state(state, endpoint, request_id, status, error_chain, body);
+    emit_v3_error_console_line_for_state(
+        state,
+        endpoint,
+        request_id,
+        status,
+        error_chain,
+        body,
+        project_path,
+    );
     None
 }
 
@@ -2789,6 +3051,7 @@ impl V3SseConsoleFinalizer {
                 "message": message
             }
         });
+        let identity = resolve_v3_console_log_identity(&self.context);
         emit_v3_error_console_line_for_state(
             &self.context.state,
             &self.context.endpoint,
@@ -2796,6 +3059,7 @@ impl V3SseConsoleFinalizer {
             status,
             &V3_ERROR_CHAIN_NODE_IDS,
             Some(&body),
+            identity.project_path.as_deref(),
         );
     }
 }
@@ -3445,6 +3709,7 @@ fn emit_v3_frame_error_console_line(
     endpoint: &str,
     request_id: &str,
     frame: &V3Server16HttpFrame,
+    project_path: Option<&str>,
 ) {
     if frame.error_chain.is_empty() && frame.status < 400 {
         return;
@@ -3459,6 +3724,7 @@ fn emit_v3_frame_error_console_line(
             V3Server16Body::Json(value) => Some(value),
             V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
         },
+        project_path,
     );
 }
 
@@ -3469,6 +3735,7 @@ fn emit_v3_error_console_line(
     status: u16,
     error_chain: &[&'static str],
     body: Option<&Value>,
+    project_path: Option<&str>,
 ) {
     emit_v3_error_console_line_with_port(
         &server.port.to_string(),
@@ -3477,6 +3744,7 @@ fn emit_v3_error_console_line(
         status,
         error_chain,
         body,
+        project_path,
     );
 }
 
@@ -3487,6 +3755,7 @@ fn emit_v3_error_console_line_with_port(
     status: u16,
     error_chain: &[&'static str],
     body: Option<&Value>,
+    project_path: Option<&str>,
 ) {
     let line = format_v3_error_console_line_with_port(
         port_label,
@@ -3495,6 +3764,7 @@ fn emit_v3_error_console_line_with_port(
         status,
         error_chain,
         body,
+        project_path,
     );
     eprintln!("{}", colorize_v3_error_console_line(&line));
 }
@@ -3506,6 +3776,7 @@ fn emit_v3_error_console_line_for_state(
     status: u16,
     error_chain: &[&'static str],
     body: Option<&Value>,
+    project_path: Option<&str>,
 ) {
     let line = format_v3_error_console_line_with_port(
         &state.server.port.to_string(),
@@ -3514,6 +3785,7 @@ fn emit_v3_error_console_line_for_state(
         status,
         error_chain,
         body,
+        project_path,
     );
     let colorized = colorize_v3_error_console_line(&line);
     append_v3_human_console_line(state, &colorized);
@@ -3527,6 +3799,7 @@ fn format_v3_error_console_line_with_port(
     status: u16,
     error_chain: &[&'static str],
     body: Option<&Value>,
+    project_path: Option<&str>,
 ) -> String {
     let error_code = body
         .and_then(|value| value.pointer("/error/code").and_then(Value::as_str))
@@ -3551,7 +3824,7 @@ fn format_v3_error_console_line_with_port(
         error_node,
         message
     );
-    format_v3_console_monitor_line(port_label, endpoint, None, &content)
+    format_v3_console_monitor_line(port_label, endpoint, project_path, &content)
 }
 
 fn compact_v3_error_number(error_chain: &[&'static str]) -> String {
@@ -5321,8 +5594,20 @@ fn error_output_response_for_server(
     request_id: &str,
     projected: routecodex_v3_error::V3Error06ClientProjected,
 ) -> Response<Body> {
+    error_output_response_for_server_with_project_path(
+        server, endpoint, request_id, projected, None,
+    )
+}
+
+fn error_output_response_for_server_with_project_path(
+    server: &V3ServerManifest,
+    endpoint: &str,
+    request_id: &str,
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+    project_path: Option<&str>,
+) -> Response<Body> {
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
-    emit_v3_frame_error_console_line(server, endpoint, request_id, &frame);
+    emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(frame)
 }
 
@@ -5506,6 +5791,7 @@ mod tests {
                     "message": "controlled"
                 }
             })),
+            None,
         );
         assert!(
             line.starts_with(&format!("[5555] [responses] cwd={expected_cwd} ")),
@@ -5513,6 +5799,29 @@ mod tests {
         );
         assert!(line.contains("❌ [responses]"));
         assert!(line.contains("request req-prefix failed"));
+    }
+
+    #[test]
+    fn error_console_prefix_can_preserve_request_project_path() {
+        let line = format_v3_error_console_line_with_port(
+            "5555",
+            "responses",
+            "req-project-cwd",
+            500,
+            &V3_ERROR_CHAIN_NODE_IDS,
+            Some(&json!({
+                "error": {
+                    "type": "runtime_error",
+                    "message": "controlled"
+                }
+            })),
+            Some("/Volumes/extension/code/OneStop"),
+        );
+        assert!(
+            line.starts_with("[5555] [responses] cwd=/Volumes/extension/code/OneStop "),
+            "failed request line must preserve request project cwd: {line}"
+        );
+        assert!(line.contains("request req-project-cwd failed"));
     }
 
     #[test]
@@ -5629,6 +5938,7 @@ mod tests {
                     "message":"controlled error"
                 }
             })),
+            None,
         );
 
         assert!(response.is_none());

@@ -17,6 +17,17 @@ continuation save/restore, finish reason, stopless/servertool projection,
 response cleanup, retry/reroute policy, or any provider/client payload semantic
 repair.
 
+## Malformed SSE Triage
+
+Do not treat the words `malformed SSE` in a log as owner proof. Split the failure before editing:
+
+- UTF-8, line/frame/buffer limit, unterminated frame, abort, timeout, upstream read, and downstream write are SSE transport failures.
+- Provider response body read failures are provider raw/body failures, even when the body kind is SSE.
+- Already-framed `data` JSON parse, event type, terminal event, choices/content/tool/reasoning schema, `[DONE]` ordering, and provider protocol aggregation are provider response event codec failures.
+- Retry, switch provider, default-floor retry, cooldown, and final client projection are Error01-06 / router policy failures, not SSE fixes.
+
+Fix action: move naming/error ownership to the nearest adjacent owner. Do not add provider-specific branches, payload repair, retry, continuation, or tool/history logic to the SSE crate, server SSE handler, response outbound, or WebSocket projection.
+
 Continuation is only the `/v1/responses` protocol save/restore boundary, and its owner is Chat Process.
 
 It is not a history transformer, response repair layer, request converter, stopless hook owner, tool-governance owner, or SSE transport owner.

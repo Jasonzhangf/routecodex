@@ -93,7 +93,8 @@ export async function materializeRouteCodexConfig(
   validateV2ConfigSources(userConfig);
   const routingPolicyGroup = resolvePrimaryRouteCodexRoutingPolicyGroupSync(userConfig);
   const manifest = await compileRouteCodexRuntimeConfigManifest(userConfig, providerRootDir, {
-    ...(routingPolicyGroup ? { routingPolicyGroup } : {})
+    ...(routingPolicyGroup ? { routingPolicyGroup } : {}),
+    includeAllRoutingPolicyGroups: true
   });
   const materializedUserConfig = materializeRouteCodexUserConfigFromManifestSync(
     userConfig,

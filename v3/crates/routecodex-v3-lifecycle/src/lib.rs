@@ -476,7 +476,14 @@ impl V3ManagedLifecycle {
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
         let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
+        ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
+        if !instance_dir.join("instance.json").exists()
+            || !instance_dir.join("pid.cache").exists()
+            || !instance_dir.join("control.json").exists()
+        {
+            return Err(V3LifecycleError::NotRunning(declaration.instance_id));
+        }
         let response = match send_restart_control(
             &instance_dir,
             &declaration,
@@ -1767,6 +1774,10 @@ mod tests {
     static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn fixture(root: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
+        fixture_with_port(root, 45499)
+    }
+
+    fn fixture_with_port(root: &TempDir, port: u16) -> (PathBuf, PathBuf, PathBuf) {
         let config = root.path().join("config.v3.toml");
         let executable = std::env::current_exe().unwrap();
         let state = root.path().join("state");
@@ -1791,7 +1802,7 @@ capabilities = ["text"]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
 "#,
-                45499
+                port
             ),
         )
         .unwrap();
@@ -1909,6 +1920,41 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         assert!(
             !instance_dir.join(RESTART_PLAN_FILE).exists(),
             "a successfully re-entered managed child must not retain the consumed restart plan"
+        );
+    }
+
+    #[test]
+    fn restart_without_current_instance_state_fails_without_bootstrap() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+        let root = TempDir::new().unwrap();
+        let port_listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = port_listener.local_addr().unwrap().port();
+        drop(port_listener);
+        let (config, executable, state) = fixture_with_port(&root, port);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+        let instance_dir = state.join("instances").join(&declaration.instance_id);
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(lifecycle.restart(&executable, Duration::from_millis(1)))
+            .unwrap_err();
+
+        assert!(
+            matches!(&error, V3LifecycleError::NotRunning(instance_id) if instance_id == &declaration.instance_id),
+            "restart without live managed truth must fail explicitly instead of bootstrapping a detached runtime, got {error}"
+        );
+        assert!(
+            !instance_dir.join("instance.json").exists(),
+            "restart without live managed truth must not publish instance state"
+        );
+        assert!(
+            !instance_dir.join("status.json").exists(),
+            "restart without live managed truth must not publish startup status"
         );
     }
 

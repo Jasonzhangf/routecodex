@@ -296,6 +296,19 @@ export const MANUAL_WIKI_PAGES = [
       'live/global/prod not claimed',
     ],
   },
+  {
+    path: `${WIKI_ROOT}/v3-mainline-caller-flow.md`,
+    title: '# V3 Mainline Caller Flow',
+    minMermaidBlocks: 2,
+    requiredTokens: [
+      '## Module caller overview',
+      '## Auto audit /补救清单',
+      'Forbidden direct response projection edges',
+      'Forbidden source registered direct response edges',
+      '## Functional caller paths',
+      'v3.responses_direct.required_mainline',
+    ],
+  },
 ];
 
 function readText(root, relPath) {

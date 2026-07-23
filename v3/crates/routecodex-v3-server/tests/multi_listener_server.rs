@@ -1624,6 +1624,63 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 }
 
 #[tokio::test]
+// feature_id: v3.responses_inbound_websocket_proxy
+async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-ws");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "relay websocket",
+                "stream": false
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["status"], "completed");
+
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(capture.body["model"], "wire-test");
+    assert_eq!(
+        capture.body["input"],
+        json!([{
+            "type":"message",
+            "role":"user",
+            "content":[{"type":"input_text","text":"relay websocket"}]
+        }])
+    );
+
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;

@@ -15,10 +15,11 @@ description: RouteCodex 调试与架构路由入口
 ## 先读
 1. 项目 `AGENTS.md`
 2. `docs/agent-routing/05-foundation-contract.md`
-3. `docs/agent-routing/00-entry-routing.md`
-4. `docs/agent-routing/40-task-memory-routing.md`
-5. `references/24-node-contract-debug-method.md`
-6. 本 skill 路由表对应的小文件
+3. V3 架构/调试/开发先读 `.agents/skills/rcc-v3-architecture/SKILL.md`
+4. `docs/agent-routing/00-entry-routing.md`
+5. `docs/agent-routing/40-task-memory-routing.md`
+6. `references/24-node-contract-debug-method.md`
+7. 本 skill 路由表对应的小文件
 
 ## 先查（硬性）
 
@@ -49,6 +50,7 @@ description: RouteCodex 调试与架构路由入口
 - 完成声明必须有 `evidence.jsonl`；跨 worker 集成默认走 `handoff/` 或 `merge-queue/`，checker 读取证据后再合并。
 
 ## Debug 首选顺序（强制）
+0. V3 任务先打开 `.agents/skills/rcc-v3-architecture/SKILL.md`，并用 `npm run render:v3-mainline-caller-flow` 生成/查看 `docs/architecture/wiki/html/v3-mainline-caller-flow.html` 的主骨架和相关分支图。
 1. 先查 `function map / owner registry / verification map`
 - 锁唯一 owner、允许路径、required gates。
 2. 再查 `mainline source / wiki / manifest`
@@ -59,6 +61,8 @@ description: RouteCodex 调试与架构路由入口
 - 合同没锁清楚时，禁止直接 grep 后改实现。
 - 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
 - 数据/控制分流先验：如果数据字段能从原始请求/响应负载直接拿到，就不要从 `MetadataCenter`、上下文 carrier、日志投影、matchedPort/localPort 之类中间语义里再取一遍；`MetadataCenter` 只用于控制语义，不能当数据面第二真源。
+- Provider 错误调试高优先级：先修请求侧 provider-bound 字段生成链，目标是让原始请求不再生成/发出会触发上游或 codec 错误的字段；禁止把焦点放到错误投影、错误显示、事后包裹、静默清理、无契约依据的空对象兼容或绕过错误。闭环证据必须是同一真实样本重新生成的 provider request / live replay 不再发生原错误。
+- SSE 错误调试高优先级：先分 transport / provider body / provider event codec / error policy owner；`malformed SSE` 文案不是 owner 证据。SSE crate/server handler 只能 opaque framing/backpressure/closeout，禁止补 provider payload、tool、reasoning、continuation、retry 语义。
 - 请求协议字段先验：HTTP headers、body 标准字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 都是请求协议数据面，默认透传；不要搬进 `MetadataCenter`，不要因为名字含 metadata 就判成 RouteCodex 控制信号。`MetadataCenter` 只写 RouteCodex 内部控制信号。
 - 反模式：同一字段多次派生、多处 fallback、先从 payload 再从 metadata 回读、用上下文零散字段拼接原始数据。
 - 直通路径特例：provider-direct / same-protocol direct 若绕过 request-executor，必须在实际送给 provider 前把 `clientConnectionState` 生成的 `abortSignal` 写进 provider runtime metadata；只保留 state 不够，direct provider 会继续跑到自然结束。
@@ -164,6 +168,13 @@ description: RouteCodex 调试与架构路由入口
 6. live replay old sample
 7. note → MEMORY → lessons
 
+## 高优先级 debug 纠偏
+
+- Provider 报错先查 provider-bound request 是否已被上游治理成合法形状。若错误源是 malformed/misordered request fields，修复目标是“错误请求不再生成/不再发出”，不是 provider codec 兜底、错误投影绕过、日志显示美化或兼容空对象。
+- 对 `function_call.arguments`、tool output 顺序、schema、stream intent 等 provider-bound 字段，先用真实样本定位第一个制造坏字段的节点；协议转换规则错误回 provider-wire builder/codec，对话治理错误回 ReqChatProcess/RespChatProcess。
+- Provider codec 只做协议转换和契约校验；V2 已明确的转换规则必须在 codec 对齐。例如普通 `function_call.arguments` 无法解析为 JSON 时，Anthropic provider request 转成合法 `tool_use.input={}`，同时保留原 call/output 对，禁止删掉模型纠错反馈。
+- 修 `~/.rcc/config.toml` / `/Volumes/extension/.rcc/config.toml` 时禁止整文件恢复旧备份。先定位当前污染块，再用最新可信样本只补丁目标 port/group/forwarder；多端口 `[[httpserver.ports]]` 语义必须保留。5520 这类生产端口要验证 routing group、forwarder targets、provider registry 三层一致，禁止把旧 `fwd.temp` / GLM / MiniMax / stale provider 误恢复进目标组。
+
 ## 硬护栏
 - 单一路径：`HTTP -> Hub Pipeline -> VR -> Provider Runtime -> Upstream`
 - Rust 真源优先：Hub Pipeline / Chat Process / 路由 / servertool 语义默认查 Rust
@@ -233,3 +244,9 @@ description: RouteCodex 调试与架构路由入口
 - note.md append-only：顶部 consolidation index，正文不删 raw
 - MEMORY.md append-only：只追加 dated correction
 - 同主题冲突：最新已验证时间戳胜出
+
+## V3 Provider-Request Dry-Run Guard
+- Trigger: `x-routecodex-dry-run: provider-request`, `/v1/responses`, `/v1/messages`, provider request evidence, or Jason reports dry-run/live mismatch.
+- Interpret dry-run as a real route/outbound/provider-request chain only up to the no-network transport cutpoint. The authoritative evidence is `providerRequest` / `dry_run.provider_request`; `dry_run.response_payload` is a fake protocol-shaped terminal response and must not be used as provider behavior truth.
+- If `providerRequestCaptured=false`, debug the pre-transport owner: route manifest, target selection, provider wire protocol compatibility, or outbound codec. Do not blame provider network or SSE.
+- Anthropic entry dry-run must select an Anthropic provider wire target. If it selects OpenAI Chat, fix the loaded route manifest or target protocol filtering before touching Anthropic codec, SSE, or error projection.

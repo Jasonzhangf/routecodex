@@ -80,6 +80,7 @@
 - Relay SSE 没有业务语义分支；SSE 只负责帧传输/编码/解码。Responses/OpenAI/Anthropic/Gemini 的 `data` 事件 payload 解析属于对应 provider/client protocol codec owner，不属于 SSE 传输 owner。
 - `SSE frame -> protocol event payload -> Hub JSON semantic` 与 `Hub JSON semantic -> protocol event payload -> SSE frame` 只能由相邻 codec owner 完成；SSE crate/server handler 只能 opaque framing/backpressure/closeout。
 - ChatProcess 必须消费 codec 产出的 Hub JSON semantic；stopless/servertool 不得在 raw SSE/handler/outbound 上执行，也不得绕过 `run_json_response_hooks`。
+- `malformed SSE` 日志不是 owner 证据：UTF-8/line/frame/buffer/unterminated 属 SSE transport；provider body read 属 provider raw/body；`data` JSON/event/terminal/tool/reasoning/finish 解析属 provider response event codec；retry/switch/cooldown/final projection 属 error policy。先分型再改唯一 owner，禁止在 SSE crate/server handler 包第二层语义。
 - Gate 必须同时锁顺序和反向：正向断言相邻函数顺序，反向红测删除 `run_json_response_hooks`、复活 raw `project_sse_stream`、或跳过中间节点会失败。
 
 5.6 V3 Hub v1 node-per-file owner lookup

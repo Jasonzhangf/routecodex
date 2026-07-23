@@ -128,11 +128,11 @@ if (currentProfile?.server_id !== 'responses_v3_5555'
     || currentProfile?.manifest_version !== 3) {
   failures.push(manifestPath + ': current_5555_profile_audit must bind the V3 5555 server identity');
 }
-if (currentProfile?.lifecycle_command_used_for_this_audit !== 'none'
+if (currentProfile?.lifecycle_command_used_for_this_audit !== 'routecodex restart --port 5555'
     || currentProfile?.allowed_lifecycle_command_if_needed !== 'routecodex restart --port 5555'
     || !Array.isArray(currentProfile?.forbidden_lifecycle_commands_used)
     || currentProfile.forbidden_lifecycle_commands_used.length !== 0) {
-  failures.push(manifestPath + ': current audit must use no lifecycle command and allow only routecodex restart --port 5555 if needed');
+  failures.push(manifestPath + ': current audit must record only routecodex restart --port 5555 and no forbidden lifecycle commands');
 }
 for (const endpoint of ['responses', 'anthropic']) {
   requireArrayText(currentProfile?.endpoints_enabled, endpoint, 'current_5555_profile_audit.endpoints_enabled');
@@ -152,6 +152,9 @@ for (const evidenceKey of [
   'messages_json_live_200',
   'messages_sse_dryrun_no_send',
   'messages_sse_live_200',
+  'responses_relay_ws_text_live_200',
+  'responses_relay_ws_tool_loop_live_200',
+  'remote_continuation_current_inventory',
 ]) {
   if (!String(currentProfile?.evidence?.[evidenceKey] ?? '').startsWith('.agent-collab/runs/')) {
     failures.push(manifestPath + ': current 5555 profile missing run evidence ' + evidenceKey);
@@ -159,9 +162,11 @@ for (const evidenceKey of [
 }
 const currentFinding = String(currentProfile?.finding ?? '');
 if (!currentFinding.includes('Anthropic Messages JSON and SSE are live_verified')
+    || !currentFinding.includes('Responses Relay client-facing WebSocket v2')
+    || !currentFinding.includes('Remote continuation exact-pin remains blocked')
     || !currentFinding.includes('multi-provider')
     || !currentFinding.includes('no start/server-start/run-managed-child')) {
-  failures.push(manifestPath + ': current 5555 finding must name multi-provider Anthropic JSON/SSE live evidence and no start lifecycle use');
+  failures.push(manifestPath + ': current 5555 finding must name multi-provider Anthropic JSON/SSE and Responses Relay WebSocket live evidence, remote continuation blocker, and no start lifecycle use');
 }
 
 for (const endpoint of expectedEndpoints) requireArrayText(manifest.axes?.endpoints, endpoint, 'axes.endpoints');
@@ -184,6 +189,14 @@ for (const relayCaseId of ['responses_relay_json_http', 'responses_relay_sse_htt
   if (!relayCase || relayCase.live_evidence?.status !== 'live_verified' || relayCase.production?.status !== 'ready') {
     failures.push(manifestPath + ': Responses Relay live case must be live_verified and ready after 5555 replay ' + relayCaseId);
   }
+}
+const relayWebSocketCase = cases.find((entry) => entry.id === 'responses_relay_websocket_v2');
+if (!relayWebSocketCase
+    || relayWebSocketCase.live_evidence?.status !== 'live_verified'
+    || relayWebSocketCase.production?.status !== 'ready'
+    || !(relayWebSocketCase.live_evidence?.refs ?? []).some((ref) =>
+      String(ref).includes('20260723T020344Z-Macstudio.local-23790-wscont'))) {
+  failures.push(manifestPath + ': Responses Relay WebSocket v2 must cite current managed 5555 live_verified evidence and be ready');
 }
 for (const anthropicCaseId of ['anthropic_messages_json_http', 'anthropic_messages_sse_http']) {
   const anthropicCase = cases.find((entry) => entry.id === anthropicCaseId);
@@ -225,6 +238,20 @@ for (const entry of cases) {
   } else if (blockers.length === 0) {
     failures.push(manifestPath + ': non-ready case must name blockers ' + entry.id);
   }
+}
+
+const productionBlockers = Array.isArray(manifest.production_blockers)
+  ? manifest.production_blockers
+  : [];
+if (!productionBlockers.some((entry) =>
+  entry.blocker_id === 'remote_continuation_exact_pin_provider_profile_unavailable')) {
+  failures.push(manifestPath + ': missing explicit remote continuation exact-pin provider/profile blocker');
+}
+if (manifest.completion_boundary?.remote_continuation_two_turn_live !== false
+    || manifest.completion_boundary?.remote_continuation_provider_ws_opened_count !== 0
+    || !String(manifest.completion_boundary?.remote_continuation_current_5555_inventory ?? '')
+      .includes('20260723T020344Z-Macstudio.local-23790-wscont')) {
+  failures.push(manifestPath + ': remote continuation live boundary must remain false with current provider inventory evidence');
 }
 
 for (const required of requiredErrorCases) {

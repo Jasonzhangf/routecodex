@@ -7,7 +7,7 @@ use super::{
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
     V3HubRequestSemanticProtocol, V3StoplessCenterState,
 };
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -736,6 +736,7 @@ fn govern_tool_outputs_at_req04(
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
+    prune_malformed_shell_like_responses_history_at_req04(input);
     let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
     let mut output_count = 0;
     for (index, item) in input.iter_mut().enumerate() {
@@ -772,6 +773,177 @@ fn govern_tool_outputs_at_req04(
         }
     }
     Ok(output_count)
+}
+
+fn prune_malformed_shell_like_responses_history_at_req04(input: &mut Vec<Value>) {
+    let mut dropped_call_ids = BTreeSet::<String>::new();
+    let mut governed = Vec::<Value>::with_capacity(input.len());
+
+    for item in std::mem::take(input) {
+        let item_type = item
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+
+        if matches!(item_type.as_str(), "function_call" | "tool_call") {
+            if let Some(name) = read_tool_call_name_at_req04(&item) {
+                let arguments = item.get("arguments").or_else(|| item.get("input"));
+                if is_invalid_shell_like_tool_call_at_req04(name.as_str(), arguments)
+                    || is_invalid_write_stdin_tool_call_at_req04(name.as_str(), arguments)
+                {
+                    if let Some(call_id) = read_tool_call_id_at_req04(&item) {
+                        dropped_call_ids.insert(call_id);
+                    }
+                    continue;
+                }
+            }
+        }
+
+        if matches!(
+            item_type.as_str(),
+            "function_call_output" | "tool_result" | "tool_message"
+        ) {
+            if read_tool_call_id_at_req04(&item)
+                .as_deref()
+                .is_some_and(|call_id| dropped_call_ids.contains(call_id))
+            {
+                continue;
+            }
+        }
+
+        governed.push(item);
+    }
+
+    *input = governed;
+}
+
+fn read_tool_call_id_at_req04(item: &Value) -> Option<String> {
+    item.get("call_id")
+        .or_else(|| item.get("tool_call_id"))
+        .or_else(|| item.get("tool_use_id"))
+        .or_else(|| item.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn is_shell_like_tool_name_at_req04(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+    )
+}
+
+fn is_write_stdin_tool_name_at_req04(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "write_stdin" | "write.stdin"
+    )
+}
+
+fn parse_json_record_at_req04(value: Option<&Value>) -> Option<Map<String, Value>> {
+    match value? {
+        Value::Object(row) => Some(row.clone()),
+        Value::String(raw) => match serde_json::from_str::<Value>(raw.trim()).ok()? {
+            Value::Object(row) => Some(row),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn read_trimmed_text_at_req04(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        Value::Array(items) => {
+            let joined = items
+                .iter()
+                .filter_map(|item| match item {
+                    Value::String(raw) => {
+                        let trimmed = raw.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }
+                    Value::Null => None,
+                    other => {
+                        let rendered = other.to_string();
+                        let trimmed = rendered.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        other => {
+            let rendered = other.to_string();
+            let trimmed = rendered.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+    }
+}
+
+fn read_command_from_args_at_req04(args: &Map<String, Value>) -> Option<String> {
+    let direct = [
+        "cmd",
+        "command",
+        "script",
+        "input",
+        "text",
+        "action",
+        "instruction",
+        "instructions",
+        "query",
+        "entry",
+    ]
+    .into_iter()
+    .find_map(|key| read_trimmed_text_at_req04(args.get(key)));
+    if direct.is_some() {
+        return direct;
+    }
+    args.get("args")
+        .and_then(Value::as_object)
+        .and_then(read_command_from_args_at_req04)
+        .or_else(|| {
+            args.get("input")
+                .and_then(Value::as_object)
+                .and_then(read_command_from_args_at_req04)
+        })
+}
+
+fn is_invalid_shell_like_tool_call_at_req04(name: &str, arguments: Option<&Value>) -> bool {
+    if !is_shell_like_tool_name_at_req04(name) {
+        return false;
+    }
+    let Some(args) = parse_json_record_at_req04(arguments) else {
+        return true;
+    };
+    read_command_from_args_at_req04(&args).is_none()
+}
+
+fn read_write_stdin_session_id_at_req04(args: &Map<String, Value>) -> Option<i64> {
+    args.get("session_id")
+        .or_else(|| args.get("sessionId"))
+        .and_then(|value| match value {
+            Value::Number(number) => number.as_i64(),
+            Value::String(raw) => raw.trim().parse::<i64>().ok(),
+            _ => None,
+        })
+}
+
+fn is_invalid_write_stdin_tool_call_at_req04(name: &str, arguments: Option<&Value>) -> bool {
+    if !is_write_stdin_tool_name_at_req04(name) {
+        return false;
+    }
+    let Some(args) = parse_json_record_at_req04(arguments) else {
+        return true;
+    };
+    read_write_stdin_session_id_at_req04(&args).is_none()
 }
 
 fn govern_chat_tool_outputs_at_req04(

@@ -1,6 +1,6 @@
 lifecycle_id: v3.responses.inbound_websocket_proxy
 owner_feature_id: v3.responses_inbound_websocket_proxy
-summary: Client-facing /v1/responses WebSocket upgrade and frame projection shell that enters the existing V3 Responses Direct Runtime.
+summary: Client-facing /v1/responses WebSocket upgrade and frame projection shell that enters the configured V3 Responses Direct or Relay Runtime.
 entrypoint: responses_websocket_endpoint
 canonical_docs:
   - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
@@ -17,7 +17,7 @@ nodes:
     symbol: build_v3_server_03_http_request_raw
   - id: V3Resp15ClientPayload
     owner: routecodex-v3-runtime
-    symbol: execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
+    symbol: configured Responses Direct or Relay Runtime entry
   - id: V3ResponsesInboundWs04ClientEventProjected
     owner: routecodex-v3-server
     symbol: send_responses_websocket_frame

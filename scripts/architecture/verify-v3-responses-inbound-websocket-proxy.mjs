@@ -38,12 +38,15 @@ for (const phrase of [
   'expected response.create',
   'response.create must be a flat event; nested response payload is unsupported',
   'execute_responses_direct_server_frame(',
-  'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(',
+  'async fn execute_responses_relay_websocket_output(',
+  'send_responses_relay_websocket_output(',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(',
+  'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
   'send_responses_websocket_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
   'response.create is already in flight',
-  'build_sse_transport_in_01_raw_chunk(&chunk)',
+  'build_v3_sse_transport_in_01_raw_chunk(&chunk)',
   'runtime byte frame is not valid JSON',
   'runtime SSE decode failed',
   'runtime SSE stream did not terminate cleanly',
@@ -60,6 +63,7 @@ for (const phrase of [
   'responses_inbound_websocket_scope_mismatch_fails_before_provider_send',
   'responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback',
   'responses_inbound_websocket_client_disconnect_drops_incremental_runtime_stream',
+  'responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime',
   'connect_async(request)',
   'responses_websockets=2026-02-06',
   'assert_control_fields_absent(&provider_event.body)',
@@ -76,6 +80,8 @@ for (const phrase of [
   'responses_websocket_endpoint',
   'responses_websocket_create_payload',
   'execute_responses_direct_server_frame',
+  'execute_responses_relay_websocket_output',
+  'send_responses_relay_websocket_output',
   'send_responses_websocket_sse_stream',
   'v3.responses.inbound_websocket_client_connection',
   'v3.responses.inbound_websocket_frame_projection',
@@ -99,7 +105,7 @@ for (const phrase of [
 
 for (const phrase of [
   'feature_id: v3.responses_inbound_websocket_proxy',
-  'controlled JSON WebSocket response.create enters the existing Responses Direct Runtime',
+  'controlled JSON WebSocket response.create enters the configured Responses Runtime',
   'malformed client WebSocket event fails before provider send',
   'npm run test:v3-responses-inbound-websocket-proxy',
   'npm run verify:v3-responses-inbound-websocket-proxy',
@@ -139,15 +145,29 @@ if (wsStart < 0 || wsEnd <= wsStart) {
     /websocket_sessions/,
     /reqwest::/,
     /HTTP fallback|http_fallback|retry_http/i,
-    /restore_history|repair_history|local_materiali[sz]ation|relay_continuation/i,
+    /restore_history|repair_history|local_materiali[sz]ation/i,
     /collect\s*::<\s*Vec/,
     /let\s+mut\s+(?:events|frames|chunks|responses)\s*=\s*Vec::new/,
   ]);
 }
 
-const runtimeCalls = text.server.match(/execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation\(/g) ?? [];
-if (runtimeCalls.length !== 1) {
-  failures.push(files.server + ': expected one existing Runtime entry call, got ' + runtimeCalls.length);
+
+const clientSocketPolls = text.server.match(/client_message = socket\.next\(\) =>/g) ?? [];
+if (clientSocketPolls.length !== 2) {
+  failures.push(files.server + ': expected Direct and Relay WebSocket stream client disconnect polling, got ' + clientSocketPolls.length);
+}
+const runtimeSseDecodeGuards = text.server.match(/runtime SSE decode failed/g) ?? [];
+if (runtimeSseDecodeGuards.length !== 2) {
+  failures.push(files.server + ': expected Direct and Relay runtime SSE decode guards, got ' + runtimeSseDecodeGuards.length);
+}
+
+const directRuntimeCalls = text.server.match(/execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug\(/g) ?? [];
+if (directRuntimeCalls.length !== 1) {
+  failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
+}
+const relayRuntimeCalls = text.server.match(/execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control\(/g) ?? [];
+if (relayRuntimeCalls.length !== 2) {
+  failures.push(files.server + ': expected HTTP plus WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
 }
 
 forbid(files.server, text.server, [

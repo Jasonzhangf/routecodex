@@ -147,7 +147,7 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
             hook_id: "ResponsesDirectResponseProjectionHook",
             hook_point: V3HookPoint::ResponseProjection,
             input_node: "V3ProviderResp14Raw",
-            output_node: "V3Resp15ClientPayload",
+            output_node: "V3DirectResp14ProviderProjectionPrepared",
         },
         V3RegisteredHook {
             hook_id: "ResponsesDirectErrorHook",

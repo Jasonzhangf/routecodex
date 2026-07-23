@@ -151,7 +151,7 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
 }
 
 #[test]
-fn req04_preserves_non_injected_tool_parse_error_feedback() {
+fn req04_drops_malformed_shell_like_function_call_and_parse_error_output() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks
         .run(
@@ -192,20 +192,29 @@ fn req04_preserves_non_injected_tool_parse_error_feedback() {
         )
         .unwrap();
 
-    assert_eq!(governed.tool_output_count(), 2);
+    assert_eq!(governed.tool_output_count(), 1);
     let input = governed.payload()["input"].as_array().unwrap();
     assert!(
-        input.iter().any(|item| {
-            item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                && item.get("call_id").and_then(Value::as_str) == Some("call_bad")
-                && item
-                    .get("output")
-                    .and_then(Value::as_str)
-                    .is_some_and(|output| {
-                        output.contains("failed to parse function arguments")
-                    })
-        }),
-        "client-side tool parse-error feedback is real tool output and must remain visible to the provider"
+        !input
+            .iter()
+            .any(|item| item.get("call_id").and_then(Value::as_str) == Some("call_bad")),
+        "malformed shell-like call history must be consumed before provider wire: {input:?}"
+    );
+    assert!(
+        input.iter().any(
+            |item| item.get("type").and_then(Value::as_str) == Some("function_call")
+                && item.get("call_id").and_then(Value::as_str) == Some("call_good")
+        ),
+        "valid shell-like function_call must remain provider-visible: {input:?}"
+    );
+    assert!(
+        input
+            .iter()
+            .any(
+                |item| item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                    && item.get("call_id").and_then(Value::as_str) == Some("call_good")
+            ),
+        "valid shell-like function_call_output must remain provider-visible: {input:?}"
     );
 }
 

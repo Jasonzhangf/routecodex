@@ -68,14 +68,22 @@ const cases = [
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
     from: 'client_message = socket.next() =>',
     to: 'provider_chunk_only = stream.next() =>',
-    diagnostic: /client_message|socket\.next/,
+    diagnostic: /client_message|socket\.next|client disconnect polling/,
+  },
+
+  {
+    name: 'Relay WebSocket dispatch removed',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    from: 'async fn execute_responses_relay_websocket_output(',
+    to: 'async fn execute_responses_relay_websocket_output_removed(',
+    diagnostic: /execute_responses_relay_websocket_output|Relay Runtime/,
   },
   {
     name: 'runtime SSE decode error hidden',
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
     from: 'runtime SSE decode failed',
     to: 'runtime stream closed',
-    diagnostic: /runtime SSE decode failed/,
+    diagnostic: /runtime SSE decode failed|runtime SSE decode guards/,
   },
   {
     name: 'malformed client event test removed',

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GENERATED_WIKI_PAGES, MANUAL_WIKI_PAGES, WIKI_ROOT } from './architecture-wiki-lib.mjs';
+import { renderV3MainlineCallerFlowHtml, V3_CALLER_FLOW_PATH } from './v3-mainline-caller-flow-lib.mjs';
 
 export const WIKI_HTML_ROOT = `${WIKI_ROOT}/html`;
 
@@ -286,6 +287,10 @@ ${bodyHtml}
 export function renderArchitectureWikiHtmlPages(root) {
   const outputs = new Map();
   for (const markdownPath of wikiMarkdownPaths()) {
+    if (markdownPath === V3_CALLER_FLOW_PATH) {
+      outputs.set(htmlPathForMarkdown(markdownPath), renderV3MainlineCallerFlowHtml(root));
+      continue;
+    }
     const markdown = readText(root, markdownPath);
     const title = markdownTitle(markdown, path.basename(markdownPath, '.md'));
     const bodyHtml = renderMarkdown(markdown)

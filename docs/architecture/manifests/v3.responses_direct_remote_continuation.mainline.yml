@@ -11,7 +11,9 @@ node_ids:
   - V3HubReqTarget06Resolved
   - V3Transport13ResponsesHttpRequest
   - V3ProviderResp14Raw
+  - V3DirectResp14ProviderProjectionPrepared
   - V3HubRespContinuation04Committed
+  - V3DirectResp15ClientPayloadReady
   - V3Resp15ClientPayload
 edges:
   - step_id: v3-rci-01
@@ -37,13 +39,27 @@ edges:
     split_binding_id: responses_direct_provider_transport_source
   - step_id: v3-rci-03
     from_node: V3ProviderResp14Raw
-    to_node: V3HubRespContinuation04Committed
+    to_node: V3DirectResp14ProviderProjectionPrepared
     status: anchored
     owner_feature_id: v3.responses_direct_remote_continuation_integration
     binding_pending: null
     split_binding_id: null
   - step_id: v3-rci-04
+    from_node: V3DirectResp14ProviderProjectionPrepared
+    to_node: V3HubRespContinuation04Committed
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-rci-05
     from_node: V3HubRespContinuation04Committed
+    to_node: V3DirectResp15ClientPayloadReady
+    status: anchored
+    owner_feature_id: v3.responses_direct_remote_continuation_integration
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-rci-06
+    from_node: V3DirectResp15ClientPayloadReady
     to_node: V3Resp15ClientPayload
     status: anchored
     owner_feature_id: v3.responses_direct_remote_continuation_integration

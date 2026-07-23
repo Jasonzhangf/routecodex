@@ -979,6 +979,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     }
                 }
             };
+        trace.push("V3DirectResp14ProviderProjectionPrepared");
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
@@ -1019,6 +1020,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             {
                 return error_output(source, trace, &hook_registry);
             }
+            trace.push("V3DirectResp15ClientPayloadReady");
             trace.push("V3Resp15ClientPayload");
 
             return V3ResponsesDirectRuntimeOutput {
@@ -1113,6 +1115,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         {
             return error_output(source, trace, &hook_registry);
         }
+        trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");
 
         return V3ResponsesDirectRuntimeOutput {

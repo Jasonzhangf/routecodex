@@ -35,10 +35,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
-const V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
-    "provider SSE stream ended before response.completed";
-const V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE: &str =
-    "provider SSE stream failed before response.completed";
+const V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
+    "provider response event stream ended before response.completed";
+const V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE: &str =
+    "provider response event stream failed before response.completed";
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str =
     "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
@@ -196,7 +196,7 @@ struct V3ResponsesRelayExcludedAvailability<'excluded> {
 struct V3ResponsesRelayProviderFailureContext<'ctx> {
     manifest: &'ctx V3Config05ManifestPublished,
     server_id: &'ctx str,
-    provider_semantic_body: &'ctx Value,
+    route_facts_body: &'ctx Value,
     provider_health: &'ctx V3ProviderHealthStore,
     retry_policy: &'ctx V3ResponsesRelayRetryPolicy,
     deterministic_sample: u64,
@@ -979,8 +979,10 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
-    #[error("V3 Responses Relay SSE provider body is malformed: {0}")]
-    ProviderSse(String),
+    #[error("V3 Responses Relay provider SSE transport failed: {0}")]
+    ProviderSseTransport(String),
+    #[error("V3 Responses Relay provider response event codec failed: {0}")]
+    ProviderResponseEventCodec(String),
     #[error(transparent)]
     LocalContinuation(#[from] V3LocalContinuationError),
     #[error("V3 Responses Relay local continuation scope routing group does not match server")]
@@ -1385,9 +1387,10 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         };
     }
     let provider_semantic_body = request_outcome.payload().clone();
-    let local_continuation_request_body = request_outcome
+    let route_facts_body = request_outcome
         .responses_original_input_surface_payload()
         .unwrap_or_else(|| provider_semantic_body.clone());
+    let local_continuation_request_body = route_facts_body.clone();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -1403,7 +1406,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let failure_context = V3ResponsesRelayProviderFailureContext {
         manifest,
         server_id: &input.server_id,
-        provider_semantic_body: &provider_semantic_body,
+        route_facts_body: &route_facts_body,
         provider_health: &provider_health,
         retry_policy: &retry_policy,
         deterministic_sample,
@@ -1415,7 +1418,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             match resolve_target(
                 manifest,
                 &input.server_id,
-                &provider_semantic_body,
+                &route_facts_body,
                 &failed_candidates,
                 &provider_health,
                 v3_responses_relay_now_epoch_ms()?,
@@ -1695,11 +1698,11 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         Ok(value) => value,
                         Err(error) => {
                             let failure = provider_runtime_failure(
-                                V3ProviderError::MalformedSse {
-                                    request_id: input.request_id.clone(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!("provider SSE response decode failed: {error}"),
-                                },
+                                provider_response_stream_failure(
+                                    error,
+                                    &input.request_id,
+                                    &selected_target_provider_id,
+                                ),
                                 &selected_target_provider_id,
                                 Some(selected_observability),
                             );
@@ -1781,7 +1784,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         "type":"response.completed",
                         "response": finalized_provider_value.clone()
                     }))
-                    .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
@@ -1803,7 +1806,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 if let Some(finish_reason) = observability.finish_reason.as_deref() {
                     stream_observation
                         .record_finish_reason(finish_reason)
-                        .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
                 }
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value)
@@ -1987,7 +1990,7 @@ async fn handle_v3_responses_relay_provider_failure(
     let alternative = resolve_target(
         context.manifest,
         context.server_id,
-        context.provider_semantic_body,
+        context.route_facts_body,
         &excluded_with_failed,
         context.provider_health,
         v3_responses_relay_now_epoch_ms()?,
@@ -2525,7 +2528,7 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
         .get("choices")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat provider response must contain choices before Responses projection"
                     .to_string(),
             )
@@ -2789,7 +2792,7 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
     custom_tool_names: &BTreeSet<String>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "OpenAI Chat tool_call must be an object before Responses projection".to_string(),
         )
     })?;
@@ -2797,7 +2800,7 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .get("function")
         .and_then(Value::as_object)
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat tool_call.function must be an object before Responses projection"
                     .to_string(),
             )
@@ -2807,7 +2810,7 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat tool_call.function.name is required before Responses projection"
                     .to_string(),
             )
@@ -2823,7 +2826,7 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat tool_call id is required before Responses projection".to_string(),
             )
         })?;
@@ -2872,7 +2875,7 @@ fn parse_v3_openai_chat_tool_call_arguments_object(
         Value::Object(Map::new())
     } else {
         serde_json::from_str::<Value>(trimmed).map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderSse(format!(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
                 "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection: {error}"
             ))
         })?
@@ -2880,9 +2883,11 @@ fn parse_v3_openai_chat_tool_call_arguments_object(
     if parsed.is_object() {
         return Ok(parsed);
     }
-    Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+    Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+        format!(
         "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
-    )))
+    ),
+    ))
 }
 
 fn build_v3_responses_web_search_action_from_openai_chat_arguments(
@@ -2890,7 +2895,7 @@ fn build_v3_responses_web_search_action_from_openai_chat_arguments(
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let parsed = parse_v3_openai_chat_tool_call_arguments_object("web_search", arguments)?;
     let object = parsed.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             "OpenAI Chat web_search arguments must be a JSON object before Responses projection"
                 .to_string(),
         )
@@ -2985,13 +2990,13 @@ fn extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
             {
                 return Ok(input);
             }
-            return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
                 "OpenAI Chat custom tool_call {name} arguments must be JSON object with string input before Responses projection: {error}"
             )));
         }
     };
     let object = parsed.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(format!(
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
             "OpenAI Chat custom tool_call {name} arguments must be JSON object before Responses projection"
         ))
     })?;
@@ -3000,7 +3005,7 @@ fn extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(format!(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
                 "OpenAI Chat custom tool_call {name} arguments.input must be string before Responses projection"
             ))
         })
@@ -3281,7 +3286,7 @@ fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
         .unwrap_or_else(|_| {
             format!(
                 "{{\"type\":\"response.failed\",\"response\":{{\"status\":\"failed\",\"error\":{{\"code\":\"provider_response_sse_stream\",\"message\":\"{}\",\"type\":\"provider_error\"}}}}}}",
-                V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE
+                V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE
             )
         });
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
@@ -3300,7 +3305,7 @@ async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     let mut output_text = String::new();
     while let Some(chunk) = provider.next().await {
         let chunk = chunk?;
-        if let Some(response) = observe_v3_runtime_responses_sse_transport_chunk(
+        if let Some(response) = observe_v3_runtime_responses_provider_event_chunk(
             &chunk,
             &mut decoder,
             observation,
@@ -3312,10 +3317,10 @@ async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     }
     decoder
         .finish()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     terminal_response.ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
-            V3_RESPONSES_RELAY_SSE_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
         )
     })
 }
@@ -3347,9 +3352,9 @@ async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             )
             .await
         }
-        other => Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-            "Responses relay cannot decode provider SSE protocol {other:?}"
-        ))),
+        other => Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("Responses relay cannot decode provider stream protocol {other:?}"),
+        )),
     }
 }
 
@@ -3388,28 +3393,31 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         let chunk = chunk?;
         let frames = decoder
             .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
+            })?;
         for frame in frames {
             let Some((_event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
                 continue;
             };
             if data == "[DONE]" {
                 if !state.message_stop_seen {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                        "Anthropic provider SSE emitted [DONE] before message_stop".to_string(),
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Anthropic provider event stream emitted [DONE] before message_stop"
+                            .to_string(),
                     ));
                 }
                 done_seen = true;
                 continue;
             }
             if done_seen || state.message_stop_seen {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                    "Anthropic provider SSE emitted data after message_stop".to_string(),
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "Anthropic provider event stream emitted data after message_stop".to_string(),
                 ));
             }
             let event: Value = serde_json::from_str(&data).map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE event is malformed: {error}"
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "Anthropic provider event stream event is malformed: {error}"
                 ))
             })?;
             characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
@@ -3417,24 +3425,27 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                 V3HubProviderWireProtocol::Anthropic,
                 V3HubTransportIntent::Sse,
             )
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+            })?;
             collect_v3_anthropic_provider_stream_event(event, &mut state)?;
         }
     }
     decoder
         .finish()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     if !state.message_stop_seen {
-        return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-            "Anthropic provider SSE ended without message_stop".to_string(),
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider event stream ended without message_stop".to_string(),
         ));
     }
     let anthropic_message = build_v3_anthropic_message_from_provider_stream_state(state)?;
-    let response = project_v3_anthropic_message_as_responses_response(&anthropic_message)
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+    let response = project_v3_anthropic_message_as_responses_response(&anthropic_message).map_err(
+        |error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()),
+    )?;
     observation
         .record_event(&response)
-        .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     Ok(response)
 }
 
@@ -3443,31 +3454,32 @@ fn collect_v3_anthropic_provider_stream_event(
     state: &mut V3AnthropicProviderStreamState,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     let event_object = event.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
-            "Anthropic provider SSE event must be an object".to_string(),
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider event stream event must be an object".to_string(),
         )
     })?;
     let event_type = event_object
         .get("type")
         .and_then(Value::as_str)
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
-                "Anthropic provider SSE event missing type".to_string(),
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "Anthropic provider event stream event missing type".to_string(),
             )
         })?;
     match event_type {
         "message_start" => {
             if state.message_start_seen {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                    "Anthropic provider SSE emitted duplicate message_start".to_string(),
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "Anthropic provider event stream emitted duplicate message_start".to_string(),
                 ));
             }
             let message = event_object
                 .get("message")
                 .and_then(Value::as_object)
                 .ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(
-                        "Anthropic provider SSE message_start missing message object".to_string(),
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Anthropic provider event stream message_start missing message object"
+                            .to_string(),
                     )
                 })?;
             for key in [
@@ -3489,22 +3501,24 @@ fn collect_v3_anthropic_provider_stream_event(
             require_v3_anthropic_provider_message_start(state, event_type)?;
             let index = read_v3_anthropic_provider_stream_index(event_object, event_type)?;
             if state.content_blocks.contains_key(&index) {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE content_block_start duplicated index {index}"
-                )));
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    format!(
+                    "Anthropic provider event stream content_block_start duplicated index {index}"
+                ),
+                ));
             }
             let content_block = event_object
                 .get("content_block")
                 .and_then(Value::as_object)
                 .ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(
-                        "Anthropic provider SSE content_block_start missing content_block object"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Anthropic provider event stream content_block_start missing content_block object"
                             .to_string(),
                     )
                 })?;
             let kind = read_v3_trimmed_string(content_block.get("type")).ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ProviderSse(
-                    "Anthropic provider SSE content_block_start missing content_block.type"
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "Anthropic provider event stream content_block_start missing content_block.type"
                         .to_string(),
                 )
             })?;
@@ -3535,9 +3549,11 @@ fn collect_v3_anthropic_provider_stream_event(
                 }
                 "tool_use" => {}
                 other => {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "Anthropic provider SSE content block type {other} is unsupported"
-                    )))
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        format!(
+                        "Anthropic provider event stream content block type {other} is unsupported"
+                    ),
+                    ))
                 }
             }
             state.content_blocks.insert(index, block);
@@ -3546,29 +3562,29 @@ fn collect_v3_anthropic_provider_stream_event(
             require_v3_anthropic_provider_message_start(state, event_type)?;
             let index = read_v3_anthropic_provider_stream_index(event_object, event_type)?;
             let block = state.content_blocks.get_mut(&index).ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE content_block_delta missing start for index {index}"
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "Anthropic provider event stream content_block_delta missing start for index {index}"
                 ))
             })?;
             if block.stopped {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE content_block_delta followed stop for index {index}"
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "Anthropic provider event stream content_block_delta followed stop for index {index}"
                 )));
             }
             let delta = event_object
                 .get("delta")
                 .and_then(Value::as_object)
                 .ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(
-                        "Anthropic provider SSE content_block_delta missing delta object"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Anthropic provider event stream content_block_delta missing delta object"
                             .to_string(),
                     )
                 })?;
             match delta.get("type").and_then(Value::as_str) {
                 Some("text_delta") => {
                     let text = delta.get("text").and_then(Value::as_str).ok_or_else(|| {
-                        V3ResponsesRelayRuntimeError::ProviderSse(
-                            "Anthropic provider SSE text_delta missing text".to_string(),
+                        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                            "Anthropic provider event stream text_delta missing text".to_string(),
                         )
                     })?;
                     block.text.push_str(text);
@@ -3579,8 +3595,8 @@ fn collect_v3_anthropic_provider_stream_event(
                         .or_else(|| delta.get("text"))
                         .and_then(Value::as_str)
                         .ok_or_else(|| {
-                            V3ResponsesRelayRuntimeError::ProviderSse(
-                                "Anthropic provider SSE thinking_delta missing thinking/text"
+                            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                "Anthropic provider event stream thinking_delta missing thinking/text"
                                     .to_string(),
                             )
                         })?;
@@ -3591,8 +3607,8 @@ fn collect_v3_anthropic_provider_stream_event(
                         .get("partial_json")
                         .and_then(Value::as_str)
                         .ok_or_else(|| {
-                            V3ResponsesRelayRuntimeError::ProviderSse(
-                                "Anthropic provider SSE input_json_delta missing partial_json"
+                            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                "Anthropic provider event stream input_json_delta missing partial_json"
                                     .to_string(),
                             )
                         })?;
@@ -3606,13 +3622,16 @@ fn collect_v3_anthropic_provider_stream_event(
                 }
                 Some("citations_delta") => {}
                 Some(other) => {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "Anthropic provider SSE delta type {other} is unsupported"
-                    )))
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        format!(
+                            "Anthropic provider event stream delta type {other} is unsupported"
+                        ),
+                    ))
                 }
                 None => {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                        "Anthropic provider SSE content_block_delta missing delta.type".to_string(),
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Anthropic provider event stream content_block_delta missing delta.type"
+                            .to_string(),
                     ))
                 }
             }
@@ -3621,13 +3640,13 @@ fn collect_v3_anthropic_provider_stream_event(
             require_v3_anthropic_provider_message_start(state, event_type)?;
             let index = read_v3_anthropic_provider_stream_index(event_object, event_type)?;
             let block = state.content_blocks.get_mut(&index).ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE content_block_stop missing start for index {index}"
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "Anthropic provider event stream content_block_stop missing start for index {index}"
                 ))
             })?;
             if block.stopped {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE duplicated content_block_stop for index {index}"
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "Anthropic provider event stream duplicated content_block_stop for index {index}"
                 )));
             }
             block.stopped = true;
@@ -3653,15 +3672,15 @@ fn collect_v3_anthropic_provider_stream_event(
                 .pointer("/error/message")
                 .and_then(Value::as_str)
                 .filter(|message| !message.trim().is_empty())
-                .unwrap_or("Anthropic provider SSE emitted an error event");
-            return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                .unwrap_or("Anthropic provider event stream emitted an error event");
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 message.to_string(),
             ));
         }
         other => {
-            return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                "Anthropic provider SSE event type {other} is unsupported"
-            )))
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!("Anthropic provider event stream event type {other} is unsupported"),
+            ))
         }
     }
     Ok(())
@@ -3674,9 +3693,9 @@ fn require_v3_anthropic_provider_message_start(
     if state.message_start_seen {
         Ok(())
     } else {
-        Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-            "Anthropic provider SSE emitted {event_type} before message_start"
-        )))
+        Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("Anthropic provider event stream emitted {event_type} before message_start"),
+        ))
     }
 }
 
@@ -3689,8 +3708,8 @@ fn read_v3_anthropic_provider_stream_index(
         .and_then(Value::as_u64)
         .map(|index| index as usize)
         .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                "Anthropic provider SSE {event_type} missing index"
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "Anthropic provider event stream {event_type} missing index"
             ))
         })
 }
@@ -3703,8 +3722,8 @@ fn merge_v3_anthropic_provider_stream_usage(
         return Ok(());
     };
     let usage = usage.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
-            "Anthropic provider SSE usage must be an object".to_string(),
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider event stream usage must be an object".to_string(),
         )
     })?;
     for (key, value) in usage {
@@ -3717,15 +3736,15 @@ fn build_v3_anthropic_message_from_provider_stream_state(
     mut state: V3AnthropicProviderStreamState,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     if !state.message_start_seen {
-        return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-            "Anthropic provider SSE response missing message_start".to_string(),
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider event stream response missing message_start".to_string(),
         ));
     }
     let mut content = Vec::with_capacity(state.content_blocks.len());
     for (index, block) in state.content_blocks {
         if !block.stopped {
-            return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                "Anthropic provider SSE content block {index} ended without content_block_stop"
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "Anthropic provider event stream content block {index} ended without content_block_stop"
             )));
         }
         match block.kind.as_deref() {
@@ -3745,8 +3764,8 @@ fn build_v3_anthropic_message_from_provider_stream_state(
             }
             Some("redacted_thinking") => {
                 let encrypted_content = block.encrypted_content.ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "Anthropic provider SSE redacted_thinking block {index} missing data"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                        "Anthropic provider event stream redacted_thinking block {index} missing data"
                     ))
                 })?;
                 content.push(json!({
@@ -3756,27 +3775,27 @@ fn build_v3_anthropic_message_from_provider_stream_state(
             }
             Some("tool_use") => {
                 let id = block.id.ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "Anthropic provider SSE tool_use block {index} missing id"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                        "Anthropic provider event stream tool_use block {index} missing id"
                     ))
                 })?;
                 let name = block.name.ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "Anthropic provider SSE tool_use block {index} missing name"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                        "Anthropic provider event stream tool_use block {index} missing name"
                     ))
                 })?;
                 let input = if block.input_json_delta.is_empty() {
                     block.input.unwrap_or_else(|| Value::Object(Map::new()))
                 } else {
                     serde_json::from_str::<Value>(&block.input_json_delta).map_err(|error| {
-                        V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                            "Anthropic provider SSE tool_use block {index} input_json_delta is malformed: {error}"
+                        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                            "Anthropic provider event stream tool_use block {index} input_json_delta is malformed: {error}"
                         ))
                     })?
                 };
                 if !input.is_object() {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "Anthropic provider SSE tool_use block {index} input must be an object"
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                        "Anthropic provider event stream tool_use block {index} input must be an object"
                     )));
                 }
                 content.push(json!({
@@ -3787,14 +3806,16 @@ fn build_v3_anthropic_message_from_provider_stream_state(
                 }));
             }
             Some(other) => {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE content block type {other} is unsupported"
-                )))
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    format!(
+                        "Anthropic provider event stream content block type {other} is unsupported"
+                    ),
+                ))
             }
             None => {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "Anthropic provider SSE content block {index} missing type"
-                )))
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    format!("Anthropic provider event stream content block {index} missing type"),
+                ))
             }
         }
     }
@@ -3854,15 +3875,17 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
         let chunk = chunk?;
         let frames = decoder
             .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
+            })?;
         for frame in frames {
             let Some((_event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
                 continue;
             };
             if data == "[DONE]" {
                 if !terminal_seen {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                        "OpenAI Chat provider SSE emitted [DONE] before terminal finish_reason"
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "OpenAI Chat provider event stream emitted [DONE] before terminal finish_reason"
                             .to_string(),
                     ));
                 }
@@ -3870,13 +3893,13 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
                 continue;
             }
             if done_seen {
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-                    "OpenAI Chat provider SSE emitted data after [DONE]".to_string(),
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "OpenAI Chat provider event stream emitted data after [DONE]".to_string(),
                 ));
             }
             let event: Value = serde_json::from_str(&data).map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                    "OpenAI Chat provider SSE event is malformed: {error}"
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "OpenAI Chat provider event stream event is malformed: {error}"
                 ))
             })?;
             if terminal_seen && is_v3_openai_chat_empty_sse_tail_sentinel(&event) {
@@ -3887,10 +3910,12 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
                 V3HubProviderWireProtocol::OpenAiChat,
                 V3HubTransportIntent::Sse,
             )
-            .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+            })?;
             observation
                 .record_event(&event)
-                .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
             collect_openai_chat_stream_event(
                 event,
                 V3OpenAiChatStreamCollectionState {
@@ -3907,10 +3932,10 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
     }
     decoder
         .finish()
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     if !terminal_seen {
-        return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-            "OpenAI Chat provider SSE ended without terminal finish_reason".to_string(),
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat provider event stream ended without terminal finish_reason".to_string(),
         ));
     }
     build_openai_chat_completion_from_stream_state(response_id, model, created, usage, choices)
@@ -3949,8 +3974,8 @@ fn collect_openai_chat_stream_event(
     state: V3OpenAiChatStreamCollectionState<'_>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     let event_object = event.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
-            "OpenAI Chat provider SSE event must be an object".to_string(),
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat provider event stream event must be an object".to_string(),
         )
     })?;
     if state.response_id.is_none() {
@@ -3970,8 +3995,8 @@ fn collect_openai_chat_stream_event(
     };
     for choice_value in event_choices {
         let choice_object = choice_value.as_object().ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
-                "OpenAI Chat provider SSE choice must be an object".to_string(),
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat provider event stream choice must be an object".to_string(),
             )
         })?;
         let index = choice_object
@@ -3989,7 +4014,7 @@ fn collect_openai_chat_stream_event(
                 state
                     .observation
                     .record_finish_reason(reason)
-                    .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+                    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
             }
         }
         let Some(delta) = choice_object.get("delta").and_then(Value::as_object) else {
@@ -4019,8 +4044,8 @@ fn collect_openai_chat_stream_tool_call_deltas(
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     for tool_call_value in tool_call_deltas {
         let tool_call_object = tool_call_value.as_object().ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderSse(
-                "OpenAI Chat provider SSE tool_call delta must be an object".to_string(),
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat provider event stream tool_call delta must be an object".to_string(),
             )
         })?;
         let index = tool_call_object
@@ -4050,8 +4075,8 @@ fn build_openai_chat_completion_from_stream_state(
     choices: BTreeMap<usize, V3OpenAiChatStreamChoice>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     if choices.is_empty() {
-        return Err(V3ResponsesRelayRuntimeError::ProviderSse(
-            "OpenAI Chat provider SSE response did not contain choices".to_string(),
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat provider event stream response did not contain choices".to_string(),
         ));
     }
     let mut materialized_choices = Vec::new();
@@ -4072,13 +4097,13 @@ fn build_openai_chat_completion_from_stream_state(
             let mut tool_calls = Vec::new();
             for (tool_index, tool_call) in choice.tool_calls {
                 let id = tool_call.id.ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "OpenAI Chat provider SSE tool_call[{tool_index}] missing id"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                        "OpenAI Chat provider event stream tool_call[{tool_index}] missing id"
                     ))
                 })?;
                 let function_name = tool_call.function_name.ok_or_else(|| {
-                    V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                        "OpenAI Chat provider SSE tool_call[{tool_index}] missing function.name"
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                        "OpenAI Chat provider event stream tool_call[{tool_index}] missing function.name"
                     ))
                 })?;
                 tool_calls.push(json!({
@@ -4128,7 +4153,7 @@ fn read_v3_trimmed_string(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn observe_v3_runtime_responses_sse_transport_chunk(
+fn observe_v3_runtime_responses_provider_event_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
     observation: &V3RuntimeStreamObservation,
@@ -4137,7 +4162,7 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
-        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSse(error.to_string()))?;
+        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string()))?;
     let mut terminal_response = None;
     for frame in frames {
         let Some((event_type, data)) = parse_v3_runtime_sse_frame_fields(&frame)? else {
@@ -4147,13 +4172,13 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
             continue;
         }
         let event: Value = serde_json::from_str(&data).map_err(|error| {
-            V3ResponsesRelayRuntimeError::ProviderSse(format!(
-                "V3 Responses Relay SSE event is malformed: {error}"
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                "V3 Responses Relay response event payload is malformed: {error}"
             ))
         })?;
         observation
             .record_event(&event)
-            .map_err(V3ResponsesRelayRuntimeError::ProviderSse)?;
+            .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
         collect_v3_runtime_responses_event_payload_evidence(
             event_type.as_deref(),
             &event,
@@ -4184,8 +4209,8 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
                     .or_else(|| event.pointer("/response/incomplete_details/reason"))
                     .and_then(Value::as_str)
                     .filter(|value| !value.trim().is_empty())
-                    .unwrap_or(V3_RESPONSES_RELAY_SSE_FAILED_MESSAGE);
-                return Err(V3ResponsesRelayRuntimeError::ProviderSse(
+                    .unwrap_or(V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE);
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     message.to_string(),
                 ));
             }
@@ -4244,7 +4269,7 @@ fn collect_v3_runtime_responses_event_payload_evidence(
     match semantic_event_type {
         Some("response.output_item.added" | "response.output_item.done") => {
             if let Some(item) = event.get("item").cloned() {
-                upsert_v3_runtime_sse_output_item(output_items, item);
+                upsert_v3_runtime_responses_event_output_item(output_items, item);
             }
         }
         Some("response.output_text.delta") => {
@@ -4260,19 +4285,19 @@ fn collect_v3_runtime_responses_event_payload_evidence(
         }
         Some("response.function_call_arguments.delta") => {
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                append_v3_runtime_sse_function_arguments(output_items, event, delta);
+                append_v3_runtime_responses_event_function_arguments(output_items, event, delta);
             }
         }
         Some("response.function_call_arguments.done") => {
             if let Some(arguments) = event.get("arguments").and_then(Value::as_str) {
-                set_v3_runtime_sse_function_arguments(output_items, event, arguments);
+                set_v3_runtime_responses_event_function_arguments(output_items, event, arguments);
             }
         }
         _ => {}
     }
 }
 
-fn upsert_v3_runtime_sse_output_item(output_items: &mut Vec<Value>, item: Value) {
+fn upsert_v3_runtime_responses_event_output_item(output_items: &mut Vec<Value>, item: Value) {
     let call_id = item
         .get("call_id")
         .or_else(|| item.get("id"))
@@ -4293,12 +4318,12 @@ fn upsert_v3_runtime_sse_output_item(output_items: &mut Vec<Value>, item: Value)
     output_items.push(item);
 }
 
-fn append_v3_runtime_sse_function_arguments(
+fn append_v3_runtime_responses_event_function_arguments(
     output_items: &mut [Value],
     event: &Value,
     delta: &str,
 ) {
-    let Some(item) = find_v3_runtime_sse_function_item_mut(output_items, event) else {
+    let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) else {
         return;
     };
     let current = item
@@ -4309,17 +4334,17 @@ fn append_v3_runtime_sse_function_arguments(
     item["arguments"] = Value::String(format!("{current}{delta}"));
 }
 
-fn set_v3_runtime_sse_function_arguments(
+fn set_v3_runtime_responses_event_function_arguments(
     output_items: &mut [Value],
     event: &Value,
     arguments: &str,
 ) {
-    if let Some(item) = find_v3_runtime_sse_function_item_mut(output_items, event) {
+    if let Some(item) = find_v3_runtime_responses_event_function_item_mut(output_items, event) {
         item["arguments"] = Value::String(arguments.to_string());
     }
 }
 
-fn find_v3_runtime_sse_function_item_mut<'items>(
+fn find_v3_runtime_responses_event_function_item_mut<'items>(
     output_items: &'items mut [Value],
     event: &Value,
 ) -> Option<&'items mut Value> {
@@ -4352,8 +4377,8 @@ fn apply_responses_stream_protocol_events_to_terminal_response(
     output_text: &str,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     let object = response.as_object_mut().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderSse(
-            "V3 Responses Relay SSE terminal response must be an object".to_string(),
+        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "V3 Responses Relay response event terminal response must be an object".to_string(),
         )
     })?;
     object
@@ -4616,6 +4641,28 @@ fn provider_runtime_failure(
     }
 }
 
+fn provider_response_stream_failure(
+    error: V3ResponsesRelayRuntimeError,
+    request_id: &str,
+    provider_id: &str,
+) -> V3ProviderError {
+    match error {
+        V3ResponsesRelayRuntimeError::Provider(error) => error,
+        V3ResponsesRelayRuntimeError::ProviderSseTransport(reason) => {
+            V3ProviderError::MalformedSse {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                reason: format!("provider SSE transport failed: {reason}"),
+            }
+        }
+        other => V3ProviderError::ResponseBody {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("provider response event codec failed: {other}"),
+        },
+    }
+}
+
 fn provider_failure_output(
     failure: V3ResponsesRelayProviderFailure,
     trace: Vec<&'static str>,
@@ -4710,6 +4757,7 @@ fn error_output(
 mod tests {
     use super::*;
     use futures_util::{stream, StreamExt};
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
 
     #[test]
@@ -4730,6 +4778,67 @@ mod tests {
             BTreeSet::from([0, 1]),
             "request-id sampling must not pin a two-target weighted pool to one provider"
         );
+    }
+
+    #[tokio::test]
+    async fn responses_relay_routes_reasoning_from_original_responses_surface_after_chat_canonicalization(
+    ) {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "g"
+endpoints = ["responses"]
+
+[providers.glm]
+type = "openai_chat"
+base_url = "https://glm.example/v1"
+default_model = "glm-5.2"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "GLM_TEST_KEY" }] }
+[providers.glm.models."glm-5.2"]
+capabilities = ["text", "reasoning", "tools"]
+
+[providers.minimax]
+type = "openai_chat"
+base_url = "https://minimax.example/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
+[providers.minimax.models."MiniMax-M3"]
+capabilities = ["text", "tools"]
+
+[route_groups.g.pools.thinking]
+selection = { strategy = "priority" }
+match = { precedence = 1, entry_protocol = "responses", required_capabilities = ["reasoning"] }
+targets = [{ kind = "provider_model", provider = "glm", model = "glm-5.2", key = "key1", priority = 1 }]
+
+[route_groups.g.pools.default]
+selection = { strategy = "weighted" }
+targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", weight = 1 }]
+"#,
+        )
+        .expect("config authoring");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
+        let output = execute_v3_responses_relay_dry_run_runtime(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "s".to_string(),
+                request_id: "req_reasoning_original_surface_route".to_string(),
+                payload: json!({
+                    "model": "gpt-5.5",
+                    "input": [{"type":"message","role":"user","content":"think deeply"}],
+                    "reasoning": {"effort": "high"},
+                    "stream": true
+                }),
+            },
+        )
+        .await;
+
+        assert_eq!(output.status, 200);
+        assert_eq!(output.body["evidence"]["providerNetworkSend"], false);
+        assert_eq!(output.body["providerRequest"]["providerId"], "glm");
+        assert_eq!(output.body["providerRequest"]["body"]["model"], "glm-5.2");
     }
 
     #[test]
@@ -5246,7 +5355,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("provider SSE stream ended before response.completed"));
+            .contains("provider response event stream ended before response.completed"));
     }
 
     #[tokio::test]
@@ -5384,7 +5493,7 @@ mod tests {
             &observation,
         )
         .await
-        .expect("Anthropic provider SSE must canonicalize before Responses Chat Process");
+        .expect("Anthropic provider event stream must canonicalize before Responses Chat Process");
 
         assert_eq!(response["status"], "completed");
         assert_eq!(response["output"][0]["type"], "message");
@@ -5415,7 +5524,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("Anthropic provider SSE ended without message_stop"));
+            .contains("Anthropic provider event stream ended without message_stop"));
     }
 
     #[tokio::test]

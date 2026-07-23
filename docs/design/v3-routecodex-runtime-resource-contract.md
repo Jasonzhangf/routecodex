@@ -161,6 +161,16 @@ Nodes may initially return an explicit pending/not-implemented result, but no re
 - Raw status, headers, bytes/stream, and provider error source.
 - Provider transport captures it; runtime parses/projects later.
 
+### `V3DirectResp14ProviderProjectionPrepared`
+
+- Direct-only provider projection has parsed raw provider bytes/stream and observed remote-continuation state.
+- Not a client/server payload and cannot be a response-chain or server-frame predecessor.
+
+### `V3DirectResp15ClientPayloadReady`
+
+- Direct-only final readiness marker immediately before the frozen `V3Resp15ClientPayload` node.
+- Only this marker may precede the Direct client payload; provider raw, continuation commit, RespInbound, and RespChatProcess may not jump to client/server projection.
+
 ### `V3Resp15ClientPayload`
 
 - Client-visible semantic response.

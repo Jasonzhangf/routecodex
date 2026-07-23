@@ -27,6 +27,8 @@ const requiredP6Nodes = [
   'V3Provider12ResponsesWirePayload',
   'V3Transport13ResponsesHttpRequest',
   'V3ProviderResp14Raw',
+  'V3DirectResp14ProviderProjectionPrepared',
+  'V3DirectResp15ClientPayloadReady',
   'V3Resp15ClientPayload',
 ];
 for (const node of requiredP6Nodes) {
@@ -54,6 +56,7 @@ const allowedExecutors = new Set([
   'execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug',
   'execute_v3_responses_direct_runtime_kernel_with_transport_and_debug',
   'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation',
+  'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug',
   'execute_v3_responses_direct_runtime_kernel_with_continuation',
   'execute_v3_responses_direct_dry_run_runtime',
   'execute_v3_responses_direct_runtime_kernel',
@@ -73,7 +76,7 @@ const frameFunction = frameFunctionStart >= 0 && frameFunctionEnd > frameFunctio
   ? server.slice(frameFunctionStart, frameFunctionEnd)
   : '';
 const responsesBranch = `${directBranch}\n${frameFunction}`;
-if (!frameFunction.includes('execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation')) {
+if (!frameFunction.includes('execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug')) {
   failures.push('P6 Server entry no longer calls the frozen Runtime kernel');
 }
 if ((frameFunction.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []).length !== 1) {

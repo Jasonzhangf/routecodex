@@ -1,5 +1,8 @@
 import { compileRouteCodexRuntimeManifestWithNative } from '../sharedmodule/helpers/config-direct-native.js';
-import { compileRouteCodexRuntimeConfigManifest } from '../../src/config/user-config-loader.js';
+import { compileRouteCodexRuntimeConfigManifest, materializeRouteCodexConfig } from '../../src/config/user-config-loader.js';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 describe('Rust runtime config materialization', () => {
   function providerConfig(providerId: string, provider: Record<string, unknown>): Record<string, unknown> {
@@ -125,6 +128,71 @@ describe('Rust runtime config materialization', () => {
         }
       ]
     });
+  });
+
+
+  it('materializes providers for every configured router policy group before per-group bootstrap', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'routecodex-provider-root-'));
+    try {
+      const writeProvider = async (providerId: string, model: string) => {
+        const dir = path.join(root, providerId);
+        await mkdir(dir, { recursive: true });
+        await writeFile(path.join(dir, 'config.v2.toml'), `version = "2.0.0"
+providerId = "${providerId}"
+
+[provider]
+id = "${providerId}"
+enabled = true
+type = "openai"
+baseURL = "https://${providerId}.example.test/v1"
+defaultModel = "${model}"
+
+[provider.auth]
+type = "apikey"
+entries = [{ alias = "key1", apiKey = "test-key" }]
+
+[provider.models."${model}"]
+supportsStreaming = true
+capabilities = ["text"]
+`);
+      };
+      await writeProvider('paid', 'paid-model');
+      await writeProvider('free', 'free-model');
+
+      const userConfig = {
+        version: '2.0.0',
+        virtualrouterMode: 'v2',
+        httpserver: {
+          ports: [
+            { port: 5520, mode: 'router', routingPolicyGroup: 'paid_group' },
+            { port: 10000, mode: 'router', routingPolicyGroup: 'free_group' }
+          ]
+        },
+        virtualrouter: {
+          routingPolicyGroups: {
+            paid_group: {
+              routing: { default: [{ id: 'paid-default', targets: ['paid.key1.paid-model'] }] }
+            },
+            free_group: {
+              routing: { default: [{ id: 'free-default', targets: ['free.key1.free-model'] }] }
+            }
+          }
+        }
+      };
+
+      const materialized = await materializeRouteCodexConfig(userConfig, root);
+      const freeManifest = await compileRouteCodexRuntimeConfigManifest(
+        materialized.userConfig,
+        undefined,
+        { routingPolicyGroup: 'free_group' }
+      );
+
+      expect(Object.keys((materialized.userConfig.virtualrouter as any).providers).sort()).toEqual(['free', 'paid']);
+      expect(freeManifest.providerIds).toEqual(['free']);
+      expect(freeManifest.virtualRouterBootstrapInput.providers).toHaveProperty('free');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('fails fast when a forwarder provider target does not declare the requested model', () => {
