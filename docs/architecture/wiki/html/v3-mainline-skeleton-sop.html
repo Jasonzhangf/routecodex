@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>V3 Mainline Skeleton SOP</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>V3 Mainline Skeleton SOP</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-skeleton-sop.md</code></p>
+      </header>
+      <article>
+        <h1>V3 Mainline Skeleton SOP</h1>
+        <p>Status: audited locked by Jason on 2026-07-23. Review surface: <code>docs/architecture/wiki/html/v3-mainline-caller-flow.html</code>. Lock manifest: <code>docs/architecture/v3-architecture-audit-locks.yml</code>.</p>
+        <h2>Locked Scope</h2>
+        <p>The following big-skeleton chains are SOP and cannot change without a Jason manual authorization record in <code>docs/architecture/v3-architecture-audit-locks.yml</code>:</p>
+        <ul>
+          <li><code>v3.config.compile</code></li>
+          <li><code>v3.entry_protocol_endpoint_binding.mainline</code></li>
+          <li><code>v3.server.startup</code></li>
+          <li><code>v3.responses_direct.required_mainline</code></li>
+          <li><code>v3.hub_pipeline.v1.request</code></li>
+          <li><code>v3.hub_pipeline.v1.response</code></li>
+          <li><code>v3.servertool_hook_skeleton_lifecycle</code></li>
+          <li><code>v3.debug_error_foundation.mainline</code></li>
+        </ul>
+        <h2>Debug Entry SOP</h2>
+        <p>1. Open this SOP first for any V3 Hub Pipeline / Direct / Relay / Stopless / servertool / error handling debug. 2. Open the HTML review surface and find the relevant locked chain before reading implementation code. 3. Check the locked chain's contract nodes and resource-flow table. 4. If the issue is outside the locked chain, continue to the relevant branch diagram; if a new pattern is proven, add or update the owning SOP. 5. If a fix would change a locked chain edge, owner, node, resource flow, caller, or callee, stop and record a Jason manual authorization before editing the locked map.</p>
+        <h2>Locked Contract</h2>
+        <ul>
+          <li>Request skeleton is <code>ReqInbound -&gt; ReqChatProcess -&gt; ReqOutbound -&gt; ProviderReqCompat -&gt; ProviderReqOutbound -&gt; Transport</code>.</li>
+          <li>Response skeleton is <code>ProviderRespInbound -&gt; ProviderRespCompat -&gt; RespInbound -&gt; RespChatProcess -&gt; RespContinuation save -&gt; RespOutbound -&gt; Server frame</code>.</li>
+          <li>Direct response projection must pass through Direct-only projection nodes; no provider raw / Resp03 / Resp04 direct-to-client shortcut.</li>
+          <li>Stopless/servertool request-side governance is Req04-owned; response-side governance is Resp03-owned; continuation save is Resp04-owned.</li>
+          <li>Error handling is a resource graph with Error01-06 plus provider health/availability; side-channel is carrier mechanism, not the resource owner.</li>
+          <li>Metadata/debug/snapshot/error carriers must not enter provider body or client normal payload.</li>
+        </ul>
+        <h2>Required Gates</h2>
+        <ul>
+          <li><code>npm run render:v3-mainline-caller-flow</code></li>
+          <li><code>npm run verify:v3-mainline-caller-flow</code></li>
+          <li><code>npm run test:v3-mainline-caller-flow-red-fixtures</code></li>
+          <li><code>npm run verify:v3-architecture-docs</code></li>
+          <li><code>npm run verify:architecture-wiki-html-sync</code></li>
+        </ul>
+        <h2>Change Rule</h2>
+        <p>A locked item fingerprint change is forbidden unless <code>manual_authorizations[]</code> records:</p>
+        <ul>
+          <li><code>authorization_id</code></li>
+          <li><code>item_id</code></li>
+          <li><code>approved_by: Jason</code></li>
+          <li><code>fingerprint_before</code></li>
+          <li><code>fingerprint_after</code></li>
+          <li>reason/scope</li>
+        </ul>
+        <p>Normal architecture gates may continue for unaudited chains, but audited locked chains are immutable without the authorization record.</p>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

@@ -8,6 +8,7 @@ export const V3_CALLER_FLOW_PATH = 'docs/architecture/wiki/v3-mainline-caller-fl
 export const V3_CALLER_FLOW_HTML_PATH = 'docs/architecture/wiki/html/v3-mainline-caller-flow.html';
 export const V3_ARCHITECTURE_AUDIT_LOCKS_PATH = 'docs/architecture/v3-architecture-audit-locks.yml';
 export const V3_RESOURCE_OPERATION_MAP_PATH = 'docs/architecture/v3-resource-operation-map.yml';
+export const V3_MAINLINE_SKELETON_SOP_PATH = 'docs/architecture/wiki/v3-mainline-skeleton-sop.md';
 
 const RESPONSE_DIRECT_TO_CLIENT_TARGETS = new Set([
   'V3ServerRespOutbound06ClientFrame',
@@ -553,6 +554,18 @@ export function auditV3ArchitectureLocks(parsed, locks, previousLocks = null) {
   if (!Array.isArray(locks?.manual_authorizations)) {
     failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: manual_authorizations must be an array`);
   }
+  if (locks?.policy?.gate_audit_status !== 'determined_locked') {
+    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: policy.gate_audit_status must be determined_locked`);
+  }
+  if (locks?.policy?.main_skeleton_sop !== V3_MAINLINE_SKELETON_SOP_PATH) {
+    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: policy.main_skeleton_sop must be ${V3_MAINLINE_SKELETON_SOP_PATH}`);
+  }
+  const requiredLockedChains = Array.isArray(locks?.policy?.required_locked_chains)
+    ? locks.policy.required_locked_chains.map((item) => String(item))
+    : [];
+  if (requiredLockedChains.length === 0) {
+    failures.push(`${V3_ARCHITECTURE_AUDIT_LOCKS_PATH}: policy.required_locked_chains must list the audited main skeleton chains`);
+  }
 
   const seen = new Set();
   for (const item of lockedItems) {
@@ -600,6 +613,10 @@ export function auditV3ArchitectureLocks(parsed, locks, previousLocks = null) {
 
   for (const chain of parsed?.chains ?? []) {
     if (!seen.has(`chain:${chain?.chain_id}`)) warnings.push(`pending manual audit: ${chain?.chain_id}`);
+  }
+  for (const chainId of requiredLockedChains) {
+    const itemId = `chain:${chainId}`;
+    if (!seen.has(itemId)) failures.push(`${itemId}: required main skeleton chain is not audited_locked`);
   }
 
   return { failures, warnings };

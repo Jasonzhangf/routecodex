@@ -5,15 +5,90 @@ review_surface:
   renderer: scripts/architecture/v3-mainline-caller-flow-lib.mjs
 policy:
   resources_and_edges_are_required: true
+  main_skeleton_sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+  gate_audit_status: determined_locked
   unaudited_items_can_change_with_normal_architecture_gates: true
   audited_locked_items_require_jason_manual_authorization: true
   debug_first_checks_locked_sop: true
   after_debug_create_or_update_sop: true
+  required_locked_chains:
+    - v3.config.compile
+    - v3.entry_protocol_endpoint_binding.mainline
+    - v3.server.startup
+    - v3.responses_direct.required_mainline
+    - v3.hub_pipeline.v1.request
+    - v3.hub_pipeline.v1.response
+    - v3.servertool_hook_skeleton_lifecycle
+    - v3.debug_error_foundation.mainline
 manual_review_instruction:
   - Open the HTML review surface.
   - Review the main skeleton, then the relevant standalone branch graph.
   - Provide feedback with chain_id and step_id when an edge/resource/owner is wrong.
   - When Jason explicitly approves a chain, add it to locked_items with the current chain fingerprint.
   - Changing a locked item requires a manual_authorizations record approved_by Jason.
-locked_items: []
+locked_items:
+  - item_id: chain:v3.config.compile
+    chain_id: v3.config.compile
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
+  - item_id: chain:v3.entry_protocol_endpoint_binding.mainline
+    chain_id: v3.entry_protocol_endpoint_binding.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:9ebd6fe03f79c332e18760ccde292cb7fffb90cbd07b1fb1c2ccf9bbeee8b0f6
+  - item_id: chain:v3.server.startup
+    chain_id: v3.server.startup
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:f266fbe1eab21df845296ae90bccff940cb80b71875af9ccfa1086ac1aa46ac0
+  - item_id: chain:v3.responses_direct.required_mainline
+    chain_id: v3.responses_direct.required_mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:3e2f2cf011320ca21e093f093bae2fec3b5debc9f06cc4f0af05b7e95af28fbf
+  - item_id: chain:v3.hub_pipeline.v1.request
+    chain_id: v3.hub_pipeline.v1.request
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:66d3f5549e48833950458b764034374874942d7da96e8e7bdff939feb8310b90
+  - item_id: chain:v3.hub_pipeline.v1.response
+    chain_id: v3.hub_pipeline.v1.response
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:6c9652ec050d62e5c23e4f5b776ea2d531a720e2725064c1cad8daaf148857cb
+  - item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    chain_id: v3.servertool_hook_skeleton_lifecycle
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:b586e01c3670a85fd25df2379802d01a766a402ce49b6349b912c641759d0f6f
+  - item_id: chain:v3.debug_error_foundation.mainline
+    chain_id: v3.debug_error_foundation.mainline
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-23T20:05:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
+    fingerprint: sha256:ba5dd08feae0703033651f1199f1ab191d3dca70d6883e2143468be86bb81f9f
 manual_authorizations: []

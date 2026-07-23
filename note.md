@@ -32692,3 +32692,9 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Unique owner: `v3.crates.routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs`; allowed test owner `v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs`.
 - Forbidden paths: server handler, SSE transport, error projection, routing fallback, runtime config, live process lifecycle.
 - Required verification: focused Anthropic codec red/green, `npm run verify:v3-anthropic-codec-characterization`, `npm run test:v3-anthropic-codec-characterization-red-fixtures`, `npm run verify:v3-module-boundaries`, `cargo fmt --manifest-path v3/Cargo.toml --all -- --check`, `git diff --check`; exact sample dry-run/live replay remains required for runtime closeout after build/install/restart authorization.
+
+# 2026-07-23T21:24:00+08:00 V3 mainline big skeleton lock verification
+- Scope: reviewed already-audited V3 big skeleton lock surface before starting small-skeleton audit.
+- Locked chains: v3.config.compile, v3.entry_protocol_endpoint_binding.mainline, v3.server.startup, v3.responses_direct.required_mainline, v3.hub_pipeline.v1.request, v3.hub_pipeline.v1.response, v3.servertool_hook_skeleton_lifecycle, v3.debug_error_foundation.mainline.
+- Evidence: 8/8 lock fingerprints match current `chainFingerprint`; `verify:v3-mainline-caller-flow` reports 8 locked / 25 pending; red fixtures reject 9 forbidden mutations.
+- Gates passed: render:v3-mainline-caller-flow, verify:v3-mainline-caller-flow, test:v3-mainline-caller-flow-red-fixtures, verify:v3-architecture-docs, verify:architecture-wiki-sync, verify:architecture-wiki-html-sync, browser smoke, git diff --check.

@@ -139,6 +139,39 @@ runExpectFail('missing-caller-symbol', (copy) => {
   console.log('[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: failed as expected');
 }
 
+{
+  const script = `
+    import { auditV3ArchitectureLocks } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    const parsed = ${JSON.stringify(parsed)};
+    const locks = {
+      schema_version: 1,
+      policy: {
+        gate_audit_status: 'determined_locked',
+        main_skeleton_sop: 'docs/architecture/wiki/v3-mainline-skeleton-sop.md',
+        required_locked_chains: ['v3.hub_pipeline.v1.request']
+      },
+      locked_items: [],
+      manual_authorizations: []
+    };
+    const audit = auditV3ArchitectureLocks(parsed, locks);
+    if (!audit.failures.some((failure) => failure.includes('required main skeleton chain is not audited_locked'))) process.exit(0);
+    console.error('required main skeleton chain is not audited_locked');
+    process.exit(1);
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  if (result.status === 0) {
+    console.error('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: expected failure but passed');
+    process.exit(1);
+  }
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (!output.includes('required main skeleton chain is not audited_locked')) {
+    console.error('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: missing expected text');
+    console.error(output);
+    process.exit(1);
+  }
+  console.log('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: failed as expected');
+}
+
 
 {
   const script = `

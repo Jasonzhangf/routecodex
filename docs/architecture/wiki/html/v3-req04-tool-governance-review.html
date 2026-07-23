@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>V3 Req04 Tool Governance Review</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f0e8;
+      --panel: #fffdfa;
+      --ink: #1f241f;
+      --muted: #5f665f;
+      --line: #d9cfbf;
+      --accent: #0f766e;
+      --accent-soft: #dff4ef;
+      --code: #f3efe6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
+        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+    .frame {
+      background: color-mix(in srgb, var(--panel) 94%, white);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
+      overflow: hidden;
+    }
+    header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    article {
+      padding: 28px;
+      line-height: 1.65;
+      font-size: 17px;
+    }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
+    h3 { font-size: 1.25rem; color: var(--accent); }
+    p, ul, table, pre { margin: 0 0 1rem; }
+    ul { padding-left: 1.35rem; }
+    li + li { margin-top: 0.35rem; }
+    code {
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
+      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+    }
+    pre {
+      background: #f8f4ec;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    pre code {
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+    .mermaid {
+      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
+      padding: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      main { padding: 18px 12px 40px; }
+      article, header { padding-left: 16px; padding-right: 16px; }
+      article { font-size: 15px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="frame">
+      <header>
+        <h1>V3 Req04 Tool Governance Review</h1>
+        <p>Canonical Markdown source: <code>docs/architecture/wiki/v3-req04-tool-governance-review.md</code></p>
+      </header>
+      <article>
+        <h1>V3 Req04 Tool Governance Review</h1>
+        <h2>Purpose</h2>
+        <p>This is the small-skeleton review surface for <code>HubReqChatProcess04Governed</code> request-side tool governance.</p>
+        <p>Canonical sources:</p>
+        <ul>
+          <li><code>docs/architecture/v3-mainline-call-map.yml</code></li>
+          <li><code>docs/architecture/v3-resource-operation-map.yml</code></li>
+          <li><code>docs/architecture/v3-architecture-audit-locks.yml</code></li>
+          <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs</code></li>
+          <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</code></li>
+        </ul>
+        <h2>Main Rule</h2>
+        <p>Req04 may govern request-side tool surface and transcript order, but it must not silently delete client/model truth. It may clean only RouteCodex-owned transient artifacts with explicit provenance and completed lifecycle.</p>
+        <h2>Tool Governance Flow</h2>
+        <pre class="mermaid">flowchart TD
+          A[HubReqContinuation03Classified] --&gt; B[Load client tool declarations]
+          B --&gt; C[Load additional_tools items]
+          C --&gt; D[Load historical tool calls and outputs]
+          D --&gt; E[Classify ownership]
+          E --&gt; F{RouteCodex injected artifact with provenance?}
+          F -- no --&gt; G[Preserve client/model/unknown truth]
+          F -- yes --&gt; H{Lifecycle completed?}
+          H -- no --&gt; G
+          H -- yes --&gt; I[Remove only internal transient artifact]
+          G --&gt; J[Inject current internal tools if policy allows]
+          I --&gt; J
+          J --&gt; K[Emit governed tools and transcript]
+          K --&gt; L[HubReqExecution05Planned]</pre>
+        <h2>Resource Matrix</h2>
+        <table>
+        <thead><tr><th>Resource</th><th>Owner</th><th>Rule</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>Client tool declarations</td><td>Client protocol data plane</td><td>Preserve by default; do not delete because a provider cannot consume the exact shape.</td></tr>
+        <tr><td>Historical tool calls</td><td>Transcript truth</td><td>Preserve <code>call_id</code>, <code>name</code>, <code>arguments</code>, and type.</td></tr>
+        <tr><td>Historical tool outputs</td><td>Client feedback truth</td><td>Preserve parse errors, unsupported tool errors, schema rejects, and execution failures.</td></tr>
+        <tr><td>RouteCodex injected tools</td><td>RouteCodex control resource</td><td>Must carry provenance; only this class can be removed by lifecycle cleanup.</td></tr>
+        <tr><td>Restored continuation context</td><td>Req04-owned context truth</td><td>After restore, process with the same governance rules.</td></tr>
+        <tr><td>Metadata/debug/stopless state</td><td>Side-channel control resource</td><td>Never enter provider/client normal payload.</td></tr>
+        </tbody>
+        </table>
+        <h2>Allowed Actions</h2>
+        <ul>
+          <li>Normalize tool declaration shape into the governed tool surface.</li>
+          <li>Inject internal tools such as <code>reasoningStop</code> only when policy allows.</li>
+          <li>Preserve malformed client feedback so the model can correct itself.</li>
+          <li>Validate call/output ordering without deleting one side of a client/model pair.</li>
+          <li>Remove only RouteCodex-owned transient artifacts with explicit provenance and completed lifecycle.</li>
+          <li>Emit diagnostics only through side-channel resources.</li>
+        </ul>
+        <h2>Forbidden Actions</h2>
+        <ul>
+          <li>Delete non-RouteCodex tool calls.</li>
+          <li>Delete non-RouteCodex tool outputs.</li>
+          <li>Delete by matching error text such as <code>failed to parse</code>, <code>unsupported</code>, or <code>unknown tool</code>.</li>
+          <li>Delete only one side of a matching call/output pair.</li>
+          <li>Repair provider-specific fields in Req04.</li>
+          <li>Downgrade <code>tool_call</code> / <code>tool_output</code> into plain text.</li>
+          <li>Put stopless/servertool/debug/snapshot metadata into provider body or client normal payload.</li>
+        </ul>
+        <h2>Review Checklist</h2>
+        <table>
+        <thead><tr><th>Check</th><th>Expected</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td></tr>
+        <tr><td>C1</td><td>No error-text-based cleanup in Req04.</td></tr>
+        <tr><td>C2</td><td>No cleanup of non-provenance tool calls or outputs.</td></tr>
+        <tr><td>C3</td><td>No one-sided deletion of paired call/output events.</td></tr>
+        <tr><td>C4</td><td><code>additional_tools</code> reach provider-visible tools.</td></tr>
+        <tr><td>C5</td><td><code>reasoningStop</code> is injected at most once.</td></tr>
+        <tr><td>C6</td><td>Internal tools do not overwrite client tools without explicit owner rule.</td></tr>
+        <tr><td>C7</td><td>Stopless guidance augments current turn only; it does not clear system/developer/user context.</td></tr>
+        <tr><td>C8</td><td>Provider-specific malformed fields are fixed in ReqOutbound/provider codec.</td></tr>
+        <tr><td>C9</td><td>Cleanup is locked by red fixtures.</td></tr>
+        <tr><td>C10</td><td>Provider dry-run shows final tool list.</td></tr>
+        <tr><td>C11</td><td>Live replay proves old tool-chain errors no longer recur.</td></tr>
+        <tr><td>C12</td><td>Metadata/debug remains side-channel only.</td></tr>
+        </tbody>
+        </table>
+        <h2>Required Red Fixtures</h2>
+        <ul>
+          <li>Preserve malformed ordinary <code>function_call</code>.</li>
+          <li>Preserve parse-error <code>function_call_output</code>.</li>
+          <li>Preserve unknown-tool feedback.</li>
+          <li>Reject one-sided cleanup of a paired call/output.</li>
+          <li>Allow internal stopless cleanup only by RouteCodex provenance.</li>
+          <li>Preserve <code>additional_tools</code>.</li>
+          <li>Keep provider malformed-field repair in codec/builder, not Req04 deletion.</li>
+          <li>Reject metadata/control leaks into provider/client payload.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
