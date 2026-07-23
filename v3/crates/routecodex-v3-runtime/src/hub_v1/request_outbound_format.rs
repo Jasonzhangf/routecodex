@@ -575,7 +575,21 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
             .collect::<Vec<_>>();
         *tools = normalized_tools;
     }
+    ensure_openai_chat_stream_usage_option(&mut normalized);
     normalized
+}
+
+fn ensure_openai_chat_stream_usage_option(payload: &mut Value) {
+    let Some(row) = payload.as_object_mut() else {
+        return;
+    };
+    if row.get("stream").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    if row.contains_key("stream_options") {
+        return;
+    }
+    row.insert("stream_options".to_string(), json!({"include_usage": true}));
 }
 
 fn normalize_openai_chat_provider_tool(tool: &Value) -> Value {

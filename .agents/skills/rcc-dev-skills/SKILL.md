@@ -250,3 +250,9 @@ description: RouteCodex 调试与架构路由入口
 - Interpret dry-run as a real route/outbound/provider-request chain only up to the no-network transport cutpoint. The authoritative evidence is `providerRequest` / `dry_run.provider_request`; `dry_run.response_payload` is a fake protocol-shaped terminal response and must not be used as provider behavior truth.
 - If `providerRequestCaptured=false`, debug the pre-transport owner: route manifest, target selection, provider wire protocol compatibility, or outbound codec. Do not blame provider network or SSE.
 - Anthropic entry dry-run must select an Anthropic provider wire target. If it selects OpenAI Chat, fix the loaded route manifest or target protocol filtering before touching Anthropic codec, SSE, or error projection.
+
+## V3 final route/usage diagnosis guard
+- Trigger: console shows a lower-priority provider/model in `[virtual-router-hit]` or `[usage]`, or usage says `usage=unreported` for a streaming OpenAI Chat provider.
+- First inspect `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request.json` and `provider-response.json`. `attempts[]` is the routing truth; the human `[virtual-router-hit]` line may show only the final successful provider after retry/switch.
+- If an earlier priority candidate has `streamError` or malformed/incomplete raw SSE, debug provider response event codec / provider stream completeness before changing route priority. SSE transport is only framing; missing terminal `finish_reason`, `[DONE]`, or Anthropic `message_stop` is provider event-codec/response-owner evidence.
+- For OpenAI Chat streaming usage, verify provider-bound `stream_options.include_usage=true` and raw final chunks. If requests omit `stream_options`, upstream may emit `usage:null`, causing console `usage=unreported`; fix provider-standard request formatting, not server console fallback.

@@ -50,6 +50,36 @@ fn openai_chat_function_tool_redacted_schema_placeholders_remain_valid_json_sche
 }
 
 #[test]
+fn openai_chat_stream_relay_requests_include_usage_when_client_does_not_set_stream_options() {
+    let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.2",
+        "input": "report usage",
+        "stream": true
+    }))
+    .unwrap();
+
+    assert_eq!(provider["stream"], json!(true));
+    assert_eq!(
+        provider["stream_options"],
+        json!({"include_usage": true}),
+        "OpenAI Chat streaming provider requests must ask upstream for final usage so V3 console usage is not unreported when the upstream supports streaming usage"
+    );
+}
+
+#[test]
+fn openai_chat_stream_relay_requests_preserve_explicit_stream_options() {
+    let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.2",
+        "messages": [{"role": "user", "content": "report usage"}],
+        "stream": true,
+        "stream_options": {"include_usage": false}
+    }))
+    .unwrap();
+
+    assert_eq!(provider["stream_options"], json!({"include_usage": false}));
+}
+
+#[test]
 fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         json!({"messages":[{"role":"user","content":"x"}]}),
