@@ -151,6 +151,65 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
 }
 
 #[test]
+fn req04_preserves_non_injected_tool_parse_error_feedback() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "input":[
+                    {
+                        "type":"function_call",
+                        "call_id":"call_bad",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"cat missing\"}{\"cmd\":\"pwd\"}"
+                    },
+                    {
+                        "type":"function_call",
+                        "call_id":"call_good",
+                        "name":"exec_command",
+                        "arguments":"{\"cmd\":\"pwd\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_bad",
+                        "output":"failed to parse function arguments: trailing characters at line 1 column 22"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_good",
+                        "output":"ok"
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    }
+                ]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .unwrap();
+
+    assert_eq!(governed.tool_output_count(), 2);
+    let input = governed.payload()["input"].as_array().unwrap();
+    assert!(
+        input.iter().any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some("call_bad")
+                && item
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .is_some_and(|output| {
+                        output.contains("failed to parse function arguments")
+                    })
+        }),
+        "client-side tool parse-error feedback is real tool output and must remain visible to the provider"
+    );
+}
+
+#[test]
 fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let valid = json!({

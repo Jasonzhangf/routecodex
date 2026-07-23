@@ -1,5 +1,4 @@
 use super::{
-    is_v3_client_tool_error_output_at_req04, is_v3_client_tool_error_pair_at_req04,
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessCenterState,
     V3StoplessCenterSteering,
@@ -706,16 +705,6 @@ fn active_stopless_cli_output(input: &[Value]) -> Option<(usize, &Value)> {
             return Some((index, item));
         }
         if is_stopless_cli_call(item) {
-            continue;
-        }
-        if is_v3_client_tool_error_output_at_req04(item) {
-            continue;
-        }
-        if index > 0 && is_v3_client_tool_error_pair_at_req04(input, index - 1) {
-            index -= 1;
-            continue;
-        }
-        if is_v3_client_tool_error_pair_at_req04(input, index) {
             continue;
         }
         if is_stopless_reset_boundary_item(item) {
