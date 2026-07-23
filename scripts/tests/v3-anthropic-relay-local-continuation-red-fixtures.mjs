@@ -28,11 +28,11 @@ const codec = files[1];
 const store = files[2];
 const manifest = files[10];
 const cases = [
-  ['remove Resp04 store', runtime, '        commit_or_release_local_continuation(', '        removed_local_continuation(', /Resp04 commit calls/],
-  ['move restore after Req05', runtime, '        merge_restored_local_context_at_req04(', '        delayed_context_merge(', /merge_restored_local_context_at_req04|missing or reordered/],
-  ['add fallback', runtime, '    let mut restored_context = None;', '    let fallback = true;\n    let mut restored_context = None;', /fallback/],
-  ['add required_action inference', runtime, '    let mut restored_context = None;', '    let required_action = true;\n    let mut restored_context = None;', /required_action/],
-  ['add codec owner leak', codec, 'fn encode_messages(', 'const STORE_KEY: &str = "store_key";\nfn encode_messages(', /store_key/],
+  ['remove Resp04 store', runtime, 'commit_or_release_local_continuation(', 'removed_local_continuation(', /Resp04 commit call|missing commit_or_release_local_continuation/],
+  ['move restore after Req05', runtime, 'with_local_context_from_req04_store(', 'delayed_context_restore(', /with_local_context_from_req04_store|missing or reordered/],
+  ['add fallback', runtime, 'let request_outcome = {', 'let fallback = true;\n    let request_outcome = {', /fallback/],
+  ['add required_action inference', runtime, 'let request_outcome = {', 'let required_action = true;\n    let request_outcome = {', /required_action/],
+  ['add codec owner leak', codec, 'use serde_json::{json, Value};', 'use serde_json::{json, Value};\nconst STORE_KEY: &str = "store_key";', /store_key/],
   ['remove Anthropic scope type', store, 'V3LocalContinuationEntryProtocol::Anthropic', 'V3LocalContinuationEntryProtocol::Responses', /V3LocalContinuationEntryProtocol::Anthropic/],
   ['drift immutable edge', manifest, 'step_id: v3-localcont-02', 'step_id: v3-localcont-02x', /edge v3-localcont-02 mismatch/],
 ];

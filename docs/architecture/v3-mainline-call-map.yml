@@ -976,8 +976,8 @@ chains:
         to_node: V3LocalContReq03ExactScopeLoaded
         caller_symbol: execute_v3_anthropic_relay_runtime_inner
         caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-        callee_symbol: V3LocalContinuationStore::restore_at_req04
-        callee_file: v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+        callee_symbol: V3HubContinuationLookup::with_local_context_from_req04_store
+        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
         owner_feature_id: v3.anthropic_relay_local_continuation_integration
         resource_flow: { consumes: [v3.continuation.local_context_truth], produces: [v3.hub.continuation_ownership], side_channel_reads: [v3.continuation.local_context_truth], side_channel_writes: [v3.hub.continuation_ownership] }
         status: anchored

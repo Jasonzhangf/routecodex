@@ -1642,6 +1642,7 @@ features:
     owner_crates: [routecodex-v3-runtime]
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
     resource_bindings:
@@ -1656,11 +1657,13 @@ features:
     entry_symbols:
       - execute_v3_anthropic_relay_runtime_with_local_continuation
       - commit_or_release_local_continuation
+      - V3HubContinuationLookup::with_local_context_from_req04_store
       - merge_v3_relay_restored_local_context_at_req04
       - V3LocalContinuationStore::commit_at_resp04
       - V3LocalContinuationStore::restore_at_req04
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/local_continuation.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
       - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_local_continuation_integration.rs

@@ -131,6 +131,7 @@ requireOrdered(
 requireText(runtime, runtimePath, 'servertool_followup_required');
 forbid(runtime, runtimePath, [
   /hooks\.govern\(resp02,\s*&V3HubRelayResponseHookProfile::empty\(\)\)/,
+  /restore_at_req04\s*\(/,
   /fn\s+resolve_target\s*\(/,
   /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
   /\bprovider_error_output\b|\bprovider_runtime_error_output\b/,
@@ -170,7 +171,7 @@ for (const phrase of [
   'V3ResponsesRelayLocalContinuationState',
   'V3ResponsesRelayLocalContinuationScope',
   'find_responses_tool_output_ids',
-  'with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)',
+  'with_local_context_from_req04_store(',
   'commit_or_release_v3_relay_local_continuation_at_resp04',
   'execute_v3_responses_relay_runtime',
   'execute_v3_responses_relay_dry_run_runtime',
@@ -212,6 +213,7 @@ requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
 forbid(responsesRuntime, responsesRuntimePath, [
   /struct\s+V3ResponsesRelayExcludedAvailability\b/,
   /struct\s+V3ResponsesRelayProviderFailureContext\b/,
+  /restore_at_req04\s*\(/,
   /fn\s+resolve_target\s*\(/,
   /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
   /\.record_provider_failure\s*\(/,

@@ -572,7 +572,7 @@ resources:
     owner_node: V3HubRespContinuation04Committed
     identity: [contextId, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, ownerKind]
     allowed_writers: [V3HubRespContinuation04Committed, commit_or_release_local_continuation, V3LocalContinuationStore::commit_at_resp04, V3LocalContinuationStore::release]
-    allowed_readers: [V3HubReqContinuation03Classified, V3HubReqChatProcess04Governed, execute_v3_anthropic_relay_runtime_with_local_continuation, V3LocalContinuationStore::restore_at_req04]
+    allowed_readers: [V3HubReqContinuation03Classified, V3HubReqChatProcess04Governed, execute_v3_anthropic_relay_runtime_with_local_continuation, V3HubContinuationLookup::with_local_context_from_req04_store, V3LocalContinuationStore::restore_at_req04]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, continuation_store_transport, response_projector, sse_framer]
     may_enter_provider_body: false
     may_enter_client_body: false

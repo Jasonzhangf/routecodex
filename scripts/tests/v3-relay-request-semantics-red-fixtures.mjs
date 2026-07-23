@@ -31,8 +31,8 @@ const fixtures = [
   {
     name: 'Req04 JSON round trip clone',
     relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: 'Ok(Some(Arc::clone(&local.canonical_context)))',
-    to: 'let _copy = serde_json::to_string(&local.canonical_context).unwrap();\n    Ok(Some(Arc::clone(&local.canonical_context)))',
+    from: 'let context = restore_local_context_from_store_at_req04(',
+    to: 'let _copy = serde_json::to_string(store_scope).unwrap();\n            let context = restore_local_context_from_store_at_req04(',
     diagnostic: /Req04 local restore|relay_request\.rs/,
   },
   {

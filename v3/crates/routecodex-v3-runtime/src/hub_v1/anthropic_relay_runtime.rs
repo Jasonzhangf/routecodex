@@ -7,9 +7,8 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailureRetryPolicy,
 };
 use crate::{
-    V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest,
-    V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey, V3LocalContinuationStore,
-    V3LocalContinuationTerminalOutcome,
+    V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
+    V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
@@ -358,48 +357,40 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         server_routing_group(manifest, &input.server_id)?,
         &input.request_id,
     );
-    let lookup =
-        if let (Some(local), Some(context_id)) = (local.as_ref(), requested_local_ids.first()) {
+    let request_outcome = {
+        let local_store_guard =
+            if let (Some(local), Some(_)) = (local.as_ref(), requested_local_ids.first()) {
+                Some(local.state.lock_store()?)
+            } else {
+                None
+            };
+        let lookup = if let (Some(local), Some(context_id)) =
+            (local.as_ref(), requested_local_ids.first())
+        {
             if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
                 return Err(V3AnthropicRelayRuntimeError::LocalContinuationScopeMismatch);
             }
-            let request = V3LocalContinuationReq04RestoreRequest::local(
-                context_id,
-                local.scope.local_key(),
-                local.now_epoch_ms,
-            );
-            let store = local.state.lock_store()?;
-            let context = store
-                .restore_at_req04(&request)?
-                .canonical_context()
-                .clone();
-            for additional_id in requested_local_ids.iter().skip(1) {
-                let additional = store
-                    .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
-                        additional_id,
-                        local.scope.local_key(),
-                        local.now_epoch_ms,
-                    ))?
-                    .canonical_context();
-                if additional != &context {
-                    return Err(V3LocalContinuationError::Codec {
-                        message: "tool results reference different local continuation contexts"
-                            .to_string(),
-                    }
-                    .into());
-                }
-            }
-            drop(store);
+            let store = local_store_guard
+                .as_deref()
+                .ok_or(V3AnthropicRelayRuntimeError::LocalContinuationStatePoisoned)?;
             V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
-                .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
+                .with_local_context_from_req04_store(
+                    context_id,
+                    local.scope.hub_scope(&input.server_id),
+                    store,
+                    local.scope.local_key(),
+                    local.now_epoch_ms,
+                    &requested_local_ids[1..],
+                )?
         } else {
             V3HubContinuationLookup::new(None, base_hub_scope)
         };
-    let request_outcome = compile_v3_hub_relay_request_hooks().run_from_normalized(
-        req02,
-        &lookup,
-        &V3HubServertoolRequestProfile::disabled(),
-    )?;
+        compile_v3_hub_relay_request_hooks().run_from_normalized(
+            req02,
+            &lookup,
+            &V3HubServertoolRequestProfile::disabled(),
+        )?
+    };
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let req04 = request_outcome.into_governed();

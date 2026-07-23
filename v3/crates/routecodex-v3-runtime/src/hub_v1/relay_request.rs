@@ -7,6 +7,10 @@ use super::{
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
     V3HubRequestSemanticProtocol, V3StoplessCenterState,
 };
+use crate::{
+    V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest, V3LocalContinuationScopeKey,
+    V3LocalContinuationStore,
+};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -43,21 +47,50 @@ struct RemoteBinding {
     scope: V3HubContinuationScope,
 }
 #[derive(Debug)]
-struct LocalContext {
-    continuation_id: String,
-    scope: V3HubContinuationScope,
-    canonical_context: Arc<Value>,
+enum LocalContext<'store> {
+    Inline {
+        continuation_id: String,
+        scope: V3HubContinuationScope,
+        canonical_context: Arc<Value>,
+    },
+    Req04Store {
+        continuation_id: String,
+        scope: V3HubContinuationScope,
+        store: &'store V3LocalContinuationStore,
+        store_scope: V3LocalContinuationScopeKey,
+        now_epoch_ms: u64,
+        additional_continuation_ids: Vec<String>,
+    },
+}
+
+impl LocalContext<'_> {
+    fn continuation_id(&self) -> &str {
+        match self {
+            Self::Inline {
+                continuation_id, ..
+            }
+            | Self::Req04Store {
+                continuation_id, ..
+            } => continuation_id,
+        }
+    }
+
+    fn scope(&self) -> &V3HubContinuationScope {
+        match self {
+            Self::Inline { scope, .. } | Self::Req04Store { scope, .. } => scope,
+        }
+    }
 }
 
 #[derive(Debug)]
-pub struct V3HubContinuationLookup {
+pub struct V3HubContinuationLookup<'store> {
     requested_continuation_id: Option<String>,
     request_scope: V3HubContinuationScope,
     remote_binding: Option<RemoteBinding>,
-    local_context: Option<LocalContext>,
+    local_context: Option<LocalContext<'store>>,
 }
 
-impl V3HubContinuationLookup {
+impl<'store> V3HubContinuationLookup<'store> {
     pub fn new(
         requested_continuation_id: Option<&str>,
         request_scope: V3HubContinuationScope,
@@ -86,12 +119,32 @@ impl V3HubContinuationLookup {
         scope: V3HubContinuationScope,
         canonical_context: Value,
     ) -> Self {
-        self.local_context = Some(LocalContext {
+        self.local_context = Some(LocalContext::Inline {
             continuation_id: continuation_id.into(),
             scope,
             canonical_context: Arc::new(canonical_context),
         });
         self
+    }
+
+    pub fn with_local_context_from_req04_store(
+        mut self,
+        continuation_id: &str,
+        hub_scope: V3HubContinuationScope,
+        store: &'store V3LocalContinuationStore,
+        store_scope: V3LocalContinuationScopeKey,
+        now_epoch_ms: u64,
+        additional_continuation_ids: &[String],
+    ) -> Result<Self, V3HubRelayRequestError> {
+        self.local_context = Some(LocalContext::Req04Store {
+            continuation_id: continuation_id.to_owned(),
+            scope: hub_scope,
+            store,
+            store_scope,
+            now_epoch_ms,
+            additional_continuation_ids: additional_continuation_ids.to_vec(),
+        });
+        Ok(self)
     }
 }
 
@@ -330,7 +383,7 @@ impl V3HubRelayRequestHooks {
     pub fn run(
         &self,
         raw: V3HubReqInbound01ClientRaw,
-        lookup: &V3HubContinuationLookup,
+        lookup: &V3HubContinuationLookup<'_>,
         profile: &V3HubServertoolRequestProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         self.run_with_attachment_history_policy(
@@ -344,7 +397,7 @@ impl V3HubRelayRequestHooks {
     pub fn run_with_attachment_history_policy(
         &self,
         raw: V3HubReqInbound01ClientRaw,
-        lookup: &V3HubContinuationLookup,
+        lookup: &V3HubContinuationLookup<'_>,
         profile: &V3HubServertoolRequestProfile,
         attachment_history_policy: V3HubAttachmentHistoryPolicy,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
@@ -370,7 +423,7 @@ impl V3HubRelayRequestHooks {
     pub fn run_from_normalized(
         &self,
         normalized: V3HubReqInbound02Normalized,
-        lookup: &V3HubContinuationLookup,
+        lookup: &V3HubContinuationLookup<'_>,
         profile: &V3HubServertoolRequestProfile,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
         self.run_from_normalized_with_events(
@@ -385,7 +438,7 @@ impl V3HubRelayRequestHooks {
     fn run_from_normalized_with_events(
         &self,
         normalized: V3HubReqInbound02Normalized,
-        lookup: &V3HubContinuationLookup,
+        lookup: &V3HubContinuationLookup<'_>,
         profile: &V3HubServertoolRequestProfile,
         attachment_history_policy: &V3HubAttachmentHistoryPolicy,
         mut events: Vec<V3HubRelayRequestHookEvent>,
@@ -472,7 +525,7 @@ impl V3HubRelayRequestHooks {
 }
 
 fn classify_continuation(
-    lookup: &V3HubContinuationLookup,
+    lookup: &V3HubContinuationLookup<'_>,
 ) -> Result<V3HubContinuationOwnership, V3HubRelayRequestError> {
     let Some(id) = lookup.requested_continuation_id.as_deref() else {
         return Ok(V3HubContinuationOwnership::New);
@@ -480,7 +533,7 @@ fn classify_continuation(
     if lookup
         .local_context
         .as_ref()
-        .is_some_and(|item| item.continuation_id == id)
+        .is_some_and(|item| item.continuation_id() == id)
         && lookup
             .remote_binding
             .as_ref()
@@ -493,9 +546,9 @@ fn classify_continuation(
     if let Some(local) = lookup
         .local_context
         .as_ref()
-        .filter(|item| item.continuation_id == id)
+        .filter(|item| item.continuation_id() == id)
     {
-        if local.scope != lookup.request_scope {
+        if local.scope() != &lookup.request_scope {
             return Err(V3HubRelayRequestError::ContinuationScopeMismatch {
                 continuation_id: id.into(),
             });
@@ -521,7 +574,7 @@ fn classify_continuation(
 
 fn restore_local_context_at_req04(
     ownership: V3HubContinuationOwnership,
-    lookup: &V3HubContinuationLookup,
+    lookup: &V3HubContinuationLookup<'_>,
 ) -> Result<Option<Arc<Value>>, V3HubRelayRequestError> {
     if ownership != V3HubContinuationOwnership::RouteCodexLocalOwned {
         return Ok(None);
@@ -529,16 +582,80 @@ fn restore_local_context_at_req04(
     let Some(requested_id) = lookup.requested_continuation_id.as_deref() else {
         return Err(V3HubRelayRequestError::ContinuationIdMissingAtRestore);
     };
-    let Some(local) = lookup
-        .local_context
-        .as_ref()
-        .filter(|item| item.continuation_id == requested_id && item.scope == lookup.request_scope)
-    else {
+    let Some(local) = lookup.local_context.as_ref().filter(|item| {
+        item.continuation_id() == requested_id && item.scope() == &lookup.request_scope
+    }) else {
         return Err(V3HubRelayRequestError::LocalContextMissingAtRestore {
             continuation_id: requested_id.to_owned(),
         });
     };
-    Ok(Some(Arc::clone(&local.canonical_context)))
+    match local {
+        LocalContext::Inline {
+            canonical_context, ..
+        } => Ok(Some(Arc::clone(canonical_context))),
+        LocalContext::Req04Store {
+            store,
+            store_scope,
+            now_epoch_ms,
+            additional_continuation_ids,
+            ..
+        } => {
+            let context = restore_local_context_from_store_at_req04(
+                store,
+                requested_id,
+                store_scope,
+                *now_epoch_ms,
+            )?;
+            for additional_id in additional_continuation_ids {
+                let additional = restore_local_context_from_store_at_req04(
+                    store,
+                    additional_id,
+                    store_scope,
+                    *now_epoch_ms,
+                )?;
+                if additional != context {
+                    return Err(V3HubRelayRequestError::RestoredLocalContextInvalid {
+                        reason: "tool outputs reference different local continuation contexts"
+                            .to_string(),
+                    });
+                }
+            }
+            Ok(Some(Arc::new(context)))
+        }
+    }
+}
+
+fn restore_local_context_from_store_at_req04(
+    store: &V3LocalContinuationStore,
+    context_id: &str,
+    scope: &V3LocalContinuationScopeKey,
+    now_epoch_ms: u64,
+) -> Result<Value, V3HubRelayRequestError> {
+    let request =
+        V3LocalContinuationReq04RestoreRequest::local(context_id, scope.clone(), now_epoch_ms);
+    store
+        .restore_at_req04(&request)
+        .map(|restored| restored.canonical_context().clone())
+        .map_err(|error| map_local_continuation_restore_error_at_req04(context_id, error))
+}
+
+fn map_local_continuation_restore_error_at_req04(
+    context_id: &str,
+    error: V3LocalContinuationError,
+) -> V3HubRelayRequestError {
+    match error {
+        V3LocalContinuationError::NotFound { .. } => V3HubRelayRequestError::ContinuationNotFound {
+            continuation_id: context_id.to_owned(),
+        },
+        V3LocalContinuationError::ScopeMismatch { .. } => {
+            V3HubRelayRequestError::ContinuationScopeMismatch {
+                continuation_id: context_id.to_owned(),
+            }
+        }
+        other => V3HubRelayRequestError::RestoredLocalContextInvalid {
+            reason: other.to_string(),
+        },
+    }
 }
 
 fn govern_protocol_tool_identity_at_req04(

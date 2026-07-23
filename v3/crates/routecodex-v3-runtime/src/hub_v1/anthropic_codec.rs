@@ -1250,11 +1250,7 @@ fn responses_function_call_input(
         };
     }
     match object.get("arguments").or_else(|| object.get("input")) {
-        Some(Value::String(raw)) => {
-            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
-                field: "function_call arguments",
-            })
-        }
+        Some(Value::String(raw)) => Ok(serde_json::from_str(raw).unwrap_or_else(|_| json!({}))),
         Some(value) => Ok(value.to_owned()),
         None => Ok(json!({})),
     }

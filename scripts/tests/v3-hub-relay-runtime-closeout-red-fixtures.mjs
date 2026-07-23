@@ -143,9 +143,16 @@ const cases = [
   {
     name: 'responses relay local continuation restore removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)',
-    mutation: 'removed_relay_restore_at_req04',
-    diagnostic: /missing with_local_context\(context_id, local.scope.hub_scope\(&input.server_id\), context\)/,
+    marker: 'with_local_context_from_req04_store(',
+    mutation: 'removed_relay_restore_at_req04(',
+    diagnostic: /missing with_local_context_from_req04_store/,
+  },
+  {
+    name: 'responses relay runtime restores local continuation outside Req04 owner',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'let store = local_store_guard',
+    mutation: 'let _forbidden_runtime_restore = store.restore_at_req04(&request)?;\n            let store = local_store_guard',
+    diagnostic: /restore_at_req04|forbidden/,
   },
   {
     name: 'responses relay local continuation commit removed',

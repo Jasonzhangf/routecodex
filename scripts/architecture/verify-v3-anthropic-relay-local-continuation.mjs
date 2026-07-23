@@ -49,20 +49,18 @@ for (const phrase of [
 
 for (const phrase of [
   'find_anthropic_tool_result_ids(&input.payload)?',
-  'restore_at_req04(&request)?',
+  'with_local_context_from_req04_store(',
   'run_from_normalized(',
-  'merge_restored_local_context_at_req04(',
   'hooks.commit(resp03)?',
   'commit_or_release_local_continuation(',
   'V3LocalContinuationTerminalOutcome::NonTerminal',
-  'store.release(context_id)',
+  'store.release_in_scope(&local.scope.local_key(), context_id)',
 ]) requireText('runtime', phrase);
 const resp04CommitBindingCount = text.runtime.match(/commit_or_release_local_continuation\(/g)?.length ?? 0;
-if (resp04CommitBindingCount !== 3) failures.push(`runtime expected two Resp04 commit calls plus one owner definition, found ${resp04CommitBindingCount}`);
+if (resp04CommitBindingCount !== 2) failures.push(`runtime expected one Resp04 commit call plus one owner definition, found ${resp04CommitBindingCount}`);
 requireOrder('runtime', [
-  'restore_at_req04(&request)?',
+  'with_local_context_from_req04_store(',
   'run_from_normalized(',
-  'merge_restored_local_context_at_req04(',
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(',
 ]);
 for (const phrase of [
@@ -84,7 +82,7 @@ for (const node of nodes) requireText('wiki', node);
 for (const node of nodes) requireText('html', node);
 for (const phrase of ['CONTROLLED JSON/SSE VERIFIED', 'implementation plan', 'test design', 'machine manifest']) requireText('html', phrase);
 
-forbid('runtime', [/fallback/i, /required_action/i, /unwrap_or_default\s*\(/, /history[_ -]?repair|context[_ -]?rebuild/i]);
+forbid('runtime', [/fallback/i, /required_action/i, /restore_at_req04\s*\(/, /history[_ -]?repair|context[_ -]?rebuild/i]);
 forbid('codec', [/metadata_center|debug_snapshot|continuation_owner|store_key/i, /unwrap_or_default\s*\(/]);
 forbid('server', [/V3AnthropicRelayLocalContinuationState|commit_or_release_local_continuation|restore_at_req04/]);
 forbid('kernel', [/V3AnthropicRelayLocalContinuationState|commit_or_release_local_continuation/]);

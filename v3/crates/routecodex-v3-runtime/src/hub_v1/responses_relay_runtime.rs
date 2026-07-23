@@ -8,7 +8,6 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailureRetryPolicy, V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS,
     V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
-use crate::V3LocalContinuationReq04RestoreRequest;
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
@@ -1303,44 +1302,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         server_routing_group(manifest, &input.server_id)?,
         &input.request_id,
     );
-    let lookup = if let (Some(local), Some(context_id)) =
-        (local.as_ref(), local_tool_output_ids.restore_ids.first())
-    {
-        if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
-            return Err(V3ResponsesRelayRuntimeError::LocalContinuationScopeMismatch);
-        }
-        let request = V3LocalContinuationReq04RestoreRequest::local(
-            context_id,
-            local.scope.local_key(),
-            local.now_epoch_ms,
-        );
-        let store = local.state.lock_store()?;
-        let context = store
-            .restore_at_req04(&request)?
-            .canonical_context()
-            .clone();
-        for additional_id in local_tool_output_ids.restore_ids.iter().skip(1) {
-            let additional = store
-                .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
-                    additional_id,
-                    local.scope.local_key(),
-                    local.now_epoch_ms,
-                ))?
-                .canonical_context();
-            if additional != &context {
-                return Err(V3LocalContinuationError::Codec {
-                    message: "tool outputs reference different local continuation contexts"
-                        .to_string(),
-                }
-                .into());
-            }
-        }
-        drop(store);
-        V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
-            .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
-    } else {
-        V3HubContinuationLookup::new(None, base_hub_scope)
-    };
     let request_stopless_control_state =
         load_v3_responses_relay_stopless_control_state(manifest, stopless_control.as_ref())?;
     let request_hook_profile = responses_relay_request_hook_profile(
@@ -1350,11 +1311,41 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         &transition_request_id,
         transition_updated_at,
     );
-    let request_outcome = compile_v3_hub_relay_request_hooks().run_from_normalized(
-        req02,
-        &lookup,
-        &request_hook_profile,
-    )?;
+    let request_outcome = {
+        let local_store_guard = if let (Some(local), Some(_)) =
+            (local.as_ref(), local_tool_output_ids.restore_ids.first())
+        {
+            Some(local.state.lock_store()?)
+        } else {
+            None
+        };
+        let lookup = if let (Some(local), Some(context_id)) =
+            (local.as_ref(), local_tool_output_ids.restore_ids.first())
+        {
+            if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
+                return Err(V3ResponsesRelayRuntimeError::LocalContinuationScopeMismatch);
+            }
+            let store = local_store_guard
+                .as_deref()
+                .ok_or(V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned)?;
+            V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
+                .with_local_context_from_req04_store(
+                    context_id,
+                    local.scope.hub_scope(&input.server_id),
+                    store,
+                    local.scope.local_key(),
+                    local.now_epoch_ms,
+                    &local_tool_output_ids.restore_ids[1..],
+                )?
+        } else {
+            V3HubContinuationLookup::new(None, base_hub_scope)
+        };
+        compile_v3_hub_relay_request_hooks().run_from_normalized(
+            req02,
+            &lookup,
+            &request_hook_profile,
+        )?
+    };
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let stopless_state = request_outcome.stopless_state().cloned();

@@ -100,10 +100,11 @@ forbidAll(req04, 'Req04 Chat Process governance', [
 
 requireAll(restore, 'Req04 local restore', [
   'V3HubContinuationOwnership::RouteCodexLocalOwned',
-  'Arc::clone(&local.canonical_context)',
+  'LocalContext::Req04Store',
+  'restore_local_context_from_store_at_req04',
   'LocalContextMissingAtRestore',
 ]);
-if ((restore.match(/Arc::clone/g) ?? []).length !== 1) fail('Req04 local restore must use exactly one Arc clone of canonical context');
+if ((restore.match(/restore_local_context_from_store_at_req04/g) ?? []).length < 1) fail('Req04 local restore must restore store-backed context inside Req04 owner');
 forbidAll(restore, 'Req04 local restore', [
   /serde_json::(?:to_value|from_value|to_string|from_str|to_vec|from_slice)/,
   /payload\.clone\s*\(/,

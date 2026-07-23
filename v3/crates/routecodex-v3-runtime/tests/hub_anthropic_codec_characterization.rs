@@ -378,6 +378,60 @@ fn responses_consecutive_tool_calls_group_before_results_for_anthropic_order() {
 }
 
 #[test]
+fn responses_malformed_function_call_arguments_become_empty_anthropic_input_and_preserve_feedback_pair(
+) {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": true,
+        "input": [
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"continue the task"}]
+            },
+            {
+                "type":"function_call",
+                "call_id":"call_8bdfda0c2e5b45d08a6b10db",
+                "name":"exec_command",
+                "arguments":"{\"cmd\": \"cat -n apps/api/src/composite-preview.js | head -80\", \"workdir\": \"/Volumes/extension/code/OneStop\"}{\"cmd\": \"cat -n apps/api/src/composite-preview.js | sed -n '80,180p'\", \"workdir\": \"/Volumes/extension/code/OneStop\"}"
+            },
+            {
+                "type":"function_call_output",
+                "call_id":"call_8bdfda0c2e5b45d08a6b10db",
+                "output":"failed to parse function arguments: trailing characters at line 1 column 109"
+            }
+        ]
+    }))
+    .expect("malformed ordinary Responses function_call arguments must not produce invalid Anthropic provider wire");
+
+    let messages = provider_request["messages"]
+        .as_array()
+        .expect("Anthropic messages");
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
+    assert_eq!(
+        messages[1]["content"][0]["id"],
+        json!("call_8bdfda0c2e5b45d08a6b10db")
+    );
+    assert_eq!(messages[1]["content"][0]["name"], json!("exec_command"));
+    assert_eq!(messages[1]["content"][0]["input"], json!({}));
+    assert_eq!(messages[2]["role"], json!("user"));
+    assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
+    assert_eq!(
+        messages[2]["content"][0]["tool_use_id"],
+        json!("call_8bdfda0c2e5b45d08a6b10db")
+    );
+    assert_eq!(
+        messages[2]["content"][0]["content"],
+        json!("failed to parse function arguments: trailing characters at line 1 column 109")
+    );
+    let serialized = serde_json::to_string(&provider_request).expect("Anthropic request JSON");
+    assert!(!serialized.contains("composite-preview.js | head -80"));
+    assert!(!serialized.contains("composite-preview.js | sed -n"));
+}
+
+#[test]
 fn responses_tool_output_without_immediate_call_group_fails_before_provider_wire() {
     let err = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
