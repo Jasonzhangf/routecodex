@@ -229,7 +229,8 @@ Req04 Chat Process:
 
 - 先完成 `/v1/responses` continuation/local context restore。
 - 当前 `exec_command` call/output 只是 no-op 完成证据。
-- Req04 删除 stopless shell pair 和旧 stopless artifacts；保留更早真实 user/assistant/unrelated tool history 和原工具声明。
+- Req04 只能删除 RouteCodex 自己注入的 stopless shell pair 和旧 stopless artifacts；所有非注入的真实 user/assistant/tool history 和原工具声明必须原样保留。
+- 普通工具失败也是客户端对模型的真实反馈。即使 output 是 `failed to parse function arguments`、`unsupported call:`、未知工具、参数校验失败或执行失败，也必须与对应 call 成对进入 provider history，让模型知道错误并自我修正；禁止按错误文本删除 call、output 或 pair。
 - Req04 必须同时删除之前由 stopless 生成的 continuation/guideline user message；该 guideline 只是当前轮 provider-facing 临时提示，不属于会话历史，下一轮只能重新生成一条。
 - Req04 根据 StoplessCenter 状态机输出普通 provider-facing continuation/guideline：
   - 所有 no-op 续轮都必须是完整 guideline，不再使用单独的 `继续。` 作为全部提示。
@@ -324,6 +325,7 @@ SOP/docs/gate 红锁
 - 只看第一轮 `requires_action` 就说 stopless 正常；必须看下一轮 provider request。
 - 只断言工具 name；必须断言工具声明语义等价。
 - 为了“续上”collapse 全 history；只能删除匹配 stopless shell pair，保留真实历史。
+- 把客户端拒绝普通工具后的错误 output 当作“无进展噪音”清理；这会留下 orphan call、破坏会话对称性，并让模型失去修正依据。
 - 把 stopless generated continuation/guideline 当真实用户历史保存并逐轮累积。
 - provider-request dry-run 推进/清空 live StoplessCenter，或用 fake provider response 触发真实状态迁移。
 - 把 guard 终止说成任务完成。
