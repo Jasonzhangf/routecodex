@@ -18,6 +18,7 @@ mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+const EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS: usize = 3;
 
 #[derive(Debug)]
 struct ProviderCapture {
@@ -230,7 +231,17 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     let error_body: Value = error_response.json().await.unwrap();
     assert_eq!(error_body["error"]["message"], "controlled rate limit");
-    let _error_capture = captures_rx.recv().await.unwrap();
+    let mut error_captures = Vec::new();
+    for _ in 0..EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS {
+        error_captures.push(captures_rx.recv().await.unwrap());
+    }
+    for capture in error_captures {
+        assert_eq!(
+            capture.body.pointer("/messages/0/content"),
+            Some(&json!("fail"))
+        );
+        assert!(capture.body.get("metadata_center").is_none());
+    }
 
     let isolation_response = client
         .post(&endpoint)

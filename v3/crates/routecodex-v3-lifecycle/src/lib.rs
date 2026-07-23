@@ -478,15 +478,29 @@ impl V3ManagedLifecycle {
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
-        if !instance_dir.join("instance.json").exists()
-            || !instance_dir.join("pid.cache").exists()
-            || !instance_dir.join("control.json").exists()
-        {
-            return Err(V3LifecycleError::NotRunning(declaration.instance_id));
-        }
+        let (control_instance_dir, mut control_declaration, _previous_owner_lock) =
+            if instance_has_control_truth(&instance_dir) {
+                (instance_dir.clone(), declaration.clone(), None)
+            } else {
+                let previous_owner =
+                    find_live_previous_owner_for_restart(&self.state_root, &declaration)?;
+                let Some((previous_instance_dir, previous_declaration)) = previous_owner else {
+                    return Err(V3LifecycleError::NotRunning(
+                        declaration.instance_id.clone(),
+                    ));
+                };
+                let previous_owner_lock =
+                    acquire_operation_lock(&previous_instance_dir, "restart")?;
+                (
+                    previous_instance_dir,
+                    previous_declaration,
+                    Some(previous_owner_lock),
+                )
+            };
+        control_declaration.executable_path = declaration.executable_path.clone();
         let response = match send_restart_control(
-            &instance_dir,
-            &declaration,
+            &control_instance_dir,
+            &control_declaration,
             self.force_snapshots,
             self.force_snapshot_stages.clone(),
         )
@@ -565,7 +579,16 @@ impl V3ManagedLifecycle {
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
-        verify_published_declaration(&instance_dir, &declaration)?;
+        if let Err(error) = verify_published_declaration(&instance_dir, &declaration) {
+            if !adopt_exec_restart_declaration_change(
+                &self.state_root,
+                &instance_dir,
+                &declaration,
+            )? {
+                return Err(error);
+            }
+            verify_published_declaration(&instance_dir, &declaration)?;
+        }
         let start_nonce = new_start_nonce(&declaration.instance_id);
         let socket_path = managed_control_socket_path(&declaration.instance_id);
         remove_restart_plan_for_previous_control_identity(&instance_dir, &start_nonce)?;
@@ -991,6 +1014,272 @@ async fn send_control_without_timeout(
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).await?;
     Ok(serde_json::from_str(&line)?)
+}
+
+fn instance_has_control_truth(instance_dir: &Path) -> bool {
+    instance_dir.join("instance.json").exists()
+        && instance_dir.join("pid.cache").exists()
+        && instance_dir.join("control.json").exists()
+}
+
+fn find_live_previous_owner_for_restart(
+    state_root: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<Option<(PathBuf, V3ManagedInstanceDeclaration)>, V3LifecycleError> {
+    let candidates = find_previous_owner_candidates_for_restart(state_root, expected)?;
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [(instance_dir, declaration)] => Ok(Some((instance_dir.clone(), declaration.clone()))),
+        _ => Err(V3LifecycleError::IdentityMismatch(format!(
+            "multiple live previous managed owners match restart declaration {}",
+            expected.instance_id
+        ))),
+    }
+}
+
+fn find_previous_owner_candidates_for_restart(
+    state_root: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<Vec<(PathBuf, V3ManagedInstanceDeclaration)>, V3LifecycleError> {
+    let instances_root = state_root.join("instances");
+    if !instances_root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(instances_root)? {
+        let instance_dir = entry?.path();
+        if !instance_dir.is_dir() {
+            continue;
+        }
+        let declaration_path = instance_dir.join("instance.json");
+        if !declaration_path.exists() {
+            continue;
+        }
+        let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
+            continue;
+        };
+        if !previous_owner_matches_restart_declaration(&published, expected) {
+            continue;
+        }
+        if !previous_owner_has_live_control_truth(&instance_dir, &published)? {
+            continue;
+        }
+        candidates.push((instance_dir, published));
+    }
+    candidates.sort_by(|(_, left), (_, right)| left.instance_id.cmp(&right.instance_id));
+    Ok(candidates)
+}
+
+fn previous_owner_matches_restart_declaration(
+    published: &V3ManagedInstanceDeclaration,
+    expected: &V3ManagedInstanceDeclaration,
+) -> bool {
+    published.instance_id != expected.instance_id
+        && published.config_path == expected.config_path
+        && listener_sets_overlap(&published.listeners, &expected.listeners)
+}
+
+fn previous_owner_has_live_control_truth(
+    instance_dir: &Path,
+    published: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    if !instance_has_control_truth(instance_dir) {
+        return Ok(false);
+    }
+    let pid: V3ManagedPidCache = read_json(&instance_dir.join("pid.cache"))?;
+    let control: V3ManagedControlRecord = read_json(&instance_dir.join("control.json"))?;
+    if pid.instance_id != published.instance_id
+        || control.instance_id != published.instance_id
+        || pid.start_nonce != control.start_nonce
+    {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "previous restart owner pid/control cache does not match declaration".to_string(),
+        ));
+    }
+    if !pid_is_alive(pid.pid) {
+        return Ok(false);
+    }
+    let socket_path = PathBuf::from(&control.socket_path);
+    if socket_path != managed_control_socket_path(&published.instance_id) || !socket_path.exists() {
+        return Ok(false);
+    }
+    let status_path = instance_dir.join("status.json");
+    if status_path.exists() {
+        let status: V3ManagedStatusRecord = read_json(&status_path)?;
+        if status.instance_id != published.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "previous restart owner status does not match declaration".to_string(),
+            ));
+        }
+        if matches!(
+            status.state,
+            V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+        ) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn adopt_exec_restart_declaration_change(
+    state_root: &Path,
+    current_instance_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    if current_instance_dir.join("instance.json").exists() {
+        return Ok(false);
+    }
+    let candidates = find_exec_restart_adoption_candidates(state_root, expected)?;
+    let (previous_instance_dir, previous_declaration) = match candidates.as_slice() {
+        [] => return Ok(false),
+        [(instance_dir, declaration)] => (instance_dir.clone(), declaration.clone()),
+        _ => {
+            return Err(V3LifecycleError::IdentityMismatch(format!(
+                "multiple exec restart adoption candidates match declaration {}",
+                expected.instance_id
+            )))
+        }
+    };
+    ensure_private_dir(current_instance_dir)?;
+    write_json_atomic(&current_instance_dir.join("instance.json"), expected)?;
+    write_status(
+        current_instance_dir,
+        &expected.instance_id,
+        V3ManagedRunState::Starting,
+        Some(format!(
+            "exec restart adopted changed declaration from {}",
+            previous_declaration.instance_id
+        )),
+    )?;
+    cleanup_previous_exec_restart_owner(&previous_instance_dir, &previous_declaration, expected)?;
+    Ok(true)
+}
+
+fn find_exec_restart_adoption_candidates(
+    state_root: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<Vec<(PathBuf, V3ManagedInstanceDeclaration)>, V3LifecycleError> {
+    let instances_root = state_root.join("instances");
+    if !instances_root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(instances_root)? {
+        let instance_dir = entry?.path();
+        if !instance_dir.is_dir() {
+            continue;
+        }
+        let declaration_path = instance_dir.join("instance.json");
+        if !declaration_path.exists() {
+            continue;
+        }
+        let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
+            continue;
+        };
+        if !previous_owner_matches_restart_declaration(&published, expected) {
+            continue;
+        }
+        if !exec_restart_adoption_candidate_matches_current_process(&instance_dir, &published)? {
+            continue;
+        }
+        candidates.push((instance_dir, published));
+    }
+    candidates.sort_by(|(_, left), (_, right)| left.instance_id.cmp(&right.instance_id));
+    Ok(candidates)
+}
+
+fn exec_restart_adoption_candidate_matches_current_process(
+    instance_dir: &Path,
+    published: &V3ManagedInstanceDeclaration,
+) -> Result<bool, V3LifecycleError> {
+    let pid_path = instance_dir.join("pid.cache");
+    if !pid_path.exists() {
+        return Ok(false);
+    }
+    let pid: V3ManagedPidCache = read_json(&pid_path)?;
+    if pid.instance_id != published.instance_id || pid.pid != std::process::id() {
+        return Ok(false);
+    }
+    let status_path = instance_dir.join("status.json");
+    if !status_path.exists() {
+        return Ok(false);
+    }
+    let status: V3ManagedStatusRecord = read_json(&status_path)?;
+    if status.instance_id != published.instance_id || status.state != V3ManagedRunState::Starting {
+        return Ok(false);
+    }
+    let control_path = instance_dir.join("control.json");
+    if control_path.exists() {
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != published.instance_id || control.start_nonce != pid.start_nonce {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "exec restart adoption candidate pid/control cache does not match".to_string(),
+            ));
+        }
+        if PathBuf::from(&control.socket_path)
+            != managed_control_socket_path(&published.instance_id)
+        {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "exec restart adoption candidate has non-canonical control socket".to_string(),
+            ));
+        }
+    }
+    Ok(true)
+}
+
+fn cleanup_previous_exec_restart_owner(
+    previous_instance_dir: &Path,
+    previous: &V3ManagedInstanceDeclaration,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    let control_path = previous_instance_dir.join("control.json");
+    if control_path.exists() {
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != previous.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to cleanup previous restart owner control for a different instance"
+                    .to_string(),
+            ));
+        }
+        let socket_path = PathBuf::from(&control.socket_path);
+        if socket_path != managed_control_socket_path(&previous.instance_id) {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to cleanup previous restart owner non-canonical socket".to_string(),
+            ));
+        }
+        if socket_path.exists() {
+            fs::remove_file(socket_path)?;
+        }
+        fs::remove_file(control_path)?;
+    }
+    for file in ["pid.cache", RESTART_PLAN_FILE] {
+        let path = previous_instance_dir.join(file);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+    }
+    write_status(
+        previous_instance_dir,
+        &previous.instance_id,
+        V3ManagedRunState::Stopped,
+        Some(format!(
+            "exec restart transferred managed ownership to {}",
+            expected.instance_id
+        )),
+    )?;
+    Ok(())
+}
+
+fn listener_sets_overlap(
+    left: &[V3ManagedListenerDeclaration],
+    right: &[V3ManagedListenerDeclaration],
+) -> bool {
+    let right_ports = right
+        .iter()
+        .map(|listener| listener.port)
+        .collect::<BTreeSet<_>>();
+    left.iter()
+        .any(|listener| right_ports.contains(&listener.port))
 }
 
 fn control_restart_plan(
@@ -1809,6 +2098,27 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         (config, executable, state)
     }
 
+    fn managed_test_declaration(
+        instance_id: &str,
+        config_path: &Path,
+        config_digest: &str,
+        executable_path: &str,
+        port: u16,
+    ) -> V3ManagedInstanceDeclaration {
+        V3ManagedInstanceDeclaration {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            config_path: config_path.display().to_string(),
+            config_digest: config_digest.to_string(),
+            executable_path: executable_path.to_string(),
+            listeners: vec![V3ManagedListenerDeclaration {
+                server_id: "responses_v3_5555".to_string(),
+                bind: "0.0.0.0".to_string(),
+                port,
+            }],
+        }
+    }
+
     #[test]
     fn deterministic_identity_and_unknown_state_fields_fail() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
@@ -1956,6 +2266,119 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
             !instance_dir.join("status.json").exists(),
             "restart without live managed truth must not publish startup status"
         );
+    }
+
+    #[test]
+    fn restart_discovers_live_previous_owner_when_config_digest_changed() {
+        let root = TempDir::new().unwrap();
+        let state = root.path().join("state");
+        let config_path = root.path().join("config.v3.toml");
+        let old = managed_test_declaration(
+            "v3-previous-digest-owner",
+            &config_path,
+            "old-digest",
+            "/tmp/old-rccv3",
+            45551,
+        );
+        let expected = managed_test_declaration(
+            "v3-current-digest-owner",
+            &config_path,
+            "new-digest",
+            "/tmp/new-rccv3",
+            45551,
+        );
+        let old_dir = state.join("instances").join(&old.instance_id);
+        ensure_private_dir(&old_dir).unwrap();
+        write_json_atomic(&old_dir.join("instance.json"), &old).unwrap();
+        write_status(&old_dir, &old.instance_id, V3ManagedRunState::Running, None).unwrap();
+        let socket_path = managed_control_socket_path(&old.instance_id);
+        fs::write(&socket_path, b"live previous owner socket marker").unwrap();
+        write_json_atomic(
+            &old_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: old.instance_id.clone(),
+                pid: std::process::id(),
+                start_nonce: "previous-owner".to_string(),
+                started_at_epoch_ms: 1,
+            },
+        )
+        .unwrap();
+        write_json_atomic(
+            &old_dir.join("control.json"),
+            &V3ManagedControlRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: old.instance_id.clone(),
+                socket_path: socket_path.display().to_string(),
+                start_nonce: "previous-owner".to_string(),
+            },
+        )
+        .unwrap();
+
+        let owner = find_live_previous_owner_for_restart(&state, &expected)
+            .unwrap()
+            .expect("changed-digest restart must find the previous live owner");
+
+        assert_eq!(owner.1.instance_id, old.instance_id);
+        let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
+        let root = TempDir::new().unwrap();
+        let state = root.path().join("state");
+        let config_path = root.path().join("config.v3.toml");
+        let old = managed_test_declaration(
+            "v3-previous-exec-owner",
+            &config_path,
+            "old-digest",
+            "/tmp/old-rccv3",
+            45552,
+        );
+        let expected = managed_test_declaration(
+            "v3-current-exec-owner",
+            &config_path,
+            "new-digest",
+            "/tmp/new-rccv3",
+            45552,
+        );
+        let old_dir = state.join("instances").join(&old.instance_id);
+        let expected_dir = state.join("instances").join(&expected.instance_id);
+        ensure_private_dir(&old_dir).unwrap();
+        write_json_atomic(&old_dir.join("instance.json"), &old).unwrap();
+        write_status(
+            &old_dir,
+            &old.instance_id,
+            V3ManagedRunState::Starting,
+            Some("exec restart accepted".to_string()),
+        )
+        .unwrap();
+        write_json_atomic(
+            &old_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: old.instance_id.clone(),
+                pid: std::process::id(),
+                start_nonce: "previous-exec-owner".to_string(),
+                started_at_epoch_ms: 1,
+            },
+        )
+        .unwrap();
+
+        assert!(
+            adopt_exec_restart_declaration_change(&state, &expected_dir, &expected).unwrap(),
+            "exec-reentered child must adopt the current declaration"
+        );
+
+        let adopted: V3ManagedInstanceDeclaration =
+            read_json(&expected_dir.join("instance.json")).unwrap();
+        let adopted_status: V3ManagedStatusRecord =
+            read_json(&expected_dir.join("status.json")).unwrap();
+        let old_status: V3ManagedStatusRecord = read_json(&old_dir.join("status.json")).unwrap();
+        assert_eq!(adopted, expected);
+        assert_eq!(adopted_status.state, V3ManagedRunState::Starting);
+        assert_eq!(old_status.state, V3ManagedRunState::Stopped);
+        assert!(!old_dir.join("pid.cache").exists());
     }
 
     #[test]

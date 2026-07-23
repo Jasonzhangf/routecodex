@@ -14,7 +14,7 @@ const cases = [
   ['Responses Direct re-entry', 'let mut trace = Vec::with_capacity(17);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(17);', /ResponsesDirect/],
   ['dynamic hooks', 'compile_v3_hub_v1_static_registry()', 'std::fs::read_dir(".").unwrap(); compile_v3_hub_v1_static_registry()', /read_dir|dynamic/],
   ['raw SSE materialization', 'routecodex_v3_sse::SseIncrementalDecoder::new(', 'let sse_frames = Vec::new(); routecodex_v3_sse::SseIncrementalDecoder::new(', /sse_frames/],
-  ['internal metadata leak', 'use std::collections::VecDeque;', 'const INTERNAL: &str = "metadata_center";\nuse std::collections::VecDeque;', /metadata_center/],
+  ['internal metadata leak', 'use std::collections::{BTreeMap, BTreeSet, VecDeque};', 'const INTERNAL: &str = "metadata_center";\nuse std::collections::{BTreeMap, BTreeSet, VecDeque};', /metadata_center/],
 ];
 const copied = [
   runtime,

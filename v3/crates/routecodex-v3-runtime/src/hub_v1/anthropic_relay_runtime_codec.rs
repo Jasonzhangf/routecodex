@@ -410,7 +410,12 @@ fn project_v3_anthropic_message_as_sse_events(
                     .ok_or(V3AnthropicCodecError::MalformedField {
                         field: "tool_use name",
                     })?;
-                let input = part.get("input").cloned().unwrap_or_else(|| json!({}));
+                let input =
+                    part.get("input")
+                        .cloned()
+                        .ok_or(V3AnthropicCodecError::MalformedField {
+                            field: "tool_use input",
+                        })?;
                 if !input.is_object() {
                     return Err(V3AnthropicCodecError::MalformedField {
                         field: "tool_use input",
@@ -496,5 +501,28 @@ fn responses_stop_reason_as_anthropic_stop_reason(
             Some("incomplete") => "max_tokens",
             _ => "end_turn",
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_sse_projection_rejects_tool_use_without_input() {
+        let error = project_v3_anthropic_message_as_sse_events(&json!({
+            "id":"msg_missing_input",
+            "type":"message",
+            "role":"assistant",
+            "content":[{"type":"tool_use","id":"call_missing_input","name":"lookup"}]
+        }))
+        .expect_err("missing tool_use input must not be synthesized as an empty object");
+
+        assert_eq!(
+            error,
+            V3AnthropicCodecError::MalformedField {
+                field: "tool_use input"
+            }
+        );
     }
 }

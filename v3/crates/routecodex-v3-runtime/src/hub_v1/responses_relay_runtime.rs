@@ -2527,6 +2527,13 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
     provider_semantic_body: &Value,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    if is_v3_openai_chat_zero_output_provider_diagnostic_payload(payload) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat provider returned zero-output upstream diagnostic instead of model output"
+                .to_string(),
+        ));
+    }
+
     let choices = payload
         .get("choices")
         .and_then(Value::as_array)
@@ -2613,6 +2620,42 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
         response.insert("usage".to_string(), usage);
     }
     Ok(Value::Object(response))
+}
+
+fn is_v3_openai_chat_zero_output_provider_diagnostic_payload(payload: &Value) -> bool {
+    let Some(usage) = extract_v3_runtime_usage_summary(payload) else {
+        return false;
+    };
+    if usage.input_tokens != Some(0)
+        || usage.output_tokens != Some(0)
+        || usage.total_tokens != Some(0)
+    {
+        return false;
+    }
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                choice.get("finish_reason").and_then(Value::as_str) == Some("stop")
+                    && choice
+                        .get("message")
+                        .and_then(Value::as_object)
+                        .is_some_and(|message| {
+                            message
+                                .get("tool_calls")
+                                .and_then(Value::as_array)
+                                .is_none_or(Vec::is_empty)
+                                && message.get("content").and_then(Value::as_str).is_some_and(
+                                    |content| {
+                                        content
+                                            .trim_start()
+                                            .starts_with("upstream returned zero output tokens")
+                                    },
+                                )
+                        })
+            })
+        })
 }
 
 fn build_v3_responses_reasoning_item_from_openai_chat_message(
@@ -3424,6 +3467,11 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                     "Anthropic provider event stream event is malformed: {error}"
                 ))
             })?;
+            if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    message,
+                ));
+            }
             characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
                 event.clone(),
                 V3HubProviderWireProtocol::Anthropic,
@@ -3906,6 +3954,11 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
                     "OpenAI Chat provider event stream event is malformed: {error}"
                 ))
             })?;
+            if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    message,
+                ));
+            }
             if terminal_seen && is_v3_openai_chat_empty_sse_tail_sentinel(&event) {
                 continue;
             }
@@ -4180,6 +4233,11 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
                 "V3 Responses Relay response event payload is malformed: {error}"
             ))
         })?;
+        if let Some(message) = extract_v3_provider_event_error_payload_message(&event) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                message,
+            ));
+        }
         observation
             .record_event(&event)
             .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
@@ -4258,9 +4316,64 @@ fn parse_v3_runtime_sse_frame_fields(
     }
     let data = data.trim();
     if data.is_empty() {
+        if let Some(message) = extract_v3_provider_event_error_message_from_sse_frame(frame) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                message,
+            ));
+        }
         return Ok(None);
     }
     Ok(Some((event_type, data.to_string())))
+}
+
+fn extract_v3_provider_event_error_message_from_sse_frame(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+) -> Option<String> {
+    let raw = reconstruct_v3_runtime_sse_frame_text(frame)?;
+    let payload = serde_json::from_str::<Value>(&raw).ok()?;
+    extract_v3_provider_event_error_payload_message(&payload)
+}
+
+fn reconstruct_v3_runtime_sse_frame_text(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+) -> Option<String> {
+    let mut lines = Vec::new();
+    for field in frame.frame().fields() {
+        match field {
+            SseField::Comment(value) => lines.push(format!(":{value}")),
+            SseField::Named { name, value } if value.is_empty() => lines.push(name.clone()),
+            SseField::Named { name, value } => lines.push(format!("{name}: {value}")),
+        }
+    }
+    let text = lines.join("\n");
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn extract_v3_provider_event_error_payload_message(payload: &Value) -> Option<String> {
+    let error = payload.get("error")?;
+    match error {
+        Value::Object(error) => {
+            let message = read_v3_trimmed_string(error.get("message"))
+                .or_else(|| read_v3_trimmed_string(error.get("error")))
+                .or_else(|| read_v3_trimmed_string(error.get("detail")));
+            let error_type = read_v3_trimmed_string(error.get("type"))
+                .or_else(|| read_v3_trimmed_string(error.get("code")));
+            match (error_type, message) {
+                (Some(error_type), Some(message)) => {
+                    Some(format!("provider event error {error_type}: {message}"))
+                }
+                (Some(error_type), None) => Some(format!("provider event error {error_type}")),
+                (None, Some(message)) => Some(format!("provider event error: {message}")),
+                (None, None) => None,
+            }
+        }
+        Value::String(message) => {
+            let message = message.trim();
+            (!message.is_empty()).then(|| format!("provider event error: {message}"))
+        }
+        _ => None,
+    }
 }
 
 fn collect_v3_runtime_responses_event_payload_evidence(
@@ -4876,6 +4989,115 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
     }
 
     #[test]
+    fn openai_chat_zero_output_upstream_diagnostic_is_provider_error() {
+        let error = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_zero_output_diagnostic",
+                "model": "glm-5.2",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "upstream returned zero output tokens, input_tokens=76100",
+                        "reasoning_content": "Let me rethink this one step at a time."
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0
+                }
+            }),
+            &json!({
+                "tools": [{"type":"function","function":{"name":"exec_command"}}]
+            }),
+        )
+        .expect_err("zero-output upstream diagnostic must be provider failure, not success");
+
+        assert!(
+            error
+                .to_string()
+                .contains("zero-output upstream diagnostic"),
+            "wrong error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let raw_sse = concat!(
+            "data: {\"id\":\"chatcmpl_zero_output_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Let me rethink this one step at a time.\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
+            "data: {\"id\":\"chatcmpl_zero_output_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"content\":\"upstream returned zero output tokens, input_tokens=76100\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
+            "data: {\"id\":\"chatcmpl_zero_output_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}],\"usage\":null}\n\n",
+            "data: {\"id\":\"chatcmpl_zero_output_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"glm-5.2\",\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0,\"input_tokens\":0,\"output_tokens\":0,\"completion_tokens_details\":{\"reasoning_tokens\":0}}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+        let provider_payload =
+            build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+                provider,
+                &observation,
+            )
+            .await
+            .expect("stream diagnostic materializes before semantic projection");
+
+        let error = build_v3_responses_provider_response_from_openai_chat_payload(
+            &provider_payload,
+            &json!({
+                "tools": [{"type":"function","function":{"name":"exec_command"}}]
+            }),
+        )
+        .expect_err("stream zero-output upstream diagnostic must not enter stopless");
+
+        assert!(
+            error
+                .to_string()
+                .contains("zero-output upstream diagnostic"),
+            "wrong error: {error}"
+        );
+        assert_eq!(
+            observation
+                .snapshot()
+                .expect("stream observation")
+                .finish_reason
+                .as_deref(),
+            Some("stop")
+        );
+    }
+
+    #[test]
+    fn openai_chat_visible_zero_output_text_with_real_usage_remains_success() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_visible_text",
+                "model": "glm-5.2",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "upstream returned zero output tokens is only quoted text here"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 9,
+                    "total_tokens": 21
+                }
+            }),
+            &json!({"tools":[]}),
+        )
+        .expect("visible content with real usage must stay a valid response");
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(
+            response["output"][0]["text"],
+            "upstream returned zero output tokens is only quoted text here"
+        );
+    }
+
+    #[test]
     fn openai_chat_provider_reasoning_content_projects_before_tool_call() {
         let response = build_v3_responses_provider_response_from_openai_chat_payload(
             &json!({
@@ -5315,6 +5537,23 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
     }
 
     #[tokio::test]
+    async fn provider_sse_raw_json_error_body_exposes_upstream_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"{\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
+        )]));
+        let error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("new_api_panic"));
+        assert!(error.to_string().contains("Panic detected"));
+    }
+
+    #[tokio::test]
     async fn provider_sse_done_terminal_aggregates_and_projects_completed_frames() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![
@@ -5461,6 +5700,42 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert!(error
             .to_string()
             .contains("Anthropic provider event stream ended without message_stop"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_raw_json_error_body_exposes_upstream_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"{\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
+        )]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("new_api_panic"));
+        assert!(error.to_string().contains("Panic detected"));
+    }
+
+    #[tokio::test]
+    async fn openai_chat_provider_sse_raw_json_error_body_exposes_upstream_error() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"{\"error\":{\"message\":\"Panic detected\",\"type\":\"new_api_panic\"}}\n\n".to_vec(),
+        )]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("new_api_panic"));
+        assert!(error.to_string().contains("Panic detected"));
     }
 
     #[tokio::test]
