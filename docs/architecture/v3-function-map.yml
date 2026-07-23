@@ -1656,7 +1656,7 @@ features:
     entry_symbols:
       - execute_v3_anthropic_relay_runtime_with_local_continuation
       - commit_or_release_local_continuation
-      - merge_restored_local_context_at_req04
+      - merge_v3_relay_restored_local_context_at_req04
       - V3LocalContinuationStore::commit_at_resp04
       - V3LocalContinuationStore::restore_at_req04
     allowed_paths:

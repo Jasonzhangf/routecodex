@@ -201,6 +201,96 @@ impl ResponsesTransport for ErrorTransport {
     }
 }
 
+struct ReselectTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ReselectTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        if provider_id == "primary" {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id,
+                    status: 500,
+                    headers: vec![],
+                    body: br#"{"error":{"type":"server_error","message":"primary failed"}}"#
+                        .to_vec(),
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"chatcmpl-reselect",
+                "object":"chat.completion",
+                "model":"chat-wire-model",
+                "created":1234567890,
+                "choices":[{
+                    "index":0,
+                    "message":{"role":"assistant","content":"secondary success","refusal":null},
+                    "finish_reason":"stop"
+                }]
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn provider_http_failure_reselects_next_candidate_before_client_projection() {
+    let transport = ReselectTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest_with_two_providers(),
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-provider-reselect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"use the available provider"}],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["primary", "secondary"]
+    );
+    assert_eq!(output.status, 200);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(output.error_chain.is_none());
+    let client_response = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => value,
+        V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(
+        client_response["choices"][0]["message"]["content"],
+        "secondary success"
+    );
+    assert!(
+        !client_response.to_string().contains("primary failed"),
+        "failed candidate error must not be projected while another candidate succeeds"
+    );
+}
+
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let output = execute_v3_openai_chat_relay_runtime(
@@ -556,6 +646,49 @@ capabilities = ["text", "tools"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn manifest_with_two_providers() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.controlled]
+bind = "127.0.0.1"
+port = 1
+routing_group = "controlled"
+endpoints = ["openai_chat"]
+[providers.primary]
+type = "openai_chat"
+base_url = "http://primary.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "primary", env = "V3_OPENAI_CHAT_PRIMARY_KEY" }] }
+[providers.primary.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools"]
+[providers.secondary]
+type = "openai_chat"
+base_url = "http://secondary.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "secondary", env = "V3_OPENAI_CHAT_SECONDARY_KEY" }] }
+[providers.secondary.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools"]
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "primary", model = "chat-wire-model", key = "primary", priority = 1 },
+  { kind = "provider_model", provider = "secondary", model = "chat-wire-model", key = "secondary", priority = 2 }
+]
 "#,
         )
         .unwrap(),

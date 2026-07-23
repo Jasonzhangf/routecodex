@@ -260,11 +260,12 @@ fn local_continuation_context_ids(
     canonical_context: &Value,
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
-    let non_internal_ids = call_ids
-        .iter()
-        .filter(|id| !is_v3_stopless_internal_call_id(id))
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut non_internal_ids = Vec::new();
+    for id in &call_ids {
+        if !is_v3_stopless_internal_call_id(id) {
+            non_internal_ids.push(id.clone());
+        }
+    }
     if !non_internal_ids.is_empty() {
         return Ok(non_internal_ids);
     }

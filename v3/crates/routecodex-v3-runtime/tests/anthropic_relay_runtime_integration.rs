@@ -322,6 +322,89 @@ impl ResponsesTransport for ErrorTransport {
     }
 }
 
+struct ReselectTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ReselectTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        if provider_id == "primary" {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id,
+                    status: 500,
+                    headers: vec![],
+                    body: br#"{"error":{"type":"server_error","message":"primary failed"}}"#
+                        .to_vec(),
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"resp_reselect",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"secondary success"}]
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn provider_http_failure_reselects_next_candidate_before_client_projection() {
+    let transport = ReselectTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest_with_two_providers(),
+        V3AnthropicRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-provider-reselect".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "messages":[{"role":"user","content":"use the available provider"}],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["primary", "secondary"]
+    );
+    assert_eq!(output.status, 200);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(output.error_chain.is_none());
+    assert_eq!(
+        output.client_response["content"][0]["text"],
+        "secondary success"
+    );
+    assert!(
+        !output
+            .client_response
+            .to_string()
+            .contains("primary failed"),
+        "failed candidate error must not be projected while another candidate succeeds"
+    );
+}
+
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let output = execute_v3_anthropic_relay_runtime(
@@ -435,6 +518,51 @@ capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reaso
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn manifest_with_two_providers() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.controlled]
+bind = "127.0.0.1"
+port = 1
+routing_group = "controlled"
+endpoints = ["anthropic"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "responses-wire-model"
+auth = { type = "api_key", entries = [{ alias = "primary", env = "V3_ANTHROPIC_PRIMARY_KEY" }] }
+[providers.primary.models.responses-wire-model]
+wire_name = "responses-wire-model"
+aliases = ["claude-client-alias"]
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
+[providers.secondary]
+type = "responses"
+base_url = "http://secondary.invalid/v1"
+default_model = "responses-wire-model"
+auth = { type = "api_key", entries = [{ alias = "secondary", env = "V3_ANTHROPIC_SECONDARY_KEY" }] }
+[providers.secondary.models.responses-wire-model]
+wire_name = "responses-wire-model"
+aliases = ["claude-client-alias"]
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 1 },
+  { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 2 }
+]
 "#,
         )
         .unwrap(),

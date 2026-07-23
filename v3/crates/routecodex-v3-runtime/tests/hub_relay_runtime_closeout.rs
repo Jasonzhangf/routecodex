@@ -1439,6 +1439,17 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         observability.unavailable_candidates,
         vec!["limited:key1:gpt-5.5".to_string()]
     );
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let provider_event = &observability.provider_failure_events[0];
+    assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
+    assert_eq!(provider_event.status, 502);
+    assert_eq!(provider_event.action, "switch_provider");
+    assert_eq!(
+        provider_event.next_provider_key.as_deref(),
+        Some("minimax:key1:MiniMax-M3")
+    );
+    assert_eq!(provider_event.failure_count, 1);
+    assert_eq!(provider_event.health_state, "healthy");
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
@@ -1470,7 +1481,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             &provider_health,
             V3ResponsesRelayRetryPolicy {
                 same_candidate_retries: 3,
-                retry_delay_ms: 0,
+                retry_delay_ms: 1,
             },
         )
         .await
@@ -1484,6 +1495,30 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
                 .and_then(|observability| observability.provider_key.as_deref()),
             Some("minimax:key1:MiniMax-M3")
         );
+        let observability = output
+            .observability
+            .as_ref()
+            .expect("successful reroute must keep provider failure observability");
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        assert_eq!(
+            observability.provider_failure_events[0].action,
+            "switch_provider"
+        );
+        if turn > 0 {
+            assert_eq!(observability.provider_failure_events[0].wait_ms, Some(1));
+        } else {
+            assert_eq!(observability.provider_failure_events[0].wait_ms, None);
+        }
+        if turn == 2 {
+            assert_eq!(observability.provider_failure_events[0].failure_count, 3);
+            assert_eq!(
+                observability.provider_failure_events[0].health_state,
+                "cooldown"
+            );
+            assert!(observability.provider_failure_events[0]
+                .cooldown_until_ms
+                .is_some());
+        }
     }
 
     let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -1501,7 +1536,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         &provider_health,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 3,
-            retry_delay_ms: 0,
+            retry_delay_ms: 1,
         },
     )
     .await
@@ -1520,6 +1555,10 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
     assert!(observability
         .unavailable_candidates
         .contains(&"limited:key1:gpt-5.5".to_string()));
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "cooled provider must be skipped before network send; no new provider error event belongs to this request"
+    );
 
     let captures = transport.captures.lock().unwrap();
     let provider_sequence: Vec<&str> = captures
@@ -1984,7 +2023,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning"]
+capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]

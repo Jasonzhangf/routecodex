@@ -151,7 +151,7 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
 }
 
 #[test]
-fn req04_drops_malformed_shell_like_function_call_and_parse_error_output() {
+fn req04_preserves_malformed_shell_like_function_call_and_parse_error_output() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks
         .run(
@@ -192,13 +192,22 @@ fn req04_drops_malformed_shell_like_function_call_and_parse_error_output() {
         )
         .unwrap();
 
-    assert_eq!(governed.tool_output_count(), 1);
+    assert_eq!(governed.tool_output_count(), 2);
     let input = governed.payload()["input"].as_array().unwrap();
     assert!(
-        !input
+        input
             .iter()
             .any(|item| item.get("call_id").and_then(Value::as_str) == Some("call_bad")),
-        "malformed shell-like call history must be consumed before provider wire: {input:?}"
+        "non-injected malformed shell-like call history must remain provider-visible so client/model feedback continuity is preserved: {input:?}"
+    );
+    assert!(
+        input
+            .iter()
+            .any(
+                |item| item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                    && item.get("call_id").and_then(Value::as_str) == Some("call_bad")
+            ),
+        "non-injected parse-error output must remain paired with its call: {input:?}"
     );
     assert!(
         input.iter().any(

@@ -620,14 +620,15 @@ fn build_stopless_cli_projection_payload(payload: &Value) -> Value {
         .and_then(|object| object.get("id"))
         .cloned()
         .unwrap_or_else(|| json!("resp_stopless_projected"));
-    let output = build_stopless_passthrough_visible_payload(payload)
-        .get("output")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|item| !is_provider_tool_call_item(item))
-        .collect::<Vec<_>>();
+    let visible_payload = build_stopless_passthrough_visible_payload(payload);
+    let mut output = Vec::new();
+    if let Some(items) = visible_payload.get("output").and_then(Value::as_array) {
+        for item in items {
+            if !is_provider_tool_call_item(item) {
+                output.push(item.clone());
+            }
+        }
+    }
     let assistant_stop_text = extract_current_assistant_stop_text(payload);
     let mut output =
         build_stopless_client_visible_projection_output(output, assistant_stop_text.as_str());

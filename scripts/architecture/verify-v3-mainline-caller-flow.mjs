@@ -58,6 +58,9 @@ const lockAudit = auditV3ArchitectureLocks(parsed, locks, previousLocks);
 for (const edge of audit.forbiddenDirectProjection) {
   failures.push(`forbidden direct response projection edge: ${edge.chain_id}/${edge.step_id} ${edge.from_node} -> ${edge.to_node}`);
 }
+for (const edge of audit.invalidAggregateEntry) {
+  failures.push(`invalid aggregate wrapper edge: ${edge.chain_id}/${edge.step_id} ${edge.from_node} -> ${edge.to_node} must use edge_kind=aggregate_entry_edge`);
+}
 for (const edge of sourceAudit.forbiddenRegisteredHooks) {
   failures.push(`forbidden source registered direct response edge: ${edge.source_path} ${edge.input_node} -> ${edge.output_node}`);
 }

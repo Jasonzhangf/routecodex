@@ -23,9 +23,11 @@ V3HubReqInbound01ClientRaw
   -> V3HubReqExecution05Planned
   -> V3HubReqTarget06Resolved
   -> V3HubReqOutbound07ProviderSemantic
+  -> ProviderReqCompat06ProviderCompat
   -> V3ProviderReqOutbound08WirePayload
   -> V3ProviderReqOutbound09TransportRequest
   -> V3ProviderRespInbound01Raw
+  -> ProviderRespCompat02ProviderCompat
   -> V3HubRespInbound02Normalized
   -> V3HubRespChatProcess03Governed
   -> V3HubRespContinuation04Committed
@@ -66,6 +68,7 @@ client protocol request
   -> V3HubReqExecution05Planned: choose Relay execution mode from Manifest facts and current request
   -> V3HubReqTarget06Resolved: route or validate pinned target through the standard target node
   -> V3HubReqOutbound07ProviderSemantic: normalize Chat semantics to provider-neutral outbound intent
+  -> ProviderReqCompat06ProviderCompat: apply provider-family protocol compatibility without Hub/VR provider-specific branches
   -> V3ProviderReqOutbound08WirePayload: adapt to the selected provider wire protocol
   -> V3ProviderReqOutbound09TransportRequest: build the standard provider transport request
 ~~~
@@ -79,8 +82,8 @@ Allowed request work:
   servertool request hooks, history/context governance, and Relay request logic.
 - Req05 may plan Direct/Relay and target-resolution mode; it does not touch normal payload.
 - Req06 may perform routed or pinned target resolution and target-local selection only.
-- Req07/Req08 may convert current Chat semantics to provider semantic and wire shapes; no tool or
-  history governance is allowed there.
+- Req07/ProviderReqCompat06/Req08 may convert current Chat semantics to provider semantic,
+  provider-family compatibility, and wire shapes; no tool or history governance is allowed there.
 - Req09 may build auth/transport only; provider health mutation remains inside Provider runtime.
 
 Forbidden request work:
@@ -98,6 +101,7 @@ Relay response processing is the reverse semantic path:
 
 ~~~text
 provider raw response
+  -> ProviderRespCompat02ProviderCompat: apply provider-family response compatibility without Hub/VR provider-specific branches
   -> V3HubRespInbound02Normalized: parse provider raw response to Hub response semantic
   -> V3HubRespChatProcess03Governed: run response tool harvest, servertool response hooks,
      response logic, and final semantic governance
@@ -108,7 +112,8 @@ provider raw response
 
 Allowed response work:
 
-- Resp01/Resp02 may parse provider JSON/SSE/raw bodies into canonical response semantics.
+- Resp01/ProviderRespCompat02/Resp02 may parse provider JSON/SSE/raw bodies into canonical
+  response semantics through the provider compatibility boundary.
 - Resp03 is the only response-side owner for tool harvest, servertool response hooks, response
   business logic, terminal/non-terminal semantic judgment, and finalization before save.
 - Resp04 is the only owner for continuation commit.

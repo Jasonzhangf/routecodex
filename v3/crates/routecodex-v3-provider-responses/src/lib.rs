@@ -9,7 +9,7 @@ pub mod wire;
 pub use error::{V3ProviderError, V3ProviderHttpFailure};
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
-    V3ProviderAvailabilityRegistry, V3ProviderHealthStore,
+    V3ProviderAvailabilityRegistry, V3ProviderFailureRecord, V3ProviderHealthStore,
 };
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,

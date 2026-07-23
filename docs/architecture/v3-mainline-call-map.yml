@@ -806,10 +806,10 @@ chains:
         to_node: V3HubReqTarget06Resolved
         caller_symbol: execute_v3_anthropic_relay_runtime
         caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-        callee_symbol: resolve_target
-        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        callee_symbol: build_v3_hub_req_target_06_from_v3_hub_req_execution_05
+        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs
         owner_feature_id: v3.anthropic_relay_runtime_integration
-        resource_flow: { consumes: [v3.hub.execution_plan, v3.request.normal_payload], produces: [v3.hub.resolved_target], side_channel_reads: [v3.config.published_manifest, v3.hub.execution_plan], side_channel_writes: [v3.hub.resolved_target] }
+        resource_flow: { consumes: [v3.hub.execution_plan, v3.route.selection_plan], produces: [v3.hub.resolved_target], side_channel_reads: [v3.provider.availability_projection], side_channel_writes: [] }
         status: anchored
       - step_id: v3-anthropic-relay-07
         from_node: V3HubReqTarget06Resolved
@@ -984,10 +984,10 @@ chains:
       - step_id: v3-localcont-03
         from_node: V3LocalContReq03ExactScopeLoaded
         to_node: V3LocalContReq04RestoredGoverned
-        caller_symbol: execute_v3_anthropic_relay_runtime_inner
-        caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-        callee_symbol: merge_restored_local_context_at_req04
-        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        caller_symbol: V3HubRelayRequestHooks::run_from_normalized
+        caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+        callee_symbol: merge_v3_relay_restored_local_context_at_req04
+        callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
         owner_feature_id: v3.anthropic_relay_local_continuation_integration
         resource_flow: { consumes: [v3.continuation.local_context_truth, v3.request.normal_payload, v3.hub.continuation_ownership], produces: [v3.request.normal_payload], side_channel_reads: [v3.continuation.local_context_truth], side_channel_writes: [] }
         status: anchored

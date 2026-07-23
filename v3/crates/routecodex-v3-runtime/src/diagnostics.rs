@@ -8,9 +8,11 @@ use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 
-pub fn project_v3_virtual_router_status(
+pub fn project_v3_virtual_router_status<R: V3ProviderAvailabilityReader>(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
+    availability: &R,
+    now_ms: u64,
 ) -> Result<Value, String> {
     let server = manifest
         .servers
@@ -24,7 +26,7 @@ pub fn project_v3_virtual_router_status(
     let pools = group
         .pools
         .values()
-        .map(|pool| route_pool_status_snapshot(manifest, &group.id, pool))
+        .map(|pool| route_pool_status_snapshot(manifest, &group.id, pool, availability, now_ms))
         .collect::<Vec<Value>>();
     let providers = group
         .pools
@@ -40,8 +42,11 @@ pub fn project_v3_virtual_router_status(
                 "hits": 0
             }
         },
-        "health": {},
-        "forwarders": manifest.forwarders.values().map(forwarder_status_snapshot).collect::<Vec<Value>>()
+        "health": {
+            "source": "process_local_provider_health",
+            "nowMs": now_ms
+        },
+        "forwarders": manifest.forwarders.values().map(|forwarder| forwarder_status_snapshot(forwarder, availability, now_ms)).collect::<Vec<Value>>()
     }))
 }
 
@@ -125,7 +130,7 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
     };
     Ok(json!({
         "ok": true,
-        "status": project_v3_virtual_router_status(manifest, server_id)?,
+        "status": project_v3_virtual_router_status(manifest, server_id, availability, now_ms)?,
         "diagnosticInput": {
             "serverId": server_id,
             "entryEndpoint": endpoint,
@@ -141,24 +146,42 @@ fn route_pool_status_snapshot(
     manifest: &V3Config05ManifestPublished,
     route_name: &str,
     pool: &V3RoutePoolManifest,
+    availability: &impl V3ProviderAvailabilityReader,
+    now_ms: u64,
 ) -> Value {
     let resolved_forwarders = pool
         .targets
         .iter()
         .filter_map(|target| target.id.as_ref())
         .filter_map(|id| manifest.forwarders.get(id))
-        .map(forwarder_status_snapshot)
+        .map(|forwarder| forwarder_status_snapshot(forwarder, availability, now_ms))
         .collect::<Vec<Value>>();
     let configured_targets = pool
         .targets
         .iter()
         .map(route_pool_target_label)
         .collect::<Vec<String>>();
-    let resolved_targets = pool
+    let resolved_target_details = pool
         .targets
         .iter()
-        .flat_map(|target| route_target_provider_keys(manifest, target))
+        .flat_map(|target| route_target_provider_statuses(manifest, target, availability, now_ms))
+        .collect::<Vec<Value>>();
+    let resolved_targets = resolved_target_details
+        .iter()
+        .filter_map(|target| target.get("providerKey").and_then(Value::as_str))
+        .map(str::to_string)
         .collect::<Vec<String>>();
+    let available_targets = resolved_target_details
+        .iter()
+        .filter(|target| target.get("available").and_then(Value::as_bool) == Some(true))
+        .filter_map(|target| target.get("providerKey").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<String>>();
+    let unavailable_providers = resolved_target_details
+        .iter()
+        .filter(|target| target.get("available").and_then(Value::as_bool) == Some(false))
+        .cloned()
+        .collect::<Vec<Value>>();
     json!({
         "routeName": route_name,
         "poolId": pool.id,
@@ -166,41 +189,64 @@ fn route_pool_status_snapshot(
         "configuredTargets": configured_targets,
         "resolvedTargets": resolved_targets,
         "resolvedForwarders": resolved_forwarders,
-        "availableTargets": resolved_targets,
-        "unavailableProviders": [],
+        "availableTargets": available_targets,
+        "unavailableProviders": unavailable_providers,
+        "targetStatuses": resolved_target_details,
         "defaultFloor": pool.id == "default" && !pool.targets.is_empty()
     })
 }
 
-fn forwarder_status_snapshot(forwarder: &V3ForwarderManifest) -> Value {
+fn forwarder_status_snapshot(
+    forwarder: &V3ForwarderManifest,
+    availability: &impl V3ProviderAvailabilityReader,
+    now_ms: u64,
+) -> Value {
     let targets = forwarder
         .targets
         .iter()
-        .map(forwarder_target_status_snapshot)
+        .map(|target| forwarder_target_status_snapshot(target, availability, now_ms))
         .collect::<Vec<Value>>();
     let target_provider_keys = forwarder
         .targets
         .iter()
         .map(forwarder_target_label)
         .collect::<Vec<String>>();
+    let available_provider_keys = targets
+        .iter()
+        .filter(|target| target.get("available").and_then(Value::as_bool) == Some(true))
+        .filter_map(|target| target.get("providerKey").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<String>>();
+    let unavailable_providers = targets
+        .iter()
+        .filter(|target| target.get("available").and_then(Value::as_bool) == Some(false))
+        .cloned()
+        .collect::<Vec<Value>>();
     json!({
         "forwarderId": forwarder.id,
         "modelId": forwarder.model,
         "strategy": format!("{:?}", forwarder.selection.strategy),
         "targetProviderKeys": target_provider_keys,
-        "availableProviderKeys": target_provider_keys,
-        "unavailableProviders": [],
-        "available": forwarder.enabled && !forwarder.targets.is_empty(),
+        "availableProviderKeys": available_provider_keys,
+        "unavailableProviders": unavailable_providers,
+        "available": forwarder.enabled && targets.iter().any(|target| target.get("available").and_then(Value::as_bool) == Some(true)),
         "targets": targets
     })
 }
 
-fn forwarder_target_status_snapshot(target: &V3ForwarderTargetManifest) -> Value {
-    json!({
-        "providerKey": forwarder_target_label(target),
-        "available": true,
-        "reasons": []
-    })
+fn forwarder_target_status_snapshot(
+    target: &V3ForwarderTargetManifest,
+    availability: &impl V3ProviderAvailabilityReader,
+    now_ms: u64,
+) -> Value {
+    provider_target_status_snapshot(
+        forwarder_target_label(target),
+        target.provider.as_deref(),
+        target.key.as_deref(),
+        target.model.as_deref(),
+        availability,
+        now_ms,
+    )
 }
 
 fn route_target_provider_keys(
@@ -222,6 +268,72 @@ fn route_target_provider_keys(
             })
             .unwrap_or_else(|| target.id.clone().into_iter().collect()),
     }
+}
+
+fn route_target_provider_statuses(
+    manifest: &V3Config05ManifestPublished,
+    target: &V3RoutePoolTargetManifest,
+    availability: &impl V3ProviderAvailabilityReader,
+    now_ms: u64,
+) -> Vec<Value> {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => vec![provider_target_status_snapshot(
+            route_pool_target_label(target),
+            target.provider.as_deref(),
+            target.key.as_deref(),
+            target.model.as_deref(),
+            availability,
+            now_ms,
+        )],
+        V3RouteTargetKind::Forwarder => target
+            .id
+            .as_ref()
+            .and_then(|id| manifest.forwarders.get(id))
+            .map(|forwarder| {
+                forwarder
+                    .targets
+                    .iter()
+                    .map(|target| forwarder_target_status_snapshot(target, availability, now_ms))
+                    .collect::<Vec<Value>>()
+            })
+            .unwrap_or_else(|| {
+                target
+                    .id
+                    .clone()
+                    .into_iter()
+                    .map(|id| {
+                        json!({
+                            "providerKey": id,
+                            "available": false,
+                            "reasons": ["forwarder_missing"]
+                        })
+                    })
+                    .collect()
+            }),
+    }
+}
+
+fn provider_target_status_snapshot(
+    provider_key: String,
+    provider: Option<&str>,
+    key: Option<&str>,
+    model: Option<&str>,
+    availability: &impl V3ProviderAvailabilityReader,
+    now_ms: u64,
+) -> Value {
+    let Some(provider) = provider else {
+        return json!({
+            "providerKey": provider_key,
+            "available": false,
+            "reasons": ["provider_missing"]
+        });
+    };
+    let projection = availability.availability(provider, key, model, now_ms);
+    json!({
+        "providerKey": provider_key,
+        "available": projection.available,
+        "reasons": projection.blocked_scopes
+    })
 }
 
 fn route_pool_target_label(target: &V3RoutePoolTargetManifest) -> String {
@@ -309,7 +421,9 @@ fn format_candidate_key(candidate: &V3TargetCandidate) -> String {
 mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-    use routecodex_v3_provider_responses::V3ProviderAllAvailable;
+    use routecodex_v3_provider_responses::{
+        V3ProviderAllAvailable, V3ProviderAvailabilityProjection,
+    };
 
     #[test]
     fn virtual_router_status_projects_route_group_pools_and_forwarders() {
@@ -343,7 +457,9 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         )
         .expect("config");
         let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
-        let status = project_v3_virtual_router_status(&manifest, "a").expect("status");
+        let status =
+            project_v3_virtual_router_status(&manifest, "a", &V3ProviderAllAvailable, 1_000)
+                .expect("status");
         assert_eq!(
             status["routes"]["gateway"]["pools"][0]["routeName"],
             "gateway"
@@ -353,6 +469,97 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
             .expect("providers")
             .contains(&Value::String("test.key1.test".to_string())));
         assert_eq!(status["forwarders"][0]["forwarderId"], "fwd");
+    }
+
+    #[test]
+    fn virtual_router_status_projects_process_local_health_and_fresh_availability_recovery() {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.a]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "gateway"
+endpoints = ["responses"]
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "TEST_KEY" }] }
+[providers.test.models.test]
+wire_name = "wire-test"
+capabilities = ["text"]
+[route_groups.gateway.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "test", model = "test", key = "key1", priority = 1 }]
+"#,
+        )
+        .expect("config");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
+        let cooled_availability = CooledAvailability { until_ms: 903_000 };
+
+        let cooled = project_v3_virtual_router_status(&manifest, "a", &cooled_availability, 3_001)
+            .expect("status");
+        let default_pool = &cooled["routes"]["gateway"]["pools"][0];
+        assert_eq!(default_pool["availableTargets"], json!([]));
+        assert_eq!(
+            default_pool["unavailableProviders"][0]["providerKey"],
+            "test.key1.test"
+        );
+        assert!(default_pool["unavailableProviders"][0]["reasons"][0]
+            .as_str()
+            .expect("reason")
+            .contains("provider_key:test:key1:test"));
+        assert_eq!(cooled["health"]["source"], "process_local_provider_health");
+
+        let recovered =
+            project_v3_virtual_router_status(&manifest, "a", &V3ProviderAllAvailable, 3_002)
+                .expect("fresh status");
+        assert_eq!(
+            recovered["routes"]["gateway"]["pools"][0]["availableTargets"][0],
+            "test.key1.test"
+        );
+
+        let after_cooldown =
+            project_v3_virtual_router_status(&manifest, "a", &cooled_availability, 903_000)
+                .expect("status");
+        assert_eq!(
+            after_cooldown["routes"]["gateway"]["pools"][0]["availableTargets"][0],
+            "test.key1.test"
+        );
+    }
+
+    struct CooledAvailability {
+        until_ms: u64,
+    }
+
+    impl V3ProviderAvailabilityReader for CooledAvailability {
+        fn availability(
+            &self,
+            provider_id: &str,
+            auth_alias: Option<&str>,
+            model_id: Option<&str>,
+            now_ms: u64,
+        ) -> V3ProviderAvailabilityProjection {
+            let blocked = now_ms < self.until_ms;
+            V3ProviderAvailabilityProjection {
+                provider_id: provider_id.to_string(),
+                auth_alias: auth_alias.map(str::to_string),
+                model_id: model_id.map(str::to_string),
+                available: !blocked,
+                blocked_scopes: blocked
+                    .then(|| {
+                        format!(
+                            "provider_key:{}:{}:{}:controlled status failure",
+                            provider_id,
+                            auth_alias.unwrap_or("-"),
+                            model_id.unwrap_or("-")
+                        )
+                    })
+                    .into_iter()
+                    .collect(),
+            }
+        }
     }
 
     #[test]

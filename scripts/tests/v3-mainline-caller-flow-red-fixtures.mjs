@@ -27,6 +27,7 @@ function runExpectFail(name, mutate, expectedText) {
     const expected = renderV3MainlineCallerFlowMarkdown(root, mapPath);
     const failures = [];
     if (audit.forbiddenDirectProjection.length) failures.push('forbidden direct response projection edge');
+    if (audit.invalidAggregateEntry.length) failures.push('invalid aggregate wrapper edge');
     if (audit.missing.length) failures.push('missing caller map field');
     if (!expected.includes('flowchart TD')) failures.push('render missing flowchart');
     if (!failures.length) process.exit(0);
@@ -60,6 +61,20 @@ runExpectFail('forbidden-direct-response-projection-edge', (copy) => {
     owner_feature_id: copy.chains[0].owner_feature_id,
   });
 }, 'forbidden direct response projection edge');
+
+runExpectFail('aggregate-entry-edge-missing-kind', (copy) => {
+  copy.chains[0].edges.push({
+    step_id: 'red-aggregate-normal-edge',
+    from_node: 'V3HubReqInbound01ClientRaw',
+    to_node: 'V3ServerRespOutbound06ClientFrame',
+    caller_symbol: 'execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control',
+    caller_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    callee_symbol: 'responses_relay_output_response',
+    callee_file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    status: 'anchored',
+    owner_feature_id: copy.chains[0].owner_feature_id,
+  });
+}, 'invalid aggregate wrapper edge');
 
 runExpectFail('missing-caller-symbol', (copy) => {
   delete copy.chains[0].edges[0].caller_symbol;
@@ -171,4 +186,29 @@ ${result.stderr}`;
     process.exit(1);
   }
   console.log('[v3-mainline-caller-flow-red] missing-provider-req-compat-review-marker: failed as expected');
+}
+
+
+{
+  const script = `
+    import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3Router05RequestClassified V3Target10ConcreteProviderSelected V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
+    const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
+    if (!audit.failures.some((failure) => failure.includes('typed-test-only'))) process.exit(0);
+    console.error('missing review marker typed-test-only');
+    process.exit(1);
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  if (result.status === 0) {
+    console.error('[v3-mainline-caller-flow-red] missing-review-status-legend: expected failure but passed');
+    process.exit(1);
+  }
+  const output = `${result.stdout}
+${result.stderr}`;
+  if (!output.includes('typed-test-only')) {
+    console.error('[v3-mainline-caller-flow-red] missing-review-status-legend: missing expected text');
+    console.error(output);
+    process.exit(1);
+  }
+  console.log('[v3-mainline-caller-flow-red] missing-review-status-legend: failed as expected');
 }

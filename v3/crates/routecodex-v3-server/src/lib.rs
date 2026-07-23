@@ -42,8 +42,8 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
     V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayStoplessControlState, V3RuntimeObservability, V3RuntimeStreamObservation,
-    V3RuntimeUsageSummary,
+    V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
+    V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -582,7 +582,12 @@ async fn virtual_router_status(
             json!({"error":{"message":"forbidden","code":"forbidden"}}),
         );
     }
-    match project_v3_virtual_router_status(&state.manifest, &state.server.id) {
+    match project_v3_virtual_router_status(
+        &state.manifest,
+        &state.server.id,
+        &state.provider_health.store(),
+        current_epoch_ms(),
+    ) {
         Ok(virtual_router) => json_response(
             200,
             json!({
@@ -2565,7 +2570,28 @@ fn project_v3_runtime_observability_debug(observability: &V3RuntimeObservability
         "stopless_activation": observability.stopless_activation,
         "target_path": observability.target_path,
         "unavailable_candidates": observability.unavailable_candidates,
+        "provider_failure_events": observability.provider_failure_events.iter().map(project_v3_runtime_provider_failure_event_debug).collect::<Vec<Value>>(),
         "usage": observability.usage.as_ref().map(project_v3_runtime_usage_debug),
+    })
+}
+
+fn project_v3_runtime_provider_failure_event_debug(
+    event: &V3RuntimeProviderFailureObservation,
+) -> Value {
+    json!({
+        "provider_key": &event.provider_key,
+        "provider_id": &event.provider_id,
+        "auth_alias": event.auth_alias.as_ref(),
+        "model_id": &event.model_id,
+        "status": event.status,
+        "error_type": event.error_type.as_ref(),
+        "message": &event.message,
+        "failure_count": event.failure_count,
+        "health_state": &event.health_state,
+        "cooldown_until_ms": event.cooldown_until_ms,
+        "action": &event.action,
+        "next_provider_key": event.next_provider_key.as_ref(),
+        "wait_ms": event.wait_ms,
     })
 }
 
@@ -2775,6 +2801,113 @@ fn build_v3_console_emission_context(
     }
 }
 
+fn emit_v3_provider_observability_console_lines(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+) {
+    if !context.state.console_enabled {
+        return;
+    }
+    let identity = resolve_v3_console_log_identity(context);
+    for event in &observability.provider_failure_events {
+        let error_content =
+            format_v3_provider_failure_console_content(&context.request_id, &identity, event);
+        let error_line = format_v3_console_line_for_identity(context, &identity, &error_content);
+        let colorized_error = colorize_v3_error_console_line(&error_line);
+        append_v3_human_console_line(&context.state, &colorized_error);
+        eprintln!("{colorized_error}");
+        if event.action == "switch_provider" {
+            let switch_content =
+                format_v3_provider_switch_console_content(&context.request_id, &identity, event);
+            let switch_line =
+                format_v3_console_line_for_identity(context, &identity, &switch_content);
+            emit_v3_colorized_request_console_line(
+                &context.state,
+                &switch_line,
+                identity.color_key.as_deref(),
+            );
+        }
+    }
+    if observability.provider_failure_events.is_empty()
+        && !observability.unavailable_candidates.is_empty()
+    {
+        let selected = format_v3_console_provider_target(observability);
+        let content = format!(
+            "[provider-unavailable] {} req={} sid={} unavailable={} selected={} reason=availability",
+            console_timestamp_hhmmss(),
+            context.request_id,
+            identity.session_id,
+            observability.unavailable_candidates.join(","),
+            selected
+        );
+        let line = format_v3_console_line_for_identity(context, &identity, &content);
+        emit_v3_colorized_request_console_line(
+            &context.state,
+            &line,
+            identity.color_key.as_deref(),
+        );
+    }
+}
+
+fn format_v3_provider_failure_console_content(
+    request_id: &str,
+    identity: &V3ConsoleLogIdentity,
+    event: &V3RuntimeProviderFailureObservation,
+) -> String {
+    let mut content = format!(
+        "❌ [provider-error] {} req={} sid={} provider={} status={} failures={} health={} action={}",
+        console_timestamp_hhmmss(),
+        request_id,
+        identity.session_id,
+        format_v3_console_provider_key_label(&event.provider_key),
+        event.status,
+        event.failure_count,
+        event.health_state,
+        event.action
+    );
+    if let Some(cooldown_until_ms) = event.cooldown_until_ms {
+        content.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
+    }
+    if let Some(wait_ms) = event.wait_ms {
+        content.push_str(&format!(" waitMs={wait_ms}"));
+    }
+    if let Some(next) = event.next_provider_key.as_deref() {
+        content.push_str(&format!(
+            " next={}",
+            format_v3_console_provider_key_label(next)
+        ));
+    }
+    if let Some(error_type) = event.error_type.as_deref() {
+        content.push_str(&format!(" type={error_type}"));
+    }
+    content.push_str(&format!(
+        " message={}",
+        format_v3_console_single_line_message(&event.message)
+    ));
+    content
+}
+
+fn format_v3_provider_switch_console_content(
+    request_id: &str,
+    identity: &V3ConsoleLogIdentity,
+    event: &V3RuntimeProviderFailureObservation,
+) -> String {
+    let next = event
+        .next_provider_key
+        .as_deref()
+        .map(format_v3_console_provider_key_label)
+        .unwrap_or_else(|| "-".to_string());
+    format!(
+        "[provider-switch] {} req={} sid={} {} -> {} action={} reason=provider_failure",
+        console_timestamp_hhmmss(),
+        request_id,
+        identity.session_id,
+        format_v3_console_provider_key_label(&event.provider_key),
+        next,
+        event.action
+    )
+}
+
 fn emit_v3_request_route_console_line(
     context: &V3ConsoleEmissionContext,
     observability: &V3RuntimeObservability,
@@ -2938,6 +3071,7 @@ fn emit_v3_observability_console_lines(
     started_at: Instant,
     include_usage: bool,
 ) {
+    emit_v3_provider_observability_console_lines(context, observability);
     emit_v3_request_route_console_line(context, observability);
     if include_usage {
         let elapsed = started_at.elapsed();
@@ -3362,6 +3496,35 @@ fn format_v3_console_provider_target(observability: &V3RuntimeObservability) -> 
     }
 }
 
+fn format_v3_console_provider_key_label(provider_key: &str) -> String {
+    let (provider_from_key, alias_from_key, model_from_key) =
+        parse_v3_console_provider_key(Some(provider_key));
+    let provider = provider_from_key.unwrap_or_else(|| provider_key.to_string());
+    let provider_label = match alias_from_key
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(alias) => format!("{provider}[{alias}]"),
+        None => provider,
+    };
+    match model_from_key
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(model) => format!("{provider_label}.{model}"),
+        None => provider_label,
+    }
+}
+
+fn format_v3_console_single_line_message(message: &str) -> String {
+    let normalized = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        "-".to_string()
+    } else {
+        normalized
+    }
+}
+
 fn parse_v3_console_provider_key(
     provider_key: Option<&str>,
 ) -> (Option<String>, Option<String>, Option<String>) {
@@ -3606,6 +3769,7 @@ fn build_v3_foundation_console_observability(
         stopless_activation: false,
         attempts: Some(1),
         unavailable_candidates: Vec::new(),
+        provider_failure_events: Vec::new(),
         target_path: vec!["dry_run:provider_request".to_string()],
         usage,
     }
@@ -3996,6 +4160,13 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "attempts"
             | "unavailable"
             | "transport"
+            | "failures"
+            | "health"
+            | "cooldownUntilMs"
+            | "waitMs"
+            | "next"
+            | "message"
+            | "selected"
             | "elapsedMs"
             | "nodes"
             | "endpoint"
@@ -5836,6 +6007,56 @@ mod tests {
         assert_eq!(
             format_v3_console_provider_target(&observability),
             "test[key].wire-test"
+        );
+    }
+
+    #[test]
+    fn provider_failure_console_content_exposes_red_error_and_switch() {
+        let event = V3RuntimeProviderFailureObservation {
+            provider_key: "limited:key1:gpt-5.5".to_string(),
+            provider_id: "limited".to_string(),
+            auth_alias: Some("key1".to_string()),
+            model_id: "gpt-5.5".to_string(),
+            status: 502,
+            error_type: Some("provider_error".to_string()),
+            message: "provider response event codec failed".to_string(),
+            failure_count: 3,
+            health_state: "cooldown".to_string(),
+            cooldown_until_ms: Some(903_000),
+            action: "switch_provider".to_string(),
+            next_provider_key: Some("minimax:key1:MiniMax-M3".to_string()),
+            wait_ms: None,
+        };
+        let identity = V3ConsoleLogIdentity {
+            session_id: "sid-test".to_string(),
+            color_key: Some("sid-test".to_string()),
+            project_path: Some("/tmp/project".to_string()),
+            request_model: Some("gpt-5.5".to_string()),
+        };
+
+        let error_content =
+            format_v3_provider_failure_console_content("req-provider-switch", &identity, &event);
+        assert!(error_content.contains("❌ [provider-error]"));
+        assert!(error_content.contains("provider=limited[key1].gpt-5.5"));
+        assert!(error_content.contains("failures=3"));
+        assert!(error_content.contains("health=cooldown"));
+        assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
+        let switch_content =
+            format_v3_provider_switch_console_content("req-provider-switch", &identity, &event);
+        assert!(switch_content.contains("[provider-switch]"));
+        assert!(switch_content.contains("limited[key1].gpt-5.5 -> minimax[key1].MiniMax-M3"));
+
+        let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
+        std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
+        let colored = colorize_v3_error_console_line(&error_content);
+        if let Some(previous) = previous {
+            std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", previous);
+        } else {
+            std::env::remove_var("ROUTECODEX_FORCE_LOG_COLOR");
+        }
+        assert!(
+            colored.starts_with(ANSI_ERROR_RED),
+            "provider error console line must be red: {colored:?}"
         );
     }
 

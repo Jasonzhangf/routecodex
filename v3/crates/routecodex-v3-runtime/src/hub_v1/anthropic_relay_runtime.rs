@@ -1,4 +1,11 @@
 use super::*;
+use crate::provider_failure_runtime_policy::{
+    resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
+    V3RelayProviderFailureRetryPolicy,
+};
 use crate::{
     V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest,
     V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey, V3LocalContinuationStore,
@@ -19,9 +26,8 @@ use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
     V3ProviderResponseBody, V3ResponsesProviderTarget,
 };
-use routecodex_v3_target::V3TargetInterpreter;
-use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 const V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
@@ -174,6 +180,8 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime(
         &transport,
         None,
         V3HubRelayResponseHookProfile::empty(),
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3RelayProviderFailureRetryPolicy::default(),
     )
     .await
     {
@@ -251,6 +259,8 @@ pub async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
         transport,
         None,
         V3HubRelayResponseHookProfile::empty(),
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3RelayProviderFailureRetryPolicy::default(),
     )
     .await
 }
@@ -303,6 +313,8 @@ where
             now_epoch_ms,
         }),
         V3HubRelayResponseHookProfile::new(servertool_names),
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3RelayProviderFailureRetryPolicy::default(),
     )
     .await
 }
@@ -319,6 +331,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     transport: &T,
     local: Option<V3AnthropicRelayLocalContinuationExecution<'_>>,
     response_hook_profile: V3HubRelayResponseHookProfile,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    retry_policy: V3RelayProviderFailureRetryPolicy,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
@@ -344,7 +358,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         server_routing_group(manifest, &input.server_id)?,
         &input.request_id,
     );
-    let mut restored_context = None;
     let lookup =
         if let (Some(local), Some(context_id)) = (local.as_ref(), requested_local_ids.first()) {
             if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
@@ -377,7 +390,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
             drop(store);
-            restored_context = Some(context.clone());
             V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
                 .with_local_context(context_id, local.scope.hub_scope(&input.server_id), context)
         } else {
@@ -390,244 +402,495 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     )?;
     trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
-    let mut req04 = request_outcome.into_governed();
-    if let Some(context) = restored_context.as_ref() {
-        merge_restored_local_context_at_req04(
-            &mut req04.previous.previous.previous.payload.0,
-            context,
-        )?;
-    }
+    let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
     );
     trace.push("V3HubReqExecution05Planned");
-    let selected = resolve_target(
+    let route_facts_body = req05.previous.previous.previous.previous.payload.0.clone();
+    let mut failed_candidates = BTreeSet::new();
+    let mut pending_provider_failure: Option<V3AnthropicRelayProviderFailure> = None;
+    let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let mut same_candidate_retries = BTreeMap::<String, usize>::new();
+    let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
+    let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        &input.server_id,
-        &req05.previous.previous.previous.previous.payload.0,
-    )?;
-    let provider_wire_protocol = provider_wire_protocol_for_provider_type(
-        &selected.candidate.provider_id,
-        &selected.candidate.provider_type,
-    )
-    .map_err(V3AnthropicRelayRuntimeError::Target)?;
-    let selected_target_provider_id = selected.candidate.provider_id.clone();
-    let selected_target_compatibility_profile = selected.candidate.compatibility_profile.clone();
-    let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-        req05,
-        V3HubTargetResolution::Routed,
-        selected.candidate,
-    );
-    trace.push("V3HubReqTarget06Resolved");
-    let req07 =
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-    trace.push("V3HubReqOutbound07ProviderSemantic");
-    let target = provider_target(manifest, req07.selected_target())?;
-    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
-    trace.push("ProviderReqCompat06ProviderCompat");
-    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-    let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-    let provider_semantic = req09.into_provider_semantic_payload();
-    let wire =
-        build_v3_provider_12_responses_wire_payload(&input.request_id, target, provider_semantic)?;
-    trace.push("V3ProviderReqOutbound08WirePayload");
-    let transport_request = match provider_wire_protocol {
-        V3HubProviderWireProtocol::Responses => {
-            build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)?
-        }
-        V3HubProviderWireProtocol::Anthropic => {
-            build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
-                .map_err(V3AnthropicRelayRuntimeError::Target)?
-        }
-        other => {
-            return Err(V3AnthropicRelayRuntimeError::Target(format!(
-                "Anthropic Relay does not support provider transport protocol {other:?}"
-            )))
-        }
+        server_id: &input.server_id,
+        entry_kind: "anthropic",
+        endpoint_path: "/v1/messages",
+        route_facts_body: &route_facts_body,
+        provider_health: &provider_health,
+        retry_policy,
+        deterministic_sample,
     };
-    trace.push("V3ProviderReqOutbound09TransportRequest");
-    let provider_raw = match transport.send(transport_request).await {
-        Ok(raw) => raw,
-        Err(V3ProviderError::HttpStatus { response }) => {
-            return Ok(provider_error_output(
-                response.status,
-                &response.body,
-                &selected_target_provider_id,
-                trace,
-            ));
-        }
-        Err(error) => {
-            return Ok(provider_runtime_error_output(
-                error,
-                &selected_target_provider_id,
-                trace,
-            ))
-        }
-    };
-    let provider_body = provider_raw.into_body();
-    if let V3ProviderResponseBody::Sse(stream) = provider_body {
-        if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-            let stream_observation = V3RuntimeStreamObservation::default();
-            let canonical_response =
-                super::responses_relay_runtime::build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
-                    stream,
-                    &stream_observation,
-                )
-                .await
-                .map_err(|error| V3AnthropicRelayRuntimeError::StructuredSse(error.to_string()))?;
-            let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-                canonical_response,
-                V3ProviderRespInbound01RawContext::new(
-                    V3HubEntryProtocol::Anthropic,
-                    V3HubProviderWireProtocol::Responses,
-                    V3HubContinuationOwnership::New,
-                    V3HubExecutionMode::Relay,
-                    V3HubInvocationSource::Client,
-                    V3HubTransportIntent::Sse,
-                )
-                .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
-            );
-            trace.push("V3ProviderRespInbound01Raw");
-            let hooks = compile_v3_hub_relay_response_hooks();
-            let resp02 = hooks.normalize(resp01)?;
-            trace.push("ProviderRespCompat02ProviderCompat");
-            trace.push("V3HubRespInbound02Normalized");
-            let resp03 = hooks.govern(resp02, &response_hook_profile)?;
-            trace.push("V3HubRespChatProcess03Governed");
-            let resp04 = hooks.commit(resp03)?;
-            trace.push("V3HubRespContinuation04Committed");
-            let servertool_followup_required = resp04.previous.servertool_action()
-                == V3HubServertoolResponseAction::FollowupRequired;
-            commit_or_release_local_continuation(
-                local.as_ref(),
-                &requested_local_ids,
-                resp04.finalized_payload(),
-                resp04.action(),
-            )?;
-            let client_events =
-                project_v3_responses_json_as_anthropic_events(resp04.finalized_payload())?;
-            let client_response =
-                V3AnthropicRelaySseProjection::project_after_resp04(client_events);
-            let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
-            trace.push("V3HubRespOutbound05ClientSemantic");
-            let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
-            trace.push("V3ServerRespOutbound06ClientFrame");
-            return Ok(V3AnthropicRelayRuntimeOutput {
-                status: 200,
-                client_response,
-                node_trace: trace,
-                error_chain: None,
-                servertool_followup_required,
-            });
-        }
-        let projection = project_v3_responses_sse_as_anthropic_events(stream)
-            .await
-            .map_err(V3AnthropicRelayRuntimeError::StructuredSse)?;
-        let (canonical_response, client_events) = projection.into_parts();
-        let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-            canonical_response,
-            V3ProviderRespInbound01RawContext::new(
-                V3HubEntryProtocol::Anthropic,
-                provider_wire_protocol,
-                V3HubContinuationOwnership::New,
-                V3HubExecutionMode::Relay,
-                V3HubInvocationSource::Client,
-                V3HubTransportIntent::Sse,
-            )
-            .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
-        );
-        trace.push("V3ProviderRespInbound01Raw");
-        let hooks = compile_v3_hub_relay_response_hooks();
-        let resp02 = hooks.normalize(resp01)?;
-        trace.push("ProviderRespCompat02ProviderCompat");
-        trace.push("V3HubRespInbound02Normalized");
-        let resp03 = hooks.govern(resp02, &response_hook_profile)?;
-        trace.push("V3HubRespChatProcess03Governed");
-        let resp04 = hooks.commit(resp03)?;
-        trace.push("V3HubRespContinuation04Committed");
-        let servertool_followup_required =
-            resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
-        commit_or_release_local_continuation(
-            local.as_ref(),
-            &requested_local_ids,
-            resp04.finalized_payload(),
-            resp04.action(),
-        )?;
-        let client_response = V3AnthropicRelaySseProjection::project_after_resp04(client_events);
-        let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
-        trace.push("V3HubRespOutbound05ClientSemantic");
-        let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
-        trace.push("V3ServerRespOutbound06ClientFrame");
-        return Ok(V3AnthropicRelayRuntimeOutput {
-            status: 200,
-            client_response,
-            node_trace: trace,
-            error_chain: None,
-            servertool_followup_required,
-        });
-    }
-    let V3ProviderResponseBody::Json(bytes) = provider_body else {
-        unreachable!("SSE returned above")
-    };
-    let provider_value: Value = serde_json::from_slice(&bytes)?;
-    let hook_provider_value = if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-        project_v3_anthropic_message_as_responses_response(&provider_value)?
-    } else {
-        provider_value
-    };
-    let hook_provider_protocol = if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-        V3HubProviderWireProtocol::Responses
-    } else {
-        provider_wire_protocol
-    };
-    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
-        hook_provider_value,
-        V3ProviderRespInbound01RawContext::new(
-            V3HubEntryProtocol::Anthropic,
-            hook_provider_protocol,
-            V3HubContinuationOwnership::New,
-            V3HubExecutionMode::Relay,
-            V3HubInvocationSource::Client,
-            transport_intent,
+    loop {
+        let selected = if let Some(selected) = retry_selected.take() {
+            selected
+        } else {
+            match resolve_v3_relay_target(
+                manifest,
+                &input.server_id,
+                "anthropic",
+                "/v1/messages",
+                &route_facts_body,
+                &failed_candidates,
+                &provider_health,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?,
+                deterministic_sample,
+            ) {
+                Ok(selected) => selected,
+                Err(error) => {
+                    if let Some(failure) = pending_provider_failure.take() {
+                        return Ok(provider_failure_output(failure, trace));
+                    }
+                    return Err(V3AnthropicRelayRuntimeError::Target(error));
+                }
+            }
+        };
+        let provider_wire_protocol = provider_wire_protocol_for_provider_type(
+            &selected.candidate.provider_id,
+            &selected.candidate.provider_type,
         )
-        .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
-    );
-    trace.push("V3ProviderRespInbound01Raw");
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks.normalize(resp01)?;
-    trace.push("ProviderRespCompat02ProviderCompat");
-    trace.push("V3HubRespInbound02Normalized");
-    let resp03 = hooks.govern(resp02, &response_hook_profile)?;
-    trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    trace.push("V3HubRespContinuation04Committed");
-    let servertool_followup_required =
-        resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
-    commit_or_release_local_continuation(
-        local.as_ref(),
-        &requested_local_ids,
-        resp04.finalized_payload(),
-        resp04.action(),
-    )?;
-    let client_response = if transport_intent == V3HubTransportIntent::Sse {
-        let client_events =
-            project_v3_responses_json_as_anthropic_events(resp04.finalized_payload())?;
-        V3AnthropicRelaySseProjection::project_after_resp04(client_events)
-    } else {
-        project_v3_responses_json_as_anthropic_message(resp04.finalized_payload())?
-    };
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
-    trace.push("V3HubRespOutbound05ClientSemantic");
-    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
-    trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok(V3AnthropicRelayRuntimeOutput {
-        status: 200,
-        client_response,
-        node_trace: trace,
-        error_chain: None,
-        servertool_followup_required,
-    })
+        .map_err(V3AnthropicRelayRuntimeError::Target)?;
+        let selected_target_provider_id = selected.candidate.provider_id.clone();
+        let selected_target_auth_alias = selected.candidate.auth_alias.clone();
+        let selected_target_model_id = selected.candidate.model_id.clone();
+        let selected_target_compatibility_profile =
+            selected.candidate.compatibility_profile.clone();
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05.clone(),
+            V3HubTargetResolution::Routed,
+            selected.candidate.clone(),
+        );
+        trace.push("V3HubReqTarget06Resolved");
+        let req07 =
+            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        trace.push("V3HubReqOutbound07ProviderSemantic");
+        let target = provider_target(manifest, req07.selected_target())?;
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
+        trace.push("ProviderReqCompat06ProviderCompat");
+        let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
+        let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
+        let provider_semantic = req09.into_provider_semantic_payload();
+        let wire = build_v3_provider_12_responses_wire_payload(
+            &input.request_id,
+            target,
+            provider_semantic,
+        )?;
+        trace.push("V3ProviderReqOutbound08WirePayload");
+        let transport_request = match provider_wire_protocol {
+            V3HubProviderWireProtocol::Responses => {
+                build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)?
+            }
+            V3HubProviderWireProtocol::Anthropic => {
+                build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?
+            }
+            other => {
+                return Err(V3AnthropicRelayRuntimeError::Target(format!(
+                    "Anthropic Relay does not support provider transport protocol {other:?}"
+                )))
+            }
+        };
+        trace.push("V3ProviderReqOutbound09TransportRequest");
+        let provider_raw = match transport.send(transport_request).await {
+            Ok(raw) => raw,
+            Err(V3ProviderError::HttpStatus { response }) => {
+                let failure = provider_http_failure(
+                    response.status,
+                    &response.body,
+                    &selected_target_provider_id,
+                );
+                if let Some(failure) = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut failed_candidates,
+                    &mut same_candidate_retries,
+                    &mut retry_selected,
+                    &mut pending_provider_failure,
+                    &mut trace,
+                )
+                .await?
+                {
+                    return Ok(provider_failure_output(failure, trace));
+                }
+                continue;
+            }
+            Err(error) => {
+                let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                if let Some(failure) = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut failed_candidates,
+                    &mut same_candidate_retries,
+                    &mut retry_selected,
+                    &mut pending_provider_failure,
+                    &mut trace,
+                )
+                .await?
+                {
+                    return Ok(provider_failure_output(failure, trace));
+                }
+                continue;
+            }
+        };
+        match provider_raw.into_body() {
+            V3ProviderResponseBody::Sse(stream) => {
+                if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                    let stream_observation = V3RuntimeStreamObservation::default();
+                    let canonical_response =
+                        match super::responses_relay_runtime::build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+                            stream,
+                            &stream_observation,
+                        )
+                        .await
+                        {
+                            Ok(response) => response,
+                            Err(error) => {
+                                let failure = provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: input.request_id.clone(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider Anthropic SSE response event codec failed: {error}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                );
+                                if let Some(failure) = handle_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut failed_candidates,
+                                    &mut same_candidate_retries,
+                                    &mut retry_selected,
+                                    &mut pending_provider_failure,
+                                    &mut trace,
+                                )
+                                .await?
+                                {
+                                    return Ok(provider_failure_output(failure, trace));
+                                }
+                                continue;
+                            }
+                        };
+                    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+                        canonical_response,
+                        V3ProviderRespInbound01RawContext::new(
+                            V3HubEntryProtocol::Anthropic,
+                            V3HubProviderWireProtocol::Responses,
+                            V3HubContinuationOwnership::New,
+                            V3HubExecutionMode::Relay,
+                            V3HubInvocationSource::Client,
+                            V3HubTransportIntent::Sse,
+                        )
+                        .with_compatibility_profile(
+                            selected_target_compatibility_profile.as_deref(),
+                        ),
+                    );
+                    let (client_response, servertool_followup_required) =
+                        match closeout_anthropic_relay_response(
+                            resp01,
+                            &response_hook_profile,
+                            trace.as_mut(),
+                            local.as_ref(),
+                            &requested_local_ids,
+                            |finalized| {
+                                let client_events =
+                                    project_v3_responses_json_as_anthropic_events(finalized)?;
+                                Ok(V3AnthropicRelaySseProjection::project_after_resp04(
+                                    client_events,
+                                ))
+                            },
+                        ) {
+                            Ok(closeout) => closeout,
+                            Err(error) => {
+                                let failure = provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: input.request_id.clone(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider response governance failed: {error}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                );
+                                if let Some(failure) = handle_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut failed_candidates,
+                                    &mut same_candidate_retries,
+                                    &mut retry_selected,
+                                    &mut pending_provider_failure,
+                                    &mut trace,
+                                )
+                                .await?
+                                {
+                                    return Ok(provider_failure_output(failure, trace));
+                                }
+                                continue;
+                            }
+                        };
+                    record_provider_success_after_resp04(
+                        &provider_health,
+                        &selected_target_provider_id,
+                        &selected_target_auth_alias,
+                        &selected_target_model_id,
+                    )?;
+                    return Ok(V3AnthropicRelayRuntimeOutput {
+                        status: 200,
+                        client_response,
+                        node_trace: trace,
+                        error_chain: None,
+                        servertool_followup_required,
+                    });
+                }
+                let projection = match project_v3_responses_sse_as_anthropic_events(stream).await {
+                    Ok(projection) => projection,
+                    Err(error) => {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: input.request_id.clone(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!(
+                                    "provider Responses SSE projection failed: {error}"
+                                ),
+                            },
+                            &selected_target_provider_id,
+                        );
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut failed_candidates,
+                            &mut same_candidate_retries,
+                            &mut retry_selected,
+                            &mut pending_provider_failure,
+                            &mut trace,
+                        )
+                        .await?
+                        {
+                            return Ok(provider_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                };
+                let (canonical_response, client_events) = projection.into_parts();
+                let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+                    canonical_response,
+                    V3ProviderRespInbound01RawContext::new(
+                        V3HubEntryProtocol::Anthropic,
+                        provider_wire_protocol,
+                        V3HubContinuationOwnership::New,
+                        V3HubExecutionMode::Relay,
+                        V3HubInvocationSource::Client,
+                        V3HubTransportIntent::Sse,
+                    )
+                    .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
+                );
+                let (client_response, servertool_followup_required) =
+                    match closeout_anthropic_relay_response(
+                        resp01,
+                        &response_hook_profile,
+                        trace.as_mut(),
+                        local.as_ref(),
+                        &requested_local_ids,
+                        move |_| {
+                            Ok(V3AnthropicRelaySseProjection::project_after_resp04(
+                                client_events,
+                            ))
+                        },
+                    ) {
+                        Ok(closeout) => closeout,
+                        Err(error) => {
+                            let failure = provider_runtime_failure(
+                                V3ProviderError::ResponseBody {
+                                    request_id: input.request_id.clone(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!("provider response governance failed: {error}"),
+                                },
+                                &selected_target_provider_id,
+                            );
+                            if let Some(failure) = handle_provider_failure(
+                                &failure_context,
+                                selected,
+                                failure,
+                                &mut failed_candidates,
+                                &mut same_candidate_retries,
+                                &mut retry_selected,
+                                &mut pending_provider_failure,
+                                &mut trace,
+                            )
+                            .await?
+                            {
+                                return Ok(provider_failure_output(failure, trace));
+                            }
+                            continue;
+                        }
+                    };
+                record_provider_success_after_resp04(
+                    &provider_health,
+                    &selected_target_provider_id,
+                    &selected_target_auth_alias,
+                    &selected_target_model_id,
+                )?;
+                return Ok(V3AnthropicRelayRuntimeOutput {
+                    status: 200,
+                    client_response,
+                    node_trace: trace,
+                    error_chain: None,
+                    servertool_followup_required,
+                });
+            }
+            V3ProviderResponseBody::Json(bytes) => {
+                let provider_value: Value = match serde_json::from_slice(&bytes) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let failure = provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: input.request_id.clone(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!("provider JSON response decode failed: {error}"),
+                            },
+                            &selected_target_provider_id,
+                        );
+                        if let Some(failure) = handle_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut failed_candidates,
+                            &mut same_candidate_retries,
+                            &mut retry_selected,
+                            &mut pending_provider_failure,
+                            &mut trace,
+                        )
+                        .await?
+                        {
+                            return Ok(provider_failure_output(failure, trace));
+                        }
+                        continue;
+                    }
+                };
+                let hook_provider_value =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        match project_v3_anthropic_message_as_responses_response(&provider_value) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                let failure = provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: input.request_id.clone(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider Anthropic JSON response codec failed: {error}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                );
+                                if let Some(failure) = handle_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut failed_candidates,
+                                    &mut same_candidate_retries,
+                                    &mut retry_selected,
+                                    &mut pending_provider_failure,
+                                    &mut trace,
+                                )
+                                .await?
+                                {
+                                    return Ok(provider_failure_output(failure, trace));
+                                }
+                                continue;
+                            }
+                        }
+                    } else {
+                        provider_value
+                    };
+                let hook_provider_protocol =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        V3HubProviderWireProtocol::Responses
+                    } else {
+                        provider_wire_protocol
+                    };
+                let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+                    hook_provider_value,
+                    V3ProviderRespInbound01RawContext::new(
+                        V3HubEntryProtocol::Anthropic,
+                        hook_provider_protocol,
+                        V3HubContinuationOwnership::New,
+                        V3HubExecutionMode::Relay,
+                        V3HubInvocationSource::Client,
+                        transport_intent,
+                    )
+                    .with_compatibility_profile(selected_target_compatibility_profile.as_deref()),
+                );
+                let (client_response, servertool_followup_required) =
+                    match closeout_anthropic_relay_response(
+                        resp01,
+                        &response_hook_profile,
+                        trace.as_mut(),
+                        local.as_ref(),
+                        &requested_local_ids,
+                        |finalized| {
+                            if transport_intent == V3HubTransportIntent::Sse {
+                                let client_events =
+                                    project_v3_responses_json_as_anthropic_events(finalized)?;
+                                Ok(V3AnthropicRelaySseProjection::project_after_resp04(
+                                    client_events,
+                                ))
+                            } else {
+                                Ok(project_v3_responses_json_as_anthropic_message(finalized)?)
+                            }
+                        },
+                    ) {
+                        Ok(closeout) => closeout,
+                        Err(error) => {
+                            let failure = provider_runtime_failure(
+                                V3ProviderError::ResponseBody {
+                                    request_id: input.request_id.clone(),
+                                    provider_id: selected_target_provider_id.clone(),
+                                    reason: format!("provider response governance failed: {error}"),
+                                },
+                                &selected_target_provider_id,
+                            );
+                            if let Some(failure) = handle_provider_failure(
+                                &failure_context,
+                                selected,
+                                failure,
+                                &mut failed_candidates,
+                                &mut same_candidate_retries,
+                                &mut retry_selected,
+                                &mut pending_provider_failure,
+                                &mut trace,
+                            )
+                            .await?
+                            {
+                                return Ok(provider_failure_output(failure, trace));
+                            }
+                            continue;
+                        }
+                    };
+                record_provider_success_after_resp04(
+                    &provider_health,
+                    &selected_target_provider_id,
+                    &selected_target_auth_alias,
+                    &selected_target_model_id,
+                )?;
+                return Ok(V3AnthropicRelayRuntimeOutput {
+                    status: 200,
+                    client_response,
+                    node_trace: trace,
+                    error_chain: None,
+                    servertool_followup_required,
+                });
+            }
+        }
+    }
 }
 
 fn find_anthropic_tool_result_ids(
@@ -659,71 +922,40 @@ fn find_anthropic_tool_result_ids(
     Ok(ids)
 }
 
-fn merge_restored_local_context_at_req04(
-    current: &mut Value,
-    restored: &Value,
-) -> Result<(), V3AnthropicRelayRuntimeError> {
-    let restored_items = restored
-        .get("output")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| V3LocalContinuationError::Codec {
-            message: "restored local continuation output must be an array".to_string(),
-        })?;
-    let current_items = current
-        .get_mut("input")
-        .and_then(Value::as_array_mut)
-        .map(std::mem::take)
-        .ok_or_else(|| V3LocalContinuationError::Codec {
-            message: "Req04 provider semantic input must be an array".to_string(),
-        })?;
-    let restored_reasoning_items = restored_items
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
-        .cloned()
-        .collect::<Vec<_>>();
-    let current_items =
-        maybe_drop_duplicate_restored_reasoning(current_items, &restored_reasoning_items);
-    let mut merged = restored_items;
-    let restored_keys = merged
-        .iter()
-        .filter_map(|item| {
-            Some((
-                item.get("type").and_then(Value::as_str)?.to_owned(),
-                item.get("call_id").and_then(Value::as_str)?.to_owned(),
-            ))
-        })
-        .collect::<Vec<_>>();
-    merged.extend(current_items.into_iter().filter(|item| {
-        let current_call_id = item.get("call_id").and_then(Value::as_str);
-        current_call_id.is_none_or(|call_id| {
-            !restored_keys.iter().any(|(restored_type, restored_id)| {
-                restored_id == call_id
-                    && Some(restored_type.as_str()) == item.get("type").and_then(Value::as_str)
-            })
-        })
-    }));
-    current["input"] = Value::Array(merged);
-    Ok(())
-}
-
-fn maybe_drop_duplicate_restored_reasoning(
-    mut current_items: Vec<Value>,
-    restored_reasoning_items: &[Value],
-) -> Vec<Value> {
-    let Some(first_current) = current_items.first() else {
-        return current_items;
-    };
-    if first_current.get("type").and_then(Value::as_str) != Some("reasoning") {
-        return current_items;
-    }
-    if restored_reasoning_items
-        .iter()
-        .any(|item| item.get("summary") == first_current.get("summary"))
-    {
-        current_items.remove(0);
-    }
-    current_items
+fn closeout_anthropic_relay_response<F>(
+    resp01: V3ProviderRespInbound01Raw,
+    response_hook_profile: &V3HubRelayResponseHookProfile,
+    trace: &mut Vec<&'static str>,
+    local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
+    requested_local_ids: &[String],
+    project_client_response: F,
+) -> Result<(Value, bool), V3AnthropicRelayRuntimeError>
+where
+    F: FnOnce(&Value) -> Result<Value, V3AnthropicRelayRuntimeError>,
+{
+    trace.push("V3ProviderRespInbound01Raw");
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks.normalize(resp01)?;
+    trace.push("ProviderRespCompat02ProviderCompat");
+    trace.push("V3HubRespInbound02Normalized");
+    let resp03 = hooks.govern(resp02, response_hook_profile)?;
+    trace.push("V3HubRespChatProcess03Governed");
+    let resp04 = hooks.commit(resp03)?;
+    trace.push("V3HubRespContinuation04Committed");
+    let servertool_followup_required =
+        resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
+    commit_or_release_local_continuation(
+        local,
+        requested_local_ids,
+        resp04.finalized_payload(),
+        resp04.action(),
+    )?;
+    let client_response = project_client_response(resp04.finalized_payload())?;
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
+    trace.push("V3HubRespOutbound05ClientSemantic");
+    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
+    trace.push("V3ServerRespOutbound06ClientFrame");
+    Ok((client_response, servertool_followup_required))
 }
 
 fn commit_or_release_local_continuation(
@@ -825,39 +1057,6 @@ fn server_routing_group<'a>(
         .ok_or_else(|| V3AnthropicRelayRuntimeError::Target(format!("server {server_id} missing")))
 }
 
-fn resolve_target(
-    manifest: &V3Config05ManifestPublished,
-    server_id: &str,
-    body: &Value,
-) -> Result<routecodex_v3_target::V3Target10ConcreteProviderSelected, V3AnthropicRelayRuntimeError>
-{
-    let facts = crate::build_v3_router_request_facts_for_entry(body, "anthropic");
-    let router = V3VirtualRouter::default();
-    let classified = router
-        .classify_request_with_facts(manifest, server_id, "/v1/messages", facts)
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(format!("{error:?}")))?;
-    let plan = router
-        .resolve_route_pool_plan(manifest, classified)
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(format!("{error:?}")))?;
-    let hit = router
-        .hit_opaque_target_plan_once(plan, 0)
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(format!("{error:?}")))?;
-    let target = V3TargetInterpreter::default();
-    let kind = target.classify_kind(hit);
-    let expanded = target
-        .expand_candidates(manifest, kind, 0)
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))?;
-    target
-        .select_available(
-            expanded,
-            &routecodex_v3_provider_responses::V3ProviderAvailabilityRegistry::from_manifest(
-                manifest,
-            ),
-            0,
-        )
-        .map_err(|error| V3AnthropicRelayRuntimeError::Target(format!("{error:?}")))
-}
-
 fn provider_target(
     manifest: &V3Config05ManifestPublished,
     selected: &routecodex_v3_target::V3TargetCandidate,
@@ -900,45 +1099,145 @@ fn provider_target(
     })
 }
 
-fn provider_error_output(
+struct V3AnthropicRelayProviderFailure {
+    status: u16,
+    client_response: Value,
+    provider_id: String,
+}
+
+async fn handle_provider_failure(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    failure: V3AnthropicRelayProviderFailure,
+    failed_candidates: &mut BTreeSet<String>,
+    same_candidate_retries: &mut BTreeMap<String, usize>,
+    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pending_provider_failure: &mut Option<V3AnthropicRelayProviderFailure>,
+    trace: &mut Vec<&'static str>,
+) -> Result<Option<V3AnthropicRelayProviderFailure>, V3AnthropicRelayRuntimeError> {
+    let result = run_v3_relay_provider_failure_policy(
+        context,
+        selected,
+        failure.status,
+        failure_error_type(&failure),
+        provider_failure_message(&failure),
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates,
+            same_candidate_retries,
+            trace,
+        },
+    )
+    .await
+    .map_err(V3AnthropicRelayRuntimeError::Target)?;
+    match result.decision {
+        V3RelayProviderFailureDecision::Reselect => {
+            *pending_provider_failure = Some(failure);
+            Ok(None)
+        }
+        V3RelayProviderFailureDecision::RetrySame(selected) => {
+            *retry_selected = Some(selected);
+            Ok(None)
+        }
+        V3RelayProviderFailureDecision::ProjectTerminal => Ok(Some(failure)),
+    }
+}
+
+fn provider_http_failure(
     status: u16,
     body: &[u8],
     provider_id: &str,
+) -> V3AnthropicRelayProviderFailure {
+    V3AnthropicRelayProviderFailure {
+        status,
+        client_response: project_v3_responses_error_as_anthropic_error(body),
+        provider_id: provider_id.to_string(),
+    }
+}
+
+fn provider_runtime_failure(
+    error: V3ProviderError,
+    provider_id: &str,
+) -> V3AnthropicRelayProviderFailure {
+    V3AnthropicRelayProviderFailure {
+        status: 502,
+        client_response: json!({"type":"error","error":{"type":"provider_error","message":error.to_string()}}),
+        provider_id: provider_id.to_string(),
+    }
+}
+
+fn failure_error_type(failure: &V3AnthropicRelayProviderFailure) -> Option<String> {
+    failure
+        .client_response
+        .pointer("/error/type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn provider_failure_message(failure: &V3AnthropicRelayProviderFailure) -> String {
+    failure
+        .client_response
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            failure
+                .client_response
+                .pointer("/error/type")
+                .and_then(Value::as_str)
+        })
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("provider returned HTTP {}", failure.status))
+}
+
+fn provider_failure_output(
+    failure: V3AnthropicRelayProviderFailure,
     trace: Vec<&'static str>,
 ) -> V3AnthropicRelayRuntimeOutput {
+    let message = provider_failure_message(&failure);
+    let code = failure
+        .client_response
+        .pointer("/error/type")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if failure.status == 502 {
+                "provider_transport_error".to_string()
+            } else {
+                format!("provider_http_{}", failure.status)
+            }
+        });
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
-        format!("provider_http_{status}"),
-        format!("provider returned HTTP {status}"),
+        code,
+        message,
     );
     error_output(
         source,
-        status,
-        project_v3_responses_error_as_anthropic_error(body),
-        provider_id,
+        failure.status,
+        failure.client_response,
+        &failure.provider_id,
         trace,
     )
 }
 
-fn provider_runtime_error_output(
-    error: V3ProviderError,
+fn record_provider_success_after_resp04(
+    provider_health: &V3ProviderFailureRuntimeHealth,
     provider_id: &str,
-    trace: Vec<&'static str>,
-) -> V3AnthropicRelayRuntimeOutput {
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderReqOutbound09TransportRequest",
-        "provider_transport_error",
-        error.to_string(),
-    );
-    error_output(
-        source,
-        502,
-        json!({"type":"error","error":{"type":"provider_error","message":error.to_string()}}),
-        provider_id,
-        trace,
-    )
+    auth_alias: &str,
+    model_id: &str,
+) -> Result<(), V3AnthropicRelayRuntimeError> {
+    provider_health
+        .record_provider_success(
+            provider_id,
+            Some(auth_alias),
+            Some(model_id),
+            v3_relay_provider_policy_now_epoch_ms()
+                .map_err(V3AnthropicRelayRuntimeError::Target)?,
+        )
+        .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))
 }
 
 fn error_output(

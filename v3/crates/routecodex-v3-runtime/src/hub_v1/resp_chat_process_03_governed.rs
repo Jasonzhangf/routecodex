@@ -535,13 +535,16 @@ fn read_v3_resp03_trimmed_owned(text: &str) -> Option<String> {
 }
 
 fn v3_resp03_reasoning_item(reasoning_segments: Vec<String>) -> Value {
+    let mut summary = Vec::new();
+    for text in reasoning_segments {
+        let Some(text) = read_v3_resp03_trimmed_owned(&text) else {
+            continue;
+        };
+        summary.push(json!({"type":"summary_text","text":text}));
+    }
     json!({
         "type": "reasoning",
-        "summary": reasoning_segments
-            .into_iter()
-            .filter_map(|text| read_v3_resp03_trimmed_owned(&text))
-            .map(|text| json!({"type":"summary_text","text":text}))
-            .collect::<Vec<_>>()
+        "summary": summary
     })
 }
 
@@ -773,12 +776,16 @@ fn harvest_v3_gemini_think_blocks(payload: &mut Value) -> bool {
             }
             changed = true;
             row.insert("text".to_string(), Value::String(harvest.visible_text));
-            let thought = harvest
-                .reasoning_segments
-                .into_iter()
-                .filter_map(|text| read_v3_resp03_trimmed_owned(&text))
-                .collect::<Vec<_>>()
-                .join("\n");
+            let mut thought = String::new();
+            for segment in harvest.reasoning_segments {
+                let Some(segment) = read_v3_resp03_trimmed_owned(&segment) else {
+                    continue;
+                };
+                if !thought.is_empty() {
+                    thought.push('\n');
+                }
+                thought.push_str(&segment);
+            }
             if !thought.is_empty() {
                 row.insert("thought".to_string(), Value::String(thought));
             }

@@ -177,15 +177,17 @@ pub(crate) fn responses_like_item_to_chat_message_at_req04(item: &Value) -> Valu
 fn chat_content_value_at_req04(value: &Value) -> Value {
     match value {
         Value::Array(items) => {
-            let text = items
-                .iter()
-                .filter_map(|item| {
-                    item.get("text")
-                        .or_else(|| item.get("content"))
-                        .and_then(Value::as_str)
-                })
-                .collect::<Vec<_>>()
-                .join("");
+            let mut text = String::new();
+            for item in items {
+                let Some(segment) = item
+                    .get("text")
+                    .or_else(|| item.get("content"))
+                    .and_then(Value::as_str)
+                else {
+                    continue;
+                };
+                text.push_str(segment);
+            }
             Value::String(text)
         }
         Value::String(text) => Value::String(text.clone()),

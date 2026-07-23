@@ -183,6 +183,93 @@ impl ResponsesTransport for ErrorTransport {
     }
 }
 
+struct ReselectTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ReselectTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        if provider_id == "primary" {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id,
+                    status: 500,
+                    headers: vec![],
+                    body:
+                        br#"{"error":{"code":500,"message":"primary failed","status":"INTERNAL"}}"#
+                            .to_vec(),
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "candidates":[{
+                    "index":0,
+                    "finishReason":"STOP",
+                    "content":{"role":"model","parts":[{"text":"secondary success"}]}
+                }]
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn provider_http_failure_reselects_next_candidate_before_client_projection() {
+    let transport = ReselectTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest_with_two_providers(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-provider-reselect".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents":[{"role":"user","parts":[{"text":"use the available provider"}]}],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["primary", "secondary"]
+    );
+    assert_eq!(output.status, 200);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(output.error_chain.is_none());
+    let client_response = match output.client_body {
+        V3GeminiRelayClientBody::Json(value) => value,
+        V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(
+        client_response["candidates"][0]["content"]["parts"][0]["text"],
+        "secondary success"
+    );
+    assert!(
+        !client_response.to_string().contains("primary failed"),
+        "failed candidate error must not be projected while another candidate succeeds"
+    );
+}
+
 struct MalformedErrorTransport;
 
 #[async_trait]
@@ -464,7 +551,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 
 #[tokio::test]
 async fn response_side_channel_is_rejected_for_json_and_sse_before_client_success() {
-    let json_error = execute_v3_gemini_relay_runtime(
+    let json_output = execute_v3_gemini_relay_runtime(
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -487,8 +574,21 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
         },
     )
     .await
-    .unwrap_err();
-    assert!(json_error.to_string().contains("metadata_center"));
+    .unwrap();
+    assert_eq!(json_output.status, 502);
+    assert_eq!(json_output.error_chain.as_ref().unwrap().len(), 6);
+    let json_client_response = match json_output.client_body {
+        V3GeminiRelayClientBody::Json(value) => value,
+        V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
+    };
+    assert!(
+        json_client_response.to_string().contains("metadata_center"),
+        "provider response side-channel rejection must be visible in terminal error body: {json_client_response}"
+    );
+    assert!(
+        !json_client_response.to_string().contains("hidden"),
+        "side-channel-contaminated provider response must not be projected as client success"
+    );
 
     let items = collect_sse_items(vec![br#"data: {"metadata_center":{"route":"must-not-leak"},"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hidden"}]},"finishReason":"STOP"}]}
 
@@ -598,6 +698,56 @@ async fn collect_sse_items(chunks: Vec<Vec<u8>>) -> Vec<Result<String, String>> 
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     manifest_with_provider_type("gemini")
+}
+
+fn manifest_with_two_providers() -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = format!(
+        r#"
+version = 3
+
+{hub_v1_declaration}
+
+[servers.controlled]
+bind = "127.0.0.1"
+port = 1
+routing_group = "controlled"
+endpoints = ["gemini"]
+
+{server_execution}
+
+[providers.primary]
+type = "gemini"
+base_url = "http://primary.invalid/v1beta"
+default_model = "gemini-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "primary", env = "V3_GEMINI_PRIMARY_KEY" }}] }}
+[providers.primary.models.gemini-wire]
+wire_name = "gemini-wire"
+aliases = ["gemini-client"]
+supports_streaming = true
+capabilities = ["text", "tools"]
+
+[providers.secondary]
+type = "gemini"
+base_url = "http://secondary.invalid/v1beta"
+default_model = "gemini-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "secondary", env = "V3_GEMINI_SECONDARY_KEY" }}] }}
+[providers.secondary.models.gemini-wire]
+wire_name = "gemini-wire"
+aliases = ["gemini-client"]
+supports_streaming = true
+capabilities = ["text", "tools"]
+
+[route_groups.controlled.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "gemini-wire", key = "primary", priority = 1 }},
+  {{ kind = "provider_model", provider = "secondary", model = "gemini-wire", key = "secondary", priority = 2 }}
+]
+"#,
+        hub_v1_declaration = hub_v1_test_declaration(),
+        server_execution = hub_v1_server_execution("controlled"),
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
 fn manifest_with_provider_type(

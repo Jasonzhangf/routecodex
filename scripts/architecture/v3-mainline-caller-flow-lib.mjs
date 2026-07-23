@@ -124,6 +124,10 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+function stripTrailingWhitespace(value) {
+  return String(value ?? '').replace(/[ \t]+$/gmu, '');
+}
+
 const MAIN_SKELETON_NOTES = new Map([
   ['v3.config.compile', {
     title: '01 配置编译',
@@ -255,6 +259,10 @@ const EDGE_STEP_NOTES = new Map([
   ['v3-rci-05', 'Resp04 之后只能走 Direct ready 节点，禁止直投'],
   ['v3-hub-resp-03', '响应侧工具/stopless/reasoning 治理唯一入口'],
   ['v3-hub-resp-04', 'Chat Process 完成后保存 continuation'],
+  ['v3-de-12', 'Error03 action 写入 health cooldown/disable'],
+  ['v3-de-13', 'provider health 投影成 target/router 可读 availability'],
+  ['v3-de-14', 'provider send/transport failure 记录 provider failure'],
+  ['v3-de-15', 'provider raw received 记录 provider success'],
   ['v3-servertool-stopless-req-03', '只消费 RouteCodex 注入的 no-op CLI 对'],
   ['v3-servertool-stopless-req-04', '注入 stop schema 和当前轮 guidance'],
   ['v3-servertool-stopless-resp-01', '检查模型是否调用 stop schema'],
@@ -359,6 +367,29 @@ function edgeStatus(edge) {
   return String(edge?.status ?? '').trim() || 'unknown';
 }
 
+function edgeReviewKind(edge) {
+  const status = edgeStatus(edge).replace('-', '_');
+  const bindingKind = String(edge?.binding_kind ?? '');
+  const edgeKind = String(edge?.edge_kind ?? '');
+  const files = `${edge?.caller_file ?? ''} ${edge?.callee_file ?? ''}`;
+  if (status === 'binding_pending') {
+    return { key: 'binding_pending', label: 'binding_pending', note: 'map owner exists but runtime/source binding is not proven' };
+  }
+  if (edgeKind === 'aggregate_entry_edge') {
+    return { key: 'aggregate-only', label: 'aggregate-only', note: 'wrapper edge only; not a semantic adjacent pipeline transition' };
+  }
+  if (bindingKind === 'h1_typed_test' || bindingKind === 'typed_runtime_node') {
+    return { key: 'typed-test-only', label: 'typed-test-only', note: 'typed skeleton/builder contract; does not prove live runtime closure' };
+  }
+  if (/tests\.rs|\/tests\//u.test(files) || /_test|test_|characterization|fixture|probe/u.test(bindingKind)) {
+    return { key: 'test-bound', label: 'test-bound', note: 'test/characterization evidence over declared owner path' };
+  }
+  if (/v3\/crates\//u.test(files) && status === 'anchored') {
+    return { key: 'live-bound', label: 'live-bound source', note: 'real runtime/source symbols are bound; live replay is still separate evidence' };
+  }
+  return { key: status || 'unknown', label: status || 'unknown', note: 'map status from edge record' };
+}
+
 function callerKey(edge, side) {
   const symbol = side === 'caller' ? edge?.caller_symbol : edge?.callee_symbol;
   const file = side === 'caller' ? edge?.caller_file : edge?.callee_file;
@@ -417,6 +448,19 @@ function detectForbiddenDirectProjectionEdges(parsed) {
   return forbidden;
 }
 
+function detectInvalidAggregateEntryEdges(parsed) {
+  const invalid = [];
+  for (const { chain, edge } of chainEdges(parsed)) {
+    const from = String(edge?.from_node ?? '');
+    const to = String(edge?.to_node ?? '');
+    const isAggregateShape = from === 'V3HubReqInbound01ClientRaw' && to === 'V3ServerRespOutbound06ClientFrame';
+    if (isAggregateShape && edge?.edge_kind !== 'aggregate_entry_edge') {
+      invalid.push({ chain_id: chain?.chain_id, step_id: edge?.step_id, from_node: from, to_node: to, edge_kind: edge?.edge_kind ?? '<missing>' });
+    }
+  }
+  return invalid;
+}
+
 function detectBindingPendingEdges(parsed) {
   return chainEdges(parsed)
     .filter(({ edge }) => edgeStatus(edge).replace('-', '_') === 'binding_pending')
@@ -461,6 +505,11 @@ export function auditV3ReviewSurfaceHtmlText(html, source_path = V3_CALLER_FLOW_
     'V3Error06ClientProjected',
     'v3.provider.health_state',
     'v3.error.client_projection',
+    'typed-test-only',
+    'live-bound',
+    'aggregate-only',
+    'binding_pending',
+    'runtime gap',
   ];
   const failures = [];
   for (const marker of requiredMarkers) {
@@ -469,6 +518,7 @@ export function auditV3ReviewSurfaceHtmlText(html, source_path = V3_CALLER_FLOW_
   const requestSection = String(html ?? '').split('Response skeleton / 响应主骨架')[0] ?? '';
   if (!requestSection.includes('v3.hub_pipeline.v1.request')) failures.push(`${source_path}: request skeleton must be generated from v3.hub_pipeline.v1.request`);
   if (!requestSection.includes('ProviderReqCompat06ProviderCompat')) failures.push(`${source_path}: request skeleton must show provider request compat before wire payload`);
+  if (!requestSection.includes('V3Router05RequestClassified') || !requestSection.includes('V3Target10ConcreteProviderSelected')) failures.push(`${source_path}: request skeleton must explicitly show VR/Target selection expansion`);
   const responsePart = String(html ?? '').split('Response skeleton / 响应主骨架')[1] ?? '';
   const responseSection = responsePart.split('Read format / 阅读格式')[0] ?? responsePart;
   if (!responseSection.includes('v3.hub_pipeline.v1.response')) failures.push(`${source_path}: response skeleton must be generated from v3.hub_pipeline.v1.response`);
@@ -482,6 +532,7 @@ export function auditV3CallerFlow(parsed) {
     missing: detectMissingEdges(parsed),
     bindingPending: detectBindingPendingEdges(parsed),
     forbiddenDirectProjection: detectForbiddenDirectProjectionEdges(parsed),
+    invalidAggregateEntry: detectInvalidAggregateEntryEdges(parsed),
   };
 }
 
@@ -764,7 +815,59 @@ function renderPrimaryChainMermaid(chain, titlePrefix = '') {
 }
 
 function renderRequestSkeletonMermaid(chains) {
-  return renderPrimaryChainMermaid(chainById(chains, 'v3.hub_pipeline.v1.request'), 'Request mainline');
+  const chain = chainById(chains, 'v3.hub_pipeline.v1.request');
+  const directChain = chainById(chains, 'v3.responses_direct.required_mainline');
+  if (!chain) return renderPrimaryChainMermaid(null, 'Request mainline');
+  const vrEdges = (directChain?.edges ?? []).filter((edge) => [
+    'v3-rd-03',
+    'v3-rd-04',
+    'v3-rd-05',
+    'v3-rd-06',
+    'v3-rd-07',
+    'v3-rd-08',
+  ].includes(edge?.step_id));
+  const edges = chain.edges ?? [];
+  const nodeIds = new Map();
+  const getNode = (nodeName) => {
+    const key = String(nodeName ?? '<missing-node>');
+    if (!nodeIds.has(key)) nodeIds.set(key, `rq_${nodeIds.size}`);
+    return nodeIds.get(key);
+  };
+  for (const edge of edges) {
+    getNode(edge?.from_node);
+    getNode(edge?.to_node);
+  }
+  for (const edge of vrEdges) {
+    getNode(edge?.from_node);
+    getNode(edge?.to_node);
+  }
+  const lines = [
+    '%%{init: {"flowchart": {"htmlLabels": true, "curve": "basis", "rankSpacing": 86, "nodeSpacing": 46}, "themeVariables": {"fontSize": "18px"}} }%%',
+    'flowchart TD',
+    '  title_note["<b>Request mainline</b><br/><small>generated from v3.hub_pipeline.v1.request edges + explicit VR/Target expansion</small>"]',
+  ];
+  for (const [nodeName, id] of nodeIds.entries()) {
+    lines.push(`  ${id}["${contractNodeHtmlLabel(nodeName)}"]`);
+  }
+  if (nodeIds.size) lines.push(`  title_note --> ${Array.from(nodeIds.values())[0]}`);
+  for (const edge of edges) {
+    if (edge?.step_id === 'v3-hub-req-05') continue;
+    lines.push(`  ${getNode(edge?.from_node)} -->|${edgeReadableLabel(edge)}| ${getNode(edge?.to_node)}`);
+    if (edge?.step_id === 'v3-hub-req-04' && vrEdges.length) {
+      lines.push(`  ${getNode(edge?.to_node)} -->|expand route facts to VR| ${getNode(vrEdges[0].from_node)}`);
+      for (const vrEdge of vrEdges) {
+        lines.push(`  ${getNode(vrEdge?.from_node)} -->|${edgeReadableLabel(vrEdge)}| ${getNode(vrEdge?.to_node)}`);
+      }
+      lines.push(`  ${getNode(vrEdges.at(-1).to_node)} -->|resolved target returns to Hub ReqTarget06| ${getNode('V3HubReqTarget06Resolved')}`);
+    }
+  }
+  const requestNodeIds = Array.from(new Set(edges.flatMap((edge) => [getNode(edge?.from_node), getNode(edge?.to_node)])));
+  const vrNodeIds = Array.from(new Set(vrEdges.flatMap((edge) => [getNode(edge?.from_node), getNode(edge?.to_node)])));
+  lines.push('  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;');
+  lines.push('  classDef vr fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;');
+  if (requestNodeIds.length) lines.push(`  class ${requestNodeIds.join(',')} node;`);
+  if (vrNodeIds.length) lines.push(`  class ${vrNodeIds.join(',')} vr;`);
+  return lines.join('\n');
 }
 
 function renderResponseSkeletonMermaid(chains) {
@@ -788,6 +891,23 @@ function nodePrimaryResource(edge, nodeName) {
   if (String(nodeName) === toNode) return (flow.produces ?? [])[0] ?? (flow.side_channel_writes ?? [])[0] ?? null;
   if (String(nodeName) === fromNode) return (flow.consumes ?? [])[0] ?? (flow.side_channel_reads ?? [])[0] ?? null;
   return null;
+}
+
+
+function errorGraphNodeNote(nodeName) {
+  if (nodeName === 'V3Transport13ResponsesHttpRequest') {
+    return {
+      title: 'Provider send failure observation',
+      note: 'provider transport/send 阶段失败时记录 health failure；不是 Error01 来源节点',
+    };
+  }
+  if (nodeName === 'V3ProviderResp14Raw') {
+    return {
+      title: 'Provider success observation',
+      note: '收到 provider raw 响应后记录 health success；这是健康恢复信号，不是错误',
+    };
+  }
+  return contractNodeNote(nodeName);
 }
 
 function renderErrorResourceMermaid(parsed, resourceMap) {
@@ -817,7 +937,7 @@ function renderErrorResourceMermaid(parsed, resourceMap) {
     getNode(edge?.to_node);
   }
   for (const [nodeName, id] of nodeIds.entries()) {
-    const info = contractNodeNote(nodeName);
+    const info = errorGraphNodeNote(nodeName);
     const resourceId = resourceForNode.get(nodeName);
     const resource = resourceIds.get(resourceId);
     const resourceText = resourceId ? `<br/><small>resource: ${escapeHtml(resourceId)}</small><br/><small>owner: ${escapeHtml(resource?.owner_crate ?? 'map missing')} / ${escapeHtml(resource?.owner_node ?? nodeName)}</small>` : '';
@@ -876,7 +996,7 @@ function renderErrorResourceSectionHtml(parsed, resourceMap) {
   return `
     <section class="skeleton error-resource-section">
       <h2>Error resources / 错误处理资源</h2>
-      <p>错误链是独立资源链：错误进入 <code>V3Error01SourceRaised</code> 后逐节点分类、策略、执行决策、客户端投影；provider health 是 provider runtime 资源，Error03 action 可触发 health 写入，VR/Target 只能读取 availability。</p>
+      <p>错误链是独立资源链：错误进入 <code>V3Error01SourceRaised</code> 后逐节点分类、策略、执行决策、客户端投影。右侧两个 provider 节点不是错误来源：<code>V3Transport13ResponsesHttpRequest</code> 表示 provider send/transport 失败时写 health failure，<code>V3ProviderResp14Raw</code> 表示收到 raw 响应后写 health success；它们只服务 provider health/availability。</p>
       <div class="diagram-shell">
         <pre class="mermaid">${escapeHtml(renderErrorResourceMermaid(parsed, resourceMap))}</pre>
       </div>
@@ -989,11 +1109,22 @@ function renderFormatHtml() {
 
 function renderAuditHtml(parsed, sourceAudit) {
   const audit = auditV3CallerFlow(parsed);
+  const chains = parsed?.chains ?? [];
+  const allEdges = chains.flatMap((chain) => (chain?.edges ?? []).map((edge) => ({ chain, edge })));
+  const kindCounts = new Map();
+  for (const { edge } of allEdges) {
+    const kind = edgeReviewKind(edge);
+    kindCounts.set(kind.key, (kindCounts.get(kind.key) ?? 0) + 1);
+  }
   const rows = [
     ['Forbidden direct response projection edges', audit.forbiddenDirectProjection.length === 0 ? 'none' : String(audit.forbiddenDirectProjection.length)],
     ['Forbidden source registered direct response edges', sourceAudit.forbiddenRegisteredHooks.length === 0 ? 'none' : String(sourceAudit.forbiddenRegisteredHooks.length)],
+    ['Invalid aggregate wrapper edges', audit.invalidAggregateEntry.length === 0 ? 'none' : String(audit.invalidAggregateEntry.length)],
     ['Missing caller/callee fields', audit.missing.length === 0 ? 'none' : String(audit.missing.length)],
     ['Binding-pending edges', String(audit.bindingPending.length)],
+    ['typed-test-only edges', String(kindCounts.get('typed-test-only') ?? 0)],
+    ['live-bound source edges', String(kindCounts.get('live-bound') ?? 0)],
+    ['aggregate-only wrapper edges', String(kindCounts.get('aggregate-only') ?? 0)],
   ];
   const pendingRows = audit.bindingPending.map((edge) => [
     `<code>${escapeHtml(edge.chain_id)}</code>`,
@@ -1001,14 +1132,45 @@ function renderAuditHtml(parsed, sourceAudit) {
     `<code>${escapeHtml(edge.from_node)}</code>`,
     `<code>${escapeHtml(edge.to_node)}</code>`,
   ]);
+  const invalidAggregateRows = audit.invalidAggregateEntry.map((edge) => [
+    `<code>${escapeHtml(edge.chain_id)}</code>`,
+    `<code>${escapeHtml(edge.step_id)}</code>`,
+    `<code>${escapeHtml(edge.from_node)}</code> → <code>${escapeHtml(edge.to_node)}</code>`,
+    `<code>${escapeHtml(edge.edge_kind)}</code>`,
+  ]);
+  const runtimeGapRows = allEdges
+    .filter(({ edge }) => ['binding_pending', 'typed-test-only', 'aggregate-only'].includes(edgeReviewKind(edge).key))
+    .map(({ chain, edge }) => {
+      const kind = edgeReviewKind(edge);
+      return [
+        `<code>${escapeHtml(chain?.chain_id ?? '')}</code>`,
+        `<code>${escapeHtml(edge?.step_id ?? '')}</code>`,
+        `<span class="status ${escapeHtml(kind.key)}">${escapeHtml(kind.label)}</span>`,
+        escapeHtml(kind.note),
+      ];
+    });
   return `
     <section class="audit-panel">
       <h2>Auto audit / 补救清单</h2>
       ${htmlTable(['Check', 'Result'], rows.map(([name, value]) => [escapeHtml(name), `<strong>${escapeHtml(value)}</strong>`]))}
+      <h3>Review status legend</h3>
+      <div class="format-grid">
+        <div class="format-card"><h3>typed-test-only</h3><p>Typed skeleton/builder edge from test-owned contract evidence; it proves node topology, not live runtime closure.</p></div>
+        <div class="format-card"><h3>live-bound</h3><p>Real source symbols are bound in Rust runtime/source files; live replay remains a separate required proof.</p></div>
+        <div class="format-card"><h3>aggregate-only</h3><p>Wrapper/entry edge only. It must not be read as an adjacent semantic pipeline transition.</p></div>
+        <div class="format-card"><h3>binding_pending</h3><p>Map owner is declared but caller/callee or source evidence is not yet strong enough to claim closure.</p></div>
+        <div class="format-card"><h3>runtime gap</h3><p>Any typed-test-only, aggregate-only, or binding_pending edge is a visible runtime gap until a runtime worker binds and verifies the adjacent owner path.</p></div>
+      </div>
+      ${invalidAggregateRows.length ? `
+        <h3>Invalid aggregate wrappers</h3>
+        ${htmlTable(['chain_id', 'step_id', 'edge', 'edge_kind'], invalidAggregateRows)}
+      ` : ''}
       ${pendingRows.length ? `
         <h3>Binding pending</h3>
         ${htmlTable(['chain_id', 'step_id', 'from_node', 'to_node'], pendingRows)}
       ` : ''}
+      <h3>Runtime gap inventory</h3>
+      ${htmlTable(['chain_id', 'step_id', 'review class', 'why it is not runtime/live closure'], runtimeGapRows)}
     </section>
   `;
 }
@@ -1075,6 +1237,7 @@ function renderBranchDetails(chain, index, locks) {
     `<code>${escapeHtml(edge?.step_id ?? '')}</code>`,
     `<code>${escapeHtml(edge?.from_node ?? '')}</code><br/>→ <code>${escapeHtml(edge?.to_node ?? '')}</code>`,
     `<span class="status ${edgeStatus(edge).replace(/[^a-z0-9_-]/giu, '_')}">${escapeHtml(edgeStatus(edge))}</span>`,
+    `<span class="status ${escapeHtml(edgeReviewKind(edge).key)}" title="${escapeHtml(edgeReviewKind(edge).note)}">${escapeHtml(edgeReviewKind(edge).label)}</span>`,
     resourceFlowHtml(edge),
     `<code>${escapeHtml(edge?.caller_symbol ?? '<missing>')}</code><br/><small>${escapeHtml(stripRoot(edge?.caller_file ?? '<missing>'))}</small>`,
     `<code>${escapeHtml(edge?.callee_symbol ?? '<missing>')}</code><br/><small>${escapeHtml(stripRoot(edge?.callee_file ?? '<missing>'))}</small>`,
@@ -1099,7 +1262,7 @@ function renderBranchDetails(chain, index, locks) {
         <div class="diagram-shell">
           <pre class="mermaid">${escapeHtml(renderContractMermaidForChain(chain))}</pre>
         </div>
-        ${htmlTable(['Step', 'Node edge', 'Status', 'Resources', 'Caller', 'Callee'], edgeRows)}
+        ${htmlTable(['Step', 'Node edge', 'Status', 'Review class', 'Resources', 'Caller', 'Callee'], edgeRows)}
       </div>
     </details>
   `;
@@ -1112,7 +1275,7 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
   const resourceMap = loadV3ResourceOperationMap(root);
   const chains = parsed?.chains ?? [];
   const edgeCount = chains.reduce((sum, chain) => sum + (chain?.edges?.length ?? 0), 0);
-  return `<!doctype html>
+  return stripTrailingWhitespace(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -1345,6 +1508,22 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
       background: #ffedd5;
       color: #7c2d12;
     }
+    .status.typed-test-only {
+      background: #ede9fe;
+      color: #5b21b6;
+    }
+    .status.live-bound {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .status.aggregate-only {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .status.test-bound {
+      background: #e0e7ff;
+      color: #3730a3;
+    }
     .status.pending_review {
       background: #e0f2fe;
       color: #075985;
@@ -1421,5 +1600,5 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
   </main>
 </body>
 </html>
-`;
+`);
 }

@@ -1146,6 +1146,7 @@ fn record_v3_direct_provider_failure(
             Some(&source.message),
             now_epoch_ms,
         )
+        .map(|_| ())
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
 }
 

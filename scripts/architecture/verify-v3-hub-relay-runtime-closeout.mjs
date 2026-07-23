@@ -4,6 +4,9 @@ import YAML from 'yaml';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
 const responsesRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
+const openaiChatRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs';
+const geminiRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs';
+const providerFailurePolicyPath = 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs';
@@ -17,6 +20,9 @@ const packagePath = 'package.json';
 
 const runtime = readFileSync(runtimePath, 'utf8');
 const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8');
+const openaiChatRuntime = readFileSync(openaiChatRuntimePath, 'utf8');
+const geminiRuntime = readFileSync(geminiRuntimePath, 'utf8');
+const providerFailurePolicy = readFileSync(providerFailurePolicyPath, 'utf8');
 const server = readFileSync(serverPath, 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
@@ -96,20 +102,38 @@ for (const script of [
 
 requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile');
 requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHookProfile');
-requireCount(runtime, runtimePath, 'hooks.govern(resp02, &response_hook_profile)?', 2);
-requireCount(runtime, runtimePath, 'let resp04 = hooks.commit(resp03)?;', 2);
-requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)', 2);
-requireCount(runtime, runtimePath, 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)', 2);
+requireRelayRuntimeUsesSharedProviderFailurePolicy(runtime, runtimePath, 'anthropic');
+requireText(runtime, runtimePath, 'fn closeout_anthropic_relay_response<F>(');
+requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 3);
+requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 1);
+requireCount(runtime, runtimePath, 'let resp03 = hooks.govern(resp02, response_hook_profile)?;', 1);
+requireCount(runtime, runtimePath, 'let resp04 = hooks.commit(resp03)?;', 1);
+requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)', 1);
+requireCount(runtime, runtimePath, 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)', 1);
+requireOrderedSequence(runtime, runtimePath, [
+  'fn closeout_anthropic_relay_response<F>(',
+  'let hooks = compile_v3_hub_relay_response_hooks();',
+  'let resp02 = hooks.normalize(resp01)?;',
+  'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
+  'let resp04 = hooks.commit(resp03)?;',
+  'commit_or_release_local_continuation(',
+  'let client_response = project_client_response(resp04.finalized_payload())?;',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)',
+  'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)',
+]);
 requireOrdered(
   runtime,
   runtimePath,
   'let resp04 = hooks.commit(resp03)?;',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)',
-  2,
+  1,
 );
 requireText(runtime, runtimePath, 'servertool_followup_required');
 forbid(runtime, runtimePath, [
   /hooks\.govern\(resp02,\s*&V3HubRelayResponseHookProfile::empty\(\)\)/,
+  /fn\s+resolve_target\s*\(/,
+  /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
+  /\bprovider_error_output\b|\bprovider_runtime_error_output\b/,
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
@@ -166,6 +190,7 @@ for (const phrase of [
   'fn observe_v3_runtime_responses_sse_transport_chunk(',
   'fn apply_responses_stream_protocol_events_to_terminal_response(',
 ]) requireText(responsesRuntime, responsesRuntimePath, phrase);
+requireRelayRuntimeUsesSharedProviderFailurePolicy(responsesRuntime, responsesRuntimePath, 'responses');
 for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
 for (const node of expectedNodes.slice(10)) {
   requireCount(responsesRuntime, responsesRuntimePath, `trace.push("${node}");`, 1);
@@ -185,12 +210,41 @@ requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
 ]);
 forbid(responsesRuntime, responsesRuntimePath, [
+  /struct\s+V3ResponsesRelayExcludedAvailability\b/,
+  /struct\s+V3ResponsesRelayProviderFailureContext\b/,
+  /fn\s+resolve_target\s*\(/,
+  /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
+  /\.record_provider_failure\s*\(/,
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /collect\s*::<\s*Vec|full_buffer/i,
   /\bproject_sse_stream\b|\bV3ObservedSseState\b|\bproject_finalized_response_sse_stream\b/,
 ]);
+
+for (const [text, path, label] of [
+  [openaiChatRuntime, openaiChatRuntimePath, 'openai_chat'],
+  [geminiRuntime, geminiRuntimePath, 'gemini'],
+]) {
+  requireRelayRuntimeUsesSharedProviderFailurePolicy(text, path, label);
+  forbid(text, path, [
+    /fn\s+resolve_target\s*\(/,
+    /\bV3VirtualRouter\b|\bV3TargetInterpreter\b/,
+    /\.record_provider_failure\s*\(/,
+    /\bprovider_error_output\b|\bprovider_runtime_error_output\b/,
+    /fallback/i,
+  ]);
+}
+
+for (const phrase of [
+  'pub(crate) async fn run_v3_relay_provider_failure_policy(',
+  'pub(crate) fn resolve_v3_relay_target',
+  'struct V3RelayExcludedAvailability',
+  'pub struct V3ProviderFailureRuntimeHealth',
+  'V3RelayProviderFailureDecision::Reselect',
+  'V3RelayProviderFailureDecision::RetrySame',
+  'V3RelayProviderFailureDecision::ProjectTerminal',
+]) requireText(providerFailurePolicy, providerFailurePolicyPath, phrase);
 
 for (const phrase of [
   'execute_v3_responses_relay_request',
@@ -306,6 +360,32 @@ function requireOrderedSequence(text, owner, phrases) {
     }
     index = next + phrase.length;
   }
+}
+
+function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKind) {
+  for (const phrase of [
+    'run_v3_relay_provider_failure_policy(',
+    'resolve_v3_relay_target(',
+    'V3RelayProviderFailurePolicyContext',
+    'V3RelayProviderFailurePolicyState',
+    'V3RelayProviderFailureDecision::Reselect',
+    'V3RelayProviderFailureDecision::RetrySame',
+    'V3RelayProviderFailureDecision::ProjectTerminal',
+    'V3ProviderFailureRuntimeHealth',
+    `entry_kind: "${entryKind}"`,
+  ]) {
+    requireText(text, owner, phrase);
+  }
+  requireOrderedSequence(text, owner, [
+    'let failure_context = V3RelayProviderFailurePolicyContext {',
+    `entry_kind: "${entryKind}"`,
+    'match resolve_v3_relay_target(',
+    'let result = run_v3_relay_provider_failure_policy(',
+    '&mut V3RelayProviderFailurePolicyState {',
+    'V3RelayProviderFailureDecision::Reselect',
+    'V3RelayProviderFailureDecision::RetrySame',
+    'V3RelayProviderFailureDecision::ProjectTerminal',
+  ]);
 }
 
 function forbid(text, owner, patterns) {
