@@ -56,7 +56,7 @@ Out of scope:
 | --- | ---: | --- |
 | `gap.runtime_extension_declared` | 214 | Implement declared extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
 | `gap.semantic_declared_runtime_closeout` | 59 | Implement manually declared native/extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
-| `gap.partial_cross_protocol_semantics` | 84 | Complete both request and response transforms for the affected semantic family. |
+| `gap.partial_cross_protocol_semantics` | 94 | Complete both request and response transforms for the affected semantic family. |
 | `gap.source_inventory_only` | 0 | Keep this at zero; new source fields must receive manual semantic owner/classification before runtime edits. |
 | `gap.shape_branch_transform` | 18 | `shape_branch_cases` are now documented/gated for the content/media/file rows; next closeout must add the named Rust positive/negative tests and adjacent codec implementation before changing any status. |
 | `gap.gemini_codec_shape_only` | 14 | Expand Gemini deep semantics or mark unsupported/lossy explicitly. |

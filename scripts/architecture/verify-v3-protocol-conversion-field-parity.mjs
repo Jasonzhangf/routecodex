@@ -305,7 +305,7 @@ for (const phrase of [
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
-  '`partial` | 84',
+  '`partial` | 94',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
   'gap.semantic_declared_runtime_closeout',
