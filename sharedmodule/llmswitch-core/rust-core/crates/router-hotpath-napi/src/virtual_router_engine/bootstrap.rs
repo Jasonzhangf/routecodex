@@ -278,9 +278,16 @@ fn collect_forwarder_target_keys(
             continue;
         };
         for target in targets.iter().filter_map(Value::as_object) {
+            if let Some(provider_key) = target
+                .get("providerKey")
+                .and_then(Value::as_str)
+                .and_then(trim_nonempty_str)
+            {
+                push_unique_trimmed(out, seen, &provider_key);
+                continue;
+            }
             let Some(provider_id) = target
                 .get("providerId")
-                .or_else(|| target.get("providerKey"))
                 .and_then(Value::as_str)
                 .and_then(trim_nonempty_str)
             else {
@@ -353,6 +360,44 @@ mod tests {
         assert_eq!(
             output["config"]["routingPolicyGroup"],
             json!("gateway_priority_5555")
+        );
+    }
+
+    #[test]
+    fn bootstrap_virtual_router_config_rejects_forwarder_provider_key_missing_profile() {
+        let input = json!({
+            "providers": {
+                "asxs-cc": {
+                    "type": "responses",
+                    "baseURL": "https://api.asxs.example/v1",
+                    "auth": { "type": "apikey", "entries": [{ "alias": "cc-oai", "apiKey": "${CC_OAI_KEY}" }] },
+                    "models": { "gpt-5.6-terra": {} }
+                }
+            },
+            "forwarders": {
+                "fwd.paid.gpt-5.6-luna": {
+                    "forwarderId": "fwd.paid.gpt-5.6-luna",
+                    "protocol": "openai",
+                    "modelId": "gpt-5.6-luna",
+                    "resolutionMode": "model-first",
+                    "strategy": "weighted",
+                    "stickyKey": "session",
+                    "targets": [{ "providerKey": "asxs-cc.cc-oai.gpt-5.6-luna", "disabled": false }]
+                }
+            },
+            "routing": {
+                "default": [{ "targets": ["fwd.paid.gpt-5.6-luna"] }]
+            }
+        });
+
+        let error = bootstrap_virtual_router_config_json(input.to_string()).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains(
+                "Routing target asxs-cc.cc-oai.gpt-5.6-luna references unknown model gpt-5.6-luna"
+            ),
+            "unexpected error: {}",
+            message
         );
     }
 }
