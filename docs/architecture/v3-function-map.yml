@@ -131,6 +131,10 @@ features:
       - v3-cfg-02
       - v3-cfg-03
       - v3-cfg-04
+      - v3-cfg-compact-01
+      - v3-cfg-compact-02
+      - v3-cfg-compact-03
+      - v3-cfg-compact-04
     entry_symbols:
       - V3ConfigStore::read_authoring
       - V3ConfigStore::load_snapshot
@@ -146,6 +150,7 @@ features:
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md
       - docs/architecture/wiki/v3-responses-direct-mainline.md
       - docs/goals/v3-foundation-p0-p2-test-design.md
       - scripts/architecture/verify-v3-resource-relation-edge-lock.mjs

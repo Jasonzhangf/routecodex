@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>V3 Compact Hub V1 Defaults SOP Review</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root { color-scheme: light; --bg:#f5f1e9; --panel:#fffdfa; --ink:#172033; --muted:#647083; --line:#d8d0c2; --accent:#0f766e; --accent-dark:#134e4a; --accent-soft:#dff4ef; --danger:#be123c; --code:#f6f0e7; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif; background:radial-gradient(circle at 10% 0%, rgba(15,118,110,.12), transparent 30%), radial-gradient(circle at 90% 10%, rgba(217,119,6,.12), transparent 30%), linear-gradient(180deg,#fbf7ef 0%,var(--bg) 100%); color:var(--ink); }
+    main { max-width:1680px; margin:0 auto; padding:34px 22px 72px; }
+    header.hero, section.panel { background:rgba(255,253,250,.96); border:1px solid var(--line); border-radius:24px; box-shadow:0 18px 48px rgba(23,32,51,.08); padding:28px; margin:18px 0; }
+    header.hero { background:linear-gradient(135deg, rgba(15,118,110,.14), rgba(255,253,250,.96)); }
+    .eyebrow { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:var(--accent-soft); color:var(--accent-dark); font-weight:800; font-size:.9rem; }
+    h1 { margin:14px 0 10px; font-size:clamp(2.2rem,4.8vw,4.8rem); line-height:.96; letter-spacing:-.055em; }
+    h2 { margin:0 0 14px; font-size:clamp(1.45rem,2.6vw,2.35rem); letter-spacing:-.025em; }
+    h3 { margin:0 0 8px; font-size:1.12rem; letter-spacing:-.012em; }
+    p { margin:0; color:var(--muted); line-height:1.55; }
+    code { font-family:"SFMono-Regular","Menlo","Consolas",monospace; font-size:.88em; background:var(--code); border:1px solid rgba(216,208,194,.9); border-radius:7px; padding:.08rem .35rem; }
+    .meta-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+    .meta-pill { border:1px solid var(--line); background:rgba(255,255,255,.74); border-radius:999px; padding:8px 12px; color:var(--muted); font-size:.92rem; }
+    .flow-stack { display:grid; gap:22px; }
+    .flow-box { overflow-x:auto; background:linear-gradient(180deg,rgba(15,118,110,.045),rgba(255,255,255,.92)); border:1px solid var(--line); border-radius:18px; padding:22px; }
+    pre.mermaid { min-width:1120px; margin:0; font-size:20px; line-height:1.45; }
+    .logic-grid, .note-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
+    .logic-card, .note-card { border:1px solid var(--line); border-radius:18px; background:white; padding:16px; min-height:150px; border-top:5px solid var(--accent); }
+    table { width:100%; border-collapse:collapse; background:white; border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:.96rem; }
+    th,td { border:1px solid var(--line); padding:11px 12px; vertical-align:top; text-align:left; line-height:1.45; }
+    th { background:var(--accent-soft); color:var(--accent-dark); font-weight:800; }
+    .callout { border-left:5px solid var(--danger); background:#fff1f2; border-radius:16px; padding:16px 18px; line-height:1.58; color:#7f1d1d; }
+    ul { margin:0; color:var(--muted); line-height:1.55; }
+  </style>
+</head>
+<body data-review-surface="v3-config-compact-hub-v1-defaults-sop">
+  <main>
+    <header class="hero">
+      <span class="eyebrow">config compiler review · audited lock</span>
+      <h1>V3 Compact Hub V1 Defaults SOP Review</h1>
+      <p>Locks compact user authoring to one Rust config compiler path. Fixed Hub endpoint, hook, resource, and execution declarations are derived before Manifest publication and cannot be rebuilt by Runtime, Server, Provider, Virtual Router, Target, or Compat.</p>
+      <div class="meta-row">
+        <span class="meta-pill">Canonical Markdown source: <code>docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md</code></span>
+        <span class="meta-pill">Review surface class: <code>V3 dedicated annotated HTML</code></span>
+        <span class="meta-pill">Generic Markdown renderer: <code>forbidden</code></span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Separated request / response diagrams</h2>
+      <div class="flow-stack">
+        <section><h3>Compact authoring compile flow</h3><div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 105, &quot;nodeSpacing&quot;: 65}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;20px&quot;}} }%%
+flowchart TD
+  title_note[&quot;&lt;b&gt;Compact authoring compile flow&lt;/b&gt;&lt;br/&gt;&lt;small&gt;generated dedicated review surface&lt;/small&gt;&quot;]
+  N0[&quot;&lt;b&gt;V3Config02AuthoringParsed&lt;/b&gt;&quot;]
+  N1[&quot;&lt;b&gt;V3HubV1CompactAuthoringAccepted&lt;/b&gt;&quot;]
+  N2[&quot;&lt;b&gt;V3Config03SchemaValidated&lt;/b&gt;&quot;]
+  N3[&quot;&lt;b&gt;V3Config05ManifestPublished&lt;/b&gt;&quot;]
+  title_note --&gt; N0
+  N0 --&gt;|v3-cfg-compact-01 parse compact declaration| N1
+  N1 --&gt;|v3-cfg-compact-02 derive Hub V1 defaults| N2
+  N1 --&gt;|v3-cfg-compact-03 derive server execution defaults| N2
+  N2 --&gt;|v3-cfg-compact-04 publish deterministic Manifest| N3
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
+  class N0,N1,N2,N3 node;</pre></div></section>
+        <section><h3>Published Manifest consumption boundary</h3><div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 105, &quot;nodeSpacing&quot;: 65}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;20px&quot;}} }%%
+flowchart TD
+  title_note[&quot;&lt;b&gt;Published Manifest consumption boundary&lt;/b&gt;&lt;br/&gt;&lt;small&gt;generated dedicated review surface&lt;/small&gt;&quot;]
+  N0[&quot;&lt;b&gt;V3Config05ManifestPublished&lt;/b&gt;&quot;]
+  N1[&quot;&lt;b&gt;V3 Runtime / Server consumers&lt;/b&gt;&quot;]
+  N2[&quot;&lt;b&gt;Source config files&lt;/b&gt;&quot;]
+  N3[&quot;&lt;b&gt;routecodex-v3-config only&lt;/b&gt;&quot;]
+  N4[&quot;&lt;b&gt;Runtime / Server / Provider / Compat&lt;/b&gt;&quot;]
+  N5[&quot;&lt;b&gt;Forbidden default writer&lt;/b&gt;&quot;]
+  title_note --&gt; N0
+  N0 --&gt;|consume compiled declarations only| N1
+  N2 --&gt;|single file IO and default owner| N3
+  N4 --&gt;|must not rebuild fixed Hub V1 defaults| N5
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
+  class N0,N1,N2,N3,N4,N5 node;</pre></div></section>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Node logic cards</h2>
+      <div class="logic-grid"><article class="logic-card">
+    <h3>Compact authoring is intentional</h3>
+    <p>Users declare pipeline identity and business routing/provider choices without listing fixed Hub hook/resource lifecycle internals.</p>
+  </article>
+<article class="logic-card">
+    <h3>Config compiler is the sole default owner</h3>
+    <p>default_hub_v1_authoring and default_server_execution live only in routecodex-v3-config and materialize before Manifest publication.</p>
+  </article>
+<article class="logic-card">
+    <h3>Manifest is the runtime truth</h3>
+    <p>Runtime and Server consume V3Config05ManifestPublished; source config reads or local default reconstruction are architecture violations.</p>
+  </article></div>
+    </section>
+
+    <section class="panel">
+      <h2>Resource / error / side-channel section</h2>
+      <table><thead><tr><th>Resource</th><th>Owner</th><th>Rule</th></tr></thead><tbody><tr><td><code>v3.config.authoring_parsed</code></td><td>routecodex-v3-config</td><td>Compact source declaration after parse.</td></tr><tr><td><code>v3.config.hub_pipeline_declarations</code></td><td>routecodex-v3-config</td><td>Closed fixed Hub V1 endpoints, hooks, resources, and execution declarations.</td></tr><tr><td><code>v3.config.published_manifest</code></td><td>routecodex-v3-config</td><td>Only runtime/server configuration truth.</td></tr></tbody></table>
+    </section>
+
+    <section class="panel">
+      <h2>Review checklist</h2>
+      <ul><li>Compact TOML compiles to the closed deterministic Manifest</li><li>V2 compat uses the same default owner</li><li>No default writer exists outside routecodex-v3-config</li><li>Locked fingerprint changes require Jason manual authorization</li></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Source-section evidence</h2>
+      <p>Detected source sections: <code>## Contract</code></p>
+    </section>
+
+    <section class="panel">
+      <h2>Canonical sources</h2>
+      <ul><li><code>docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md</code></li><li><code>docs/architecture/wiki/html/v3-mainline-caller-flow.html</code></li><li><code>docs/architecture/v3-mainline-call-map.yml</code></li><li><code>docs/architecture/v3-resource-operation-map.yml</code></li><li><code>docs/architecture/v3-function-map.yml</code></li><li><code>docs/architecture/v3-verification-map.yml</code></li></ul>
+    </section>
+  </main>
+</body>
+</html>

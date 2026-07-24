@@ -19,11 +19,42 @@ export const MERMAID_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/
 
 
 const V3_ENTRY_PROTOCOL_ENDPOINT_BINDING_PATH = 'docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md';
+const V3_CONFIG_COMPACT_HUB_V1_DEFAULTS_SOP_PATH = 'docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md';
 const V3_OPENAI_CHAT_RELAY_CONTROLLED_RUNTIME_PATH = 'docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md';
 const V3_GEMINI_RELAY_CONTROLLED_RUNTIME_PATH = 'docs/architecture/wiki/v3-gemini-relay-controlled-runtime.md';
 const V3_PROTOCOL_NORMALIZATION_TOOL_GOVERNANCE_BOUNDARY_PATH = 'docs/architecture/wiki/v3-protocol-normalization-tool-governance-boundary.md';
 
 const V3_DEDICATED_REVIEW_SURFACES = new Map([
+  [V3_CONFIG_COMPACT_HUB_V1_DEFAULTS_SOP_PATH, {
+    id: 'v3-config-compact-hub-v1-defaults-sop',
+    eyebrow: 'config compiler review · audited lock',
+    title: 'V3 Compact Hub V1 Defaults SOP Review',
+    summary: 'Locks compact user authoring to one Rust config compiler path. Fixed Hub endpoint, hook, resource, and execution declarations are derived before Manifest publication and cannot be rebuilt by Runtime, Server, Provider, Virtual Router, Target, or Compat.',
+    requestTitle: 'Compact authoring compile flow',
+    responseTitle: 'Published Manifest consumption boundary',
+    requestEdges: [
+      ['V3Config02AuthoringParsed', 'V3HubV1CompactAuthoringAccepted', 'v3-cfg-compact-01 parse compact declaration'],
+      ['V3HubV1CompactAuthoringAccepted', 'V3Config03SchemaValidated', 'v3-cfg-compact-02 derive Hub V1 defaults'],
+      ['V3HubV1CompactAuthoringAccepted', 'V3Config03SchemaValidated', 'v3-cfg-compact-03 derive server execution defaults'],
+      ['V3Config03SchemaValidated', 'V3Config05ManifestPublished', 'v3-cfg-compact-04 publish deterministic Manifest'],
+    ],
+    responseEdges: [
+      ['V3Config05ManifestPublished', 'V3 Runtime / Server consumers', 'consume compiled declarations only'],
+      ['Source config files', 'routecodex-v3-config only', 'single file IO and default owner'],
+      ['Runtime / Server / Provider / Compat', 'Forbidden default writer', 'must not rebuild fixed Hub V1 defaults'],
+    ],
+    logicCards: [
+      ['Compact authoring is intentional', 'Users declare pipeline identity and business routing/provider choices without listing fixed Hub hook/resource lifecycle internals.'],
+      ['Config compiler is the sole default owner', 'default_hub_v1_authoring and default_server_execution live only in routecodex-v3-config and materialize before Manifest publication.'],
+      ['Manifest is the runtime truth', 'Runtime and Server consume V3Config05ManifestPublished; source config reads or local default reconstruction are architecture violations.'],
+    ],
+    resources: [
+      ['v3.config.authoring_parsed', 'routecodex-v3-config', 'Compact source declaration after parse.'],
+      ['v3.config.hub_pipeline_declarations', 'routecodex-v3-config', 'Closed fixed Hub V1 endpoints, hooks, resources, and execution declarations.'],
+      ['v3.config.published_manifest', 'routecodex-v3-config', 'Only runtime/server configuration truth.'],
+    ],
+    checklist: ['Compact TOML compiles to the closed deterministic Manifest', 'V2 compat uses the same default owner', 'No default writer exists outside routecodex-v3-config', 'Locked fingerprint changes require Jason manual authorization'],
+  }],
   [V3_ENTRY_PROTOCOL_ENDPOINT_BINDING_PATH, {
     id: 'v3-entry-protocol-endpoint-binding',
     eyebrow: 'entry protocol review · dedicated surface',

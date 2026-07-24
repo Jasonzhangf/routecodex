@@ -71,6 +71,23 @@ export const GENERATED_WIKI_PAGES = [
 
 export const MANUAL_WIKI_PAGES = [
   {
+    path: `${WIKI_ROOT}/v3-config-compact-hub-v1-defaults-sop.md`,
+    title: '# V3 Config Compact Hub V1 Defaults SOP',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Contract',
+      '## Mainline',
+      '## Allowed Owners',
+      '## Forbidden Owners',
+      '## Default Truth',
+      '## Review Checklist',
+      '## Gates',
+      'V3HubV1CompactAuthoringAccepted',
+      'default_hub_v1_authoring()',
+      'default_server_execution()',
+    ],
+  },
+  {
     path: `${WIKI_ROOT}/stopless-session-mainline-source.md`,
     title: '# Stopless Session Mainline Source',
     minMermaidBlocks: 2,

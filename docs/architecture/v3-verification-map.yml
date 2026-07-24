@@ -654,6 +654,8 @@ features:
       - docs/architecture/v3-resource-operation-map.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-architecture-audit-locks.yml
+      - docs/architecture/wiki/v3-config-compact-hub-v1-defaults-sop.md
       - docs/architecture/wiki/v3-responses-direct-mainline.md
     required_unit:
       - V3ConfigStore::read_authoring reads the config file source once
@@ -666,6 +668,7 @@ features:
     required_contract:
       - v3.config.compile chain owner_feature_id resolves through the V3 function map and verification map
       - v3-cfg-01 through v3-cfg-04 remain adjacent config compiler edges
+      - v3.config.compact_hub_v1_defaults remains a separately audited SOP lock with v3-cfg-compact-01 through v3-cfg-compact-04
       - Config owns config file IO; Runtime/Server/Provider cannot read config source files directly
       - Secrets are emitted only as auth handles and never enter published manifest debug or client payloads
       - User-facing V3 config does not require listing fixed Hub V1 hook/resource lifecycle internals
