@@ -1764,15 +1764,21 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
             assert_eq!(body["status"], "completed");
             assert_eq!(body["finish_reason"], "stop");
             let serialized = serde_json::to_string(&body).unwrap();
-            assert_eq!(
+            assert_ne!(
                 body["output_text"],
                 json!(control_only_text),
-                "guard terminal must stop intercepting and pass through provider finish_reason=stop response"
+                "guard terminal must stop intercepting but must not pass through raw stop schema control text"
             );
             assert!(
                 !serialized.contains("Stopless 已达到连续自动续轮上限"),
                 "guard terminal must not expose internal stopless budget state: {serialized}"
             );
+            for forbidden_control in ["stopreason", "current_goal", "next_step"] {
+                assert!(
+                    !serialized.contains(forbidden_control),
+                    "guard terminal must strip raw schema/control marker {forbidden_control}: {serialized}"
+                );
+            }
             for forbidden in [
                 "call_stopless_reasoning",
                 "routecodex hook run reasoningStop",

@@ -74,6 +74,12 @@ const fixtures = [
     diagnostic: /forbidden V3 MVP lifecycle\/fallback wording/,
   },
   {
+    name: 'undeclared Resp03 repair helper stays forbidden',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+    mutation: '\nfn complete_or_repair_v3_resp03_history_frames() {}\n',
+    diagnostic: /forbidden V3 MVP lifecycle\/fallback wording/,
+  },
+  {
     name: 'debug owns business topology',
     file: 'v3/crates/routecodex-v3-debug/src/lib.rs',
     mutation: '\nconst FORBIDDEN_DEBUG_TOPOLOGY: &str = "V3ResponsesDirect11Policy";\n',

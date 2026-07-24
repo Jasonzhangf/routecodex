@@ -19,6 +19,31 @@ V2 reference files are read-only comparison sources:
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/openai_openai_codec.rs`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs`
 
+Protocol field inventory sources are recorded in
+`docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml#source_inventory`.
+This inventory is downloaded from OpenAI OpenAPI / OpenAI SDK types / Anthropic SDK
+types / Gemini discovery schema and is broader than the current supported Relay
+runtime. Fields such as Responses `background` / `prompt_cache_options`, OpenAI
+Chat `audio` / `modalities` / `reasoning_effort`, Anthropic `container` /
+`output_config`, and Gemini `toolConfig` / `generationConfig` / candidate metadata
+must be mapped to either canonical Chat Process semantics, protocol-specific Chat
+Process extension blocks, edge-only transport state, or explicit unsupported/lossy
+audit rows before any runtime conversion is expanded.
+
+The human-readable truth text for the current audit is
+`docs/architecture/reviews/v3-protocol-semantic-matrix-review.md#canonical-textual-truth-for-the-field-matrix-audit`.
+The follow-up implementation plan for closing non-covered rows is
+`docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md`.
+
+The primary review contract is now `chat_semantic_translation_groups`, not direct
+source-field equivalence. Each group must first define what the OpenAI Chat native
+field or protocol-neutral Chat extension means, then group Responses / Anthropic /
+Gemini fields by identical semantic meaning with explicit value/shape transforms.
+This is intentionally not one-to-one: tool call id/name/arguments, tool result
+call_id/output/name/error, image URL, file id/data/url, inline bytes, MIME type,
+and response terminal/usage fields are separate semantics even when a source
+protocol nests them under one object.
+
 ## Owner boundaries
 
 | Edge | V3 owner | Allowed action |
@@ -34,7 +59,7 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 
 ## Data-plane / control-plane rule
 
-- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. They must remain normal payload fields when the target protocol can represent them.
+- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. They must remain normal payload fields only when the target protocol can represent them; OpenAI Chat provider wire preserves `metadata` but strips non-standard `client_metadata`.
 - RouteCodex-created control fields (`metadata_center`, `routeHint`, `stoplessCenter`, `requestCapabilities`, etc.) must fail before provider/client normal payload.
 - Unsupported target-protocol fields must not be silently dropped. This slice either maps them, preserves them under the target protocol when legal, or fail-fast tests them when malformed.
 
@@ -58,9 +83,40 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `stream` | preserved | request matrix |
 | `response_format` | preserved | request matrix |
 | `max_output_tokens` / `max_tokens` | preserve target-compatible token limit; do not drop the explicit client field | request matrix |
-| `metadata`, `client_metadata` | preserved as data-plane fields | request matrix |
+| `metadata` / `client_metadata` | `metadata` preserved when target supports it; `client_metadata` stripped before OpenAI Chat provider wire because it is not a standard Chat provider field | request matrix |
 | `stop` | preserved | request matrix |
 | RouteCodex control fields | rejected before wire | negative gate already existing; keep covered |
+
+Manual split that gates must preserve:
+
+| Source protocol field | Extended OpenAI Chat semantic | Rule |
+| --- | --- | --- |
+| Responses `function_call.call_id`, Anthropic `tool_use.id`, Gemini `functionCall.id` | `request.messages[].tool_calls[].id` | id only |
+| Responses `function_call.name`, Anthropic `tool_use.name`, Gemini `functionCall.name` | `request.messages[].tool_calls[].function.name` | callable name only |
+| Responses `function_call.arguments`, Anthropic `tool_use.input`, Gemini `functionCall.args` | `request.messages[].tool_calls[].function.arguments` | argument payload only |
+| Responses `function_call_output.call_id`, Anthropic `tool_result.tool_use_id`, Gemini `functionResponse.id` | `request.messages[].tool_call_id` | result pairing id only |
+| Responses `function_call_output.output`, Anthropic `tool_result.content`, Gemini `functionResponse.response` | `request.messages[].tool_result.output` | tool result payload only |
+| Gemini `functionResponse.name` | `request.messages[].tool_result.name` | result name extension, not pairing id |
+| Anthropic `tool_result.is_error` | `request.messages[].tool_result.is_error` | error-status extension, not content/id |
+| Gemini `inlineData.mimeType` / `fileData.mimeType` | `request.messages[].content[].media.mime_type` | MIME annotation, never image URL |
+
+Shape-branch contract that gates must preserve before runtime closeout:
+
+| Shape branch group | Positive branch examples | Negative / forbidden collapse |
+| --- | --- | --- |
+| `content.image_url` | Responses `input_image.image_url` and Anthropic `image.source.type=url` map to `request.messages[].content[].image_url.url`. | Anthropic `image.source.type=base64`, Gemini `inlineData.*`, and Gemini `fileData.fileUri` must not map to image URL. |
+| `content.inline_media_data` | Anthropic base64 image/document data and Gemini `inlineData.data` map to `request.messages[].content[].media.inline_data`. | URL sources and MIME-only fields must not map to inline data. |
+| `content.media_mime_type` | Anthropic source `media_type` and Gemini `inlineData.mimeType` / `fileData.mimeType` map to `request.messages[].content[].media.mime_type`. | Payload bytes and file URI must not map to MIME. |
+| `content.file_id` | Responses `input_file.file_id` maps to `request.messages[].content[].file.file_id`. | Responses file data/url/name and Gemini file URI must not collapse into provider file id. |
+| `content.file_data` | Responses `input_file.file_data` and Anthropic document base64 data map to `request.messages[].content[].file.file_data`. | File id, URL, filename, and generic Gemini inline media without file-kind evidence must not collapse into file data. |
+| `content.file_uri` | Responses `input_file.file_url` and Gemini `fileData.fileUri` map to `request.messages[].content[].file.file_url`. | Image URL and inline bytes must not collapse into file URI. |
+
+Every `shape_branch_gap` row in the YAML must include
+`shape_branch_cases.positive[]` and `shape_branch_cases.negative[]` with
+`source_condition` / `forbidden_source`, target semantic, adjacent Rust codec
+owner file, and required Rust test symbol. These case names are the source-test
+TODO list for the next runtime slice; labels cannot move to `covered` until those
+tests exist and pass.
 
 ### Responses request -> OpenAI Chat provider wire
 
@@ -84,12 +140,12 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 
 ### Responses request -> Anthropic provider wire
 
-| Responses field | Anthropic provider wire / Responses client projection | Required test |
+| Responses field | Anthropic provider wire | Required test |
 | --- | --- | --- |
-| `reasoning.effort` / `reasoning.summary` | top-level Anthropic `thinking` request config with deterministic `budget_tokens` | `responses_reasoning_request_config_projects_to_anthropic_thinking_wire` and runtime provider-wire matrix |
-| `reasoning.thinking` | exact top-level Anthropic `thinking` object preserved for Anthropic-compatible projection | `responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape` |
+| `reasoning.effort` / `reasoning.summary` | top-level `thinking` request config with deterministic `budget_tokens` | `responses_reasoning_request_config_projects_to_anthropic_thinking_wire` and runtime provider-wire matrix |
+| `reasoning.thinking` | exact top-level `thinking` object preserved for Anthropic-compatible local projection | `responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape` |
 | original Responses request surface after Req04 governance | preserved through `ProviderReqCompat06ProviderCompat` before Anthropic wire codec for both `input[]` and string `input` request forms | `responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking` and `responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking` |
-| Anthropic provider `thinking` JSON/SSE response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` and SSE reasoning tests |
+| Anthropic provider `thinking` JSON response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` |
 
 ### Anthropic request -> Responses provider semantic
 

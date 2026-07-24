@@ -4099,6 +4099,7 @@ fn collect_v3_anthropic_provider_stream_event(
         }
         "message_stop" => {
             require_v3_anthropic_provider_message_start(state, event_type)?;
+            close_v3_anthropic_provider_textual_stream_blocks_at_message_stop(state);
             state.message_stop_seen = true;
         }
         "ping" => {}
@@ -4119,6 +4120,22 @@ fn collect_v3_anthropic_provider_stream_event(
         }
     }
     Ok(())
+}
+
+fn close_v3_anthropic_provider_textual_stream_blocks_at_message_stop(
+    state: &mut V3AnthropicProviderStreamState,
+) {
+    for block in state.content_blocks.values_mut() {
+        if block.stopped {
+            continue;
+        }
+        if matches!(
+            block.kind.as_deref(),
+            Some("text" | "thinking" | "reasoning" | "redacted_thinking")
+        ) {
+            block.stopped = true;
+        }
+    }
 }
 
 fn require_v3_anthropic_provider_message_start(
@@ -5911,10 +5928,20 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
             V3ResponsesRelayClientBody::Json(body) => body,
             V3ResponsesRelayClientBody::Sse(_) => panic!("runtime failure must project as JSON"),
         };
-        assert_eq!(body["error"]["type"], "runtime_error");
+        assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
+        assert_eq!(body["error"]["class"], "runtime_failure");
+        assert_eq!(body["error"]["stage"], "V3HubRuntime");
+        assert_eq!(body["error"]["decision"], "project_client_error");
+        assert_eq!(body["error"]["target_exhausted"], true);
+        assert_eq!(body["error"]["candidates_remaining"], 0);
+        assert_eq!(body["error"]["error_node"], "V3Error06ClientProjected");
         assert_eq!(
             body["error"]["message"],
             "V3 Hub static hook registry failed: registry unavailable"
+        );
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
         );
     }
 
@@ -6350,6 +6377,56 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         let snapshot = observation.snapshot().expect("stream observation");
         assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
         assert_eq!(snapshot.finish_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_message_stop_closes_open_thinking_block_without_502() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_glmrelay\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"glm-5.2\",\"content\":[],\"usage\":{\"input_tokens\":210584,\"output_tokens\":0}}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Working on it\"}}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":205404,\"cache_read_input_tokens\":203776,\"output_tokens\":28},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n".to_vec()),
+            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .expect(
+            "terminal Anthropic message_stop must preserve completed thinking instead of raising synthetic 502",
+        );
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "reasoning");
+        assert_eq!(response["output"][0]["summary"][0]["text"], "Working on it");
+        let snapshot = observation.snapshot().expect("stream observation");
+        assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
+        assert_eq!(snapshot.finish_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_message_stop_does_not_close_open_tool_block() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_tool_missing_stop\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"glm-5.2\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"exec_command\",\"input\":{}}}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n".to_vec()),
+            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+        ]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("content block 0 ended without content_block_stop"));
     }
 
     #[tokio::test]

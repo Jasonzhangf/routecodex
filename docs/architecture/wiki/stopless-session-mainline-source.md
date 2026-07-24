@@ -52,9 +52,9 @@ stateDiagram-v2
   [*] --> Idle
   Idle --> ProviderTurnInFlight: stsm-01 managed_relay_req04_without_active_noop
   ProviderTurnInFlight --> Idle: stsm-02 resp03_non_stop_progress_or_ordinary_tool_call
-  ProviderTurnInFlight --> TerminalCompleted: stsm-03 resp03_reasoning_stop_finished_with_evidence
-  ProviderTurnInFlight --> TerminalBlocked: stsm-04 resp03_reasoning_stop_blocked_with_reason_and_evidence
-  ProviderTurnInFlight --> RespStopObserved: stsm-05 resp03_natural_stop_or_invalid_or_need_continue
+  ProviderTurnInFlight --> TerminalCompleted: stsm-03 resp03_reasoning_stop_or_summary_schema_finished_with_evidence
+  ProviderTurnInFlight --> TerminalBlocked: stsm-04 resp03_reasoning_stop_or_summary_schema_blocked_with_reason_and_evidence
+  ProviderTurnInFlight --> RespStopObserved: stsm-05 resp03_natural_stop_or_invalid_or_need_continue_or_summary_schema_unfinished
   RespStopObserved --> CliNoopProjected: stsm-06 budget_remaining
   CliNoopProjected --> CliNoopObserved: stsm-07 req04_after_restore_current_noop_output_seen
   CliNoopObserved --> ContinuationGuidancePrepared: stsm-08 req04_shell_artifacts_removed
@@ -80,7 +80,7 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- | --- |
 | `Idle` | `reset` | `false` | `false` | `false` | No active stopless control state for this scoped session. |
 | `ProviderTurnInFlight` | `active` | `true` | `false` | `false` | A managed relay provider turn is in flight with transparent stopless guidance and exactly one internal reasoningStop declaration. |
-| `RespStopObserved` | `transient` | `false` | `false` | `false` | Resp03 observed a natural stop, invalid/no evidence reasoningStop, or explicit continue signal before deciding projection or pass-through. |
+| `RespStopObserved` | `transient` | `false` | `false` | `false` | Resp03 observed a natural stop, invalid/no evidence reasoningStop, explicit continue signal, or canonical summary stop_schema unfinished signal before deciding projection or pass-through. |
 | `CliNoopProjected` | `active` | `true` | `true` | `false` | Resp03 preserved visible assistant text and projected no-input exec_command for client tool-round closure. |
 | `CliNoopObserved` | `transient` | `false` | `false` | `false` | Req04 after continuation restore observed the current no-op output only as tool-round completion evidence. |
 | `ContinuationGuidancePrepared` | `transient` | `false` | `false` | `true` | Req04 removed no-op shell artifacts and stale generated stopless guidelines, then prepared one ordinary, transparent provider-facing current-turn continuation guideline. |
@@ -107,9 +107,9 @@ stateDiagram-v2
 | --- | --- | --- | --- | --- | --- |
 | `stsm-01` | `normal` | `Idle` | `ProviderTurnInFlight` | `managed_relay_req04_without_active_noop` | Inject transparent base guidance and exactly one reasoningStop tool; no StoplessCenter write unless a prior state is being consumed. |
 | `stsm-02` | `normal` | `ProviderTurnInFlight` | `Idle` | `resp03_non_stop_progress_or_ordinary_tool_call` | Clear scoped StoplessCenter; preserve normal response/tool progression. |
-| `stsm-03` | `normal` | `ProviderTurnInFlight` | `TerminalCompleted` | `resp03_reasoning_stop_finished_with_evidence` | Strip internal reasoningStop artifact, preserve/replace visible completion text, clear state, no CLI projection. |
-| `stsm-04` | `normal` | `ProviderTurnInFlight` | `TerminalBlocked` | `resp03_reasoning_stop_blocked_with_reason_and_evidence` | Strip internal reasoningStop artifact, preserve blocked text, clear or wait-user state, no CLI projection. |
-| `stsm-05` | `normal` | `ProviderTurnInFlight` | `RespStopObserved` | `resp03_natural_stop_or_invalid_or_need_continue` | Classify stop kind and compute next consecutive stop count in MetadataCenter control, not from text/CLI/stdout. |
+| `stsm-03` | `normal` | `ProviderTurnInFlight` | `TerminalCompleted` | `resp03_reasoning_stop_or_summary_schema_finished_with_evidence` | Strip internal reasoningStop artifact when present, preserve/replace visible completion text, clear state, no CLI projection. |
+| `stsm-04` | `normal` | `ProviderTurnInFlight` | `TerminalBlocked` | `resp03_reasoning_stop_or_summary_schema_blocked_with_reason_and_evidence` | Strip internal reasoningStop artifact when present; for canonical stop_schema blocked, append blocked reason to canonical summary, clear or wait-user state, no CLI projection. |
+| `stsm-05` | `normal` | `ProviderTurnInFlight` | `RespStopObserved` | `resp03_natural_stop_or_invalid_or_need_continue_or_summary_schema_unfinished` | Classify stop kind and compute next consecutive stop count in MetadataCenter control, not from visible text/CLI/stdout. Canonical summary stop_schema nextStep may store one next_step_prompt control string for Req04. |
 | `stsm-06` | `normal` | `RespStopObserved` | `CliNoopProjected` | `budget_remaining` | Store scoped StoplessCenter state and project client-visible no-input exec_command while preserving assistant visible text. |
 | `stsm-07` | `normal` | `CliNoopProjected` | `CliNoopObserved` | `req04_after_restore_current_noop_output_seen` | Consume no-op output only as current-turn evidence; do not parse stdout or args. |
 | `stsm-08` | `normal` | `CliNoopObserved` | `ContinuationGuidancePrepared` | `req04_shell_artifacts_removed` | Remove matching stopless shell call/output, stale internal artifacts, and previously generated stopless continuation guidelines; append exactly one transparent current-turn guideline. |

@@ -33,7 +33,8 @@ for (const path of all) {
   const productionText = text.replace(/#\[cfg\(test\)\][\s\S]*/, '');
   const semanticProductionText = productionText
     .replace(/\.method_not_allowed_fallback\(method_not_allowed\)/g, '')
-    .replace(/\.fallback\(path_not_found\)/g, '');
+    .replace(/\.fallback\(path_not_found\)/g, '')
+    .replace(/\bcomplete_or_repair_v3_resp03_tool_frames\b/g, 'complete_v3_resp03_tool_frames');
   const isTest = path.includes('/tests/');
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');

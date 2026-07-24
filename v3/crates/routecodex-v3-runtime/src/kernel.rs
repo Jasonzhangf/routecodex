@@ -1681,6 +1681,8 @@ mod tests {
                 "V3Provider12ResponsesWirePayload",
                 "V3Transport13ResponsesHttpRequest",
                 "V3ProviderResp14Raw",
+                "V3DirectResp14ProviderProjectionPrepared",
+                "V3DirectResp15ClientPayloadReady",
                 "V3Resp15ClientPayload",
             ]
         );

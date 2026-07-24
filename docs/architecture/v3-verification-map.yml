@@ -581,16 +581,23 @@ features:
       - v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs
       - scripts/architecture/verify-v3-gemini-codec-characterization.mjs
       - scripts/tests/v3-gemini-codec-characterization-red-fixtures.mjs
-    mainline_bindings: [v3-protocol-gemini-01, v3-protocol-gemini-02, v3-protocol-gemini-03, v3-protocol-gemini-04]
+    mainline_bindings: [v3-protocol-gemini-01, v3-protocol-gemini-shape-branch-01, v3-protocol-gemini-tool-config-01, v3-protocol-gemini-thinking-config-01, v3-protocol-gemini-02, v3-protocol-gemini-03, v3-protocol-gemini-04]
     design: [docs/goals/v3-gemini-codec-characterization-plan.md]
     test_design: [docs/goals/v3-gemini-codec-characterization-test-design.md]
     required_contract:
       - native Gemini request and response payloads remain semantically unchanged
+      - Gemini inlineData.data, inlineData.mimeType, fileData.mimeType, and fileData.fileUri shape branches are classified by the codec owner into distinct Chat media/file semantics without changing provider wire payload
+      - Gemini toolConfig.functionCallingConfig.mode and allowedFunctionNames are classified by the codec owner into distinct Chat tool-choice policy and allowed-name extension semantics without changing provider wire payload
+      - Gemini generationConfig.thinkingConfig.includeThoughts, thinkingBudget, and thinkingLevel are classified by the codec owner into distinct Chat reasoning visibility, budget-token, and level semantics without changing provider wire payload
       - missing or orphan functionResponse identities are preserved by codec normalization and fail explicitly in Chat Process governance without repair
       - SSE input is one already-framed candidate event and is never byte-parsed or materialized
       - internal side-channel fields fail closed
       - no Hub hook Server runtime Provider transport continuation Relay or fallback is added
       - Gemini runtime wiring is owned separately by v3.gemini_relay_runtime_integration; codec characterization alone is not live/provider evidence
+    required_symbols:
+      - collect_v3_gemini_request_shape_branch_semantics
+      - collect_v3_gemini_request_tool_config_semantics
+      - collect_v3_gemini_request_thinking_config_semantics
     required_gates:
       - npm run test:v3-gemini-codec-characterization
       - npm run verify:v3-gemini-codec-characterization
@@ -1319,6 +1326,10 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
     design:
       - docs/goals/v3-protocol-conversion-field-parity-test-design.md
+      - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
+      - docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
+      - docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
+      - docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html
     contract:
       - docs/architecture/v3-resource-operation-map.yml
       - docs/architecture/v3-function-map.yml
@@ -1336,6 +1347,7 @@ features:
       - Source-level controlled runtime tests capture provider wire and client projection for the three supported paths.
       - No live 5555/provider replay is claimed by this feature until global install and managed restart gates run separately.
     required_gates:
+      - npm run render:v3-protocol-semantic-field-matrix
       - npm run test:v3-protocol-conversion-field-parity
       - npm run verify:v3-protocol-conversion-field-parity
       - npm run test:v3-protocol-conversion-field-parity-red-fixtures
@@ -1472,6 +1484,7 @@ features:
       - Responses Relay separates provider request transport intent, provider response body kind, and client response projection intent; client `stream=true` remains SSE even if provider raw body is JSON, and client `stream=false` remains JSON even if a controlled provider raw body is SSE
       - provider error enters Error01-06 without Resp01 success projection
       - provider raw response decode/protocol errors enter the same provider failure policy and reselect before Error06 while alternatives remain
+      - Anthropic provider SSE terminal `message_stop` closes open text/thinking/reasoning blocks without synthetic 502, while still-open `tool_use` remains malformed and fails fast
       - provider-request dry-run uses the shared no-network transport terminal effect for Responses Relay and Anthropic Messages Relay
       - Responses Relay last default retries exactly twice with fixed 5s delay and projects on the third failure
       - provider/client payloads do not leak session continuation metadata_center resource or routecodex control fields
@@ -1799,6 +1812,10 @@ features:
       - Req04 provider-facing continuation is a complete non-persistent guideline that is transparent to the model: it must not expose no-op/CLI/client bridge/finish_reason/counters/budget/guard, must cover restored-context continuation, tool-use progress, and completion/blocked evidence requirements; a single terse `继续。` prompt fails
       - Req04 provider-facing continuation text changes by StoplessCenter policy for default continue, stronger continue, needs-evidence, and blocked/wait-user states without exposing counters, guard, budget, CLI, no-op, or client bridge internals
       - guard exhaustion does not project another no-op and does not synthesize internal state diagnostics; it stops intercepting so the current provider finish_reason=stop response passes through
+      - stop/end_turn with no canonical reasoning summary projects no-op and can count toward guard
+      - stop/end_turn with canonical reasoning summary and `stop_schema.finished=true` passes through without no-op or counter increment
+      - stop/end_turn with canonical reasoning summary and unfinished `stop_schema.nextStep` projects no-op, stores the nextStep only as scoped StoplessCenter `next_step_prompt`, and Req04 carries it into the next provider-facing continuation prompt
+      - stop/end_turn with canonical reasoning summary and `stop_schema.blocked=true` plus blocked reason appends the blocked reason to canonical summary and passes through without no-op or counter increment
       - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
       - direct negative stays exactly-zero relay stopless for the same payload matrix
       - "`[features].stopless_center = false` disables relay stopless injection and projection"
@@ -1832,7 +1849,7 @@ features:
       servertool_followup_reenter: false
       global_install_restart: false
     notes:
-      - "Old V3 stop schema/fence/CLI JSON continuation is not an allowed runtime source. `<rcc_stop_schema>`, `schemaFeedback`, `repeatCount`, `maxRepeats`, `triggerHint`, `continuationPrompt`, and `next_step` must not appear in provider/client normal payload."
+      - "Old V3 stop schema/fence/CLI JSON continuation is not an allowed runtime source. `<rcc_stop_schema>`, visible-text `schemaFeedback`, `repeatCount`, `maxRepeats`, `triggerHint`, `continuationPrompt`, and visible-text `next_step` must not appear in provider/client normal payload. The only schema exception is a canonical reasoning `summary` sibling `stop_schema` / `stopSchema` object inspected at Resp03; unfinished `nextStep` becomes scoped StoplessCenter `next_step_prompt`, not CLI/stdout/debug/continuation state."
       - "StoplessCenter state changes only at Resp03 and is read at Req04 from MetadataCenter/runtime_control side-channel state through `StoplessCenterMetadataControl`; `V3ResponsesRelayStoplessControlState` is only an adapter runtime handle."
       - "data/control lock: StoplessCenter is a Metadata Center control-signal; client/provider normal payload carries user/model data only."
       - "Local continuation context/store, CLI stdout, CLI args, empty CLI JSON envelopes, client/provider body, snapshot metadata, `__runtime.json`, generic Hub closeout, and server-entry aggregate edges must never carry or own StoplessCenter control."

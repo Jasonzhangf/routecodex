@@ -172,6 +172,61 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
             intercepted: false,
         });
     }
+    if response_has_canonical_reasoning_summary(input.provider_payload().as_ref()) {
+        if let Some(decision) = response_summary_stop_schema_decision(input.provider_payload()) {
+            return match decision {
+                V3SummaryStopSchemaDecision::Finished => Ok(V3StoplessResponseHookOutcome {
+                    input,
+                    center_state: None,
+                    intercepted: false,
+                }),
+                V3SummaryStopSchemaDecision::Blocked { reason } => {
+                    let projected = build_summary_blocked_passthrough_payload(
+                        input.provider_payload(),
+                        &reason,
+                    );
+                    *input.provider_payload_mut() = Arc::new(projected);
+                    Ok(V3StoplessResponseHookOutcome {
+                        input,
+                        center_state: None,
+                        intercepted: true,
+                    })
+                }
+                V3SummaryStopSchemaDecision::Continue {
+                    next_step,
+                    transition_reason,
+                    steering,
+                } => project_stopless_noop_for_stop_candidate(
+                    input,
+                    profile,
+                    steering,
+                    transition_reason,
+                    next_step,
+                ),
+            };
+        }
+        return Ok(V3StoplessResponseHookOutcome {
+            input,
+            center_state: None,
+            intercepted: false,
+        });
+    }
+    project_stopless_noop_for_stop_candidate(
+        input,
+        profile,
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+        "natural_stop_cli_projected",
+        None::<String>,
+    )
+}
+
+fn project_stopless_noop_for_stop_candidate(
+    mut input: V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+    steering: V3StoplessCenterSteering,
+    transition_reason: &'static str,
+    next_step: Option<String>,
+) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
     let natural_stop_count = next_stopless_consecutive_stop_count(profile);
     let max_natural_stops = stopless_max_natural_stops(profile);
     if natural_stop_count > max_natural_stops {
@@ -187,15 +242,12 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
     *input.provider_payload_mut() = Arc::new(projected);
     Ok(V3StoplessResponseHookOutcome {
         center_state: Some(
-            V3StoplessCenterState::new(
-                natural_stop_count,
-                max_natural_stops,
-                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-            )
-            .with_last_request_id(profile.stopless_transition_request_id())
-            .with_last_response_id(stopless_response_id(input.provider_payload()))
-            .with_last_transition_reason("natural_stop_cli_projected")
-            .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0)),
+            V3StoplessCenterState::new(natural_stop_count, max_natural_stops, steering)
+                .with_next_step_prompt(next_step)
+                .with_last_request_id(profile.stopless_transition_request_id())
+                .with_last_response_id(stopless_response_id(input.provider_payload()))
+                .with_last_transition_reason(transition_reason)
+                .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0)),
         ),
         input,
         intercepted: true,
@@ -350,6 +402,106 @@ fn first_reasoning_stop_tool_call_arguments(output: Option<&Value>) -> Option<&s
                     .and_then(|function| function.get("arguments"))
                     .and_then(Value::as_str)
             })
+    })
+}
+
+fn response_has_canonical_reasoning_summary(response: &Value) -> bool {
+    let response = response.get("response").unwrap_or(response);
+    response
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+        .any(reasoning_item_has_non_empty_summary_text)
+}
+
+fn reasoning_item_has_non_empty_summary_text(item: &Value) -> bool {
+    item.get("summary")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|entry| {
+            entry
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty())
+        })
+}
+
+enum V3SummaryStopSchemaDecision {
+    Finished,
+    Continue {
+        next_step: Option<String>,
+        transition_reason: &'static str,
+        steering: V3StoplessCenterSteering,
+    },
+    Blocked {
+        reason: String,
+    },
+}
+
+fn response_summary_stop_schema_decision(response: &Value) -> Option<V3SummaryStopSchemaDecision> {
+    let response = response.get("response").unwrap_or(response);
+    response
+        .get("output")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+        .filter(|item| reasoning_item_has_non_empty_summary_text(item))
+        .find_map(reasoning_item_stop_schema_decision)
+}
+
+fn reasoning_item_stop_schema_decision(item: &Value) -> Option<V3SummaryStopSchemaDecision> {
+    let schema = item
+        .get("stop_schema")
+        .or_else(|| item.get("stopSchema"))?
+        .as_object()?;
+    let finished = read_stop_schema_bool(schema, "finished");
+    let blocked = read_stop_schema_bool(schema, "blocked");
+    let next_step = read_first_stop_schema_text(schema, &["nextStep", "next_step"]);
+    let has_recognized_field = finished.is_some() || blocked.is_some() || next_step.is_some();
+    if !has_recognized_field {
+        return None;
+    }
+    if finished == Some(true) {
+        return Some(V3SummaryStopSchemaDecision::Finished);
+    }
+    if blocked == Some(true) {
+        if let Some(reason) =
+            read_first_stop_schema_text(schema, &["blockedReason", "blocked_reason", "reason"])
+        {
+            return Some(V3SummaryStopSchemaDecision::Blocked { reason });
+        }
+        return Some(V3SummaryStopSchemaDecision::Continue {
+            next_step,
+            transition_reason: "summary_stop_schema_blocked_reason_missing_cli_projected",
+            steering: V3StoplessCenterSteering::ReasoningStopNeedsEvidence,
+        });
+    }
+    Some(V3SummaryStopSchemaDecision::Continue {
+        transition_reason: if next_step.is_some() {
+            "summary_stop_schema_next_step_cli_projected"
+        } else {
+            "summary_stop_schema_continue_cli_projected"
+        },
+        next_step,
+        steering: V3StoplessCenterSteering::Continue,
+    })
+}
+
+fn read_stop_schema_bool(object: &Map<String, Value>, key: &str) -> Option<bool> {
+    object.get(key).and_then(Value::as_bool)
+}
+
+fn read_first_stop_schema_text(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        object
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
     })
 }
 
@@ -596,8 +748,71 @@ fn build_stopless_passthrough_visible_payload(payload: &Value) -> Value {
             prefix: None,
         })
         .payload;
+    strip_canonical_stop_schema_fields(&mut payload);
     strip_empty_responses_visible_messages(&mut payload);
     payload
+}
+
+fn build_summary_blocked_passthrough_payload(payload: &Value, reason: &str) -> Value {
+    let mut payload = payload.clone();
+    append_blocked_reason_to_canonical_reasoning_summary(&mut payload, reason);
+    payload
+}
+
+fn append_blocked_reason_to_canonical_reasoning_summary(payload: &mut Value, reason: &str) {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return;
+    }
+    if let Some(response) = payload.get_mut("response") {
+        append_blocked_reason_to_canonical_reasoning_summary(response, reason);
+    }
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in output {
+        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        if !reasoning_item_has_non_empty_summary_text(item) {
+            continue;
+        }
+        let Some(summary) = item.get_mut("summary").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        if summary.iter().any(|entry| {
+            entry
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains(reason))
+        }) {
+            return;
+        }
+        summary.push(json!({
+            "type": "summary_text",
+            "text": format!("阻塞：{reason}")
+        }));
+        return;
+    }
+}
+
+fn strip_canonical_stop_schema_fields(payload: &mut Value) {
+    if let Some(response) = payload.get_mut("response") {
+        strip_canonical_stop_schema_fields(response);
+    }
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in output {
+        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        object.remove("stop_schema");
+        object.remove("stopSchema");
+    }
 }
 
 fn build_stopless_guard_passthrough_visible_payload(payload: &Value) -> Value {
@@ -1003,6 +1218,10 @@ fn append_stopless_noop_continuation(
 fn stopless_continuation_prompt_for_state(state: Option<&V3StoplessCenterState>) -> String {
     let mut prompt = STOPLESS_NOOP_CONTINUATION_GUIDELINE.to_string();
     if let Some(state) = state {
+        if let Some(next_step) = state.next_step_prompt() {
+            prompt.push_str("\n\n上一轮给出的下一步：");
+            prompt.push_str(next_step);
+        }
         prompt.push_str("\n\n");
         prompt.push_str(stopless_instruction_for_state(state));
     }

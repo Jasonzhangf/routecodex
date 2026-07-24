@@ -45,6 +45,7 @@ routecodex hook run reasoningStop
 | 表面 | 角色 | 是否是真源 |
 | --- | --- | --- |
 | provider/model-visible `reasoningStop` tool | 让模型报告完成、阻塞、需要继续等 stop 事件；其输出只作为 Resp03 输入事件被评估 | 不是长期状态真源 |
+| canonical reasoning `summary` sibling `stop_schema` / `stopSchema` | 让带 reasoning summary 的自然 stop 显式报告 finished / blocked / nextStep；只在 Resp03 与同一 reasoning item 的非空 summary 一起被评估 | 不是长期状态真源 |
 | client-visible `exec_command` | 对客户端投影公共 CLI 命令，让用户看到本轮 stop 文本 | 不是状态真源 |
 | `routecodex hook run reasoningStop` | no-input no-op，只完成客户端工具轮 | 不是状态真源 |
 | `MetadataCenter.runtime_control.stopless` / V3 等价 control resource | StoplessCenter 状态机唯一控制真源 | 是 |
@@ -125,6 +126,7 @@ next_request_policy:
   stop_for_user_block
   stop_for_guard
 
+next_step_prompt
 last_request_id
 last_response_id
 last_transition_reason
@@ -135,7 +137,7 @@ updated_at
 
 - `consecutive_stop_count` 只是状态机字段之一，不能代替状态机。
 - `need_continue` / `blocked` / `terminal` 必须显式闭环；不能只靠 prompt 字符串推断。
-- provider/model 响应中的 text/schema/tool arguments 属于本轮 response data；Resp03 评估后只把控制结论写入 MetadataCenter。不要把整段文本、payload、tool history 镜像进 MetadataCenter。
+- provider/model 响应中的 text/schema/tool arguments 属于本轮 response data；Resp03 评估后只把控制结论写入 MetadataCenter。canonical reasoning summary sibling `stop_schema.nextStep` 只能收缩成一个 scoped `next_step_prompt` 字符串给下一轮 Req04 当前轮提示使用；不要把整段文本、payload、tool history 镜像进 MetadataCenter。
 - Req04 只能从 MetadataCenter 读取控制状态，并用当前已恢复的 continuation/data 面构造下一轮 provider 请求。
 
 ### 标准状态迁移
@@ -160,6 +162,18 @@ TerminalBlocked(clear or wait-user state)
 ProviderTurnInFlight
   -- Resp03 natural/no_schema/invalid/need_continue and budget remains -->
 RespStopObserved -> CliNoopProjected(store state)
+
+ProviderTurnInFlight
+  -- Resp03 canonical reasoning summary + stop_schema.finished=true -->
+TerminalCompleted(clear/pass-through)
+
+ProviderTurnInFlight
+  -- Resp03 canonical reasoning summary + stop_schema.blocked=true + blocked reason -->
+TerminalBlocked(clear/pass-through, blocked reason appended into summary)
+
+ProviderTurnInFlight
+  -- Resp03 canonical reasoning summary + stop_schema unfinished / nextStep and budget remains -->
+RespStopObserved -> CliNoopProjected(store state with optional next_step_prompt)
 
 CliNoopProjected
   -- next request after continuation restore sees current no-op output -->
@@ -220,6 +234,10 @@ Req04 Chat Process:
 ### Round 1 response：client-visible
 
 - Resp03 内拦截提前 stop 或 provider/model-visible `reasoningStop` event。
+- Resp03 先检查 stop/end_turn 是否有 canonical reasoning summary；没有 summary 默认当提前 stop 续轮；有 summary 时只接受同一 reasoning item 的 sibling `stop_schema` / `stopSchema` 对象作为 schema 决策，visible/fenced schema 仍不是状态源。
+- `stop_schema.finished=true`：不拦截，不计数，直接返回。
+- `stop_schema.blocked=true` 且存在 `blockedReason` / `blocked_reason` / `reason`：把 blocked reason 追加进 canonical summary，不拦截，不计数，直接返回。
+- `stop_schema.finished=false` / unfinished：继续续轮；如果有 `nextStep` / `next_step`，只存为 scoped `next_step_prompt` 并在下一轮 Req04 当前轮 continuation prompt 中作为“上一轮给出的下一步”使用。
 - 先保留模型本轮可见文本，再投影 client-visible `exec_command` no-op。
 - CLI 命令必须是 no-input：`routecodex hook run reasoningStop`。
 - 投影结果不得泄漏 raw internal `reasoningStop`、StoplessCenter state、repeat counter、schema feedback、metadata/debug 字段。
@@ -237,9 +255,11 @@ Req04 Chat Process:
   - 基础 guideline 必须对模型透明：不得提 no-op、CLI、`routecodex hook run reasoningStop`、客户端工具轮、`finish_reason=stop` 或桥接机制；只说明基于已恢复完整上下文继续推理，先复核目标、已有结论、未完成事项和停下位置，缺事实或需要执行时继续调用可用工具，只有完成/阻塞且有证据时才调用 `reasoningStop`，既未完成也未阻塞时继续工作。
   - 连续提前 stop 增加：只增强任务推进要求，不显式暴露第几次、预算或续轮上限等内部状态。
   - `need_continue=true` / evidence 不足：明确不要把它当 terminal；若现在判断完成或阻塞，必须给具体证据，否则继续推进。
+  - `next_step_prompt`：如果 Resp03 从 canonical summary sibling stop_schema 提取到 nextStep，Req04 把它放入当前轮 provider-facing continuation prompt；不要暴露 `stop_schema`、`nextStep` 字段名、CLI、counter、guard 或 MetadataCenter 细节。
   - `blocked=true` 且证据足够：应转 terminal/wait-user，不再继续 loop。
   - guard 达到：不再拦截当前 `finish_reason=stop` 响应，不追加 no-op，不合成终止/诊断文本。
 - Provider request 不得含 `call_stopless_reasoning`、`routecodex hook run reasoningStop`、CLI stdout、`--input-json`、`repeatCount`、`schemaFeedback`、`triggerHint`、`missingFields`、`runtime_control`、`metadata_center`。
+- Provider request 不得含 canonical stop_schema 对象本身；`next_step_prompt` 只能投影为普通当前轮文字提示，不得以 `stop_schema` / `nextStep` / `next_step` 字段形式进入 provider/client normal payload。
 - Provider request 中由 stopless 生成的 continuation/guideline 最多只能有一条；重复 dry-run 或多轮真实续杯都不得让旧 generated guideline 累积。
 - Req04 重新注入 guidance + exactly-one `reasoningStop` 后，才能进入 VR/provider wire。
 
@@ -302,6 +322,7 @@ Req04 Chat Process:
 8. Guard/terminal：完成、阻塞、guard、non-stop progress、already-terminal 均有正反测试。
 9. Generated guideline history：多轮 no-op/guard 前 provider request 中 generated continuation guideline 必须 exactly-one；旧 generated guideline 累积必须红。
 10. Dry-run read-only：带 StoplessCenter 的 provider-request dry-run 不得改变 live StoplessCenter，连续 dry-run 产物必须 identical；dry-run 推进 count/phase 或 clear state 必须红。
+11. Summary/stop_schema：无 summary 的 stop/end_turn 必须续轮；summary + `stop_schema.finished=true` 必须通过且不计数；summary + unfinished `nextStep` 必须续轮并让 Req04 prompt 带 nextStep；summary + blocked reason 必须把 reason 写入 summary 并通过；visible text/fenced schema 仍必须红锁为非状态源。
 
 验证升级：
 
@@ -320,7 +341,7 @@ SOP/docs/gate 红锁
 
 - 用 `--input-json '{}'` 保留一个无意义输入 envelope。
 - 在 CLI args/stdout 中携带 stopless 状态。
-- 把 `repeatCount`、`schemaFeedback`、`triggerHint`、`next_step` 当 CLI 状态。
+- 把 `repeatCount`、`schemaFeedback`、`triggerHint`、visible/fenced `next_step` 当 CLI 状态。
 - 用 continuation store 保存 StoplessCenter。
 - 在 SSE、server handler、provider transport、req_inbound、resp_outbound、immutable interval 补 stopless 语义。
 - 只看第一轮 `requires_action` 就说 stopless 正常；必须看下一轮 provider request。
@@ -336,8 +357,16 @@ SOP/docs/gate 红锁
 ### Stop schema vs natural stop 判定补充
 
 - 如果 provider-facing system guidance 和 `reasoningStop` schema 已完整存在，模型真要完成/阻塞时应调用 `reasoningStop`，不能把自然 `finish_reason=stop` 当合法终态证据。
+- 新 summary-first completion gate 只放行带 canonical reasoning summary 的自然 stop；有 summary 且有 sibling `stop_schema` 时按 schema 判定 finished / blocked / unfinished nextStep；没有 summary 的自然 stop 继续续轮。
 - 如果自然 stop 是偶发早停，下一轮 managed stopless provider request 必须仍保留完整原系统/工具语义，并把工具决策提升为 required/any：有真实工具可推进就调用真实工具；无完成/阻塞证据不得连续 text-only stop。
 - Live stopless probe 必须带真实可隔离 `client_metadata.session_id/thread_id`（或 Codex 等价 session scope）。缺失 session scope 的轻量 curl 会按合同不写 StoplessCenter/不注入 stopless，不能作为 stopless 生效或失效证据。
+
+### Reasoning / thinking 协议映射补充
+
+- Anthropic `thinking` 是 Responses/OpenAI `reasoning` 的等价协议语义；Responses `summary` 只是 canonical reasoning item 的摘要载体，不是 `thinking` 的同义词。
+- 请求侧必须有映射：Responses `reasoning.effort` / `reasoning.summary` / `reasoning.thinking` 在 Anthropic provider wire 前必须投影为 top-level `thinking`，且不得把 Responses `reasoning` 原字段漏进 Anthropic body。
+- 响应侧必须有映射：Anthropic JSON/SSE `thinking` / `thinking_delta` / `redacted_thinking` 必须在 RespInbound/Resp03 前归一为 Responses `output[].type=reasoning`，保留 `summary[].text` 与 `encrypted_content`，不能被当作普通 visible text。
+- Stopless 的 summary-first gate 只能检查 canonical Responses reasoning summary；如果 provider 因请求侧缺 `thinking` 只返回 text + `end_turn`，根因在请求协议映射，不要改 SSE、handler、RespOutbound 或提示词兜底。
 
 ### GLM OpenAI Chat schema compatibility check
 

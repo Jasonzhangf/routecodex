@@ -199,6 +199,7 @@ pub struct V3StoplessCenterState {
     terminal: bool,
     guard_exhausted: bool,
     next_request_policy: V3StoplessCenterNextRequestPolicy,
+    next_step_prompt: Option<String>,
     last_request_id: Option<String>,
     last_response_id: Option<String>,
     last_transition_reason: Option<String>,
@@ -264,6 +265,7 @@ impl V3StoplessCenterState {
             terminal,
             guard_exhausted,
             next_request_policy,
+            next_step_prompt: None,
             last_request_id: None,
             last_response_id: None,
             last_transition_reason: None,
@@ -316,6 +318,10 @@ impl V3StoplessCenterState {
         self.next_request_policy
     }
 
+    pub fn next_step_prompt(&self) -> Option<&str> {
+        self.next_step_prompt.as_deref()
+    }
+
     pub fn last_request_id(&self) -> Option<&str> {
         self.last_request_id.as_deref()
     }
@@ -353,6 +359,15 @@ impl V3StoplessCenterState {
 
     pub fn with_updated_at(mut self, updated_at: u64) -> Self {
         self.updated_at = updated_at;
+        self
+    }
+
+    pub fn with_next_step_prompt(mut self, next_step_prompt: Option<impl Into<String>>) -> Self {
+        self.next_step_prompt = next_step_prompt.and_then(|value| {
+            let value = value.into();
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        });
         self
     }
 

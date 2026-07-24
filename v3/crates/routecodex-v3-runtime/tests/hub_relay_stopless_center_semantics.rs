@@ -70,6 +70,24 @@ fn stopless_cmd(payload: &Value) -> String {
         .to_string()
 }
 
+fn reasoning_summary_texts(payload: &Value) -> Vec<String> {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+        .flat_map(|item| {
+            item.get("summary")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|entry| entry.get("text").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
 fn assert_full_stopless_continuation_prompt(prompt: &str) {
     for required in [
         "继续当前目标",
@@ -432,6 +450,243 @@ fn natural_stop_projects_noop_cli_without_cli_state_json() {
     assert!(
         serialized.contains("自然停下的可见文本"),
         "client-visible assistant text must survive natural-stop projection: {serialized}"
+    );
+}
+
+#[test]
+fn natural_stop_with_canonical_reasoning_summary_passes_without_stopless_projection() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_natural_stop_with_summary",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[
+                {
+                    "type":"reasoning",
+                    "summary":[{
+                        "type":"summary_text",
+                        "text":"The task is complete with evidence."
+                    }],
+                    "stop_schema":{
+                        "finished":true,
+                        "blocked":false,
+                        "nextStep":""
+                    }
+                },
+                {
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"完成。"}]
+                }
+            ]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+
+    assert_eq!(payload["status"], "completed");
+    assert_eq!(payload["finish_reason"], "stop");
+    assert!(
+        resp04.stopless_center_state().is_none(),
+        "canonical summary must classify the stop as complete before StoplessCenter counting"
+    );
+    assert!(
+        payload
+            .get("output")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .all(|item| item.get("call_id").and_then(Value::as_str)
+                != Some("call_stopless_reasoning")),
+        "summary-complete response must not project the client-visible stopless CLI: {payload}"
+    );
+}
+
+#[test]
+fn third_consecutive_natural_stop_with_summary_passes_without_incrementing_stopless_state() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let prior_state = V3StoplessCenterState::new(
+        2,
+        3,
+        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+    );
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_third_stop_with_summary",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[
+                {
+                    "type":"reasoning",
+                    "summary":[{
+                        "type":"summary_text",
+                        "text":"The repeated stop is actually a complete answer."
+                    }],
+                    "stop_schema":{
+                        "finished":true,
+                        "blocked":false
+                    }
+                },
+                {"type":"output_text","text":"第三次停止但已完成。"}
+            ]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_center_state(prior_state),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+
+    assert_eq!(payload["status"], "completed");
+    assert!(
+        resp04.stopless_center_state().is_none(),
+        "summary-complete third stop must pass through and clear/supersede stopless state instead of counting"
+    );
+    assert!(
+        payload
+            .get("output")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .all(|item| item.get("call_id").and_then(Value::as_str)
+                != Some("call_stopless_reasoning")),
+        "third stop with summary must not project stopless CLI: {payload}"
+    );
+}
+
+#[test]
+fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04_prompt() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_summary_schema_next_step",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[
+                {
+                    "type":"reasoning",
+                    "summary":[{
+                        "type":"summary_text",
+                        "text":"I found the next concrete action but have not run it yet."
+                    }],
+                    "stop_schema":{
+                        "finished":false,
+                        "blocked":false,
+                        "nextStep":"Run cargo test for the new summary/schema stopless gate."
+                    }
+                },
+                {"type":"output_text","text":"下一步需要跑测试。"}
+            ]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    let state = resp04
+        .stopless_center_state()
+        .expect("unfinished summary stop_schema must continue through StoplessCenter");
+
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(stopless_cmd(payload), "routecodex hook run reasoningStop");
+    assert_eq!(state.steering(), V3StoplessCenterSteering::Continue);
+    assert_eq!(
+        state.next_step_prompt(),
+        Some("Run cargo test for the new summary/schema stopless gate.")
+    );
+    assert_eq!(
+        state.last_transition_reason(),
+        Some("summary_stop_schema_next_step_cli_projected")
+    );
+
+    let prompt = continuation_prompt_for_state(state.clone());
+    assert_full_stopless_continuation_prompt(&prompt);
+    assert!(
+        prompt.contains("Run cargo test for the new summary/schema stopless gate."),
+        "Req04 continuation prompt must carry the canonical stop_schema nextStep: {prompt}"
+    );
+    let serialized = serde_json::to_string(payload).unwrap();
+    assert!(
+        !serialized.contains("stop_schema"),
+        "client-visible no-op projection must not leak canonical stop_schema control field: {serialized}"
+    );
+}
+
+#[test]
+fn natural_stop_with_summary_stop_schema_blocked_reason_passes_and_augments_summary() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_summary_schema_blocked",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[
+                {
+                    "type":"reasoning",
+                    "summary":[{
+                        "type":"summary_text",
+                        "text":"I cannot continue without the external approval."
+                    }],
+                    "stop_schema":{
+                        "finished":false,
+                        "blocked":true,
+                        "blockedReason":"Need Jason approval before deleting production config."
+                    }
+                },
+                {"type":"output_text","text":"需要确认。"}
+            ]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    let summaries = reasoning_summary_texts(payload);
+
+    assert_eq!(payload["status"], "completed");
+    assert!(
+        resp04.stopless_center_state().is_none(),
+        "blocked summary stop_schema must pass through without counting or projecting no-op"
+    );
+    assert!(
+        summaries
+            .iter()
+            .any(|text| text.contains("Need Jason approval before deleting production config.")),
+        "blocked reason must be projected into canonical reasoning summary: {summaries:?}"
+    );
+    assert!(
+        payload
+            .get("output")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .all(|item| item.get("call_id").and_then(Value::as_str)
+                != Some("call_stopless_reasoning")),
+        "blocked schema response must not project stopless CLI: {payload}"
     );
 }
 

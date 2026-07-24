@@ -199,7 +199,7 @@ fn stopless_live_shape_fourth_natural_stop_passes_original_text_without_cli() {
 }
 
 #[test]
-fn stopless_live_shape_guard_schema_only_text_passes_through_without_intercept() {
+fn stopless_live_shape_guard_schema_only_text_strips_control_without_intercept() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let control_only_text =
         r#"{"stopreason":2,"current_goal":"still running","next_step":"continue"}"#;
@@ -234,15 +234,21 @@ fn stopless_live_shape_guard_schema_only_text_passes_through_without_intercept()
     let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
     assert_eq!(resp04.finalized_payload()["status"], "completed");
     assert_eq!(resp04.finalized_payload()["finish_reason"], "stop");
-    assert_eq!(
+    assert_ne!(
         resp04.finalized_payload()["output_text"],
         json!(control_only_text),
-        "guard terminal must stop intercepting and pass through the provider finish_reason=stop response"
+        "guard terminal must stop intercepting but must not pass through raw stop schema control text"
     );
     assert!(
         !serialized.contains("Stopless 已达到连续自动续轮上限"),
         "guard terminal must not expose internal stopless budget state: {serialized}"
     );
+    for forbidden_control in ["stopreason", "current_goal", "next_step"] {
+        assert!(
+            !serialized.contains(forbidden_control),
+            "guard terminal must strip raw schema/control marker {forbidden_control}: {serialized}"
+        );
+    }
     for forbidden in [
         "call_stopless_reasoning",
         "routecodex hook run reasoningStop",

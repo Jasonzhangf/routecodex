@@ -19,7 +19,7 @@ pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
     input: V3HubRespChatProcess03Governed,
     action: V3HubContinuationCommit,
 ) -> V3HubRespContinuation04Committed {
-    let finalized_payload = Arc::clone(input.previous.provider_payload());
+    let finalized_payload = input.previous.provider_payload().clone();
     let canonical_context = if action == V3HubContinuationCommit::LocalContext {
         Some(V3HubRelayCanonicalResponseContext {
             payload: Arc::clone(&finalized_payload),
@@ -91,7 +91,7 @@ impl V3HubRespContinuation04Committed {
 pub(crate) fn commit_v3_hub_relay_response(
     input: V3HubRespChatProcess03Governed,
 ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
-    let finalized_payload = Arc::clone(input.previous.provider_payload());
+    let finalized_payload = input.previous.provider_payload().clone();
     let stopless_center_state = input.stopless_center_state.clone();
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
