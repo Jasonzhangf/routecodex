@@ -5,10 +5,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_anthropic_relay_runtime, project_v3_responses_json_as_anthropic_message,
-    project_v3_responses_sse_as_anthropic_events, V3AnthropicRelayRuntimeInput,
+    V3AnthropicRelayRuntimeInput, execute_v3_anthropic_relay_runtime,
+    project_v3_responses_json_as_anthropic_message, project_v3_responses_sse_as_anthropic_events,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Mutex;
 
 struct JsonTransport {
@@ -103,12 +103,16 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 17, "trace={:?}", output.node_trace);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
-    assert!(output
-        .node_trace
-        .contains(&"ProviderReqCompat06ProviderCompat"));
-    assert!(output
-        .node_trace
-        .contains(&"ProviderRespCompat02ProviderCompat"));
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderReqCompat06ProviderCompat")
+    );
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderRespCompat02ProviderCompat")
+    );
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
 }
@@ -419,7 +423,25 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     .await
     .unwrap();
     assert_eq!(output.status, 429);
-    assert_eq!(output.client_response["type"], "error");
+    assert_eq!(
+        output.client_response["error"]["message"],
+        "controlled rate limit"
+    );
+    assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
+    assert_eq!(
+        output.client_response["error"]["stage"],
+        "V3ProviderReqOutbound09TransportRequest"
+    );
+    assert_eq!(output.client_response["error"]["class"], "provider_failure");
+    assert_eq!(
+        output.client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert!(
+        output.client_response["error"].get("type").is_none(),
+        "provider raw Anthropic error body must not bypass ErrorErr06 projection: {}",
+        output.client_response
+    );
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
@@ -467,10 +489,12 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
         canonical_response["output"][0]["text"],
         "V3_COMPAT_ANTHROPIC_SSE_OK"
     );
-    assert!(client_events.iter().any(|event| event
-        .pointer("/data/delta/text")
-        .and_then(|value| value.as_str())
-        == Some("ANTHROPIC_SSE_OK")));
+    assert!(client_events.iter().any(|event| {
+        event
+            .pointer("/data/delta/text")
+            .and_then(|value| value.as_str())
+            == Some("ANTHROPIC_SSE_OK")
+    }));
     assert_eq!(client_events.last().unwrap()["event"], "message_stop");
 }
 

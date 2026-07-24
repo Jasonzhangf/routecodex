@@ -1864,7 +1864,7 @@ features:
       - npm run verify:v3-cargo-fmt
       - git diff --check
     notes:
-      - "Protocol body fields named metadata/client_metadata are data-plane fields when the entry/provider protocol supports them; they must not be moved to MetadataCenter or reconstructed from MetadataCenter."
+      - "Protocol body fields named metadata/client_metadata are data-plane fields only when the target entry/provider protocol supports them; OpenAI Chat provider wire preserves metadata but must not forward non-standard client_metadata."
       - "RouteCodex-created internal control fields fail-fast before provider/client payload projection."
       - "Malformed function/custom-tool arguments fail-fast; no empty-object or text fallback is allowed."
     runtime_status: source_field_parity_focused_gates_only
@@ -2498,6 +2498,75 @@ features:
       - git diff --check
     runtime_status: architecture_gate_only
 
+  - feature_id: v3.resp03_tool_governance_gap_closeout
+    status: source_gate_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_chat_process_gate
+    owner_scope: "Resp03 owns provider-neutral response text harvest, tool-frame repair, finish_reason branch selection, split tool_call/stop servertool hooks, and ordinary tool governance before Resp04 continuation save."
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
+      - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
+    resource_bindings:
+      - v3.hub.response_semantic
+      - v3.hub.tool_governance_truth
+      - v3.continuation.local_context_truth
+    mainline_bindings:
+      - v3-resp03-tool-governance-01
+      - v3-resp03-tool-governance-02
+      - v3-resp03-tool-governance-03
+      - v3-resp03-tool-governance-04
+      - v3-resp03-tool-governance-05
+    entry_symbols:
+      - govern_v3_hub_relay_response
+      - complete_or_repair_v3_resp03_tool_frames
+      - inspect_v3_resp03_finish_reason
+      - apply_v3_tool_call_servertool_hook_at_resp03
+      - apply_v3_stop_servertool_hook_at_resp03
+      - project_v3_apply_patch_freeform_calls_at_resp03
+      - commit_v3_hub_relay_response
+      - resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook
+      - resp04_reuses_resp03_repaired_payload_without_semantic_repair
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+      - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
+      - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
+      - docs/goals/v3-resp03-tool-governance-gap-closeout-plan.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server/src
+      - v3/crates/routecodex-v3-provider-responses/src
+      - src
+      - sharedmodule
+      - ~/.rcc
+      - global install
+      - restart
+      - fallback
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
+      - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
+      - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+      - npm run verify:v3-normalization-payload-logic-boundary
+      - npm run verify:v3-architecture-docs
+      - npm run verify:architecture-wiki-html-sync
+      - npm run verify:architecture-wiki-sync
+      - node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs
+      - git diff --check
+    completion_rule:
+      source: "Complete when Resp03/Resp04 Rust tests and source gates prove the corrected order, split hooks, no Resp04 semantic repair, map bindings, and diff check."
+      runtime: "No install, restart, or live replay is claimed by this source slice."
+      forbidden_claim: "Do not claim live closeout without global install, restart, and real sample replay."
+
   - feature_id: v3.servertool_hook_skeleton_lifecycle
     status: controlled_runtime_slice_verified
     change_risk: critical
@@ -2534,7 +2603,7 @@ features:
       - v3-servertool-stopless-resp-03
       - v3-servertool-stopless-resp-04
     entry_symbols:
-      - apply_v3_stopless_response_hook_at_resp03
+      - apply_v3_tool_call_servertool_hook_at_resp03
       - apply_v3_stopless_request_hook_at_req04
       - V3StoplessCenterState
       - V3StoplessCenterSteering
@@ -2723,5 +2792,55 @@ features:
       - npm run verify:v3-rust-only
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
+      - git diff --check
+    runtime_status: source_controlled_no_live_cutover
+
+
+  - feature_id: v3.sse_transport_core_independent
+    owner_crate: routecodex-v3-sse
+    owner_file: v3/crates/routecodex-v3-sse/src/lib.rs
+    resource_bindings:
+      - v3.sse.transport_raw_chunk
+      - v3.sse.transport_decoded_frame
+      - v3.sse.transport_validated_frame_stream
+      - v3.sse.transport_encoded_chunk
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-sse-transport-01
+      - v3-sse-transport-02
+      - v3-sse-transport-03
+      - v3-sse-server-frame-04
+    entry_symbols:
+      - build_v3_sse_transport_in_01_raw_chunk
+      - build_v3_sse_transport_in_02_from_fields
+      - build_v3_sse_transport_in_03_from_v3_sse_transport_in_02
+      - build_v3_sse_transport_out_04_from_v3_sse_transport_in_03
+      - SseIncrementalDecoder::push
+      - validated_sse_stream
+      - wrap_v3_relay_sse_closeout_stream
+      - Body::from_stream
+    allowed_paths:
+      - v3/crates/routecodex-v3-sse
+      - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/wiki/v3-mainline-skeleton-sop.md
+      - docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml
+      - scripts/architecture/verify-sse-transport-core-shared.mjs
+    forbidden_paths:
+      - src/server/handlers
+      - src/modules/llmswitch
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+    required_gates:
+      - npm run verify:sse-transport-core-shared
+      - npm run verify:sse-architecture-boundary
+      - npm run test:v3-sse-transport-core
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib relay_sse_closeout -- --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:architecture-wiki-html-sync
       - git diff --check
     runtime_status: source_controlled_no_live_cutover

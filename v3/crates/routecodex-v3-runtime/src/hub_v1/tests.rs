@@ -80,6 +80,29 @@ fn openai_chat_stream_relay_requests_preserve_explicit_stream_options() {
 }
 
 #[test]
+fn openai_chat_provider_wire_does_not_forward_client_metadata() {
+    let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.2",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}]
+        }],
+        "stream": true,
+        "client_metadata": {
+            "session_id": "client-session",
+            "x-codex-turn-metadata": "{\"workspaces\":{\"/Volumes/extension/code\":{\"has_changes\":true}}}"
+        }
+    }))
+    .unwrap();
+
+    assert!(
+        provider.get("client_metadata").is_none(),
+        "OpenAI Chat provider wire must not forward Codex client_metadata: {provider}"
+    );
+}
+
+#[test]
 fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         json!({"messages":[{"role":"user","content":"x"}]}),
@@ -536,8 +559,8 @@ fn local_continuation_context_never_carries_stopless_center_state() {
         "max_natural_stops",
     ] {
         assert!(
-                !serialized.contains(forbidden),
-                "relay local continuation context leaked stopless control field {forbidden}: {serialized}"
-            );
+            !serialized.contains(forbidden),
+            "relay local continuation context leaked stopless control field {forbidden}: {serialized}"
+        );
     }
 }

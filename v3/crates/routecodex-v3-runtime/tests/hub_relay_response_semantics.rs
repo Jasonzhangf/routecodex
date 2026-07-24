@@ -302,6 +302,90 @@ fn stopless_response_hook_projects_noop_cli_for_natural_stop_without_cli_state_j
 }
 
 #[test]
+fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_stop_with_real_tool_call",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_real_exec",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"pwd\"}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    assert_eq!(resp03.tool_call_count(), 1);
+    assert_eq!(resp03.servertool_action(), V3HubServertoolResponseAction::None);
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["finish_reason"], "tool_calls");
+    assert_eq!(payload["output"][0]["call_id"], "call_real_exec");
+    assert_eq!(payload["output"][0]["name"], "exec_command");
+    assert!(
+        serde_json::to_string(payload)
+            .unwrap()
+            .contains("call_stopless_reasoning")
+            == false,
+        "tool_call branch must not run stop hook projection: {payload}"
+    );
+}
+
+#[test]
+fn resp04_reuses_resp03_repaired_payload_without_semantic_repair() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_raw(
+            json!({
+                "id":"resp_repair_at_resp03",
+                "status":"completed",
+                "finish_reason":"stop",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_patch_resp03",
+                    "name":"apply_patch",
+                    "arguments":"{\"patch\":\"*** Begin Patch\\n*** End Patch\\n\"}"
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+
+    let resp03 = hooks
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
+        .unwrap();
+    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
+    let resp04 = hooks.commit(resp03).unwrap();
+
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    assert!(
+        resp04.canonical_context_shares_provider_payload(),
+        "Resp04 must save Resp03 governed payload directly, not run its own status/finish_reason repair"
+    );
+    assert_eq!(resp04.finalized_payload()["status"], "requires_action");
+    assert_eq!(resp04.finalized_payload()["finish_reason"], "tool_calls");
+    assert_eq!(
+        resp04.finalized_payload()["output"][0]["type"],
+        "custom_tool_call"
+    );
+}
+
+#[test]
 fn stopless_response_hook_empty_natural_stop_projects_noop_without_synthetic_text() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks

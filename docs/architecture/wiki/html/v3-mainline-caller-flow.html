@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>33 functional paths</span>
-        <span>218 caller edges</span>
+        <span>35 functional paths</span>
+        <span>228 caller edges</span>
       </div>
     </header>
 
@@ -470,7 +470,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>3</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>154</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>164</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -558,10 +558,12 @@ flowchart TD
 <tr><td><a href="#chain-v3_gemini_relay_controlled_runtime"><code>v3.gemini_relay.controlled_runtime</code></a><br/>v 3.gemini_relay.controlled_runtime</td><td><span class="status pending_review">pending review</span></td><td>17</td><td>19</td><td><code>v3.gemini_relay_runtime_integration</code></td><td><code>sha256:43c48cd0e5b2…</code></td></tr>
 <tr><td><a href="#chain-v3_entry_protocol_registry_contract_mainline"><code>v3.entry_protocol_registry_contract.mainline</code></a><br/>v 3.entry_protocol_registry_contract.mainline</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>3</td><td><code>v3.entry_protocol_registry_contract</code></td><td><code>sha256:dc6300953dc1…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_relay_runtime_closeout"><code>v3.hub_relay.runtime_closeout</code></a><br/>v 3.hub_relay.runtime_closeout</td><td><span class="status pending_review">pending review</span></td><td>16</td><td>17</td><td><code>v3.hub_relay_runtime_closeout</code></td><td><code>sha256:78e626071713…</code></td></tr>
+<tr><td><a href="#chain-v3_sse_transport_boundary"><code>v3.sse.transport_boundary</code></a><br/>v 3.sse.transport_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>6</td><td><code>v3.sse_transport_core_independent</code></td><td><code>sha256:ee58da7eca3b…</code></td></tr>
 <tr><td><a href="#chain-v3_protocol_conversion_field_parity"><code>v3.protocol_conversion_field_parity</code></a><br/>v 3.protocol_conversion_field_parity</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>9</td><td><code>v3.protocol_conversion_field_parity</code></td><td><code>sha256:c41ca2e06b69…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_relay_source_server_entry"><code>v3.responses_relay.source_server_entry</code></a><br/>v 3.responses_relay.source_server_entry</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>9</td><td><code>v3.hub_relay_runtime_closeout</code></td><td><code>sha256:2e16a74aaa88…</code></td></tr>
-<tr><td><a href="#chain-v3_servertool_hook_skeleton_lifecycle"><code>v3.servertool_hook_skeleton_lifecycle</code></a><br/>06 Stopless / Servertool</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>8</td><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><code>sha256:b586e01c3670…</code></td></tr>
+<tr><td><a href="#chain-v3_servertool_hook_skeleton_lifecycle"><code>v3.servertool_hook_skeleton_lifecycle</code></a><br/>06 Stopless / Servertool</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>8</td><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><code>sha256:e47bae6a4f5f…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_relay_tool_servertool_multiturn_parity"><code>v3.hub_relay.tool_servertool_multiturn_parity</code></a><br/>v 3.hub_relay.tool_servertool_multiturn_parity</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>7</td><td><code>v3.relay_tool_servertool_multiturn_parity_closeout</code></td><td><code>sha256:b0f92f2f3831…</code></td></tr>
+<tr><td><a href="#chain-v3_resp03_tool_governance_gap_closeout"><code>v3.resp03_tool_governance_gap_closeout</code></a><br/>v 3.resp 03_tool_governance_gap_closeout</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>4</td><td><code>v3.resp03_tool_governance_gap_closeout</code></td><td><code>sha256:394010de4849…</code></td></tr>
 <tr><td><a href="#chain-v3_live_provider_compat_parity"><code>v3.live_provider_compat.parity</code></a><br/>v 3.live_provider_compat.parity</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>1</td><td><code>v3.live_provider_compat_parity_closeout</code></td><td><code>sha256:0fd1c6b97be5…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_inbound_websocket_proxy"><code>v3.responses.inbound_websocket_proxy</code></a><br/>v 3.responses.inbound_websocket_proxy</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>7</td><td><code>v3.responses_inbound_websocket_proxy</code></td><td><code>sha256:42fa9d5e6908…</code></td></tr>
 <tr><td><a href="#chain-v3_protocol_normalization_tool_governance_boundary"><code>v3.protocol_normalization_tool_governance_boundary</code></a><br/>v 3.protocol_normalization_tool_governance_boundary</td><td><span class="status pending_review">pending review</span></td><td>8</td><td>9</td><td><code>v3.protocol_normalization_tool_governance_boundary</code></td><td><code>sha256:4537268f94a2…</code></td></tr>
@@ -810,6 +812,27 @@ flowchart TD
             <span>V3LiveCompat01MatrixDeclared → V3LiveCompat04ProductionReadinessProjected</span>
             <span><code>v3.live_provider_compat.parity</code></span>
             <span>3 edges · 1 resources · docs, docs::manifest, scripts</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+      </div>
+    </section>
+
+
+    <section class="branch-group">
+      <h3>Other branches</h3>
+      <div class="branch-grid">
+        <a class="branch-card" href="#chain-v3_sse_transport_boundary">
+            <span class="chain-id">v 3.sse.transport_boundary</span>
+            <span>V3SseTransportIn01RawChunk → V3ServerRespOutbound06ClientFrame</span>
+            <span><code>v3.sse.transport_boundary</code></span>
+            <span>4 edges · 6 resources · routecodex-v3-sse, v3-provider-responses, v3-server</span>
+            <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_resp03_tool_governance_gap_closeout">
+            <span class="chain-id">v 3.resp 03_tool_governance_gap_closeout</span>
+            <span>V3HubRespInbound02Normalized → V3HubRespContinuation04Committed</span>
+            <span><code>v3.resp03_tool_governance_gap_closeout</code></span>
+            <span>6 edges · 4 resources · v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
       </div>
@@ -2247,6 +2270,52 @@ flowchart TD
     </details>
 
 
+    <details class="branch-detail" id="chain-v3_sse_transport_boundary" >
+      <summary>
+        <span class="summary-main">v 3.sse.transport_boundary</span>
+        <span class="summary-sub">V3SseTransportIn01RawChunk → V3ServerRespOutbound06ClientFrame</span>
+        <span class="summary-sub">4 edges · <code>v3.sse.transport_boundary</code> · V3SseTransportIn01RawChunk → V3ServerRespOutbound06ClientFrame</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">V3 SSE is a transport-only edge: provider bytes become opaque validated SSE frames in routecodex-v3-sse, protocol semantics are handled by provider/protocol codecs, and server output only hands finalized client stream bytes to Body::from_stream.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.sse_transport_core_independent</code></span>
+          <span>audit: <span class="status audited_locked">locked by Jason</span></span>
+          <span>modules: <code>routecodex-v3-sse · v3-provider-responses · v3-server</code></span>
+          <span>resources: <code>6</code></span>
+          <span>manifest: <code>docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml</code></span>
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_sse_transport_boundary_0[&quot;&lt;b&gt;Sse Transport In 01 Raw Chunk&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportIn01RawChunk&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_1[&quot;&lt;b&gt;Sse Transport In 02 Decoded Frame&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportIn02DecodedFrame&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_2[&quot;&lt;b&gt;Sse Transport In 03 Validated Frame Stream&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportIn03ValidatedFrameStream&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_3[&quot;&lt;b&gt;Sse Transport Out 04 Encoded Chunk&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportOut04EncodedChunk&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_4[&quot;&lt;b&gt;Client semantic&lt;/b&gt;&lt;br/&gt;按入口协议投影客户端语义&lt;br/&gt;&lt;small&gt;V3HubRespOutbound05ClientSemantic&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_5[&quot;&lt;b&gt;Server client frame&lt;/b&gt;&lt;br/&gt;server 发送最终 client frame&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_0 --&gt;|v3-sse-transport-01&lt;br/&gt;routecodex-v3-sse → routecodex-v3-sse| n_v3_sse_transport_boundary_1
+  n_v3_sse_transport_boundary_1 --&gt;|v3-sse-transport-02&lt;br/&gt;routecodex-v3-sse → routecodex-v3-sse| n_v3_sse_transport_boundary_2
+  n_v3_sse_transport_boundary_2 --&gt;|v3-sse-transport-03&lt;br/&gt;v3-provider-responses → routecodex-v3-sse| n_v3_sse_transport_boundary_3
+  n_v3_sse_transport_boundary_4 --&gt;|v3-sse-server-frame-04&lt;br/&gt;v3-server → v3-server| n_v3_sse_transport_boundary_5
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_sse_transport_boundary_0,n_v3_sse_transport_boundary_1,n_v3_sse_transport_boundary_2,n_v3_sse_transport_boundary_3,n_v3_sse_transport_boundary_4,n_v3_sse_transport_boundary_5 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-sse-transport-01</code></td><td><code>V3SseTransportIn01RawChunk</code><br/>→ <code>V3SseTransportIn02DecodedFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.transport_raw_chunk</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.sse.transport_decoded_frame</code></div></td><td><code>SseIncrementalDecoder::push</code><br/><small>routecodex-v3-sse/src/lib.rs</small></td><td><code>build_v3_sse_transport_in_02_from_fields</code><br/><small>routecodex-v3-sse/src/lib.rs</small></td></tr>
+<tr><td><code>v3-sse-transport-02</code></td><td><code>V3SseTransportIn02DecodedFrame</code><br/>→ <code>V3SseTransportIn03ValidatedFrameStream</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.transport_decoded_frame</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.sse.transport_validated_frame_stream</code></div></td><td><code>SseIncrementalDecoder::push</code><br/><small>routecodex-v3-sse/src/lib.rs</small></td><td><code>build_v3_sse_transport_in_03_from_v3_sse_transport_in_02</code><br/><small>routecodex-v3-sse/src/lib.rs</small></td></tr>
+<tr><td><code>v3-sse-transport-03</code></td><td><code>V3SseTransportIn03ValidatedFrameStream</code><br/>→ <code>V3SseTransportOut04EncodedChunk</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.transport_validated_frame_stream</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.sse.transport_encoded_chunk</code></div></td><td><code>validated_sse_stream</code><br/><small>routecodex-v3-provider-responses/src/shared.rs</small></td><td><code>build_v3_sse_transport_out_04_from_v3_sse_transport_in_03</code><br/><small>routecodex-v3-sse/src/lib.rs</small></td></tr>
+<tr><td><code>v3-sse-server-frame-04</code></td><td><code>V3HubRespOutbound05ClientSemantic</code><br/>→ <code>V3ServerRespOutbound06ClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code> <code>v3.sse.transport_encoded_chunk</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>wrap_v3_relay_sse_closeout_stream</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>Body::from_stream</code><br/><small>routecodex-v3-server/src/lib.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
     <details class="branch-detail" id="chain-v3_protocol_conversion_field_parity" >
       <summary>
         <span class="summary-main">v 3.protocol_conversion_field_parity</span>
@@ -2391,9 +2460,9 @@ flowchart TD
 <tr><td><code>v3-servertool-stopless-req-02</code></td><td><code>V3HubReqChatProcess04Governed</code><br/>→ <code>V3StoplessReq01RuntimeControlLoaded</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>load_v3_responses_relay_stopless_control_state</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td><td><code>V3ResponsesRelayStoplessControlState::load_for_scope</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td></tr>
 <tr><td><code>v3-servertool-stopless-req-03</code></td><td><code>V3StoplessReq01RuntimeControlLoaded</code><br/>→ <code>V3StoplessReq02NoopCliConsumed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div></td><td><code>apply_v3_stopless_request_hook_at_req04</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>strip_active_stopless_pair_and_stale</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
 <tr><td><code>v3-servertool-stopless-req-04</code></td><td><code>V3StoplessReq02NoopCliConsumed</code><br/>→ <code>V3StoplessReq03GuidanceToolInjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.hub.tool_governance_truth</code></div></td><td><code>apply_v3_stopless_request_hook_at_req04</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>inject_stopless_guidance</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
-<tr><td><code>v3-servertool-stopless-resp-01</code></td><td><code>V3HubRespChatProcess03Governed</code><br/>→ <code>V3StoplessResp01ReasoningStopInspected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.static_hook_registry</code></div></td><td><code>apply_v3_stopless_response_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>first_reasoning_stop_tool_call_arguments</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
+<tr><td><code>v3-servertool-stopless-resp-01</code></td><td><code>V3HubRespChatProcess03Governed</code><br/>→ <code>V3StoplessResp01ReasoningStopInspected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.static_hook_registry</code></div></td><td><code>apply_v3_tool_call_servertool_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>first_reasoning_stop_tool_call_arguments</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
 <tr><td><code>v3-servertool-stopless-resp-02</code></td><td><code>V3StoplessResp01ReasoningStopInspected</code><br/>→ <code>V3StoplessResp02RuntimeControlUpdated</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_responses_relay_stopless_control_transition</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td><td><code>V3ResponsesRelayStoplessControlState::store_for_scope</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td></tr>
-<tr><td><code>v3-servertool-stopless-resp-03</code></td><td><code>V3StoplessResp02RuntimeControlUpdated</code><br/>→ <code>V3StoplessResp03NoopCliOrTerminalProjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_stopless_response_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>build_stopless_cli_projection_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
+<tr><td><code>v3-servertool-stopless-resp-03</code></td><td><code>V3StoplessResp02RuntimeControlUpdated</code><br/>→ <code>V3StoplessResp03NoopCliOrTerminalProjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_tool_call_servertool_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>build_stopless_cli_projection_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
 <tr><td><code>v3-servertool-stopless-resp-04</code></td><td><code>V3StoplessResp03NoopCliOrTerminalProjected</code><br/>→ <code>V3HubRespContinuation04Committed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.continuation.local_context_truth</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.continuation.local_context_truth</code></div></td><td><code>commit_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td><td><code>build_v3_relay_local_continuation_context_at_resp04</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td></tr>
 </tbody>
 </table>
@@ -2446,6 +2515,57 @@ flowchart TD
 <tr><td><code>v3-relay-tool-parity-04</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.static_hook_registry</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.hub.tool_governance_truth</code></div></td><td><code>response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit</code><br/><small>routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs</small></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
 <tr><td><code>v3-relay-tool-parity-05</code></td><td><code>V3HubRespChatProcess03Governed</code><br/>→ <code>V3HubRespContinuation04Committed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code> <code>v3.hub.tool_governance_truth</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.continuation.local_context_truth</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.tool_governance_truth</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.continuation.local_context_truth</code></div></td><td><code>response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit</code><br/><small>routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs</small></td><td><code>commit_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td></tr>
 <tr><td><code>v3-relay-tool-parity-06</code></td><td><code>V3HubRespOutbound05ClientSemantic</code><br/>→ <code>V3ServerRespOutbound06ClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code></div></td><td><code>responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order</code><br/><small>routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs</small></td><td><code>build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05</code><br/><small>routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_resp03_tool_governance_gap_closeout" >
+      <summary>
+        <span class="summary-main">v 3.resp 03_tool_governance_gap_closeout</span>
+        <span class="summary-sub">V3HubRespInbound02Normalized → V3HubRespContinuation04Committed</span>
+        <span class="summary-sub">6 edges · <code>v3.resp03_tool_governance_gap_closeout</code> · V3HubRespInbound02Normalized → V3HubRespContinuation04Committed</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Resp03 response small skeleton: provider-neutral text harvest and tool-frame repair occur before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; stop branch runs a distinct stop hook; Resp04 only saves the governed continuation truth.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.resp03_tool_governance_gap_closeout</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>v3-runtime::hub_v1</code></span>
+          <span>resources: <code>4</code></span>
+          <span>manifest: <code>binding_pending</code></span>
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_resp03_tool_governance_gap_closeout_0[&quot;&lt;b&gt;RespInbound 归一化&lt;/b&gt;&lt;br/&gt;只解析 provider raw，不做工具治理&lt;br/&gt;&lt;small&gt;V3HubRespInbound02Normalized&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_1[&quot;&lt;b&gt;Resp Chat Process&lt;/b&gt;&lt;br/&gt;响应侧工具收割、servertool、stopless、reasoning harvest 唯一治理点&lt;br/&gt;&lt;small&gt;V3HubRespChatProcess03Governed&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_2[&quot;&lt;b&gt;Resp 03 Finish Reason Branch&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Resp03FinishReasonBranch&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_3[&quot;&lt;b&gt;Resp 03 Tool Call Servertool Hook&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Resp03ToolCallServertoolHook&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_4[&quot;&lt;b&gt;Resp 03 Ordinary Tool Governance&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Resp03OrdinaryToolGovernance&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_5[&quot;&lt;b&gt;Resp 03 Stop Servertool Hook&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Resp03StopServertoolHook&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_6[&quot;&lt;b&gt;Continuation save&lt;/b&gt;&lt;br/&gt;响应侧 continuation 真相保存点；之后到下轮 restore 是不可变区&lt;br/&gt;&lt;small&gt;V3HubRespContinuation04Committed&lt;/small&gt;&quot;]
+  n_v3_resp03_tool_governance_gap_closeout_0 --&gt;|v3-resp03-tool-governance-01&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_resp03_tool_governance_gap_closeout_1
+  n_v3_resp03_tool_governance_gap_closeout_1 --&gt;|v3-resp03-tool-governance-02&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_resp03_tool_governance_gap_closeout_2
+  n_v3_resp03_tool_governance_gap_closeout_2 --&gt;|v3-resp03-tool-governance-03&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_resp03_tool_governance_gap_closeout_3
+  n_v3_resp03_tool_governance_gap_closeout_3 --&gt;|v3-resp03-tool-governance-04&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_resp03_tool_governance_gap_closeout_4
+  n_v3_resp03_tool_governance_gap_closeout_2 --&gt;|v3-resp03-tool-governance-05&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_resp03_tool_governance_gap_closeout_5
+  n_v3_resp03_tool_governance_gap_closeout_1 --&gt;|v3-resp03-tool-governance-06&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime::hub_v1| n_v3_resp03_tool_governance_gap_closeout_6
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_resp03_tool_governance_gap_closeout_0,n_v3_resp03_tool_governance_gap_closeout_1,n_v3_resp03_tool_governance_gap_closeout_2,n_v3_resp03_tool_governance_gap_closeout_3,n_v3_resp03_tool_governance_gap_closeout_4,n_v3_resp03_tool_governance_gap_closeout_5,n_v3_resp03_tool_governance_gap_closeout_6 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-resp03-tool-governance-01</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>complete_or_repair_v3_resp03_tool_frames</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
+<tr><td><code>v3-resp03-tool-governance-02</code></td><td><code>V3HubRespChatProcess03Governed</code><br/>→ <code>V3Resp03FinishReasonBranch</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>inspect_v3_resp03_finish_reason</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
+<tr><td><code>v3-resp03-tool-governance-03</code></td><td><code>V3Resp03FinishReasonBranch</code><br/>→ <code>V3Resp03ToolCallServertoolHook</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.static_hook_registry</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.hub.tool_governance_truth</code></div></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>apply_v3_tool_call_servertool_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
+<tr><td><code>v3-resp03-tool-governance-04</code></td><td><code>V3Resp03ToolCallServertoolHook</code><br/>→ <code>V3Resp03OrdinaryToolGovernance</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.tool_governance_truth</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.hub.tool_governance_truth</code></div></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>project_v3_apply_patch_freeform_calls_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td></tr>
+<tr><td><code>v3-resp03-tool-governance-05</code></td><td><code>V3Resp03FinishReasonBranch</code><br/>→ <code>V3Resp03StopServertoolHook</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.static_hook_registry</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.hub.tool_governance_truth</code></div></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>apply_v3_stop_servertool_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
+<tr><td><code>v3-resp03-tool-governance-06</code></td><td><code>V3HubRespChatProcess03Governed</code><br/>→ <code>V3HubRespContinuation04Committed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.continuation.local_context_truth</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.continuation.local_context_truth</code></div></td><td><code>commit_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td><td><code>V3HubRelayCanonicalResponseContext</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td></tr>
 </tbody>
 </table>
       </div>

@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GENERATED_WIKI_PAGES, MANUAL_WIKI_PAGES, WIKI_ROOT } from './architecture-wiki-lib.mjs';
 import { renderV3MainlineCallerFlowHtml, V3_CALLER_FLOW_PATH } from './v3-mainline-caller-flow-lib.mjs';
+import {
+  renderV3Req04ToolGovernanceReviewHtml,
+  V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH,
+} from './v3-req04-tool-governance-review-lib.mjs';
 
 export const WIKI_HTML_ROOT = `${WIKI_ROOT}/html`;
 
@@ -289,6 +293,10 @@ export function renderArchitectureWikiHtmlPages(root) {
   for (const markdownPath of wikiMarkdownPaths()) {
     if (markdownPath === V3_CALLER_FLOW_PATH) {
       outputs.set(htmlPathForMarkdown(markdownPath), renderV3MainlineCallerFlowHtml(root));
+      continue;
+    }
+    if (markdownPath === V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH) {
+      outputs.set(htmlPathForMarkdown(markdownPath), renderV3Req04ToolGovernanceReviewHtml(root));
       continue;
     }
     const markdown = readText(root, markdownPath);

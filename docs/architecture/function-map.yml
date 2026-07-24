@@ -29,6 +29,8 @@ owners:
       - scripts/tests/resource-source-bindings-red-fixtures.mjs
       - docs/architecture/function-map.yml
       - docs/architecture/verification-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-mainline-skeleton-sop.md
       - docs/architecture/mainline-call-map.yml
       - docs/goals/resource-ownership-refactor-plan.md
     forbidden_paths:
@@ -9098,6 +9100,8 @@ owners:
     required_gates:
       - npm run test:v3-sse-transport-core
       - npm run test:v3-sse-transport-adapter
+      - npm run verify:sse-transport-core-shared
+      - npm run verify:sse-architecture-boundary
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run verify:function-map-compile-gate
@@ -9106,6 +9110,7 @@ owners:
     notes:
       - "This is a V3 workspace copy of the protocol-neutral SSE transport core so V3 can build and run independently from the V2 llmswitch-core crate tree."
       - "Protocol semantics, tool governance, continuation, stopless, and provider-specific event projection remain outside this transport module."
+      - "V3 server closeout may observe EOF/error/drop transport lifecycle only; it must not parse SSE event names or data JSON for terminal/required_action/failure semantics."
 
   - feature_id: v3.provider_compat_profile_loading
     status: active

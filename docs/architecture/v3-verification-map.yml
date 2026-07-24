@@ -1311,7 +1311,7 @@ features:
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
     required_unit:
-      - Responses request to OpenAI Chat provider wire preserves data-plane metadata/client_metadata/stop, tool schema, tool_choice, user, sampling, response_format, and token fields.
+      - Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format, and token fields while rejecting non-standard client_metadata from provider wire.
       - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
       - Anthropic thinking is preserved under Responses reasoning.thinking rather than compressed to effort-only state.
@@ -1708,6 +1708,46 @@ features:
       runtime: "Architecture documentation and gate only; no runtime behavior, live provider compatibility, global install, restart, release, or production cutover is claimed."
       forbidden_claim: "Do not treat resource declarations as callable paths, collapse multiple paths into one multi-target edge, or claim live/runtime closure from this source gate."
 
+  - feature_id: v3.resp03_tool_governance_gap_closeout
+    status: source_gate_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_chat_process_gate
+    owner_scope: "Resp03/Resp04 response governance small skeleton: text harvest, tool-frame repair, finish_reason branch, tool_call servertool hook, ordinary governance, stop servertool hook, Resp04 continuation save only."
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+      - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
+      - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
+    design:
+      - docs/goals/v3-resp03-tool-governance-gap-closeout-plan.md
+      - docs/architecture/wiki/v3-req04-tool-governance-review.md
+    contract:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+    required_unit:
+      - Resp03 repairs completed/stop tool-call responses to requires_action/tool_calls before stop hook projection
+      - Resp03 splits tool_call servertool hook from stop servertool hook
+      - Resp03 runs ordinary apply_patch/client tool governance only after tool-call servertool pass-through
+      - Resp04 reuses Resp03 governed provider payload and does not mutate status finish_reason or tool frames
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
+      - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
+      - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+      - npm run verify:v3-normalization-payload-logic-boundary
+      - npm run verify:v3-architecture-docs
+      - npm run verify:architecture-wiki-html-sync
+      - npm run verify:architecture-wiki-sync
+      - node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs
+      - git diff --check
+    completion_rule:
+      source: "Source complete only when required Rust tests, verifier, red fixtures, architecture gates, browser smoke, and diff check pass."
+      runtime: "No live install/restart/replay is claimed."
+      forbidden_claim: "Do not claim live closeout from source gates."
+
   - feature_id: v3.servertool_hook_skeleton_lifecycle
     status: controlled_runtime_slice_verified
     change_risk: critical
@@ -1842,3 +1882,40 @@ features:
       live_cutover: false
       global_install_restart: false
       compat_runtime_behavior: typed_runtime_nodes_anchored
+
+
+  - feature_id: v3.sse_transport_core_independent
+    status: source_controlled_transport_boundary_locked
+    change_risk: high
+    owner_kind: rust_project_v3_transport_only
+    owner_scope: "V3-only SSE byte/frame transport owner; no protocol, continuation, tool, stopless, terminal, routing, or provider/client payload semantic ownership."
+    owner_modules:
+      - v3/crates/routecodex-v3-sse
+      - v3/crates/routecodex-v3-provider-responses/src/shared.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    design:
+      - docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
+      - docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - scripts/architecture/verify-sse-transport-core-shared.mjs
+    required_unit:
+      - V3 SSE transport preserves arbitrary UTF-8 chunks, multiline data, comments, id/retry, unknown fields, opaque [DONE], and normal EOF.
+      - V3 SSE transport rejects invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation, and upstream failure with typed transport errors.
+      - V3 server closeout emits only transport EOF/error/drop outcomes and does not parse SSE event names or data JSON.
+    required_gates:
+      - npm run verify:sse-transport-core-shared
+      - npm run verify:sse-architecture-boundary
+      - npm run test:v3-sse-transport-core
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib relay_sse_closeout -- --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:architecture-wiki-html-sync
+      - git diff --check
+    completion_boundary:
+      source_controlled: true
+      live_cutover: false
+      global_install_restart: false
+      forbidden_claim: "Do not claim provider protocol terminal validation, continuation correctness, or live SSE provider behavior from this transport boundary gate alone."

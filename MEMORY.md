@@ -4401,3 +4401,13 @@ Tags: #v3-architecture #review-surface #request-response-split #error-resources
 - OpenAI Chat provider streams with all-zero usage plus assistant diagnostic text `upstream returned zero output tokens...` are provider failures before Resp03/stopless. The same phrase inside visible assistant content with real usage is normal output.
 - V3 5555 restart owner mismatch after config digest change is handled by `routecodex restart --port 5555` discovering the single previous live managed owner for the same config/listener and exec-reentry adopting the new declaration. Do not use `start` to recover this class.
 - Verified closeout for this slice: installed `0.90.3971-2026-07-23T173618Z`, managed restart instance `v3-d227d8cac104a761d29c`, `/health` OK, foreground PID uses the installed `/Volumes/extension/.rcc/install/.../dist/bin/rccv3`, exact old panic and zero-output request bodies replayed to HTTP 200 SSE with `[DONE]`. The old upstream `new_api_panic` did not reproduce live, so source red/green tests plus saved raw sample are the branch proof.
+
+## 2026-07-24 V3 Resp03/Resp04 tool-governance closeout
+- Verified source truth: response governance order is now Resp03-owned: text/think harvest -> tool-frame completion/finish_reason repair -> finish_reason branch -> tool_call servertool hook -> ordinary tool governance only after pass-through; stop branch uses separate stop servertool hook.
+- Resp04 contract: continuation save/commit reuses already-governed Resp03 provider payload; Resp04 must not mutate status, finish_reason, stop_reason, tool frames, history, or guidance.
+- Gate truth: `verify:v3-relay-tool-servertool-multiturn-parity-closeout` and red fixtures lock split hooks, no merged stopless response hook in Resp03 orchestrator, no Resp04 semantic repair, map bindings, and the two focused response semantic tests.
+- Validation scope: source gates passed only; no install/restart/live replay was performed in this slice.
+
+## 2026-07-24 - V3 SSE transport boundary locked
+- V3 SSE edge is now locked as transport-only in `docs/architecture/wiki/v3-mainline-skeleton-sop.md` and `v3.sse.transport_boundary`; provider/client protocol semantics must stay in provider/protocol codec or `RespOutbound`, not server/SSE closeout.
+- `V3SseConsoleCloseoutStream` may only observe transport EOF, stream error, and client drop. It must not parse SSE event names or `data` JSON for `response.completed`, `response.requires_action`, `response.failed`, tool, continuation, stopless, servertool, routing, or error-policy decisions.

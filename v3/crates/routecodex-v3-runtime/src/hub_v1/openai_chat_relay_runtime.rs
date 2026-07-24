@@ -1,27 +1,27 @@
 use super::*;
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy,
+    V3RelayProviderFailureRetryPolicy, resolve_v3_relay_target,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
+    V3_ERROR_CHAIN_NODE_IDS, V3ErrorActionScope, V3ErrorSourceKind,
     build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
     build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
     build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05, V3ErrorActionScope, V3ErrorSourceKind,
-    V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_06_client_projected_from_v3_error_05,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_http_request_from_parts, ReqwestResponsesTransport,
-    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
-    V3ProviderResponseBody, V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
+    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody, V3ResponsesProviderTarget,
+    V3Transport13ResponsesHttpRequest, build_v3_provider_12_responses_wire_payload,
+    build_v3_transport_13_responses_http_request_from_parts,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::pin::Pin;
 
@@ -654,7 +654,7 @@ fn provider_target(
         _ => {
             return Err(V3OpenAiChatRelayRuntimeError::Target(
                 "selected auth handle is invalid".to_string(),
-            ))
+            ));
         }
     };
     Ok(V3ResponsesProviderTarget {
@@ -806,6 +806,7 @@ fn error_output(
     provider_id: &str,
     mut trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
+    let _ = client_response;
     let classified = build_v3_error_02_classified_from_v3_error_01(source);
     let local = build_v3_error_03_target_local_action_from_v3_error_02(
         classified,
@@ -818,9 +819,14 @@ fn error_output(
     let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
     let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    let client_status = if status >= 400 {
+        status
+    } else {
+        projected.status
+    };
     V3OpenAiChatRelayRuntimeOutput {
-        status,
-        client_body: V3OpenAiChatRelayClientBody::Json(client_response),
+        status: client_status,
+        client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
     }

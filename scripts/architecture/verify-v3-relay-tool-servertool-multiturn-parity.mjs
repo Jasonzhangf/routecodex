@@ -12,6 +12,7 @@ const files = {
   responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   providerResponsesTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
+  responseSemanticsTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
   tests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
   responsesLocalTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   manifest: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
@@ -128,6 +129,8 @@ if (injectStart < 0 || injectEnd < 0) {
 requireAll(text.responseCommon, files.responseCommon, ['pub enum V3HubRelayToolKind']);
 requireAll(text.responseChatProcess, files.responseChatProcess, [
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
+  'fn complete_or_repair_v3_resp03_tool_frames',
+  'fn inspect_v3_resp03_finish_reason',
   'fn project_v3_apply_patch_freeform_calls_at_resp03',
   'normalize_v3_apply_patch_freeform_input_for_client',
   'tool_call_kinds',
@@ -135,11 +138,41 @@ requireAll(text.responseChatProcess, files.responseChatProcess, [
   'servertool_action',
   'V3HubServertoolResponseAction::FollowupRequired',
 ]);
+requireAll(text.servertoolHooks, files.servertoolHooks, [
+  'apply_v3_tool_call_servertool_hook_at_resp03',
+  'apply_v3_stop_servertool_hook_at_resp03',
+]);
+const resp03GovernStart = text.responseChatProcess.indexOf('fn govern_v3_hub_relay_response(');
+const resp03GovernEnd = text.responseChatProcess.indexOf('\nstruct V3Resp03ProtocolGovernance', resp03GovernStart);
+if (resp03GovernStart < 0 || resp03GovernEnd < 0) {
+  fail(`${files.responseChatProcess}: unable to isolate Resp03 response governance orchestrator`);
+} else {
+  const resp03Govern = text.responseChatProcess.slice(resp03GovernStart, resp03GovernEnd);
+  requireOrdered(resp03Govern, files.responseChatProcess, [
+    'harvest_v3_think_blocks_at_resp03',
+    'complete_or_repair_v3_resp03_tool_frames',
+    'inspect_v3_resp03_finish_reason',
+    'apply_v3_tool_call_servertool_hook_at_resp03',
+    'project_v3_apply_patch_freeform_calls_at_resp03',
+    'apply_v3_stop_servertool_hook_at_resp03',
+  ], 'Resp03 response governance');
+  forbid(
+    resp03Govern,
+    files.responseChatProcess,
+    /apply_v3_stopless_response_hook_at_resp03/,
+    'merged stopless response hook in Resp03 orchestrator',
+  );
+}
 requireAll(text.responseContinuation, files.responseContinuation, [
   'canonical_tool_call_kinds',
-  'fn canonicalize_v3_hub_resp04_finalized_payload',
   'canonical_context_shares_provider_payload',
 ]);
+forbid(
+  text.responseContinuation,
+  files.responseContinuation,
+  /canonicalize_v3_hub_resp04_finalized_payload|finish_reason|finishReason|stop_reason|stopReason|requires_action/,
+  'Resp04 semantic repair of status/finish_reason/tool frames',
+);
 const clientSseProjectionStart = text.responsesRelayRuntime.indexOf(
   'fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
 );
@@ -231,6 +264,25 @@ requireAll(text.tests, files.tests, [
   'V3HubContinuationOwnership::RouteCodexLocalOwned',
   'data:image/png;base64,CURRENT',
 ]);
+requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [
+  'resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook',
+  'resp04_reuses_resp03_repaired_payload_without_semantic_repair',
+]);
+requireAll(text.functionMap, files.functionMap, [
+  'feature_id: v3.resp03_tool_governance_gap_closeout',
+  'complete_or_repair_v3_resp03_tool_frames',
+  'apply_v3_tool_call_servertool_hook_at_resp03',
+  'apply_v3_stop_servertool_hook_at_resp03',
+]);
+requireAll(text.mainlineMap, files.mainlineMap, [
+  'chain_id: v3.resp03_tool_governance_gap_closeout',
+  'v3-resp03-tool-governance-01',
+  'v3-resp03-tool-governance-06',
+]);
+requireAll(text.verificationMap, files.verificationMap, [
+  'feature_id: v3.resp03_tool_governance_gap_closeout',
+  'Resp04 reuses Resp03 governed provider payload',
+]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
   'json_stopless_center_noop_cli_roundtrip_preserves_provider_tools',
@@ -307,16 +359,16 @@ function forbid(source, owner, pattern, label) {
   if (pattern.test(source)) fail(`${owner}: forbidden ${label} (${pattern})`);
 }
 
-function requireOrdered(source, owner, phrases) {
+function requireOrdered(source, owner, phrases, label = 'Req04') {
   let previousIndex = -1;
   for (const phrase of phrases) {
     const index = source.indexOf(phrase);
     if (index < 0) {
-      fail(`${owner}: missing ordered Req04 step ${phrase}`);
+      fail(`${owner}: missing ordered ${label} step ${phrase}`);
       return;
     }
     if (index <= previousIndex) {
-      fail(`${owner}: Req04 step out of order ${phrase}`);
+      fail(`${owner}: ${label} step out of order ${phrase}`);
       return;
     }
     previousIndex = index;

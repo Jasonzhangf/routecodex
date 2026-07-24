@@ -1,0 +1,51 @@
+lifecycle_id: v3.sse.transport_boundary.mainline
+owner_feature_id: v3.sse_transport_core_independent
+entrypoint:
+  node_id: V3SseTransportIn01RawChunk
+  call_map_chain_id: v3.sse.transport_boundary
+nodes:
+  - V3SseTransportIn01RawChunk
+  - V3SseTransportIn02DecodedFrame
+  - V3SseTransportIn03ValidatedFrameStream
+  - V3SseTransportOut04EncodedChunk
+  - V3HubRespOutbound05ClientSemantic
+  - V3ServerRespOutbound06ClientFrame
+edges:
+  - step_id: v3-sse-transport-01
+    from_node: V3SseTransportIn01RawChunk
+    to_node: V3SseTransportIn02DecodedFrame
+    owner_feature_id: v3.sse_transport_core_independent
+    status: anchored
+  - step_id: v3-sse-transport-02
+    from_node: V3SseTransportIn02DecodedFrame
+    to_node: V3SseTransportIn03ValidatedFrameStream
+    owner_feature_id: v3.sse_transport_core_independent
+    status: anchored
+  - step_id: v3-sse-transport-03
+    from_node: V3SseTransportIn03ValidatedFrameStream
+    to_node: V3SseTransportOut04EncodedChunk
+    owner_feature_id: v3.sse_transport_core_independent
+    status: anchored
+  - step_id: v3-sse-server-frame-04
+    from_node: V3HubRespOutbound05ClientSemantic
+    to_node: V3ServerRespOutbound06ClientFrame
+    owner_feature_id: v3.sse_transport_core_independent
+    status: anchored
+forbidden_semantics:
+  - response.completed
+  - response.requires_action
+  - response.failed
+  - required_action
+  - tool_call
+  - continuation
+  - stopless
+  - servertool
+  - retry_or_reroute_policy
+canonical_docs:
+  - docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
+  - docs/architecture/function-map.yml
+  - docs/architecture/verification-map.yml
+verification_gates:
+  - npm run verify:sse-transport-core-shared
+  - npm run verify:sse-architecture-boundary
+  - npm run test:v3-sse-transport-core

@@ -1,17 +1,17 @@
 use axum::{
+    Json, Router,
     body::Body,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::Response,
     routing::post,
-    Json, Router,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{net::TcpListener, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 #[path = "../../../tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
@@ -156,13 +156,15 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .await
         .unwrap();
     assert_eq!(json_response.status(), StatusCode::OK);
-    assert!(json_response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("V3ServerRespOutbound06ClientFrame"));
+    assert!(
+        json_response
+            .headers()
+            .get("x-routecodex-v3-node-trace")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("V3ServerRespOutbound06ClientFrame")
+    );
     let json_body: Value = json_response.json().await.unwrap();
     assert_eq!(
         json_body["choices"][0]["message"]["content"],
@@ -231,6 +233,16 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     let error_body: Value = error_response.json().await.unwrap();
     assert_eq!(error_body["error"]["message"], "controlled rate limit");
+    assert_eq!(error_body["error"]["code"], "rate_limit_error");
+    assert_eq!(error_body["error"]["class"], "provider_failure");
+    assert_eq!(
+        error_body["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert!(
+        error_body["error"].get("type").is_none(),
+        "provider raw error body must not bypass ErrorErr06 projection: {error_body}"
+    );
     let mut error_captures = Vec::new();
     for _ in 0..EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS {
         error_captures.push(captures_rx.recv().await.unwrap());

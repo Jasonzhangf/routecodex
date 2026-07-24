@@ -217,11 +217,31 @@ fn govern_v3_hub_relay_response(
     input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
-    let stopless_outcome = apply_v3_stopless_response_hook_at_resp03(input, profile)?;
-    let stopless_center_state = stopless_outcome.center_state;
-    let input = harvest_v3_think_blocks_at_resp03(stopless_outcome.input);
-    let input = project_v3_apply_patch_freeform_calls_at_resp03(input);
+    let input = harvest_v3_think_blocks_at_resp03(input);
+    let input = complete_or_repair_v3_resp03_tool_frames(input);
     let governance = build_v3_resp03_protocol_governance(&input)?;
+    let branch = inspect_v3_resp03_finish_reason(&input, &governance);
+    let mut stopless_center_state = None;
+    let (input, governance) = match branch {
+        V3Resp03FinishReasonBranch::ToolCall => {
+            let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
+            stopless_center_state = tool_call_hook.center_state;
+            let input = if tool_call_hook.intercepted {
+                tool_call_hook.input
+            } else {
+                project_v3_apply_patch_freeform_calls_at_resp03(tool_call_hook.input)
+            };
+            let governance = build_v3_resp03_protocol_governance(&input)?;
+            (input, governance)
+        }
+        V3Resp03FinishReasonBranch::Stop => {
+            let stop_hook = apply_v3_stop_servertool_hook_at_resp03(input, profile)?;
+            stopless_center_state = stop_hook.center_state;
+            let governance = build_v3_resp03_protocol_governance(&stop_hook.input)?;
+            (stop_hook.input, governance)
+        }
+        V3Resp03FinishReasonBranch::Other => (input, governance),
+    };
     let terminality = if governance.tool_calls.is_empty() {
         governance.status_terminality
     } else {
@@ -245,9 +265,146 @@ fn govern_v3_hub_relay_response(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V3Resp03FinishReasonBranch {
+    ToolCall,
+    Stop,
+    Other,
+}
+
 struct V3Resp03ProtocolGovernance {
     status_terminality: V3HubResponseTerminality,
     tool_calls: Vec<V3HubResponseToolCall>,
+}
+
+fn complete_or_repair_v3_resp03_tool_frames(
+    mut input: V3HubRespInbound02Normalized,
+) -> V3HubRespInbound02Normalized {
+    if input.provider_raw().provider_protocol != V3HubProviderWireProtocol::Responses {
+        return input;
+    }
+    let mut next = input.provider_payload().as_ref().clone();
+    let Some(object) = next.as_object_mut() else {
+        return input;
+    };
+    let has_tool_call = object
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "custom_tool_call" | "tool_call")
+            )
+        });
+    if !has_tool_call {
+        return input;
+    }
+    let Some(status) = object.get("status").and_then(Value::as_str) else {
+        return input;
+    };
+    if !matches!(status, "completed" | "requires_action" | "in_progress" | "queued") {
+        return input;
+    }
+    let mut changed = false;
+    if status == "completed" {
+        object.insert(
+            "status".to_string(),
+            Value::String("requires_action".to_string()),
+        );
+        changed = true;
+    }
+    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
+        if object.contains_key(key) && object.get(key).and_then(Value::as_str) != Some("tool_calls")
+        {
+            object.insert(key.to_string(), Value::String("tool_calls".to_string()));
+            changed = true;
+        }
+    }
+    if !object.contains_key("finish_reason") {
+        object.insert(
+            "finish_reason".to_string(),
+            Value::String("tool_calls".to_string()),
+        );
+        changed = true;
+    }
+    if changed {
+        *input.provider_payload_mut() = Arc::new(next);
+    }
+    input
+}
+
+fn inspect_v3_resp03_finish_reason(
+    input: &V3HubRespInbound02Normalized,
+    governance: &V3Resp03ProtocolGovernance,
+) -> V3Resp03FinishReasonBranch {
+    if !governance.tool_calls.is_empty() || response_has_v3_resp03_tool_call_finish_reason(input) {
+        return V3Resp03FinishReasonBranch::ToolCall;
+    }
+    if governance.status_terminality == V3HubResponseTerminality::Terminal
+        && response_has_v3_resp03_stop_finish_reason(input)
+    {
+        return V3Resp03FinishReasonBranch::Stop;
+    }
+    V3Resp03FinishReasonBranch::Other
+}
+
+
+fn response_has_v3_resp03_tool_call_finish_reason(input: &V3HubRespInbound02Normalized) -> bool {
+    response_v3_resp03_finish_reasons(input.provider_payload().as_ref())
+        .iter()
+        .any(|value| matches!(value.as_str(), "tool_calls" | "tool_call"))
+}
+
+fn response_has_v3_resp03_stop_finish_reason(input: &V3HubRespInbound02Normalized) -> bool {
+    let finish_reasons = response_v3_resp03_finish_reasons(input.provider_payload().as_ref());
+    if finish_reasons.is_empty() {
+        return input
+            .provider_payload()
+            .get("status")
+            .and_then(Value::as_str)
+            == Some("completed");
+    }
+    finish_reasons.iter().any(|value| {
+        matches!(
+            value.as_str(),
+            "stop" | "end_turn" | "complete" | "completed" | "STOP"
+        )
+    })
+}
+
+fn response_v3_resp03_finish_reasons(payload: &Value) -> Vec<String> {
+    let mut values = Vec::new();
+    for path in [
+        &["finish_reason"][..],
+        &["finishReason"][..],
+        &["stop_reason"][..],
+        &["stopReason"][..],
+        &["response", "finish_reason"][..],
+        &["response", "finishReason"][..],
+        &["response", "stop_reason"][..],
+        &["response", "stopReason"][..],
+        &["choices", "0", "finish_reason"][..],
+        &["candidates", "0", "finishReason"][..],
+    ] {
+        if let Some(value) = v3_resp03_string_path(payload, path) {
+            values.push(value);
+        }
+    }
+    values
+}
+
+fn v3_resp03_string_path(value: &Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        if let Ok(index) = segment.parse::<usize>() {
+            current = current.as_array()?.get(index)?;
+        } else {
+            current = current.as_object()?.get(*segment)?;
+        }
+    }
+    current.as_str().map(str::to_owned)
 }
 
 fn build_v3_resp03_protocol_governance(

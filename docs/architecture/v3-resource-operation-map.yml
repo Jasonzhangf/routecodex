@@ -843,7 +843,7 @@ resources:
     allowed_writers: [docs/goals/v3-protocol-conversion-field-parity-test-design.md, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
     allowed_readers: [docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
-    data_plane_fields: [metadata, client_metadata, stop, thinking, tool_choice, usage, model, created, response_format]
+    data_plane_fields: [metadata, stop, thinking, tool_choice, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -901,6 +901,57 @@ resources:
     allowed_writers: [project_sse_stream]
     allowed_readers: [gemini_relay_output_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: V3ServerRespOutbound06ClientFrame
+    binding_status: anchored
+
+
+  - resource_id: v3.sse.transport_raw_chunk
+    resource_kind: transport_byte_chunk
+    lifecycle: v3.sse.transport_boundary
+    owner_crate: routecodex-v3-sse
+    owner_node: V3SseTransportIn01RawChunk
+    identity: [requestId, providerId, chunkSequence]
+    allowed_writers: [validated_sse_stream]
+    allowed_readers: [SseIncrementalDecoder::push]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.sse.transport_decoded_frame
+    resource_kind: transport_decoded_frame
+    lifecycle: v3.sse.transport_boundary
+    owner_crate: routecodex-v3-sse
+    owner_node: V3SseTransportIn02DecodedFrame
+    identity: [requestId, providerId, frameSequence]
+    allowed_writers: [build_v3_sse_transport_in_02_from_fields]
+    allowed_readers: [build_v3_sse_transport_in_03_from_v3_sse_transport_in_02]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.sse.transport_validated_frame_stream
+    resource_kind: transport_validated_frame_stream
+    lifecycle: v3.sse.transport_boundary
+    owner_crate: routecodex-v3-sse
+    owner_node: V3SseTransportIn03ValidatedFrameStream
+    identity: [requestId, providerId, frameSequence]
+    allowed_writers: [build_v3_sse_transport_in_03_from_v3_sse_transport_in_02]
+    allowed_readers: [build_v3_sse_transport_out_04_from_v3_sse_transport_in_03]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.sse.transport_encoded_chunk
+    resource_kind: transport_encoded_chunk
+    lifecycle: v3.sse.transport_boundary
+    owner_crate: routecodex-v3-sse
+    owner_node: V3SseTransportOut04EncodedChunk
+    identity: [requestId, providerId, frameSequence]
+    allowed_writers: [build_v3_sse_transport_out_04_from_v3_sse_transport_in_03]
+    allowed_readers: [validated_sse_stream, Body::from_stream]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
     may_enter_client_body: false
     release_point: V3ServerRespOutbound06ClientFrame

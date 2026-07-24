@@ -343,3 +343,23 @@ SOP/docs/gate 红锁
 - 如果 GLM/OpenAI Chat 返回 `Invalid schema for function 'exec_command': '[REDACTED]' is not of type 'object', 'boolean'`，先检查最终 `provider-request.json` 或 provider-request dry-run body。这是 provider-wire JSON Schema 问题，不是 stopless 清空工具/提示词，也不是 SSE stream mode 问题。
 - `tools[].function.parameters`、`properties.*`、`items`、`oneOf`/`anyOf`/`allOf` members 等 JSON Schema 位置里的 redacted placeholder 必须在 provider send 前归一为 boolean schema `true`。不得归一普通 tool description/text，不得删除工具。
 - 该类修复的 stopless live closeout 必须包含第二轮 submit 路径：client-visible `routecodex hook run reasoningStop` output -> provider-request dry-run -> live provider response，且 live 结果必须是真实工具调用或合法 terminal `reasoningStop`。
+
+## Resp03 split-hook closeout rule (2026-07-24)
+
+Response-side stopless/servertool governance must stay split after Resp03 tool-frame repair:
+
+```text
+Resp03 text harvest
+  -> complete/repair tool frames and finish_reason
+  -> inspect corrected finish_reason
+  -> tool_call branch: apply_v3_tool_call_servertool_hook_at_resp03
+       -> if not intercepted, ordinary tool governance may run
+  -> stop branch: apply_v3_stop_servertool_hook_at_resp03
+  -> Resp04 continuation save only
+```
+
+Rules:
+- Do not revive a merged `apply_v3_stopless_response_hook_at_resp03` in the Resp03 orchestrator.
+- Do not run ordinary apply_patch/client-tool governance before the tool_call servertool hook gets first pass.
+- Do not repair `status`, `finish_reason`, `stop_reason`, tool frames, history, or guidance in Resp04; Resp04 only saves/releases already-governed Resp03 truth.
+- If map/SOP edges mention the old merged response hook, update them to the split hook symbols and refresh the architecture lock with a manual authorization record.

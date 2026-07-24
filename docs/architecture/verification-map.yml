@@ -746,6 +746,8 @@ verification:
     integration:
       - docs/architecture/function-map.yml
       - docs/architecture/verification-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-mainline-skeleton-sop.md
       - docs/architecture/wiki/virtual-router-ownership-map.md
       - docs/goals/virtual-router-shared-function-library-convergence-plan.md
       - package.json
@@ -4455,6 +4457,8 @@ verification:
     smoke:
       - npm run test:v3-sse-transport-core
       - npm run test:v3-sse-transport-adapter
+      - npm run verify:sse-transport-core-shared
+      - npm run verify:sse-architecture-boundary
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run verify:function-map-compile-gate
@@ -4465,6 +4469,7 @@ verification:
       - "Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry, CRLF/LF, unknown fields, opaque `[DONE]`, and normal close inside the V3 workspace."
       - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and no synthetic terminal success."
       - "V3 crates must import `routecodex-v3-sse`, not `sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core`."
+      - "Server closeout wrappers must not parse SSE event names or data JSON to decide terminal, required_action, continuation, tool, stopless, servertool, or provider failure semantics."
 
   - feature_id: v3.provider_compat_profile_loading
     change_risk: high

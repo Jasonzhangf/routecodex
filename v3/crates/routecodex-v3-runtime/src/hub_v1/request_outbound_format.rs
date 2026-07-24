@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -506,6 +506,9 @@ fn normalize_openai_chat_message_content_part(part: &Value) -> Value {
 
 fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
     let mut normalized = strip_private_fields(payload);
+    if let Some(row) = normalized.as_object_mut() {
+        row.remove("client_metadata");
+    }
     let instructions = normalized
         .as_object_mut()
         .and_then(|row| row.remove("instructions"))

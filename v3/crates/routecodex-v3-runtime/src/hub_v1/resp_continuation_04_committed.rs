@@ -19,7 +19,7 @@ pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
     input: V3HubRespChatProcess03Governed,
     action: V3HubContinuationCommit,
 ) -> V3HubRespContinuation04Committed {
-    let finalized_payload = canonicalize_v3_hub_resp04_finalized_payload(&input);
+    let finalized_payload = Arc::clone(input.previous.provider_payload());
     let canonical_context = if action == V3HubContinuationCommit::LocalContext {
         Some(V3HubRelayCanonicalResponseContext {
             payload: Arc::clone(&finalized_payload),
@@ -91,7 +91,7 @@ impl V3HubRespContinuation04Committed {
 pub(crate) fn commit_v3_hub_relay_response(
     input: V3HubRespChatProcess03Governed,
 ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
-    let finalized_payload = canonicalize_v3_hub_resp04_finalized_payload(&input);
+    let finalized_payload = Arc::clone(input.previous.provider_payload());
     let stopless_center_state = input.stopless_center_state.clone();
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
@@ -114,39 +114,6 @@ pub(crate) fn commit_v3_hub_relay_response(
     })
 }
 
-fn canonicalize_v3_hub_resp04_finalized_payload(
-    input: &V3HubRespChatProcess03Governed,
-) -> Arc<Value> {
-    let provider_payload = input.previous.provider_payload();
-    if input.terminality != V3HubResponseTerminality::NonTerminal || input.tool_calls.is_empty() {
-        return Arc::clone(provider_payload);
-    }
-    let Some(source) = provider_payload.as_object() else {
-        return Arc::clone(provider_payload);
-    };
-    let mut projected = source.clone();
-    let mut changed = false;
-    if projected.get("status").and_then(Value::as_str) != Some("requires_action") {
-        projected.insert(
-            "status".to_string(),
-            Value::String("requires_action".to_string()),
-        );
-        changed = true;
-    }
-    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
-        if projected.contains_key(key)
-            && projected.get(key).and_then(Value::as_str) != Some("tool_calls")
-        {
-            projected.insert(key.to_string(), Value::String("tool_calls".to_string()));
-            changed = true;
-        }
-    }
-    if changed {
-        Arc::new(Value::Object(projected))
-    } else {
-        Arc::clone(provider_payload)
-    }
-}
 
 pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
     canonical_request: &Value,

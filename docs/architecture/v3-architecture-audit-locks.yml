@@ -20,6 +20,7 @@ policy:
     - v3.hub_pipeline.v1.response
     - v3.servertool_hook_skeleton_lifecycle
     - v3.debug_error_foundation.mainline
+    - v3.sse.transport_boundary
 manual_review_instruction:
   - Open the HTML review surface.
   - Review the main skeleton, then the relevant standalone branch graph.
@@ -82,7 +83,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:b586e01c3670a85fd25df2379802d01a766a402ce49b6349b912c641759d0f6f
+    fingerprint: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f
+    last_manual_authorization_id: auth-20260724-resp03-tool-governance-split
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
     status: audited_locked
@@ -91,4 +93,19 @@ locked_items:
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
     fingerprint: sha256:ba5dd08feae0703033651f1199f1ab191d3dca70d6883e2143468be86bb81f9f
-manual_authorizations: []
+  - item_id: chain:v3.sse.transport_boundary
+    chain_id: v3.sse.transport_boundary
+    status: audited_locked
+    reviewed_by: Jason
+    locked_at: '2026-07-24T12:00:00+08:00'
+    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
+    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
+    fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
+manual_authorizations:
+  - authorization_id: auth-20260724-resp03-tool-governance-split
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-07-24T09:00:00+08:00'
+    reason: "Active goal requires splitting the old merged response stopless hook into tool_call and stop servertool hooks while preserving the audited lifecycle."
+    fingerprint_before: sha256:b586e01c3670a85fd25df2379802d01a766a402ce49b6349b912c641759d0f6f
+    fingerprint_after: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f

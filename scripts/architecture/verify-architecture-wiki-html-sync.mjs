@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { renderArchitectureWikiHtmlPages } from './wiki-html-lib.mjs';
+import {
+  auditV3Req04ToolGovernanceReviewHtmlText,
+  V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH,
+} from './v3-req04-tool-governance-review-lib.mjs';
 
 const root = process.cwd();
 const expected = renderArchitectureWikiHtmlPages(root);
@@ -16,6 +20,17 @@ for (const [relPath, content] of expected.entries()) {
   if (current !== content) {
     failures.push(`${relPath} is out of sync with wiki markdown`);
   }
+}
+
+const req04HtmlPath = path.join(
+  'docs/architecture/wiki/html',
+  path.basename(V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH).replace(/\.md$/u, '.html'),
+);
+const req04Expected = expected.get(req04HtmlPath);
+if (!req04Expected) {
+  failures.push(`${req04HtmlPath}: missing generated Req04 HTML expectation`);
+} else {
+  failures.push(...auditV3Req04ToolGovernanceReviewHtmlText(req04Expected, req04HtmlPath));
 }
 
 if (failures.length > 0) {

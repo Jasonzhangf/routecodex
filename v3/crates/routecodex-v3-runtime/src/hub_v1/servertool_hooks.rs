@@ -36,9 +36,10 @@ pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
 pub struct V3StoplessResponseHookOutcome {
     pub input: V3HubRespInbound02Normalized,
     pub center_state: Option<V3StoplessCenterState>,
+    pub intercepted: bool,
 }
 
-pub fn apply_v3_stopless_response_hook_at_resp03(
+pub fn apply_v3_tool_call_servertool_hook_at_resp03(
     mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
@@ -46,16 +47,13 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            intercepted: false,
         });
     }
     let object = input
         .provider_payload()
         .as_object()
         .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
-    let status = object
-        .get("status")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     if let Some(arguments) = first_reasoning_stop_tool_call_arguments(object.get("output")) {
         return match classify_reasoning_stop_arguments(arguments) {
             V3ReasoningStopDecision::Terminal { prefix } => {
@@ -67,6 +65,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                 Ok(V3StoplessResponseHookOutcome {
                     input,
                     center_state: None,
+                    intercepted: true,
                 })
             }
             V3ReasoningStopDecision::Continue => {
@@ -87,6 +86,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                     return Ok(V3StoplessResponseHookOutcome {
                         input,
                         center_state: None,
+                        intercepted: true,
                     });
                 }
                 let projected = build_stopless_cli_projection_payload(input.provider_payload());
@@ -94,6 +94,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                 Ok(V3StoplessResponseHookOutcome {
                     input,
                     center_state: Some(state),
+                    intercepted: true,
                 })
             }
             V3ReasoningStopDecision::NeedsEvidence => {
@@ -114,6 +115,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                     return Ok(V3StoplessResponseHookOutcome {
                         input,
                         center_state: None,
+                        intercepted: true,
                     });
                 }
                 let projected = build_stopless_cli_projection_payload(input.provider_payload());
@@ -121,14 +123,42 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
                 Ok(V3StoplessResponseHookOutcome {
                     input,
                     center_state: Some(state),
+                    intercepted: true,
                 })
             }
         };
     }
+    Ok(V3StoplessResponseHookOutcome {
+        input,
+        center_state: None,
+        intercepted: false,
+    })
+}
+
+pub fn apply_v3_stop_servertool_hook_at_resp03(
+    mut input: V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
+    if !profile.stopless_reasoning_stop_enabled() {
+        return Ok(V3StoplessResponseHookOutcome {
+            input,
+            center_state: None,
+            intercepted: false,
+        });
+    }
+    let object = input
+        .provider_payload()
+        .as_object()
+        .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
+    let status = object
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if status != "completed" {
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            intercepted: false,
         });
     }
     let stop_candidate = response_has_stopless_stop_trigger(input.provider_payload().as_ref())
@@ -139,6 +169,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            intercepted: false,
         });
     }
     let natural_stop_count = next_stopless_consecutive_stop_count(profile);
@@ -147,6 +178,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
+            intercepted: false,
         });
     }
     let projected = build_stopless_cli_projection_payload(input.provider_payload());
@@ -164,6 +196,7 @@ pub fn apply_v3_stopless_response_hook_at_resp03(
             .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0)),
         ),
         input,
+        intercepted: true,
     })
 }
 

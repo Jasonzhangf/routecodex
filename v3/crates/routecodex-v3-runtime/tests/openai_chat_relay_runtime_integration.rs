@@ -5,10 +5,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_openai_chat_relay_runtime, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
+    execute_v3_openai_chat_relay_runtime,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Mutex;
 
 struct JsonTransport {
@@ -143,12 +143,16 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 17);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
-    assert!(output
-        .node_trace
-        .contains(&"ProviderReqCompat06ProviderCompat"));
-    assert!(output
-        .node_trace
-        .contains(&"ProviderRespCompat02ProviderCompat"));
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderReqCompat06ProviderCompat")
+    );
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderRespCompat02ProviderCompat")
+    );
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
@@ -314,6 +318,20 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         V3OpenAiChatRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
     assert_eq!(client_response["error"]["message"], "controlled rate limit");
+    assert_eq!(client_response["error"]["code"], "rate_limit_error");
+    assert_eq!(
+        client_response["error"]["stage"],
+        "V3ProviderReqOutbound09TransportRequest"
+    );
+    assert_eq!(client_response["error"]["class"], "provider_failure");
+    assert_eq!(
+        client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert!(
+        client_response["error"].get("type").is_none(),
+        "provider raw error body must not bypass ErrorErr06 projection: {client_response}"
+    );
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
@@ -376,18 +394,18 @@ async fn sse_runtime_preserves_split_frames_tool_delta_terminal_and_done_order()
         .collect::<Vec<_>>();
     assert_eq!(events.len(), 4);
     assert_eq!(
-        serde_json::from_str::<Value>(events[0].trim_start_matches("data: ").trim()).unwrap()
-            ["choices"][0]["delta"]["role"],
+        serde_json::from_str::<Value>(events[0].trim_start_matches("data: ").trim()).unwrap()["choices"]
+            [0]["delta"]["role"],
         "assistant",
     );
     assert_eq!(
-        serde_json::from_str::<Value>(events[1].trim_start_matches("data: ").trim()).unwrap()
-            ["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+        serde_json::from_str::<Value>(events[1].trim_start_matches("data: ").trim()).unwrap()["choices"]
+            [0]["delta"]["tool_calls"][0]["function"]["arguments"],
         "{\"q\":\"beta\"}"
     );
     assert_eq!(
-        serde_json::from_str::<Value>(events[2].trim_start_matches("data: ").trim()).unwrap()
-            ["choices"][0]["finish_reason"],
+        serde_json::from_str::<Value>(events[2].trim_start_matches("data: ").trim()).unwrap()["choices"]
+            [0]["finish_reason"],
         "tool_calls"
     );
     assert_eq!(events[3], "data: [DONE]\n\n");
@@ -597,9 +615,11 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
             V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
         };
         let items = stream.collect::<Vec<_>>().await;
-        assert!(items
-            .iter()
-            .any(|item| item.as_ref().is_err_and(|error| error.contains(expected))));
+        assert!(
+            items
+                .iter()
+                .any(|item| item.as_ref().is_err_and(|error| error.contains(expected)))
+        );
     }
 }
 

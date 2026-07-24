@@ -1,36 +1,35 @@
 use super::*;
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailureDecision, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS,
-    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy, resolve_v3_relay_target,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
+    V3_ERROR_CHAIN_NODE_IDS, V3ErrorActionScope, V3ErrorSourceKind,
     build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
     build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
     build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05, V3ErrorActionScope, V3ErrorSourceKind,
-    V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_06_client_projected_from_v3_error_05,
 };
 use routecodex_v3_provider_responses::{
+    ReqwestResponsesTransport, ResponsesTransport, V3Provider12ResponsesWirePayload,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore,
+    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
     build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_parts,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
-    ResponsesTransport, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore, V3ProviderResp14Raw,
-    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
-    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+    SseField, SseIncrementalDecoder, SseTransportLimits, build_v3_sse_transport_in_01_raw_chunk,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -41,8 +40,7 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
     "provider response event stream ended before response.completed";
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE: &str =
     "provider response event stream failed before response.completed";
-const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str =
-    "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
+const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str = "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
 const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize =
@@ -1591,17 +1589,18 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
-                let hook_provider_value =
-                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        try_before_resp03!(project_v3_anthropic_message_as_responses_response(
-                            &provider_value
-                        )
-                        .map_err(|error| {
-                            V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
-                        }))
-                    } else {
-                        provider_value.clone()
-                    };
+                let hook_provider_value = if provider_wire_protocol
+                    == V3HubProviderWireProtocol::Anthropic
+                {
+                    try_before_resp03!(
+                        project_v3_anthropic_message_as_responses_response(&provider_value)
+                            .map_err(|error| {
+                                V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
+                            })
+                    )
+                } else {
+                    provider_value.clone()
+                };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         V3HubProviderWireProtocol::Responses
@@ -1639,16 +1638,18 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
-                try_before_resp03!(provider_health
-                    .record_provider_success(
-                        &selected_target_provider_id,
-                        Some(&selected_target_auth_alias),
-                        Some(&selected_target_model_id),
-                        v3_responses_relay_now_epoch_ms()?,
-                    )
-                    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
-                        error.to_string()
-                    )));
+                try_before_resp03!(
+                    provider_health
+                        .record_provider_success(
+                            &selected_target_provider_id,
+                            Some(&selected_target_auth_alias),
+                            Some(&selected_target_model_id),
+                            v3_responses_relay_now_epoch_ms()?,
+                        )
+                        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
+                            error.to_string()
+                        ))
+                );
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
@@ -1764,16 +1765,18 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
-                try_before_resp03!(provider_health
-                    .record_provider_success(
-                        &selected_target_provider_id,
-                        Some(&selected_target_auth_alias),
-                        Some(&selected_target_model_id),
-                        v3_responses_relay_now_epoch_ms()?,
-                    )
-                    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
-                        error.to_string()
-                    )));
+                try_before_resp03!(
+                    provider_health
+                        .record_provider_success(
+                            &selected_target_provider_id,
+                            Some(&selected_target_auth_alias),
+                            Some(&selected_target_model_id),
+                            v3_responses_relay_now_epoch_ms()?,
+                        )
+                        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
+                            error.to_string()
+                        ))
+                );
                 stream_observation
                     .record_event(&json!({
                         "type":"response.completed",
@@ -2931,8 +2934,8 @@ fn parse_v3_openai_chat_tool_call_arguments_object(
     }
     Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
         format!(
-        "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
-    ),
+            "OpenAI Chat tool_call {name} arguments must be a JSON object before Responses projection"
+        ),
     ))
 }
 
@@ -3036,9 +3039,11 @@ fn extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
             {
                 return Ok(input);
             }
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "OpenAI Chat custom tool_call {name} arguments must be JSON object with string input before Responses projection: {error}"
-            )));
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!(
+                    "OpenAI Chat custom tool_call {name} arguments must be JSON object with string input before Responses projection: {error}"
+                ),
+            ));
         }
     };
     let object = parsed.as_object().ok_or_else(|| {
@@ -3555,8 +3560,8 @@ fn collect_v3_anthropic_provider_stream_event(
             if state.content_blocks.contains_key(&index) {
                 return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     format!(
-                    "Anthropic provider event stream content_block_start duplicated index {index}"
-                ),
+                        "Anthropic provider event stream content_block_start duplicated index {index}"
+                    ),
                 ));
             }
             let content_block = event_object
@@ -3603,9 +3608,9 @@ fn collect_v3_anthropic_provider_stream_event(
                 other => {
                     return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                         format!(
-                        "Anthropic provider event stream content block type {other} is unsupported"
-                    ),
-                    ))
+                            "Anthropic provider event stream content block type {other} is unsupported"
+                        ),
+                    ));
                 }
             }
             state.content_blocks.insert(index, block);
@@ -3619,9 +3624,11 @@ fn collect_v3_anthropic_provider_stream_event(
                 ))
             })?;
             if block.stopped {
-                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                    "Anthropic provider event stream content_block_delta followed stop for index {index}"
-                )));
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    format!(
+                        "Anthropic provider event stream content_block_delta followed stop for index {index}"
+                    ),
+                ));
             }
             let delta = event_object
                 .get("delta")
@@ -3678,13 +3685,13 @@ fn collect_v3_anthropic_provider_stream_event(
                         format!(
                             "Anthropic provider event stream delta type {other} is unsupported"
                         ),
-                    ))
+                    ));
                 }
                 None => {
                     return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                         "Anthropic provider event stream content_block_delta missing delta.type"
                             .to_string(),
-                    ))
+                    ));
                 }
             }
         }
@@ -3697,9 +3704,11 @@ fn collect_v3_anthropic_provider_stream_event(
                 ))
             })?;
             if block.stopped {
-                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                    "Anthropic provider event stream duplicated content_block_stop for index {index}"
-                )));
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    format!(
+                        "Anthropic provider event stream duplicated content_block_stop for index {index}"
+                    ),
+                ));
             }
             block.stopped = true;
         }
@@ -3732,7 +3741,7 @@ fn collect_v3_anthropic_provider_stream_event(
         other => {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 format!("Anthropic provider event stream event type {other} is unsupported"),
-            ))
+            ));
         }
     }
     Ok(())
@@ -3795,9 +3804,11 @@ fn build_v3_anthropic_message_from_provider_stream_state(
     let mut content = Vec::with_capacity(state.content_blocks.len());
     for (index, block) in state.content_blocks {
         if !block.stopped {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "Anthropic provider event stream content block {index} ended without content_block_stop"
-            )));
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!(
+                    "Anthropic provider event stream content block {index} ended without content_block_stop"
+                ),
+            ));
         }
         match block.kind.as_deref() {
             Some("text") => content.push(json!({
@@ -3846,9 +3857,11 @@ fn build_v3_anthropic_message_from_provider_stream_state(
                     })?
                 };
                 if !input.is_object() {
-                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                        "Anthropic provider event stream tool_use block {index} input must be an object"
-                    )));
+                    return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        format!(
+                            "Anthropic provider event stream tool_use block {index} input must be an object"
+                        ),
+                    ));
                 }
                 content.push(json!({
                     "type":"tool_use",
@@ -3862,12 +3875,12 @@ fn build_v3_anthropic_message_from_provider_stream_state(
                     format!(
                         "Anthropic provider event stream content block type {other} is unsupported"
                     ),
-                ))
+                ));
             }
             None => {
                 return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                     format!("Anthropic provider event stream content block {index} missing type"),
-                ))
+                ));
             }
         }
     }
@@ -4769,6 +4782,7 @@ fn error_output(
     mut observability: Option<V3RuntimeObservability>,
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
+    let _ = client_response;
     let classified = build_v3_error_02_classified_from_v3_error_01(source);
     let local = build_v3_error_03_target_local_action_from_v3_error_02(
         classified,
@@ -4791,9 +4805,14 @@ fn error_output(
             observability.provider_id = Some(provider_id.to_string());
         }
     }
+    let client_status = if status >= 400 {
+        status
+    } else {
+        projected.status
+    };
     V3ResponsesRelayRuntimeOutput {
-        status,
-        client_body: V3ResponsesRelayClientBody::Json(client_response),
+        status: client_status,
+        client_body: V3ResponsesRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability,
@@ -4805,7 +4824,7 @@ fn error_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::{stream, StreamExt};
+    use futures_util::{StreamExt, stream};
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
 
@@ -4830,8 +4849,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn responses_relay_routes_reasoning_from_original_responses_surface_after_chat_canonicalization(
-    ) {
+    async fn responses_relay_routes_reasoning_from_original_responses_surface_after_chat_canonicalization()
+     {
         let authoring = parse_v3_config_02_authoring(
             r#"
 version = 3
@@ -5128,8 +5147,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert_eq!(response["status"], "requires_action");
         assert_eq!(response["output"][0]["type"], "reasoning");
         assert_eq!(
-            response["output"][0]["summary"][0]["text"],
-            "Need inspect before running the tool.",
+            response["output"][0]["summary"][0]["text"], "Need inspect before running the tool.",
             "OpenAI Chat reasoning_content must become replay-safe Responses reasoning.summary before tool calls"
         );
         assert!(
@@ -5291,6 +5309,52 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
             body["error"]["message"],
             "V3 Hub static hook registry failed: registry unavailable"
         );
+    }
+
+    #[test]
+    fn provider_failure_output_projects_error_chain_body_without_success_wrapping() {
+        let output = provider_failure_output(
+            V3ResponsesRelayProviderFailure {
+                status: 429,
+                client_response: json!({
+                    "error": {
+                        "type": "rate_limit_error",
+                        "message": "controlled rate limit"
+                    }
+                }),
+                provider_id: "controlled".to_string(),
+                observability: None,
+            },
+            vec!["V3ProviderReqOutbound09TransportRequest"],
+            0,
+        );
+
+        assert_eq!(output.status, 429);
+        let body = match &output.client_body {
+            V3ResponsesRelayClientBody::Json(body) => body,
+            V3ResponsesRelayClientBody::Sse(_) => panic!("provider error must project as JSON"),
+        };
+        assert_eq!(body["error"]["code"], "rate_limit_error");
+        assert_eq!(body["error"]["message"], "controlled rate limit");
+        assert_eq!(
+            body["error"]["stage"],
+            "V3ProviderReqOutbound09TransportRequest"
+        );
+        assert_eq!(body["error"]["class"], "provider_failure");
+        assert_eq!(body["error"]["decision"], "project_client_error");
+        assert_eq!(body["error"]["target_exhausted"], true);
+        assert_eq!(body["error"]["candidates_remaining"], 0);
+        assert_eq!(body["error"]["error_node"], "V3Error06ClientProjected");
+        assert!(
+            body["error"].get("type").is_none(),
+            "provider raw error body must not bypass ErrorErr06 projection: {body}"
+        );
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
+        assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
     }
 
     fn test_provider_request(
@@ -5511,9 +5575,11 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         .await
         .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("provider response event stream ended before response.completed"));
+        assert!(
+            error
+                .to_string()
+                .contains("provider response event stream ended before response.completed")
+        );
     }
 
     #[tokio::test]
@@ -5583,14 +5649,18 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         )
         .await;
         assert!(projected[0].as_ref().unwrap().contains("response.created"));
-        assert!(projected[1]
-            .as_ref()
-            .unwrap()
-            .contains("response.output_item.done"));
-        assert!(projected[2]
-            .as_ref()
-            .unwrap()
-            .contains("response.completed"));
+        assert!(
+            projected[1]
+                .as_ref()
+                .unwrap()
+                .contains("response.output_item.done")
+        );
+        assert!(
+            projected[2]
+                .as_ref()
+                .unwrap()
+                .contains("response.completed")
+        );
         assert!(projected[3].as_ref().unwrap().contains("response.done"));
         assert_eq!(projected[4].as_ref().unwrap(), "data: [DONE]\n\n");
     }
@@ -5697,9 +5767,11 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         .await
         .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("Anthropic provider event stream ended without message_stop"));
+        assert!(
+            error
+                .to_string()
+                .contains("Anthropic provider event stream ended without message_stop")
+        );
     }
 
     #[tokio::test]

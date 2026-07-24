@@ -1,17 +1,17 @@
 use axum::{
+    Json, Router,
     body::Body,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::Response,
     routing::post,
-    Json, Router,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{net::TcpListener, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 #[path = "../../../tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
@@ -155,13 +155,15 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .await
         .unwrap();
     assert_eq!(json_response.status(), StatusCode::OK);
-    assert!(json_response
-        .headers()
-        .get("x-routecodex-v3-node-trace")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("V3ServerRespOutbound06ClientFrame"));
+    assert!(
+        json_response
+            .headers()
+            .get("x-routecodex-v3-node-trace")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("V3ServerRespOutbound06ClientFrame")
+    );
     let json_body: Value = json_response.json().await.unwrap();
     assert_eq!(
         json_body["candidates"][0]["content"]["parts"][0]["text"],
@@ -229,7 +231,21 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     let error_body: Value = error_response.json().await.unwrap();
     assert_eq!(error_body["error"]["message"], "controlled rate limit");
+    assert_eq!(error_body["error"]["code"], "RESOURCE_EXHAUSTED");
+    assert_eq!(error_body["error"]["class"], "provider_failure");
+    assert_eq!(
+        error_body["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert!(
+        error_body["error"].get("status").is_none(),
+        "provider raw Gemini status must not bypass ErrorErr06 projection: {error_body}"
+    );
     let _error_capture = captures_rx.recv().await.unwrap();
+    while tokio::time::timeout(Duration::from_millis(25), captures_rx.recv())
+        .await
+        .is_ok()
+    {}
 
     let isolation_response = client
         .post(&endpoint)

@@ -5,9 +5,9 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_gemini_relay_runtime, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, execute_v3_gemini_relay_runtime,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Mutex;
 
 #[path = "../../../tests/support/hub_v1_fixture.rs"]
@@ -106,12 +106,16 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 17);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
-    assert!(output
-        .node_trace
-        .contains(&"ProviderReqCompat06ProviderCompat"));
-    assert!(output
-        .node_trace
-        .contains(&"ProviderRespCompat02ProviderCompat"));
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderReqCompat06ProviderCompat")
+    );
+    assert!(
+        output
+            .node_trace
+            .contains(&"ProviderRespCompat02ProviderCompat")
+    );
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     let client_response = match output.client_body {
         V3GeminiRelayClientBody::Json(value) => value,
@@ -313,6 +317,20 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON error body"),
     };
     assert_eq!(client_response["error"]["message"], "controlled rate limit");
+    assert_eq!(client_response["error"]["code"], "RESOURCE_EXHAUSTED");
+    assert_eq!(
+        client_response["error"]["stage"],
+        "V3ProviderReqOutbound09TransportRequest"
+    );
+    assert_eq!(client_response["error"]["class"], "provider_failure");
+    assert_eq!(
+        client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert!(
+        client_response["error"].get("status").is_none(),
+        "provider raw Gemini status must not bypass ErrorErr06 projection: {client_response}"
+    );
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
     assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));

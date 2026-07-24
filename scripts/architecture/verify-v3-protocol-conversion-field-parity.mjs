@@ -128,7 +128,7 @@ for (const [owner, body, phrases] of [
     'responses_openai_chat_field_parity_request_matrix',
     'responses_openai_chat_field_parity_response_matrix',
     '"metadata":{"client":"metadata-kept"}',
-    '"client_metadata":{"codex":"client-metadata-kept"}',
+    'OpenAI Chat provider wire must not forward non-standard client_metadata',
   ]],
   [paths.anthropicTests, text.anthropicTests, [
     'anthropic_responses_field_parity_request_matrix',
@@ -162,7 +162,7 @@ for (const [owner, body, phrases] of [
   ]],
   [paths.verificationMap, text.verificationMap, [
     'feature_id: v3.protocol_conversion_field_parity',
-    'Responses request to OpenAI Chat provider wire preserves data-plane metadata/client_metadata/stop',
+    'Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop',
     'Anthropic thinking is preserved under Responses reasoning.thinking',
     'npm run test:v3-protocol-conversion-field-parity',
   ]],

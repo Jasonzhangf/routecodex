@@ -34,6 +34,15 @@ The following big-skeleton chains are SOP and cannot change without a Jason manu
 - Error handling is a resource graph with Error01-06 plus provider health/availability; side-channel is carrier mechanism, not the resource owner.
 - Metadata/debug/snapshot/error carriers must not enter provider body or client normal payload.
 
+## SSE Edge SOP
+
+- SSE is an independent transport edge. It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only.
+- SSE transport and server frame code must not inspect `data` JSON, event names, `required_action`, terminal status, tool calls, continuation, stopless/servertool, routing, retry, or error-policy semantics.
+- Provider inbound streaming semantics belong to provider/protocol response codec owners after `SseTransportIn03ValidatedFrameStream` has produced opaque frames.
+- Client outbound streaming semantics belong to `V3HubRespOutbound05ClientSemantic`; `V3ServerRespOutbound06ClientFrame` only hands finalized JSON/client bytes to `Body::from_stream`.
+- EOF without a provider/client semantic terminal is a protocol/runtime owner error before client projection, not a server/SSE parser responsibility.
+- Console closeout may record stream EOF, provider stream error, or client drop from transport lifecycle only; it must not parse SSE payloads to decide completed/failed/requires_action.
+
 ## Required Gates
 
 - `npm run render:v3-mainline-caller-flow`

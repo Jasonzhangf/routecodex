@@ -3,216 +3,600 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>V3 Req04 Tool Governance Review</title>
+  <title>V3 Req04 / Resp03 Tool Governance Review</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f4f0e8;
+      --bg: #f5f1e9;
       --panel: #fffdfa;
-      --ink: #1f241f;
-      --muted: #5f665f;
-      --line: #d9cfbf;
+      --ink: #172033;
+      --muted: #647083;
+      --line: #d8d0c2;
       --accent: #0f766e;
+      --accent-dark: #134e4a;
       --accent-soft: #dff4ef;
-      --code: #f3efe6;
+      --danger: #be123c;
+      --code: #f6f0e7;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
       background:
-        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 32%),
-        linear-gradient(180deg, #f7f3eb 0%, var(--bg) 100%);
+        radial-gradient(circle at 10% 0%, rgba(15, 118, 110, 0.12), transparent 30%),
+        radial-gradient(circle at 90% 10%, rgba(217, 119, 6, 0.12), transparent 30%),
+        linear-gradient(180deg, #fbf7ef 0%, var(--bg) 100%);
       color: var(--ink);
     }
-    main {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 40px 20px 72px;
-    }
-    .frame {
-      background: color-mix(in srgb, var(--panel) 94%, white);
+    main { max-width: 1680px; margin: 0 auto; padding: 34px 22px 72px; }
+    header.hero,
+    section.panel {
+      background: rgba(255, 253, 250, 0.96);
       border: 1px solid var(--line);
-      border-radius: 20px;
-      box-shadow: 0 18px 48px rgba(31, 36, 31, 0.08);
-      overflow: hidden;
-    }
-    header {
-      padding: 24px 28px 18px;
-      border-bottom: 1px solid var(--line);
-      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 253, 250, 0.9));
-    }
-    header h1 {
-      margin: 0 0 8px;
-      font-size: clamp(2rem, 4vw, 3rem);
-      line-height: 1.05;
-      letter-spacing: -0.03em;
-    }
-    header p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 0.98rem;
-    }
-    article {
+      border-radius: 24px;
+      box-shadow: 0 18px 48px rgba(23, 32, 51, 0.08);
       padding: 28px;
-      line-height: 1.65;
-      font-size: 17px;
+      margin: 18px 0;
     }
-    h1, h2, h3, h4, h5, h6 { line-height: 1.15; margin: 1.4em 0 0.55em; }
-    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
-    h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 1.1rem; }
-    h3 { font-size: 1.25rem; color: var(--accent); }
-    p, ul, table, pre { margin: 0 0 1rem; }
-    ul { padding-left: 1.35rem; }
-    li + li { margin-top: 0.35rem; }
+    header.hero { background: linear-gradient(135deg, rgba(15, 118, 110, 0.14), rgba(255,253,250,0.96)); }
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-dark);
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    h1 { margin: 14px 0 10px; font-size: clamp(2.2rem, 4.8vw, 4.8rem); line-height: 0.96; letter-spacing: -0.055em; }
+    h2 { margin: 0 0 14px; font-size: clamp(1.45rem, 2.6vw, 2.35rem); letter-spacing: -0.025em; }
+    h3 { margin: 0 0 8px; font-size: 1.12rem; letter-spacing: -0.012em; }
+    p { margin: 0; }
     code {
       font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
-      font-size: 0.92em;
+      font-size: 0.88em;
       background: var(--code);
-      border: 1px solid color-mix(in srgb, var(--line) 80%, white);
-      border-radius: 6px;
+      border: 1px solid rgba(216, 208, 194, 0.9);
+      border-radius: 7px;
       padding: 0.08rem 0.35rem;
     }
-    pre {
-      background: #f8f4ec;
+    .hero p { color: var(--muted); font-size: 1.08rem; max-width: 1040px; line-height: 1.55; }
+    .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .meta-pill {
       border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
-      overflow-x: auto;
+      background: rgba(255,255,255,0.74);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 0.92rem;
     }
-    pre code {
-      background: transparent;
-      border: 0;
-      padding: 0;
-    }
-    .mermaid {
-      background: linear-gradient(180deg, rgba(15, 118, 110, 0.04), rgba(255,255,255,0.92));
-      padding: 20px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: white;
-      border: 1px solid var(--line);
-    }
-    th, td {
-      border: 1px solid var(--line);
-      padding: 10px 12px;
-      vertical-align: top;
-      text-align: left;
-    }
-    th {
-      background: var(--accent-soft);
-      font-weight: 700;
-    }
-    @media (max-width: 720px) {
-      main { padding: 18px 12px 40px; }
-      article, header { padding-left: 16px; padding-right: 16px; }
-      article { font-size: 15px; }
+    .flow-stack { display: grid; gap: 22px; }
+    .flow-box { overflow-x: auto; background: linear-gradient(180deg, rgba(15,118,110,0.045), rgba(255,255,255,0.92)); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+    pre.mermaid { min-width: 1180px; margin: 0; font-size: 21px; line-height: 1.45; }
+    .flow-box svg { width: 100% !important; height: auto !important; min-width: 1120px; }
+    .source-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 8px 14px; padding-left: 1.1rem; margin: 0; color: var(--muted); line-height: 1.45; }
+    .invariant-list { display: grid; gap: 10px; margin: 0; padding-left: 1.25rem; line-height: 1.55; }
+    .logic-grid,
+    .note-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
+    .logic-card,
+    .note-card { border: 1px solid var(--line); border-radius: 18px; background: white; padding: 16px; min-height: 168px; }
+    .logic-card p,
+    .note-card p { color: var(--muted); line-height: 1.5; }
+    .node-card-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; color: var(--muted); font-family: "SFMono-Regular", "Menlo", "Consolas", monospace; font-size: 0.78rem; }
+    .logic-card.boundary { border-top: 5px solid #2563eb; }
+    .logic-card.restore { border-top: 5px solid #0284c7; }
+    .logic-card.normalize { border-top: 5px solid #334155; }
+    .logic-card.load { border-top: 5px solid #334155; }
+    .logic-card.classify { border-top: 5px solid #d97706; }
+    .logic-card.preserve { border-top: 5px solid #047857; }
+    .logic-card.inject { border-top: 5px solid #4f46e5; }
+    .logic-card.govern,
+    .logic-card.emit { border-top: 5px solid var(--accent); }
+    .logic-card.harvest { border-top: 5px solid #9333ea; }
+    .logic-card.sidechannel { border-top: 5px solid #475569; }
+    .logic-card.save { border-top: 5px solid #0891b2; }
+    dl { margin: 0; display: grid; gap: 8px; }
+    dt { font-weight: 800; color: var(--accent-dark); }
+    dd { margin: 0; color: var(--muted); line-height: 1.5; }
+    .badge { display: inline-block; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); font-size: 0.78rem; font-weight: 700; padding: 4px 8px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.045em; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 0.96rem; }
+    th, td { border: 1px solid var(--line); padding: 11px 12px; vertical-align: top; text-align: left; line-height: 1.45; }
+    th { background: var(--accent-soft); color: var(--accent-dark); font-weight: 800; }
+    .callout { border-left: 5px solid var(--danger); background: #fff1f2; border-radius: 16px; padding: 16px 18px; line-height: 1.58; color: #7f1d1d; }
+    .callout strong { color: #881337; }
+    @media (max-width: 900px) {
+      main { padding: 18px 12px 48px; }
+      header.hero, section.panel { padding: 18px; border-radius: 18px; }
+      h1 { font-size: 2.4rem; }
+      pre.mermaid { min-width: 980px; }
+      .flow-box svg { min-width: 980px; }
     }
   </style>
 </head>
 <body>
   <main>
-    <section class="frame">
-      <header>
-        <h1>V3 Req04 Tool Governance Review</h1>
-        <p>Canonical Markdown source: <code>docs/architecture/wiki/v3-req04-tool-governance-review.md</code></p>
-      </header>
-      <article>
-        <h1>V3 Req04 Tool Governance Review</h1>
-        <h2>Purpose</h2>
-        <p>This is the small-skeleton review surface for <code>HubReqChatProcess04Governed</code> request-side tool governance.</p>
-        <p>Canonical sources:</p>
-        <ul>
-          <li><code>docs/architecture/v3-mainline-call-map.yml</code></li>
-          <li><code>docs/architecture/v3-resource-operation-map.yml</code></li>
-          <li><code>docs/architecture/v3-architecture-audit-locks.yml</code></li>
-          <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs</code></li>
-          <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</code></li>
-        </ul>
-        <h2>Main Rule</h2>
-        <p>Req04 may govern request-side tool surface and transcript order, but it must not silently delete client/model truth. It may clean only RouteCodex-owned transient artifacts with explicit provenance and completed lifecycle.</p>
-        <h2>Tool Governance Flow</h2>
-        <pre class="mermaid">flowchart TD
-          A[HubReqContinuation03Classified] --&gt; B[Load client tool declarations]
-          B --&gt; C[Load additional_tools items]
-          C --&gt; D[Load historical tool calls and outputs]
-          D --&gt; E[Classify ownership]
-          E --&gt; F{RouteCodex injected artifact with provenance?}
-          F -- no --&gt; G[Preserve client/model/unknown truth]
-          F -- yes --&gt; H{Lifecycle completed?}
-          H -- no --&gt; G
-          H -- yes --&gt; I[Remove only internal transient artifact]
-          G --&gt; J[Inject current internal tools if policy allows]
-          I --&gt; J
-          J --&gt; K[Emit governed tools and transcript]
-          K --&gt; L[HubReqExecution05Planned]</pre>
-        <h2>Resource Matrix</h2>
-        <table>
-        <thead><tr><th>Resource</th><th>Owner</th><th>Rule</th></tr></thead>
-        <tbody>
-        <tr><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>Client tool declarations</td><td>Client protocol data plane</td><td>Preserve by default; do not delete because a provider cannot consume the exact shape.</td></tr>
-        <tr><td>Historical tool calls</td><td>Transcript truth</td><td>Preserve <code>call_id</code>, <code>name</code>, <code>arguments</code>, and type.</td></tr>
-        <tr><td>Historical tool outputs</td><td>Client feedback truth</td><td>Preserve parse errors, unsupported tool errors, schema rejects, and execution failures.</td></tr>
-        <tr><td>RouteCodex injected tools</td><td>RouteCodex control resource</td><td>Must carry provenance; only this class can be removed by lifecycle cleanup.</td></tr>
-        <tr><td>Restored continuation context</td><td>Req04-owned context truth</td><td>After restore, process with the same governance rules.</td></tr>
-        <tr><td>Metadata/debug/stopless state</td><td>Side-channel control resource</td><td>Never enter provider/client normal payload.</td></tr>
-        </tbody>
-        </table>
-        <h2>Allowed Actions</h2>
-        <ul>
-          <li>Normalize tool declaration shape into the governed tool surface.</li>
-          <li>Inject internal tools such as <code>reasoningStop</code> only when policy allows.</li>
-          <li>Preserve malformed client feedback so the model can correct itself.</li>
-          <li>Validate call/output ordering without deleting one side of a client/model pair.</li>
-          <li>Remove only RouteCodex-owned transient artifacts with explicit provenance and completed lifecycle.</li>
-          <li>Emit diagnostics only through side-channel resources.</li>
-        </ul>
-        <h2>Forbidden Actions</h2>
-        <ul>
-          <li>Delete non-RouteCodex tool calls.</li>
-          <li>Delete non-RouteCodex tool outputs.</li>
-          <li>Delete by matching error text such as <code>failed to parse</code>, <code>unsupported</code>, or <code>unknown tool</code>.</li>
-          <li>Delete only one side of a matching call/output pair.</li>
-          <li>Repair provider-specific fields in Req04.</li>
-          <li>Downgrade <code>tool_call</code> / <code>tool_output</code> into plain text.</li>
-          <li>Put stopless/servertool/debug/snapshot metadata into provider body or client normal payload.</li>
-        </ul>
-        <h2>Review Checklist</h2>
-        <table>
-        <thead><tr><th>Check</th><th>Expected</th></tr></thead>
-        <tbody>
-        <tr><td>---</td><td>---</td></tr>
-        <tr><td>C1</td><td>No error-text-based cleanup in Req04.</td></tr>
-        <tr><td>C2</td><td>No cleanup of non-provenance tool calls or outputs.</td></tr>
-        <tr><td>C3</td><td>No one-sided deletion of paired call/output events.</td></tr>
-        <tr><td>C4</td><td><code>additional_tools</code> reach provider-visible tools.</td></tr>
-        <tr><td>C5</td><td><code>reasoningStop</code> is injected at most once.</td></tr>
-        <tr><td>C6</td><td>Internal tools do not overwrite client tools without explicit owner rule.</td></tr>
-        <tr><td>C7</td><td>Stopless guidance augments current turn only; it does not clear system/developer/user context.</td></tr>
-        <tr><td>C8</td><td>Provider-specific malformed fields are fixed in ReqOutbound/provider codec.</td></tr>
-        <tr><td>C9</td><td>Cleanup is locked by red fixtures.</td></tr>
-        <tr><td>C10</td><td>Provider dry-run shows final tool list.</td></tr>
-        <tr><td>C11</td><td>Live replay proves old tool-chain errors no longer recur.</td></tr>
-        <tr><td>C12</td><td>Metadata/debug remains side-channel only.</td></tr>
-        </tbody>
-        </table>
-        <h2>Required Red Fixtures</h2>
-        <ul>
-          <li>Preserve malformed ordinary <code>function_call</code>.</li>
-          <li>Preserve parse-error <code>function_call_output</code>.</li>
-          <li>Preserve unknown-tool feedback.</li>
-          <li>Reject one-sided cleanup of a paired call/output.</li>
-          <li>Allow internal stopless cleanup only by RouteCodex provenance.</li>
-          <li>Preserve <code>additional_tools</code>.</li>
-          <li>Keep provider malformed-field repair in codec/builder, not Req04 deletion.</li>
-          <li>Reject metadata/control leaks into provider/client payload.</li>
-        </ul>
-      </article>
+    <header class="hero">
+      <span class="eyebrow">small skeleton review · client SSE request / response governance split</span>
+      <h1>V3 Req04 / Resp03 Tool Governance Review</h1>
+      <p>
+        请求生命周期从 Client SSE Request Start 开始：server accept → request normalization → tool output pair normalization → continuation owner check → Req04 restore → current-turn merge/governance。响应侧单独是 Resp03 response governance + Resp04 continuation save。
+        每个节点都写清楚“干什么”和“逻辑”，HTML 由架构渲染器生成。
+      </p>
+      <div class="meta-row">
+        <span class="meta-pill">Canonical Markdown source: <code>docs/architecture/wiki/v3-req04-tool-governance-review.md</code></span>
+        <span class="meta-pill">Request edge: <code>Client SSE → Server raw → ReqInbound02 → Tool output pair normalization → Req03 owner check → Req04 restore/govern → ReqExecution05</code></span>
+        <span class="meta-pill">Response edge: <code>Provider raw → ProviderRespCompat02 → RespInbound02 → Resp03 text harvest/tool repair → finish_reason tool_call|stop hooks → Resp04 continuation save endpoint → RespOutbound05 → json2sse</code></span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Main Rule</h2>
+      <ol class="invariant-list">
+    <li>Request lifecycle starts at Client SSE Request Start, then server accept, request normalization, tool output pair normalization, continuation owner check, Req04 restore, current-turn merge/governance, and ReqExecution handoff.</li>
+    <li>Restored context is already canonical; after restore, Req04 merges only current request deltas and current tool surfaces.</li>
+    <li>This small skeleton does not declare a request-side internal artifact removal path because no confirmed requirement exists.</li>
+    <li>Error feedback is preserved: parse-error, unknown-tool, unsupported, schema reject, and execution failure outputs remain model correction input.</li>
+    <li>Response chain runs provider raw → compat → RespInbound normalization before Resp03. Resp03 first harvests text, completes/repairs tool frames, may correct finish_reason, then branches tool_call/stop into different servertool hooks.</li>
+    <li>Provider codec owns malformed provider fields; Req04/Resp03 cannot become provider-specific workaround or error projection layer.</li>
+    <li>Diagnostics stay side-channel only and must not enter provider body or client normal payload.</li>
+  </ol>
+    </section>
+
+    <section class="panel">
+      <h2>Separated skeleton diagrams</h2>
+      <div class="flow-stack">
+        <section>
+          <h3>Request Tool Governance Flow</h3>
+          <div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 112, &quot;nodeSpacing&quot;: 70}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;21px&quot;}} }%%
+flowchart TD
+  title_note[&quot;&lt;b&gt;Request Tool Governance Flow&lt;/b&gt;&lt;br/&gt;&lt;small&gt;starts at client SSE request; normalizes tool outputs; restores continuation at Req04&lt;/small&gt;&quot;]
+  RQ00[&quot;&lt;b&gt;Client SSE Request Start&lt;/b&gt;&lt;br/&gt;客户端发出 SSE 请求；审计计时和 request lifecycle 从这里开始。&lt;br/&gt;&lt;small&gt;Client HTTP/SSE /v1/responses stream=true&lt;/small&gt;&quot;]
+  RQ01[&quot;&lt;b&gt;Server SSE Frame Accepted&lt;/b&gt;&lt;br/&gt;server 接收 HTTP/SSE 请求、绑定 endpoint、request id、port/server id。&lt;br/&gt;&lt;small&gt;V3Server03HttpRequestRaw&lt;/small&gt;&quot;]
+  RQ02[&quot;&lt;b&gt;Request Normalization&lt;/b&gt;&lt;br/&gt;把客户端协议请求非破坏性归一化为 Hub request normal payload。&lt;br/&gt;&lt;small&gt;V3HubReqInbound02Normalized&lt;/small&gt;&quot;]
+  RQ03[&quot;&lt;b&gt;Tool Output Pair Normalization&lt;/b&gt;&lt;br/&gt;归一化客户端提交的工具输出结果，并保持它和对应 tool call 的 call_id/type 关系。&lt;br/&gt;&lt;small&gt;function_call_output / custom_tool_call_output adjacency&lt;/small&gt;&quot;]
+  RQ04[&quot;&lt;b&gt;Continuation Owner Check&lt;/b&gt;&lt;br/&gt;校验 entry protocol、continuationOwner、session/conversation、port/group scope。&lt;br/&gt;&lt;small&gt;V3HubReqContinuation03Classified&lt;/small&gt;&quot;]
+  RQ05[&quot;&lt;b&gt;Continuation Restore at Req04&lt;/b&gt;&lt;br/&gt;在 request Chat Process 入口恢复上一轮 Resp04 保存的 canonical local context。&lt;br/&gt;&lt;small&gt;V3LocalContinuationStore::restore_at_req04&lt;/small&gt;&quot;]
+  RQ06[&quot;&lt;b&gt;Merge Current Tool Surfaces&lt;/b&gt;&lt;br/&gt;合并当前请求携带的 top-level tools 和 Codex additional_tools。&lt;br/&gt;&lt;small&gt;top-level tools + input[].additional_tools.tools&lt;/small&gt;&quot;]
+  RQ07[&quot;&lt;b&gt;Preserve Client Tool Feedback&lt;/b&gt;&lt;br/&gt;把当前客户端工具执行结果并入 governed request truth。&lt;br/&gt;&lt;small&gt;function_call_output / custom output truth&lt;/small&gt;&quot;]
+  RQ08[&quot;&lt;b&gt;Inject Current Internal Tools&lt;/b&gt;&lt;br/&gt;按当前 turn policy 注入 reasoningStop 等内部工具和必要 guidance。&lt;br/&gt;&lt;small&gt;reasoningStop / servertool request hook profile&lt;/small&gt;&quot;]
+  RQ09[&quot;&lt;b&gt;Emit Req04 Governed Request&lt;/b&gt;&lt;br/&gt;把 restored context + 当前请求工具 surface + 当前工具输出结果交给 ReqExecution05。&lt;br/&gt;&lt;small&gt;V3HubReqExecution05Planned&lt;/small&gt;&quot;]
+  title_note --&gt; RQ00
+  RQ00 --&gt;|client SSE request enters server| RQ01
+  RQ01 --&gt;|bind endpoint/request/port facts| RQ02
+  RQ02 --&gt;|non-destructive protocol normalization| RQ03
+  RQ03 --&gt;|normalize tool output pairing and order| RQ04
+  RQ04 --&gt;|owner/scope keys valid| RQ05
+  RQ05 --&gt;|restore canonical context before merge| RQ06
+  RQ06 --&gt;|merge current tool declarations| RQ07
+  RQ07 --&gt;|preserve current client feedback truth| RQ08
+  RQ08 --&gt;|exactly-one current internal tool policy| RQ09
+  classDef boundary fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#172554;
+  classDef restore fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;
+  classDef compat fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  classDef repair fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+  classDef servertool fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
+
+  classDef normalize fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef load fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+  classDef preserve fill:#ecfdf5,stroke:#047857,stroke-width:2px,color:#064e3b;
+  classDef inject fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
+  classDef govern fill:#f0fdfa,stroke:#0f766e,stroke-width:2px,color:#134e4a;
+  classDef classify fill:#fefce8,stroke:#ca8a04,stroke-width:2px,color:#713f12;
+  classDef harvest fill:#faf5ff,stroke:#9333ea,stroke-width:2px,color:#581c87;
+  classDef sidechannel fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a;
+  classDef save fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#164e63;
+  classDef emit fill:#f0fdfa,stroke:#0f766e,stroke-width:2px,color:#134e4a;
+  classDef frame fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a;
+  class RQ00,RQ01,RQ04 boundary;
+  class RQ05 restore;
+  class RQ02,RQ03 normalize;
+  class RQ06 load;
+  class RQ07 preserve;
+  class RQ08 inject;
+  class RQ09 emit;</pre></div>
+        </section>
+        <section>
+          <h3>Response Tool Governance Flow</h3>
+          <div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 112, &quot;nodeSpacing&quot;: 70}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;21px&quot;}} }%%
+flowchart TD
+  title_note[&quot;&lt;b&gt;Response Tool Governance Flow&lt;/b&gt;&lt;br/&gt;&lt;small&gt;Provider raw → compat → normalization → Resp03 governance → Resp04 save endpoint → outbound → json2sse&lt;/small&gt;&quot;]
+  RS00[&quot;&lt;b&gt;Provider Response Raw&lt;/b&gt;&lt;br/&gt;接收 provider 原始响应 JSON/SSE 事件。&lt;br/&gt;&lt;small&gt;V3ProviderRespInbound01Raw&lt;/small&gt;&quot;]
+  RS01[&quot;&lt;b&gt;Provider Response Compat&lt;/b&gt;&lt;br/&gt;先做 provider-specific response compat，把上游差异映射到 Hub 可解析形状。&lt;br/&gt;&lt;small&gt;ProviderRespCompat02ProviderCompat&lt;/small&gt;&quot;]
+  RS02[&quot;&lt;b&gt;RespInbound Normalization&lt;/b&gt;&lt;br/&gt;把 compat 后的 provider 响应归一化成 Hub response semantic。&lt;br/&gt;&lt;small&gt;V3HubRespInbound02Normalized&lt;/small&gt;&quot;]
+  RS03[&quot;&lt;b&gt;Text Harvest First&lt;/b&gt;&lt;br/&gt;进入 Resp03 后先收割文本、reasoning、delta 累积片段。&lt;br/&gt;&lt;small&gt;Resp03 text harvest&lt;/small&gt;&quot;]
+  RS04[&quot;&lt;b&gt;Complete / Repair Tool Frames&lt;/b&gt;&lt;br/&gt;补齐/修正可从响应语义确定的 tool frame，例如 text-harvest 后形成完整 tool call。&lt;br/&gt;&lt;small&gt;Resp03 tool frame completion&lt;/small&gt;&quot;]
+  RS05[&quot;&lt;b&gt;Inspect finish_reason&lt;/b&gt;&lt;br/&gt;根据补齐修复后的 finish_reason 选择响应治理路径。&lt;br/&gt;&lt;small&gt;finish_reason: tool_call | stop | other&lt;/small&gt;&quot;]
+  RS06[&quot;&lt;b&gt;Tool-call Servertool Hook&lt;/b&gt;&lt;br/&gt;在 tool_call 分支先判断模型 tool call 是否属于 servertool/内部工具。&lt;br/&gt;&lt;small&gt;servertool hook under finish_reason=tool_call&lt;/small&gt;&quot;]
+  RS07[&quot;&lt;b&gt;Ordinary Tool Governance&lt;/b&gt;&lt;br/&gt;servertool 未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。&lt;br/&gt;&lt;small&gt;exec_command / apply_patch / client tool governance&lt;/small&gt;&quot;]
+  RS08[&quot;&lt;b&gt;Stop Servertool Hook&lt;/b&gt;&lt;br/&gt;在 stop 分支执行 stop/servertool/stopless 相关 hook。&lt;br/&gt;&lt;small&gt;servertool hook under finish_reason=stop&lt;/small&gt;&quot;]
+  RS09[&quot;&lt;b&gt;Update Runtime Control Side-Channel&lt;/b&gt;&lt;br/&gt;根据 tool_call/stop 分支治理结果更新 runtime control side-channel。&lt;br/&gt;&lt;small&gt;StoplessCenterMetadataControl&lt;/small&gt;&quot;]
+  RS10[&quot;&lt;b&gt;Emit Resp03 Governed Semantic&lt;/b&gt;&lt;br/&gt;合流输出 Resp03 已治理的 response semantic。&lt;br/&gt;&lt;small&gt;V3HubRespChatProcess03Governed::output&lt;/small&gt;&quot;]
+  RS11[&quot;&lt;b&gt;Resp04 Continuation Save&lt;/b&gt;&lt;br/&gt;保存 Resp03 已治理结果形成下一轮 Req04 可恢复的 canonical local context；这是 Chat Process 终点。&lt;br/&gt;&lt;small&gt;V3HubRespContinuation04Committed&lt;/small&gt;&quot;]
+  RS12[&quot;&lt;b&gt;RespOutbound Client Semantic&lt;/b&gt;&lt;br/&gt;Chat Process 结束后，把已治理/已保存的 Hub response semantic 投影为入口协议可见的 client semantic。&lt;br/&gt;&lt;small&gt;V3HubRespOutbound05ClientSemantic&lt;/small&gt;&quot;]
+  RS13[&quot;&lt;b&gt;JSON to SSE Client Frame&lt;/b&gt;&lt;br/&gt;对客户端 SSE 入口，把 outbound client semantic 转成 SSE frame 并发送。&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame / json2sse&lt;/small&gt;&quot;]
+  title_note --&gt; RS00
+  RS00 --&gt;|provider raw enters response chain| RS01
+  RS01 --&gt;|provider-specific compat first| RS02
+  RS02 --&gt;|Hub normalized response enters Resp03| RS03
+  RS03 --&gt;|text/reasoning/delta harvest complete| RS04
+  RS04 --&gt;|finish_reason may be corrected| RS05
+  RS05 --&gt;|finish_reason=tool_call| RS06
+  RS05 --&gt;|finish_reason=stop| RS08
+  RS05 --&gt;|other terminal / pass-through| RS10
+  RS06 --&gt;|servertool intercepted| RS09
+  RS06 --&gt;|not servertool| RS07
+  RS07 --&gt;|ordinary tool governed| RS09
+  RS08 --&gt;|stop hook governed| RS09
+  RS09 --&gt;|side-channel state updated only| RS10
+  RS10 --&gt;|Chat Process governed semantic complete| RS11
+  RS11 --&gt;|Chat Process endpoint: continuation saved| RS12
+  RS12 --&gt;|client SSE entry framing| RS13
+  classDef boundary fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#172554;
+  classDef restore fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;
+  classDef compat fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  classDef repair fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+  classDef servertool fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
+
+  classDef normalize fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef load fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
+  classDef preserve fill:#ecfdf5,stroke:#047857,stroke-width:2px,color:#064e3b;
+  classDef inject fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
+  classDef govern fill:#f0fdfa,stroke:#0f766e,stroke-width:2px,color:#134e4a;
+  classDef classify fill:#fefce8,stroke:#ca8a04,stroke-width:2px,color:#713f12;
+  classDef harvest fill:#faf5ff,stroke:#9333ea,stroke-width:2px,color:#581c87;
+  classDef sidechannel fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a;
+  classDef save fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#164e63;
+  classDef emit fill:#f0fdfa,stroke:#0f766e,stroke-width:2px,color:#134e4a;
+  classDef frame fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a;
+  class RS00 boundary;
+  class RS01 compat;
+  class RS02 normalize;
+  class RS12 emit;
+  class RS13 frame;
+  class RS07,RS10 govern;
+  class RS03 harvest;
+  class RS04 repair;
+  class RS06,RS08 servertool;
+  class RS09 sidechannel;
+  class RS11 save;</pre></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Request node logic</h2>
+      <div class="logic-grid">
+        <article class="logic-card boundary">
+          <div class="node-card-top"><span>RQ00</span><small>Client HTTP/SSE /v1/responses stream=true</small></div>
+          <h3>Client SSE Request Start</h3>
+          <dl>
+            <dt>干什么</dt><dd>客户端发出 SSE 请求；审计计时和 request lifecycle 从这里开始。</dd>
+            <dt>逻辑</dt><dd>客户端请求 intent 是 SSE，server 对这个入口后续必须按 SSE client response 语义返回；这不等同于 provider 一定 SSE。</dd>
+          </dl>
+        </article>
+        <article class="logic-card boundary">
+          <div class="node-card-top"><span>RQ01</span><small>V3Server03HttpRequestRaw</small></div>
+          <h3>Server SSE Frame Accepted</h3>
+          <dl>
+            <dt>干什么</dt><dd>server 接收 HTTP/SSE 请求、绑定 endpoint、request id、port/server id。</dd>
+            <dt>逻辑</dt><dd>server 只捕获原始请求和入口事实；不做工具配对、不修 history、不恢复 continuation。</dd>
+          </dl>
+        </article>
+        <article class="logic-card normalize">
+          <div class="node-card-top"><span>RQ02</span><small>V3HubReqInbound02Normalized</small></div>
+          <h3>Request Normalization</h3>
+          <dl>
+            <dt>干什么</dt><dd>把客户端协议请求非破坏性归一化为 Hub request normal payload。</dd>
+            <dt>逻辑</dt><dd>只做入口协议解析、stream intent、input/messages 形状归一；不得裁剪真实 payload 或把工具输出降级成文本。</dd>
+          </dl>
+        </article>
+        <article class="logic-card normalize">
+          <div class="node-card-top"><span>RQ03</span><small>function_call_output / custom_tool_call_output adjacency</small></div>
+          <h3>Tool Output Pair Normalization</h3>
+          <dl>
+            <dt>干什么</dt><dd>归一化客户端提交的工具输出结果，并保持它和对应 tool call 的 call_id/type 关系。</dd>
+            <dt>逻辑</dt><dd>parse-error、unknown-tool、unsupported feedback 是客户端反馈结果；这里只归一配对关系和顺序，不删除、不补造。</dd>
+          </dl>
+        </article>
+        <article class="logic-card boundary">
+          <div class="node-card-top"><span>RQ04</span><small>V3HubReqContinuation03Classified</small></div>
+          <h3>Continuation Owner Check</h3>
+          <dl>
+            <dt>干什么</dt><dd>校验 entry protocol、continuationOwner、session/conversation、port/group scope。</dd>
+            <dt>逻辑</dt><dd>只分类 owner/scope；不恢复 payload。owner 不匹配、entry 不匹配、scope 不匹配必须 fail-fast。</dd>
+          </dl>
+        </article>
+        <article class="logic-card restore">
+          <div class="node-card-top"><span>RQ05</span><small>V3LocalContinuationStore::restore_at_req04</small></div>
+          <h3>Continuation Restore at Req04</h3>
+          <dl>
+            <dt>干什么</dt><dd>在 request Chat Process 入口恢复上一轮 Resp04 保存的 canonical local context。</dd>
+            <dt>逻辑</dt><dd>恢复的是 Resp04 已保存的 canonical context，不是重新读取一遍历史；恢复后只合并当前请求增量工具输出和工具 surface。</dd>
+          </dl>
+        </article>
+        <article class="logic-card load">
+          <div class="node-card-top"><span>RQ06</span><small>top-level tools + input[].additional_tools.tools</small></div>
+          <h3>Merge Current Tool Surfaces</h3>
+          <dl>
+            <dt>干什么</dt><dd>合并当前请求携带的 top-level tools 和 Codex additional_tools。</dd>
+            <dt>逻辑</dt><dd>保留原 surface；additional_tools 是 Codex capability declaration surface，不能为了内部工具注入而 flatten/drop。</dd>
+          </dl>
+        </article>
+        <article class="logic-card preserve">
+          <div class="node-card-top"><span>RQ07</span><small>function_call_output / custom output truth</small></div>
+          <h3>Preserve Client Tool Feedback</h3>
+          <dl>
+            <dt>干什么</dt><dd>把当前客户端工具执行结果并入 governed request truth。</dd>
+            <dt>逻辑</dt><dd>只根据显式协议字段配对 call_id/type；错误反馈是模型下一轮纠错输入，不能按错误文本删除。</dd>
+          </dl>
+        </article>
+        <article class="logic-card inject">
+          <div class="node-card-top"><span>RQ08</span><small>reasoningStop / servertool request hook profile</small></div>
+          <h3>Inject Current Internal Tools</h3>
+          <dl>
+            <dt>干什么</dt><dd>按当前 turn policy 注入 reasoningStop 等内部工具和必要 guidance。</dd>
+            <dt>逻辑</dt><dd>最多一次；append/augment 当前 turn，不覆盖客户端工具，不清空 system/developer/user context。</dd>
+          </dl>
+        </article>
+        <article class="logic-card emit">
+          <div class="node-card-top"><span>RQ09</span><small>V3HubReqExecution05Planned</small></div>
+          <h3>Emit Req04 Governed Request</h3>
+          <dl>
+            <dt>干什么</dt><dd>把 restored context + 当前请求工具 surface + 当前工具输出结果交给 ReqExecution05。</dd>
+            <dt>逻辑</dt><dd>Req04 到此结束；provider wire 字段错误只能在 ReqOutbound/provider codec 修，不能在 Req04 删除 transcript truth。</dd>
+          </dl>
+        </article>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Response node logic</h2>
+      <div class="logic-grid">
+        <article class="logic-card boundary">
+          <div class="node-card-top"><span>RS00</span><small>V3ProviderRespInbound01Raw</small></div>
+          <h3>Provider Response Raw</h3>
+          <dl>
+            <dt>干什么</dt><dd>接收 provider 原始响应 JSON/SSE 事件。</dd>
+            <dt>逻辑</dt><dd>这里只保留 provider raw truth；不做工具治理、不解释 finish_reason、不投影 client。</dd>
+          </dl>
+        </article>
+        <article class="logic-card compat">
+          <div class="node-card-top"><span>RS01</span><small>ProviderRespCompat02ProviderCompat</small></div>
+          <h3>Provider Response Compat</h3>
+          <dl>
+            <dt>干什么</dt><dd>先做 provider-specific response compat，把上游差异映射到 Hub 可解析形状。</dd>
+            <dt>逻辑</dt><dd>compat 只处理 provider 协议差异；不得承担 servertool、stopless、普通工具治理。</dd>
+          </dl>
+        </article>
+        <article class="logic-card normalize">
+          <div class="node-card-top"><span>RS02</span><small>V3HubRespInbound02Normalized</small></div>
+          <h3>RespInbound Normalization</h3>
+          <dl>
+            <dt>干什么</dt><dd>把 compat 后的 provider 响应归一化成 Hub response semantic。</dd>
+            <dt>逻辑</dt><dd>归一化只建立 Hub response 语义输入；finish_reason 分流和工具治理还不能在这里做。</dd>
+          </dl>
+        </article>
+        <article class="logic-card harvest">
+          <div class="node-card-top"><span>RS03</span><small>Resp03 text harvest</small></div>
+          <h3>Text Harvest First</h3>
+          <dl>
+            <dt>干什么</dt><dd>进入 Resp03 后先收割文本、reasoning、delta 累积片段。</dd>
+            <dt>逻辑</dt><dd>先把文本/增量收齐，避免后续工具补齐和 finish_reason 判定基于不完整响应。</dd>
+          </dl>
+        </article>
+        <article class="logic-card repair">
+          <div class="node-card-top"><span>RS04</span><small>Resp03 tool frame completion</small></div>
+          <h3>Complete / Repair Tool Frames</h3>
+          <dl>
+            <dt>干什么</dt><dd>补齐/修正可从响应语义确定的 tool frame，例如 text-harvest 后形成完整 tool call。</dd>
+            <dt>逻辑</dt><dd>这个阶段可能改写 finish_reason，例如从 stop 修正为 tool_call；这是 finish_reason 分流前的最后治理准备点。</dd>
+          </dl>
+        </article>
+        <article class="logic-card decision">
+          <div class="node-card-top"><span>RS05</span><small>finish_reason: tool_call | stop | other</small></div>
+          <h3>Inspect finish_reason</h3>
+          <dl>
+            <dt>干什么</dt><dd>根据补齐修复后的 finish_reason 选择响应治理路径。</dd>
+            <dt>逻辑</dt><dd>tool_call 和 stop 走不同 servertool hook；两条响应治理分支在 Resp03 内并行建模，但不和请求图混合。</dd>
+          </dl>
+        </article>
+        <article class="logic-card servertool">
+          <div class="node-card-top"><span>RS06</span><small>servertool hook under finish_reason=tool_call</small></div>
+          <h3>Tool-call Servertool Hook</h3>
+          <dl>
+            <dt>干什么</dt><dd>在 tool_call 分支先判断模型 tool call 是否属于 servertool/内部工具。</dd>
+            <dt>逻辑</dt><dd>servertool 拦截优先于普通工具治理；如果被 servertool 接管，就进入 servertool response governance，不再当普通 exec/apply_patch 处理。</dd>
+          </dl>
+        </article>
+        <article class="logic-card govern">
+          <div class="node-card-top"><span>RS07</span><small>exec_command / apply_patch / client tool governance</small></div>
+          <h3>Ordinary Tool Governance</h3>
+          <dl>
+            <dt>干什么</dt><dd>servertool 未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。</dd>
+            <dt>逻辑</dt><dd>这里治理普通工具 identity、arguments、call_id、required_action/client projection 输入；不得删除客户端可见工具真相。</dd>
+          </dl>
+        </article>
+        <article class="logic-card servertool">
+          <div class="node-card-top"><span>RS08</span><small>servertool hook under finish_reason=stop</small></div>
+          <h3>Stop Servertool Hook</h3>
+          <dl>
+            <dt>干什么</dt><dd>在 stop 分支执行 stop/servertool/stopless 相关 hook。</dd>
+            <dt>逻辑</dt><dd>stop 下的 servertool hook 和 tool_call 下的 servertool hook 是不同入口；可治理 natural stop、reasoningStop、guard/pass-through 等响应状态。</dd>
+          </dl>
+        </article>
+        <article class="logic-card sidechannel">
+          <div class="node-card-top"><span>RS09</span><small>StoplessCenterMetadataControl</small></div>
+          <h3>Update Runtime Control Side-Channel</h3>
+          <dl>
+            <dt>干什么</dt><dd>根据 tool_call/stop 分支治理结果更新 runtime control side-channel。</dd>
+            <dt>逻辑</dt><dd>只写 side-channel；不得把 stopless/servertool/debug/control 字段放进 provider body 或 client normal payload。</dd>
+          </dl>
+        </article>
+        <article class="logic-card govern">
+          <div class="node-card-top"><span>RS10</span><small>V3HubRespChatProcess03Governed::output</small></div>
+          <h3>Emit Resp03 Governed Semantic</h3>
+          <dl>
+            <dt>干什么</dt><dd>合流输出 Resp03 已治理的 response semantic。</dd>
+            <dt>逻辑</dt><dd>到 Resp03 出口时响应治理完成；后续节点只能 save / project，不再解释工具语义。</dd>
+          </dl>
+        </article>
+        <article class="logic-card save">
+          <div class="node-card-top"><span>RS11</span><small>V3HubRespContinuation04Committed</small></div>
+          <h3>Resp04 Continuation Save</h3>
+          <dl>
+            <dt>干什么</dt><dd>保存 Resp03 已治理结果形成下一轮 Req04 可恢复的 canonical local context；这是 Chat Process 终点。</dd>
+            <dt>逻辑</dt><dd>Resp04 只 commit/release continuation；禁止重新解释响应、补工具、修 history 或注入 guidance。保存完成后才允许进入 RespOutbound。</dd>
+          </dl>
+        </article>
+        <article class="logic-card emit">
+          <div class="node-card-top"><span>RS12</span><small>V3HubRespOutbound05ClientSemantic</small></div>
+          <h3>RespOutbound Client Semantic</h3>
+          <dl>
+            <dt>干什么</dt><dd>Chat Process 结束后，把已治理/已保存的 Hub response semantic 投影为入口协议可见的 client semantic。</dd>
+            <dt>逻辑</dt><dd>只做 client protocol projection；不保存 continuation，不恢复请求，不吞上游错误。</dd>
+          </dl>
+        </article>
+        <article class="logic-card frame">
+          <div class="node-card-top"><span>RS13</span><small>V3ServerRespOutbound06ClientFrame / json2sse</small></div>
+          <h3>JSON to SSE Client Frame</h3>
+          <dl>
+            <dt>干什么</dt><dd>对客户端 SSE 入口，把 outbound client semantic 转成 SSE frame 并发送。</dd>
+            <dt>逻辑</dt><dd>这是传输 framing：JSON/Semantic → SSE frame；不得再治理工具、保存 continuation 或修响应语义。</dd>
+          </dl>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Audit notes</h2>
+      <div class="note-grid">
+    <article class="note-card">
+      <span class="badge">split</span>
+      <h3>Client SSE request lifecycle split from response governance</h3>
+      <p>请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、continuation owner check、Req04 restore、当前请求 merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 分 tool_call/stop 两条 servertool hook 分支。两边不能混成一张图。</p>
+    </article>
+    <article class="note-card">
+      <span class="badge">request</span>
+      <h3>Error feedback is preserved</h3>
+      <p>普通模型 tool call 和客户端 tool output 是 transcript truth。即使 output 是 parse error、unknown tool、unsupported call、schema reject 或 execution failure，也必须回给模型纠错。</p>
+    </article>
+    <article class="note-card">
+      <span class="badge">request</span>
+      <h3>No request-side artifact-removal path</h3>
+      <p>这张小骨架不声明请求侧内部产物移除路径；没有已确认需求就不画、不实现、不锁这条边。</p>
+    </article>
+    <article class="note-card">
+      <span class="badge">response</span>
+      <h3>Resp03 owns response governance</h3>
+      <p>响应侧 compat 和归一化之后，文本收割、工具补齐修复、finish_reason 分流、servertool hooks、普通工具治理都只能在 Resp03 做；RespOutbound/handler 不能补第二套治理。</p>
+    </article>
+    <article class="note-card">
+      <span class="badge">response</span>
+      <h3>Resp04 continuation save is Chat Process endpoint</h3>
+      <p>Resp04 是 Chat Process 终点：只保存 Resp03 已治理的 continuation truth。之后才进入 RespOutbound，再由 json2sse 做客户端 SSE framing。</p>
+    </article>
+    <article class="note-card">
+      <span class="badge">owner</span>
+      <h3>Provider codec owns malformed provider fields</h3>
+      <p>provider 因字段 shape 报错时，修 ReqOutbound / provider codec，目标是 provider-bound request 不再产生错误字段；不是在 Req04/Resp03 删除正常 transcript。</p>
+    </article>
+    <article class="note-card">
+      <span class="badge">side-channel</span>
+      <h3>Diagnostics stay side-channel only</h3>
+      <p>debug、metadata、stopless runtime control、snapshot 只能走 side-channel carrier；不得混进 provider body 或 client normal payload。</p>
+    </article>
+  </div>
+    </section>
+
+    <section class="panel">
+      <h2>Resource Matrix</h2>
+      <table>
+    <thead><tr><th>Resource</th><th>Owner</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td>Client SSE request</td><td>Server entry / ReqInbound</td><td>Request lifecycle starts here; preserve client stream intent.</td></tr>
+      <tr><td>Client tool output result</td><td>Tool Output Pair Normalization / Req04</td><td>Pair by explicit protocol call_id/type; preserve error feedback.</td></tr>
+      <tr><td>Local continuation context</td><td>Resp04 save / Req04 restore</td><td>Save after Resp03, restore before Req04 current-turn merge; immutable between those points.</td></tr>
+      <tr><td>Client tool declarations</td><td>Request data plane / Req04 reader</td><td>Preserve by default; do not delete because a provider cannot consume the exact shape.</td></tr>
+      <tr><td>additional_tools</td><td>Codex capability declaration surface / Req04 reader</td><td>Preserve original Responses input surface; do not flatten or drop it for convenience.</td></tr>
+      <tr><td>Provider response tool calls</td><td>Resp03 response governance truth</td><td>Classify and harvest before Resp04 commit; do not leave response governance to RespOutbound.</td></tr>
+      <tr><td>Stopless runtime control</td><td>Metadata side-channel / StoplessCenter</td><td>Read at Req04, update at Resp03; never enter provider/client normal payload.</td></tr>
+      <tr><td>Provider malformed fields</td><td>ReqOutbound / provider codec owner</td><td>Fix provider-bound field generation before send; do not delete transcript truth in Req04.</td></tr>
+    </tbody>
+  </table>
+    </section>
+
+    <section class="panel">
+      <h2>Forbidden action focus</h2>
+      <div class="callout">
+        <strong>Do not repair tool continuity by deleting request truth or by moving governance to the wrong side.</strong>
+        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Restored context is canonical and is not read again as raw history. Response-side tool/servertool/stopless governance belongs to Resp03, then Resp04 saves continuation truth as the Chat Process endpoint; outbound and json2sse happen after that.
+        Provider malformed fields are fixed at ReqOutbound/provider codec; debug/control facts stay side-channel only.
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Review Checklist</h2>
+      <table>
+    <thead><tr><th>Check</th><th>Expected</th><th>Risk locked</th></tr></thead>
+    <tbody>
+      <tr><td>C1</td><td>Request diagram starts at Client SSE Request Start.</td><td>Locks client-origin lifecycle.</td></tr>
+      <tr><td>C2</td><td>Request diagram includes server accept and request normalization.</td><td>Locks no Req04-only shortcut.</td></tr>
+      <tr><td>C3</td><td>Request diagram includes tool output pair normalization before continuation restore/governance.</td><td>Locks client tool result handling.</td></tr>
+      <tr><td>C4</td><td>Continuation owner check is separate from continuation restore.</td><td>Locks owner/scope fail-fast before restore.</td></tr>
+      <tr><td>C5</td><td>Restored canonical context is not read as raw history again.</td><td>Locks save/restore lifecycle semantics.</td></tr>
+      <tr><td>C6</td><td>Req04 merges current request deltas after restore.</td><td>Locks current-turn merge point.</td></tr>
+      <tr><td>C7</td><td>No request-side internal artifact-removal path is declared in this small skeleton.</td><td>Locks removal of unproven artifact-removal path.</td></tr>
+      <tr><td>C8</td><td>Error feedback is preserved.</td><td>Locks parse-error / unknown-tool feedback preservation.</td></tr>
+      <tr><td>C9</td><td>additional_tools reach provider-visible tools.</td><td>Locks Codex capability declaration surface.</td></tr>
+      <tr><td>C10</td><td>Resp03 owns response-side tool/servertool/stopless governance.</td><td>Locks no handler/RespOutbound duplicate response governance.</td></tr>
+      <tr><td>C11</td><td>Resp04 saves/commits continuation truth as the Chat Process endpoint; RespOutbound and JSON→SSE happen after it.</td><td>Locks Chat Process endpoint before outbound/json2sse.</td></tr>
+      <tr><td>C12</td><td>Provider-specific malformed fields are fixed in ReqOutbound/provider codec.</td><td>Locks provider codec owner.</td></tr>
+      <tr><td>C13</td><td>Metadata/debug remains side-channel only.</td><td>Locks normal payload purity.</td></tr>
+    </tbody>
+  </table>
+    </section>
+
+    <section class="panel">
+      <h2>Required Red Fixtures</h2>
+      <table>
+    <thead><tr><th>Fixture</th><th>What it proves</th></tr></thead>
+    <tbody>
+      <tr><td>Client SSE request lifecycle begins before Req04</td><td>Request audit cannot omit server accept and ReqInbound normalization.</td></tr>
+      <tr><td>Tool output pair normalization preserves parse-error function_call_output</td><td>Client tool result feedback remains model correction input.</td></tr>
+      <tr><td>Continuation owner mismatch rejects before restore</td><td>Owner/scope check is not hidden inside restore.</td></tr>
+      <tr><td>Restore canonical context then merge current deltas</td><td>Req04 does not read restored context as raw history again.</td></tr>
+      <tr><td>Preserve malformed ordinary function_call</td><td>Ordinary malformed call stays transcript truth; provider codec emits legal provider shape.</td></tr>
+      <tr><td>Preserve unknown-tool feedback</td><td>Client rejection stays feedback instead of being silently deleted.</td></tr>
+      <tr><td>Reject one-sided deletion of a paired call/output</td><td>Call/output adjacency cannot be broken.</td></tr>
+      <tr><td>Preserve additional_tools</td><td>Codex capability declarations remain visible.</td></tr>
+      <tr><td>Classify response tool/servertool actions only in Resp03</td><td>Response governance cannot move to RespInbound, RespOutbound, handler, or SSE.</td></tr>
+      <tr><td>Reject Resp04 semantic repair</td><td>Resp04 cannot reinterpret tools or fix history after Resp03.</td></tr>
+      <tr><td>Keep provider malformed-field repair in codec/builder</td><td>Req04 cannot become provider-specific workaround layer.</td></tr>
+      <tr><td>Reject metadata/control leaks into provider/client payload</td><td>Side-channel remains isolated.</td></tr>
+    </tbody>
+  </table>
+    </section>
+
+    <section class="panel">
+      <h2>Canonical sources</h2>
+      <ul class="source-list">
+    <li><code>docs/architecture/v3-mainline-call-map.yml</code></li>
+    <li><code>docs/architecture/v3-resource-operation-map.yml</code></li>
+    <li><code>docs/architecture/v3-architecture-audit-locks.yml</code></li>
+    <li><code>docs/architecture/wiki/v3-mainline-skeleton-sop.md</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</code></li>
+  </ul>
     </section>
   </main>
 </body>
