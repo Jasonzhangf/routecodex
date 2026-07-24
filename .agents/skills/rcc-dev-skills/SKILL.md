@@ -62,6 +62,7 @@ description: RouteCodex 调试与架构路由入口
 - 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
 - 数据/控制分流先验：如果数据字段能从原始请求/响应负载直接拿到，就不要从 `MetadataCenter`、上下文 carrier、日志投影、matchedPort/localPort 之类中间语义里再取一遍；`MetadataCenter` 只用于控制语义，不能当数据面第二真源。
 - Provider 错误调试高优先级：先修请求侧 provider-bound 字段生成链，目标是让原始请求不再生成/发出会触发上游或 codec 错误的字段；禁止把焦点放到错误投影、错误显示、事后包裹、静默清理、无契约依据的空对象兼容或绕过错误。闭环证据必须是同一真实样本重新生成的 provider request / live replay 不再发生原错误。
+- Provider 返回 HTTP 200 但 SSE/JSON 内容是诊断文本、零 usage 或 provider 特征错误时，归类为 provider semantic error：先在 `config.v3.toml` 的 `error.provider_error_action_policy` / `error.client_error_projection_policy` 配置并经 V3 config manifest 编译，再让 Resp03 前的 runtime 消费 manifest 进入 provider failure/reselect；禁止把 provider-specific 短语硬编码到 SSE crate、server handler、RespOutbound 或 Error06 显示层。
 - SSE 错误调试高优先级：先分 transport / provider body / provider event codec / error policy owner；`malformed SSE` 文案不是 owner 证据。SSE crate/server handler 只能 opaque framing/backpressure/closeout，禁止补 provider payload、tool、reasoning、continuation、retry 语义。
 - 请求协议字段先验：HTTP headers、body 标准字段、`metadata`、`client_metadata`、`x-*` / `x-codex-*` 都是请求协议数据面，默认透传；不要搬进 `MetadataCenter`，不要因为名字含 metadata 就判成 RouteCodex 控制信号。`MetadataCenter` 只写 RouteCodex 内部控制信号。
 - 反模式：同一字段多次派生、多处 fallback、先从 payload 再从 metadata 回读、用上下文零散字段拼接原始数据。

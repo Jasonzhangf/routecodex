@@ -156,6 +156,8 @@ fn published_manifest() -> V3Config05ManifestPublished {
         },
         error: V3ErrorManifest {
             policies: BTreeMap::new(),
+            provider_error_action_policy: Vec::new(),
+            client_error_projection_policy: Vec::new(),
         },
     }
 }

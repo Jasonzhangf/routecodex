@@ -124,6 +124,7 @@ features:
       - v3.config.published_manifest
       - v3.config.hub_pipeline_declarations
       - v3.config.route_pool_match_declarations
+      - v3.provider_error.policy_manifest
       - v3.hub.runtime_resource_declarations
       - v3.secret.provider_auth_handle
     mainline_bindings:
@@ -142,6 +143,7 @@ features:
       - validate_v3_config_03_schema_from_v3_config_02
       - build_v3_config_04_resource_registry_from_v3_config_03
       - publish_v3_config_05_manifest_from_v3_config_04
+      - compile_error
       - default_hub_v1_authoring
       - default_server_execution
     allowed_paths:
@@ -270,6 +272,7 @@ features:
       - v3.error.exhaustion_decision
       - v3.error.execution_decision
       - v3.error.client_projection
+      - v3.provider_error.policy_manifest
       - v3.provider.health_state
       - v3.provider.availability_projection
     mainline_bindings:

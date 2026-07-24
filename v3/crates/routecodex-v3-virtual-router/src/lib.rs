@@ -445,6 +445,8 @@ mod tests {
             },
             error: V3ErrorManifest {
                 policies: BTreeMap::new(),
+                provider_error_action_policy: Vec::new(),
+                client_error_projection_policy: Vec::new(),
             },
             route_groups: BTreeMap::from([(
                 "g".into(),

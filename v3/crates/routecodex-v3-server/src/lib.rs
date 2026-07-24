@@ -6052,6 +6052,8 @@ mod tests {
             },
             error: routecodex_v3_config::V3ErrorManifest {
                 policies: BTreeMap::new(),
+                provider_error_action_policy: Vec::new(),
+                client_error_projection_policy: Vec::new(),
             },
         });
         let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();

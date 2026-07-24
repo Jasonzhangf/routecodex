@@ -84,6 +84,18 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider_error.policy_manifest
+    resource_kind: provider_error_policy_manifest
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3ErrorManifest
+    identity: [policyId, providerScope, matcher, actionClass, reasonCode]
+    allowed_writers: [compile_error, V3Config05ManifestPublished]
+    allowed_readers: [routecodex-v3-runtime, V3ProviderRespInbound01Raw, V3Error01SourceRaised, V3Error06ClientProjected]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.models.capability_catalog
     resource_kind: client_catalog_projection
     lifecycle: v3.models.capability_catalog

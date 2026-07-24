@@ -255,6 +255,10 @@ pub struct V3DebugAuthoringConfig {
 pub struct V3ErrorAuthoringConfig {
     #[serde(default)]
     pub policies: BTreeMap<String, V3ErrorPolicyAuthoringConfig>,
+    #[serde(default)]
+    pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyAuthoringConfig>,
+    #[serde(default)]
+    pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,6 +269,149 @@ pub struct V3ErrorPolicyAuthoringConfig {
     pub cooldown_ms: Option<u64>,
     #[serde(default)]
     pub max_attempts: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderErrorActionPolicyAuthoringConfig {
+    pub policy_id: String,
+    #[serde(default)]
+    pub scope: V3ProviderErrorPolicyScopeAuthoringConfig,
+    #[serde(rename = "match")]
+    pub matcher: V3ProviderErrorMatcherAuthoringConfig,
+    pub action: V3ProviderErrorActionAuthoringConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderErrorPolicyScopeAuthoringConfig {
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub provider_type: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub routing_group: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderErrorMatcherAuthoringConfig {
+    #[serde(default)]
+    pub http_status: Option<u16>,
+    #[serde(default)]
+    pub provider_code: Option<String>,
+    #[serde(default)]
+    pub provider_type_code: Option<String>,
+    #[serde(default)]
+    pub terminal_status: Option<String>,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+    #[serde(default)]
+    pub usage_total_tokens: Option<u64>,
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub choices_count: Option<usize>,
+    #[serde(default)]
+    pub has_valid_model_output: Option<bool>,
+    #[serde(default)]
+    pub content_contains_any: Vec<String>,
+    #[serde(default)]
+    pub sse: Option<V3ProviderErrorSseMatcherAuthoringConfig>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderErrorSseMatcherAuthoringConfig {
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+    #[serde(default)]
+    pub usage_total_tokens: Option<u64>,
+    #[serde(default)]
+    pub content_contains_any: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderErrorActionAuthoringConfig {
+    pub kind: V3ProviderErrorActionClass,
+    pub reason_code: String,
+    pub retry_mode: V3ProviderErrorRetryMode,
+    #[serde(default)]
+    pub cooldown_ms: Option<u64>,
+    #[serde(default)]
+    pub disable_scope: V3ProviderErrorActionScope,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ProviderErrorActionScope {
+    ProviderInstance,
+    AuthKey,
+    #[default]
+    ProviderModel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ProviderErrorActionClass {
+    RecoverableNoPenalty,
+    DisableUntilRestart,
+    PeriodicRecovery,
+}
+
+impl V3ProviderErrorActionClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RecoverableNoPenalty => "recoverable_no_penalty",
+            Self::DisableUntilRestart => "disable_until_restart",
+            Self::PeriodicRecovery => "periodic_recovery",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ProviderErrorRetryMode {
+    None,
+    RetrySame,
+    ReselectBeforeClientProjection,
+    ProjectTerminal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ClientErrorProjectionPolicyAuthoringConfig {
+    pub policy_id: String,
+    #[serde(rename = "match")]
+    pub matcher: V3ClientErrorProjectionMatcherAuthoringConfig,
+    pub projection: V3ClientErrorProjectionAuthoringConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ClientErrorProjectionMatcherAuthoringConfig {
+    #[serde(default)]
+    pub reason_code: Option<String>,
+    #[serde(default)]
+    pub action_class: Option<V3ProviderErrorActionClass>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ClientErrorProjectionAuthoringConfig {
+    pub public_code: String,
+    pub message_mode: V3ClientErrorProjectionMessageMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ClientErrorProjectionMessageMode {
+    CodeOnly,
 }
 
 #[derive(Debug, Clone)]
@@ -748,6 +895,8 @@ pub struct V3DebugManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ErrorManifest {
     pub policies: BTreeMap<String, V3ErrorPolicyManifest>,
+    pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyManifest>,
+    pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -755,6 +904,65 @@ pub struct V3ErrorPolicyManifest {
     pub action: String,
     pub cooldown_ms: Option<u64>,
     pub max_attempts: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ProviderErrorActionPolicyManifest {
+    pub policy_id: String,
+    pub scope: V3ProviderErrorPolicyScopeManifest,
+    pub matcher: V3ProviderErrorMatcherManifest,
+    pub action: V3ProviderErrorActionManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct V3ProviderErrorPolicyScopeManifest {
+    pub provider_id: Option<String>,
+    pub provider_type: Option<String>,
+    pub model_id: Option<String>,
+    pub routing_group: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct V3ProviderErrorMatcherManifest {
+    pub http_status: Option<u16>,
+    pub provider_code: Option<String>,
+    pub provider_type_code: Option<String>,
+    pub terminal_status: Option<String>,
+    pub finish_reason: Option<String>,
+    pub usage_total_tokens: Option<u64>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub choices_count: Option<usize>,
+    pub has_valid_model_output: Option<bool>,
+    pub content_contains_any: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ProviderErrorActionManifest {
+    pub kind: V3ProviderErrorActionClass,
+    pub reason_code: String,
+    pub retry_mode: V3ProviderErrorRetryMode,
+    pub cooldown_ms: Option<u64>,
+    pub disable_scope: V3ProviderErrorActionScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ClientErrorProjectionPolicyManifest {
+    pub policy_id: String,
+    pub matcher: V3ClientErrorProjectionMatcherManifest,
+    pub projection: V3ClientErrorProjectionManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct V3ClientErrorProjectionMatcherManifest {
+    pub reason_code: Option<String>,
+    pub action_class: Option<V3ProviderErrorActionClass>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ClientErrorProjectionManifest {
+    pub public_code: String,
+    pub message_mode: V3ClientErrorProjectionMessageMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

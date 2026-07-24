@@ -26,6 +26,38 @@ action = "target_local_reselect"
 cooldown_ms = 1000
 max_attempts = 3
 
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_200_diagnostic_zero_usage"
+
+[error.provider_error_action_policy.scope]
+provider_id = "glmrelay_openai"
+provider_type = "openai_chat"
+
+[error.provider_error_action_policy.match]
+http_status = 200
+
+[error.provider_error_action_policy.match.sse]
+finish_reason = "stop"
+usage_total_tokens = 0
+content_contains_any = ["provider diagnostic text"]
+
+[error.provider_error_action_policy.action]
+kind = "periodic_recovery"
+reason_code = "provider_diagnostic_zero_usage"
+retry_mode = "reselect_before_client_projection"
+cooldown_ms = 300000
+disable_scope = "provider_model"
+
+[[error.client_error_projection_policy]]
+policy_id = "provider_busy_code_only"
+
+[error.client_error_projection_policy.match]
+reason_code = "provider_diagnostic_zero_usage"
+
+[error.client_error_projection_policy.projection]
+public_code = "E_PROVIDER_TEMPORARILY_UNAVAILABLE"
+message_mode = "code_only"
+
 [servers.primary]
 bind = "127.0.0.1"
 port = 4444
@@ -154,6 +186,32 @@ fn parses_full_config_v3_without_interpreting_targets() {
     assert_eq!(
         manifest.error.policies["provider_unavailable"].max_attempts,
         Some(3)
+    );
+    let provider_error_policy = &manifest.error.provider_error_action_policy[0];
+    assert_eq!(
+        provider_error_policy.policy_id,
+        "glmrelay_openai_200_diagnostic_zero_usage"
+    );
+    assert_eq!(
+        provider_error_policy.scope.provider_id.as_deref(),
+        Some("glmrelay_openai")
+    );
+    assert_eq!(provider_error_policy.matcher.http_status, Some(200));
+    assert_eq!(
+        provider_error_policy.matcher.finish_reason.as_deref(),
+        Some("stop")
+    );
+    assert_eq!(provider_error_policy.matcher.usage_total_tokens, Some(0));
+    assert_eq!(
+        provider_error_policy.action.kind.as_str(),
+        "periodic_recovery"
+    );
+    assert_eq!(provider_error_policy.action.cooldown_ms, Some(300000));
+    assert_eq!(
+        manifest.error.client_error_projection_policy[0]
+            .projection
+            .public_code,
+        "E_PROVIDER_TEMPORARILY_UNAVAILABLE"
     );
 
     let route_target = &manifest.route_groups["primary"].pools["default"].targets[0];
@@ -308,6 +366,39 @@ fn rejects_unknown_fields_and_secret_literals() {
     let secret = FULL_CONFIG.replace("env = \"CC_API_KEY\"", "env = \"sk-secret-value\"");
     let authoring = parse_v3_config_02_authoring(&secret).unwrap();
     assert!(compile_v3_config_05_manifest(authoring).is_err());
+}
+
+#[test]
+fn validates_provider_error_policy_manifest_rules() {
+    let missing_scope = FULL_CONFIG.replace(
+        "provider_id = \"glmrelay_openai\"\nprovider_type = \"openai_chat\"\n",
+        "",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_scope).unwrap())
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("text matcher requires provider-specific scope"),
+        "{error}"
+    );
+
+    let missing_cooldown = FULL_CONFIG.replace("cooldown_ms = 300000\n", "");
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_cooldown).unwrap())
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("periodic_recovery requires cooldown_ms"),
+        "{error}"
+    );
+
+    let secret_text = FULL_CONFIG.replace("provider diagnostic text", "sk-secret-value");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&secret_text).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("content matcher"), "{error}");
 }
 
 #[test]

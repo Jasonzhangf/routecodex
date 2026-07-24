@@ -57,7 +57,7 @@ chains:
         owner_feature_id: v3.config_interpreter_contract
         resource_flow:
           consumes: [v3.config.schema_validated]
-          produces: [v3.config.resource_registry, v3.config.hub_pipeline_declarations, v3.hub.runtime_resource_declarations, v3.config.route_pool_match_declarations]
+          produces: [v3.config.resource_registry, v3.config.hub_pipeline_declarations, v3.hub.runtime_resource_declarations, v3.config.route_pool_match_declarations, v3.provider_error.policy_manifest]
           side_channel_reads: []
           side_channel_writes: []
         status: anchored
@@ -71,7 +71,7 @@ chains:
         owner_feature_id: v3.config_interpreter_contract
         resource_flow:
           consumes: [v3.config.resource_registry]
-          produces: [v3.config.published_manifest, v3.secret.provider_auth_handle]
+          produces: [v3.config.published_manifest, v3.secret.provider_auth_handle, v3.provider_error.policy_manifest]
           side_channel_reads: []
           side_channel_writes: [v3.secret.provider_auth_handle]
         status: anchored

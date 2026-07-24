@@ -36,7 +36,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
+    fingerprint: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d
+    last_manual_authorization_id: auth-20260724-provider-error-policy-manifest
   - item_id: chain:v3.config.compact_hub_v1_defaults
     chain_id: v3.config.compact_hub_v1_defaults
     status: audited_locked
@@ -118,3 +119,10 @@ manual_authorizations:
     reason: "Active goal requires splitting the old merged response stopless hook into tool_call and stop servertool hooks while preserving the audited lifecycle."
     fingerprint_before: sha256:b586e01c3670a85fd25df2379802d01a766a402ce49b6349b912c641759d0f6f
     fingerprint_after: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f
+  - authorization_id: auth-20260724-provider-error-policy-manifest
+    item_id: chain:v3.config.compile
+    approved_by: Jason
+    approved_at: '2026-07-24T15:16:00+08:00'
+    reason: "Jason asked to inspect production/current/existing V3 config after locking the unified provider error contract and fill missing config support; adding provider error policy manifest resource changes the locked config.compile resource flow only."
+    fingerprint_before: sha256:7a2f68829c5b4f2a6eb33ac605f1f27b79cdf0e1c0e54ea27f26662fa859a193
+    fingerprint_after: sha256:1390aa1d0f1b67e239443b07db62061f0f7f1c64e15c8cdc9ceb8684e80e282d

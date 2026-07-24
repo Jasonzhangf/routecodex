@@ -9,7 +9,10 @@ use crate::provider_failure_runtime_policy::{
     V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
 use futures_util::StreamExt;
-use routecodex_v3_config::V3Config05ManifestPublished;
+use routecodex_v3_config::{
+    V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest,
+    V3ProviderErrorMatcherManifest,
+};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorActionScope, V3ErrorHandlingCenter,
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
@@ -1603,12 +1606,52 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     } else {
                         provider_wire_protocol
                     };
+                if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
+                    if let Some(semantic_error) = provider_response_semantic_error_from_manifest(
+                        Some(manifest),
+                        Some(&selected_target_provider_id),
+                        &provider_value,
+                    ) {
+                        let failure = provider_semantic_failure(
+                            provider_status,
+                            semantic_error,
+                            &selected_target_provider_id,
+                            Some(selected_observability),
+                        );
+                        let terminal_failure = try_before_resp03!(
+                            handle_v3_responses_relay_provider_failure(
+                                &failure_context,
+                                selected,
+                                failure,
+                                &mut V3ResponsesRelayProviderRetryState {
+                                    failed_candidates: &mut failed_candidates,
+                                    same_candidate_retries: &mut same_candidate_retries,
+                                    retry_selected: &mut retry_selected,
+                                    pending_provider_failure: &mut pending_provider_failure,
+                                    provider_failure_events: &mut provider_failure_events,
+                                    trace: &mut trace,
+                                },
+                            )
+                            .await
+                        );
+                        if let Some(failure) = terminal_failure {
+                            clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                manifest,
+                                stopless_control.as_ref(),
+                                stopless_state.as_ref(),
+                            )?;
+                            return Ok(provider_failure_output(failure, trace, 0));
+                        }
+                        continue;
+                    }
+                }
                 let (action, finalized_provider_value, response_stopless_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             provider_value: &hook_provider_value,
                             provider_semantic_body: &provider_semantic_body,
                             manifest,
+                            provider_id: Some(&selected_target_provider_id),
                             provider_protocol: hook_provider_protocol,
                             provider_response_transport_intent: V3HubTransportIntent::Json,
                             compatibility_profile: selected
@@ -1767,12 +1810,52 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     } else {
                         provider_wire_protocol
                     };
+                if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
+                    if let Some(semantic_error) = provider_response_semantic_error_from_manifest(
+                        Some(manifest),
+                        Some(&selected_target_provider_id),
+                        &provider_value,
+                    ) {
+                        let failure = provider_semantic_failure(
+                            provider_status,
+                            semantic_error,
+                            &selected_target_provider_id,
+                            Some(selected_observability),
+                        );
+                        let terminal_failure = try_before_resp03!(
+                            handle_v3_responses_relay_provider_failure(
+                                &failure_context,
+                                selected,
+                                failure,
+                                &mut V3ResponsesRelayProviderRetryState {
+                                    failed_candidates: &mut failed_candidates,
+                                    same_candidate_retries: &mut same_candidate_retries,
+                                    retry_selected: &mut retry_selected,
+                                    pending_provider_failure: &mut pending_provider_failure,
+                                    provider_failure_events: &mut provider_failure_events,
+                                    trace: &mut trace,
+                                },
+                            )
+                            .await
+                        );
+                        if let Some(failure) = terminal_failure {
+                            clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                manifest,
+                                stopless_control.as_ref(),
+                                stopless_state.as_ref(),
+                            )?;
+                            return Ok(provider_failure_output(failure, trace, 0));
+                        }
+                        continue;
+                    }
+                }
                 let (action, finalized_provider_value, response_stopless_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             provider_value: &provider_value,
                             provider_semantic_body: &provider_semantic_body,
                             manifest,
+                            provider_id: Some(&selected_target_provider_id),
                             provider_protocol: hook_provider_protocol,
                             provider_response_transport_intent: V3HubTransportIntent::Sse,
                             compatibility_profile: selected
@@ -2378,6 +2461,7 @@ struct V3ResponsesRelayJsonResponseHookInput<'a> {
     provider_value: &'a Value,
     provider_semantic_body: &'a Value,
     manifest: &'a V3Config05ManifestPublished,
+    provider_id: Option<&'a str>,
     provider_protocol: V3HubProviderWireProtocol,
     provider_response_transport_intent: V3HubTransportIntent,
     compatibility_profile: Option<&'a str>,
@@ -2415,10 +2499,13 @@ fn run_json_response_hooks(
     let mut resp02 = hooks.normalize(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
-        let converted = build_v3_responses_provider_response_from_openai_chat_payload(
-            resp02.provider_payload(),
-            input.provider_semantic_body,
-        )?;
+        let converted =
+            build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+                resp02.provider_payload(),
+                input.provider_semantic_body,
+                Some(input.manifest),
+                input.provider_id,
+            )?;
         *resp02.provider_payload_mut() = Arc::new(converted);
         resp02.provider_raw_mut().provider_protocol = V3HubProviderWireProtocol::Responses;
     }
@@ -2593,11 +2680,33 @@ fn clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
     clear_v3_responses_relay_stopless_control_state(manifest, stopless_control)
 }
 
+#[cfg(test)]
 fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
     provider_semantic_body: &Value,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+        payload,
+        provider_semantic_body,
+        None,
+        None,
+    )
+}
+
+fn build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+    payload: &Value,
+    provider_semantic_body: &Value,
+    manifest: Option<&V3Config05ManifestPublished>,
+    provider_id: Option<&str>,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
     if let Some(message) = openai_chat_provider_diagnostic_message(payload) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            message,
+        ));
+    }
+    if let Some(message) =
+        provider_response_semantic_error_message_from_manifest(manifest, provider_id, payload)
+    {
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             message,
         ));
@@ -2698,7 +2807,6 @@ fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option<String> {
             && usage.output_tokens == Some(0)
             && usage.total_tokens == Some(0)
     });
-    let usage_missing_or_zero = usage.is_none() || usage_zero;
     payload
         .get("choices")
         .and_then(Value::as_array)
@@ -2722,17 +2830,198 @@ fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option<String> {
                             .to_string(),
                     );
                 }
-                if usage_missing_or_zero
-                    && content.contains("mac超负荷运载")
-                    && content.contains("挂了")
-                {
-                    return Some(format!(
-                        "OpenAI Chat provider returned upstream overload diagnostic instead of model output: {content}"
-                    ));
-                }
                 None
             })
         })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3ProviderSemanticErrorProjection {
+    code: String,
+    message: String,
+}
+
+fn provider_response_semantic_error_message_from_manifest(
+    manifest: Option<&V3Config05ManifestPublished>,
+    provider_id: Option<&str>,
+    payload: &Value,
+) -> Option<String> {
+    provider_response_semantic_error_from_manifest(manifest, provider_id, payload)
+        .map(|error| error.message)
+}
+
+fn provider_response_semantic_error_from_manifest(
+    manifest: Option<&V3Config05ManifestPublished>,
+    provider_id: Option<&str>,
+    payload: &Value,
+) -> Option<V3ProviderSemanticErrorProjection> {
+    let manifest = manifest?;
+    let provider_id = provider_id?;
+    let provider = manifest.providers.get(provider_id);
+    let provider_type = provider.map(|provider| provider.provider_type.as_str());
+    let model = payload.get("model").and_then(Value::as_str);
+    manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| {
+            provider_error_action_policy_matches(policy, provider_id, provider_type, model, payload)
+        })
+        .map(|policy| {
+            let public_message = manifest
+                .error
+                .client_error_projection_policy
+                .iter()
+                .find(|projection| {
+                    projection
+                        .matcher
+                        .reason_code
+                        .as_deref()
+                        .is_none_or(|reason| reason == policy.action.reason_code)
+                        && projection
+                            .matcher
+                            .action_class
+                            .is_none_or(|action| action == policy.action.kind)
+                })
+                .map(|projection| projection.projection.public_code.clone())
+                .unwrap_or_else(|| policy.action.reason_code.clone());
+            V3ProviderSemanticErrorProjection {
+                code: policy.action.reason_code.clone(),
+                message: format!(
+                    "Provider response semantic error matched policy {} reason {} action {} display {}",
+                    policy.policy_id,
+                    policy.action.reason_code,
+                    policy.action.kind.as_str(),
+                    public_message
+                ),
+            }
+        })
+}
+
+fn provider_error_action_policy_matches(
+    policy: &V3ProviderErrorActionPolicyManifest,
+    provider_id: &str,
+    provider_type: Option<&str>,
+    model: Option<&str>,
+    payload: &Value,
+) -> bool {
+    if policy
+        .scope
+        .provider_id
+        .as_deref()
+        .is_some_and(|expected| expected != provider_id)
+    {
+        return false;
+    }
+    if policy
+        .scope
+        .provider_type
+        .as_deref()
+        .is_some_and(|expected| Some(expected) != provider_type)
+    {
+        return false;
+    }
+    if policy
+        .scope
+        .model_id
+        .as_deref()
+        .is_some_and(|expected| Some(expected) != model)
+    {
+        return false;
+    }
+    provider_error_matcher_matches(&policy.matcher, payload)
+}
+
+fn provider_error_matcher_matches(
+    matcher: &V3ProviderErrorMatcherManifest,
+    payload: &Value,
+) -> bool {
+    if matcher.http_status.is_some_and(|status| status != 200) {
+        return false;
+    }
+    let usage = extract_v3_runtime_usage_summary(payload);
+    if matcher.usage_total_tokens.is_some_and(|expected| {
+        usage.as_ref().and_then(|usage| usage.total_tokens) != Some(expected)
+    }) {
+        return false;
+    }
+    if matcher.input_tokens.is_some_and(|expected| {
+        usage.as_ref().and_then(|usage| usage.input_tokens) != Some(expected)
+    }) {
+        return false;
+    }
+    if matcher.output_tokens.is_some_and(|expected| {
+        usage.as_ref().and_then(|usage| usage.output_tokens) != Some(expected)
+    }) {
+        return false;
+    }
+    let choices = payload.get("choices").and_then(Value::as_array);
+    if matcher
+        .choices_count
+        .is_some_and(|expected| choices.map_or(0, Vec::len) != expected)
+    {
+        return false;
+    }
+    if matcher
+        .finish_reason
+        .as_deref()
+        .is_some_and(|expected| !payload_choices_have_finish_reason(payload, expected))
+    {
+        return false;
+    }
+    if matcher
+        .has_valid_model_output
+        .is_some_and(|expected| provider_payload_has_valid_model_output(payload) != expected)
+    {
+        return false;
+    }
+    if !matcher.content_contains_any.is_empty()
+        && !provider_payload_content_contains_any(payload, &matcher.content_contains_any)
+    {
+        return false;
+    }
+    true
+}
+
+fn payload_choices_have_finish_reason(payload: &Value, expected: &str) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| choice.get("finish_reason").and_then(Value::as_str) == Some(expected))
+}
+
+fn provider_payload_has_valid_model_output(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            let Some(message) = choice.get("message").and_then(Value::as_object) else {
+                return false;
+            };
+            message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some_and(|calls| !calls.is_empty())
+                || message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| !content.trim().is_empty())
+        })
+}
+
+fn provider_payload_content_contains_any(payload: &Value, phrases: &[String]) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|choice| choice.get("message").and_then(Value::as_object))
+        .filter_map(|message| message.get("content").and_then(Value::as_str))
+        .any(|content| phrases.iter().any(|phrase| content.contains(phrase)))
 }
 
 fn build_v3_responses_reasoning_item_from_openai_chat_message(
@@ -4777,6 +5066,26 @@ fn provider_runtime_failure(
     }
 }
 
+fn provider_semantic_failure(
+    status: u16,
+    error: V3ProviderSemanticErrorProjection,
+    provider_id: &str,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayProviderFailure {
+    V3ResponsesRelayProviderFailure {
+        status,
+        client_response: json!({
+            "error": {
+                "type": "provider_semantic_error",
+                "code": error.code,
+                "message": error.message,
+            }
+        }),
+        provider_id: provider_id.to_string(),
+        observability,
+    }
+}
+
 fn provider_response_stream_failure(
     error: V3ResponsesRelayRuntimeError,
     request_id: &str,
@@ -4917,6 +5226,55 @@ mod tests {
     use futures_util::{stream, StreamExt};
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
+
+    fn glmrelay_error_policy_manifest() -> V3Config05ManifestPublished {
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(
+                r#"
+version = 3
+
+[[error.provider_error_action_policy]]
+policy_id = "glmrelay_openai_200_diagnostic_zero_usage"
+[error.provider_error_action_policy.scope]
+provider_id = "glmrelay_openai"
+provider_type = "openai_chat"
+[error.provider_error_action_policy.match]
+http_status = 200
+[error.provider_error_action_policy.match.sse]
+finish_reason = "stop"
+usage_total_tokens = 0
+content_contains_any = ["mac超负荷运载，应该是挂了"]
+[error.provider_error_action_policy.action]
+kind = "periodic_recovery"
+reason_code = "provider_diagnostic_zero_usage"
+retry_mode = "reselect_before_client_projection"
+cooldown_ms = 300000
+disable_scope = "provider_model"
+
+[servers.s]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "g"
+endpoints = ["responses"]
+
+[providers.glmrelay_openai]
+type = "openai_chat"
+base_url = "https://glm-relayapi.top/v1"
+default_model = "glm-5.2"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "GLM_TEST_KEY" }] }
+
+[providers.glmrelay_openai.models."glm-5.2"]
+capabilities = ["text", "reasoning", "tools"]
+
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "glmrelay_openai", model = "glm-5.2", key = "key1", priority = 1 }]
+"#,
+            )
+            .expect("config authoring"),
+        )
+        .expect("manifest")
+    }
 
     #[test]
     fn target_selection_sample_is_stable_per_request_and_spans_weighted_buckets() {
@@ -5208,7 +5566,8 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
 
     #[test]
     fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
-        let error = build_v3_responses_provider_response_from_openai_chat_payload(
+        let manifest = glmrelay_error_policy_manifest();
+        let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
             &json!({
                 "id": "chatcmpl_overload_diagnostic",
                 "model": "glm-5.2",
@@ -5219,14 +5578,50 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
                     },
                     "finish_reason": "stop"
                 }],
-                "usage": null
+                "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
             }),
             &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
+            Some(&manifest),
+            Some("glmrelay_openai"),
         )
         .expect_err("upstream overload diagnostic must be provider failure, not success content");
 
         assert!(
-            error.to_string().contains("upstream overload diagnostic"),
+            error.to_string().contains("provider_diagnostic_zero_usage"),
+            "wrong error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
+        let manifest = glmrelay_error_policy_manifest();
+        let observation = V3RuntimeStreamObservation::default();
+        let raw_sse = concat!(
+            "data: {\"id\":\"chatcmpl_overload_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784865608,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"reasoning_content\":\"checking\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
+            "data: {\"id\":\"chatcmpl_overload_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784865638,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"content\":\"mac超负荷运载，应该是挂了\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
+            "data: {\"id\":\"chatcmpl_overload_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784865638,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}],\"usage\":null}\n\n",
+            "data: {\"id\":\"chatcmpl_overload_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784865638,\"model\":\"glm-5.2\",\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0,\"input_tokens\":0,\"output_tokens\":0}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+        let provider_payload =
+            build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+                provider,
+                &observation,
+            )
+            .await
+            .expect("stream diagnostic materializes before semantic policy");
+
+        let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+            &provider_payload,
+            &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
+            Some(&manifest),
+            Some("glmrelay_openai"),
+        )
+        .expect_err("configured stream diagnostic must not enter stopless");
+
+        assert!(
+            error.to_string().contains("provider_diagnostic_zero_usage"),
             "wrong error: {error}"
         );
     }

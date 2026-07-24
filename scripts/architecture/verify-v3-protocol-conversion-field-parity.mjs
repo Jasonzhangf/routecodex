@@ -80,7 +80,7 @@ const chatToResponses = functionSlice(
 );
 for (const phrase of [
   'fn build_v3_responses_provider_response_from_openai_chat_payload',
-  'payload.get("model")',
+  'if let Some(model) = payload.get("model") {\n        response.insert("model".to_string(), model.clone());\n    }',
   'payload.get("created_at").or_else(|| payload.get("created"))',
   'normalize_v3_hub_responses_usage_from_openai_chat_usage',
   'build_v3_responses_reasoning_item_from_openai_chat_message',
