@@ -269,7 +269,8 @@ Req04 Chat Process:
 ### Guard
 
 - guard 是防无限循环的安全终止，不是“任务完成”证明。
-- 到达 guard 时只停止 stopless 拦截，让当前 provider `finish_reason=stop` 响应按原协议返回；不得投影新的 CLI，不得合成“续轮上限/guard/内部状态”诊断文本。
+- 到达 guard 时只停止继续拦截/续轮；不得投影新的 CLI，不得合成“续轮上限/guard/内部状态”诊断文本。
+- GuardTerminal 仍必须在 Resp03 使用 cleaned visible payload 投影：普通可见文本保留，但 raw stop schema/control marker（如 `stopreason/current_goal/next_step`）不得穿透到 client visible payload；禁止直接返回未清理的 input payload。
 - 非 stop 进展、普通 tool call、真实 user turn、terminal schema、session/scope change 必须 reset。
 
 ## 节点审计表
@@ -366,7 +367,7 @@ Rules:
 
 ## Stopless live closeout review rule (2026-07-24)
 
-- `verify:v3-stopless-state-machine-docs` green is not enough. Always run `test:v3-stopless-state-machine-docs-red-fixtures`; if the red fixture fails with `ERR_MODULE_NOT_FOUND`, fix the fixture temp-copy dependency first because mutation diagnostics are masked.
+- `verify:v3-stopless-state-machine-docs` green is not enough. Always run `test:v3-stopless-state-machine-docs-red-fixtures`; if the red fixture fails with `ERR_MODULE_NOT_FOUND`, fix the fixture temp-copy dependencies first because mutation diagnostics are masked. Known required deps include `v3-mainline-caller-flow-lib.mjs` and `v3-req04-tool-governance-review-lib.mjs`.
 - Live closeout must include `scripts/tests/stopless-5555-live-probe.mjs` after global install and managed `routecodex restart --port 5555`.
-- `invalid_stopless_continuation_loop` with visible raw stop schema JSON is a Chat Process stopless lifecycle gap. First inspect Resp03 stopless terminal/projection handling, Req04 restored no-op consumption, current-turn guidance, and stop schema visible-text stripping.
+- `invalid_stopless_continuation_loop` with visible raw stop schema JSON is a Chat Process stopless lifecycle gap. First inspect Resp03 stopless terminal/projection handling, especially GuardTerminal cleaned visible payload projection, Req04 restored no-op consumption, current-turn guidance, and stop schema visible-text stripping.
 - Do not fix this class in SSE framing, server handler, RespOutbound, continuation store transport, or error projection.

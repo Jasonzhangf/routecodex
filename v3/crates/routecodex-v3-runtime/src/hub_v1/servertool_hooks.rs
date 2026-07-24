@@ -175,10 +175,12 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
     let natural_stop_count = next_stopless_consecutive_stop_count(profile);
     let max_natural_stops = stopless_max_natural_stops(profile);
     if natural_stop_count > max_natural_stops {
+        let projected = build_stopless_guard_passthrough_visible_payload(input.provider_payload());
+        *input.provider_payload_mut() = Arc::new(projected);
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
-            intercepted: false,
+            intercepted: true,
         });
     }
     let projected = build_stopless_cli_projection_payload(input.provider_payload());

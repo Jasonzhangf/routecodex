@@ -25,6 +25,8 @@ const copied = [
   'scripts/architecture/wiki-html-lib.mjs',
   'scripts/architecture/architecture-wiki-lib.mjs',
   'scripts/architecture/mainline-call-map-lib.mjs',
+  'scripts/architecture/v3-mainline-caller-flow-lib.mjs',
+  'scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
 ];
 
 const cases = [

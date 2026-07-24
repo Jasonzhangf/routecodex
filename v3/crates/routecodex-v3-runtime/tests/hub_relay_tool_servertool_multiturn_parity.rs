@@ -745,6 +745,63 @@ fn stopless_hook_blackbox_terminal_reasoning_stop_skips_cli_roundtrip() {
 }
 
 #[test]
+fn stopless_guard_terminal_strips_raw_stop_schema_text_without_cli_roundtrip() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_blackbox_stopless_guard_schema_text",
+                "object":"response",
+                "status":"completed",
+                "finish_reason":"end_turn",
+                "output":[{
+                    "type":"message",
+                    "role":"assistant",
+                    "content":[{"type":"output_text","text":"{\"stopreason\":2,\"current_goal\":\"live guard\",\"reason\":\"not done\",\"evidence\":\"\",\"next_step\":\"PHASE_NEXT\",\"needs_user_input\":false}"}]
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty()
+                .with_stopless_reasoning_stop()
+                .with_stopless_center_state(V3StoplessCenterState::new(
+                    3,
+                    3,
+                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+                )),
+        )
+        .unwrap();
+    assert_eq!(
+        resp03.terminality(),
+        routecodex_v3_runtime::V3HubResponseTerminality::Terminal
+    );
+    assert_eq!(
+        resp03.servertool_action(),
+        V3HubServertoolResponseAction::None
+    );
+    let resp04 = response_hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    for forbidden in [
+        "stopreason",
+        "current_goal",
+        "next_step",
+        "PHASE_NEXT",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !serialized.contains(forbidden),
+            "guard terminal must not leak raw stop schema/control marker {forbidden}: {serialized}"
+        );
+    }
+}
+
+#[test]
 fn stopless_hook_blackbox_disabled_request_profile_keeps_cli_result_as_tool_output() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
     let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-disabled"), scope()).with_local_context(
