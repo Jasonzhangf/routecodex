@@ -49,3 +49,4 @@ verification_gates:
   - npm run verify:sse-transport-core-shared
   - npm run verify:sse-architecture-boundary
   - npm run test:v3-sse-transport-core
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib relay_sse_closeout -- --nocapture

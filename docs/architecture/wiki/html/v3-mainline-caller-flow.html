@@ -2341,16 +2341,16 @@ flowchart TD
         <div class="diagram-shell">
           <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
 flowchart TD
-  n_v3_sse_transport_boundary_0[&quot;&lt;b&gt;Sse Transport In 01 Raw Chunk&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportIn01RawChunk&lt;/small&gt;&quot;]
-  n_v3_sse_transport_boundary_1[&quot;&lt;b&gt;Sse Transport In 02 Decoded Frame&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportIn02DecodedFrame&lt;/small&gt;&quot;]
-  n_v3_sse_transport_boundary_2[&quot;&lt;b&gt;Sse Transport In 03 Validated Frame Stream&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportIn03ValidatedFrameStream&lt;/small&gt;&quot;]
-  n_v3_sse_transport_boundary_3[&quot;&lt;b&gt;Sse Transport Out 04 Encoded Chunk&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3SseTransportOut04EncodedChunk&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_0[&quot;&lt;b&gt;SSE raw chunk&lt;/b&gt;&lt;br/&gt;原始 transport bytes；只进入 framing，不读取 event/data 业务语义&lt;br/&gt;&lt;small&gt;V3SseTransportIn01RawChunk&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_1[&quot;&lt;b&gt;SSE decoded frame&lt;/b&gt;&lt;br/&gt;只完成 UTF-8、line、frame 字段解码；data JSON 仍保持 opaque&lt;br/&gt;&lt;small&gt;V3SseTransportIn02DecodedFrame&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_2[&quot;&lt;b&gt;SSE validated frame stream&lt;/b&gt;&lt;br/&gt;只验证 framing/limits/EOF/drop/error；不判断 completed/tool/continuation&lt;br/&gt;&lt;small&gt;V3SseTransportIn03ValidatedFrameStream&lt;/small&gt;&quot;]
+  n_v3_sse_transport_boundary_3[&quot;&lt;b&gt;SSE encoded chunk&lt;/b&gt;&lt;br/&gt;把已验证 frame 重新编码为字节；不修改业务 JSON 或 terminal 语义&lt;br/&gt;&lt;small&gt;V3SseTransportOut04EncodedChunk&lt;/small&gt;&quot;]
   n_v3_sse_transport_boundary_4[&quot;&lt;b&gt;Client semantic&lt;/b&gt;&lt;br/&gt;按入口协议投影客户端语义&lt;br/&gt;&lt;small&gt;V3HubRespOutbound05ClientSemantic&lt;/small&gt;&quot;]
   n_v3_sse_transport_boundary_5[&quot;&lt;b&gt;Server client frame&lt;/b&gt;&lt;br/&gt;server 发送最终 client frame&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame&lt;/small&gt;&quot;]
-  n_v3_sse_transport_boundary_0 --&gt;|v3-sse-transport-01&lt;br/&gt;routecodex-v3-sse → routecodex-v3-sse| n_v3_sse_transport_boundary_1
-  n_v3_sse_transport_boundary_1 --&gt;|v3-sse-transport-02&lt;br/&gt;routecodex-v3-sse → routecodex-v3-sse| n_v3_sse_transport_boundary_2
-  n_v3_sse_transport_boundary_2 --&gt;|v3-sse-transport-03&lt;br/&gt;v3-provider-responses → routecodex-v3-sse| n_v3_sse_transport_boundary_3
-  n_v3_sse_transport_boundary_4 --&gt;|v3-sse-server-frame-04&lt;br/&gt;v3-server → v3-server| n_v3_sse_transport_boundary_5
+  n_v3_sse_transport_boundary_0 --&gt;|v3-sse-transport-01&lt;br/&gt;raw bytes 解码为 frame 字段；不解析 data JSON| n_v3_sse_transport_boundary_1
+  n_v3_sse_transport_boundary_1 --&gt;|v3-sse-transport-02&lt;br/&gt;只做 transport framing/limit 校验；业务终态仍归 provider/runtime| n_v3_sse_transport_boundary_2
+  n_v3_sse_transport_boundary_2 --&gt;|v3-sse-transport-03&lt;br/&gt;provider adapter 输出 opaque validated frames；[DONE] 仍是 transport sentinel| n_v3_sse_transport_boundary_3
+  n_v3_sse_transport_boundary_4 --&gt;|v3-sse-server-frame-04&lt;br/&gt;server closeout 只交给 Body::from_stream 并记录 EOF/error/drop| n_v3_sse_transport_boundary_5
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   class n_v3_sse_transport_boundary_0,n_v3_sse_transport_boundary_1,n_v3_sse_transport_boundary_2,n_v3_sse_transport_boundary_3,n_v3_sse_transport_boundary_4,n_v3_sse_transport_boundary_5 node;</pre>

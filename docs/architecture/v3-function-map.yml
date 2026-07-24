@@ -2842,6 +2842,7 @@ features:
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/wiki/v3-mainline-skeleton-sop.md
       - docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml
+      - scripts/architecture/v3-mainline-caller-flow-lib.mjs
       - scripts/architecture/verify-sse-transport-core-shared.mjs
     forbidden_paths:
       - src/server/handlers

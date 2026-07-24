@@ -17,12 +17,22 @@ const v3Adapter = 'v3/crates/routecodex-v3-provider-responses/src/shared.rs';
 const v3Projection = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const v3Nodes = 'v3/crates/routecodex-v3-runtime/src/nodes.rs';
 const v3Server = 'v3/crates/routecodex-v3-server/src/lib.rs';
+const v3SseManifest = 'docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml';
+const v3FunctionMap = 'docs/architecture/v3-function-map.yml';
+const v3VerificationMap = 'docs/architecture/v3-verification-map.yml';
 
-for (const file of [coreCargo, coreSource, v2Workspace, v2Cargo, v2Adapter, v3SseCargo, v3SseSource, v3Cargo, v3Adapter, v3Projection, v3Nodes, v3Server]) {
+for (const file of [coreCargo, coreSource, v2Workspace, v2Cargo, v2Adapter, v3SseCargo, v3SseSource, v3Cargo, v3Adapter, v3Projection, v3Nodes, v3Server, v3SseManifest, v3FunctionMap, v3VerificationMap]) {
   if (!fs.existsSync(path.join(root, file))) failures.push(`${file}: required shared SSE transport surface missing`);
 }
 
 if (failures.length === 0) {
+  const relayCloseoutGate = 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib relay_sse_closeout -- --nocapture';
+  for (const file of [v3SseManifest, v3FunctionMap, v3VerificationMap]) {
+    if (!read(file).includes(relayCloseoutGate)) {
+      failures.push(`${file}: SSE transport boundary must list server closeout cargo gate ${relayCloseoutGate}`);
+    }
+  }
+
   const core = read(coreSource);
   const productionCore = core.split('#[cfg(test)]')[0];
   for (const marker of [
