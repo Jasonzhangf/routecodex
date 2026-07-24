@@ -296,6 +296,22 @@ export const MANUAL_WIKI_PAGES = [
       'live/global/prod not claimed',
     ],
   },
+
+  {
+    path: `${WIKI_ROOT}/v3-protocol-normalization-tool-governance-boundary.md`,
+    title: '# V3 Protocol Normalization Tool Governance Boundary',
+    minMermaidBlocks: 2,
+    requiredTokens: [
+      '## Contract',
+      '## Request chain',
+      '## Response chain',
+      '## Known repaired violations',
+      '## Compat skeleton',
+      '## Gates',
+      'ProviderReqCompat06ProviderCompat',
+      'ProviderRespCompat02ProviderCompat',
+    ],
+  },
   {
     path: `${WIKI_ROOT}/v3-mainline-caller-flow.md`,
     title: '# V3 Mainline Caller Flow',

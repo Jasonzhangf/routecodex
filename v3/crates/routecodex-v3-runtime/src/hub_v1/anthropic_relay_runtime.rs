@@ -4,7 +4,7 @@ use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy,
+    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
@@ -415,18 +415,18 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let selected = if let Some(selected) = retry_selected.take() {
             selected
         } else {
-            match resolve_v3_relay_target(
+            match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
                 manifest,
-                &input.server_id,
-                "anthropic",
-                "/v1/messages",
-                &route_facts_body,
-                &failed_candidates,
-                &provider_health,
-                v3_relay_provider_policy_now_epoch_ms()
+                server_id: &input.server_id,
+                entry_kind: "anthropic",
+                endpoint_path: "/v1/messages",
+                body: &route_facts_body,
+                request_local_excluded_candidates: &failed_candidates,
+                provider_health: &provider_health,
+                now_ms: v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3AnthropicRelayRuntimeError::Target)?,
                 deterministic_sample,
-            ) {
+            }) {
                 Ok(selected) => selected,
                 Err(error) => {
                     if let Some(failure) = pending_provider_failure.take() {
@@ -494,11 +494,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &failure_context,
                     selected,
                     failure,
-                    &mut failed_candidates,
-                    &mut same_candidate_retries,
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
                     &mut retry_selected,
                     &mut pending_provider_failure,
-                    &mut trace,
                 )
                 .await?
                 {
@@ -512,11 +514,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     &failure_context,
                     selected,
                     failure,
-                    &mut failed_candidates,
-                    &mut same_candidate_retries,
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
                     &mut retry_selected,
                     &mut pending_provider_failure,
-                    &mut trace,
                 )
                 .await?
                 {
@@ -552,11 +556,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     &failure_context,
                                     selected,
                                     failure,
-                                    &mut failed_candidates,
-                                    &mut same_candidate_retries,
+                                    &mut V3RelayProviderFailurePolicyState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        trace: &mut trace,
+                                    },
                                     &mut retry_selected,
                                     &mut pending_provider_failure,
-                                    &mut trace,
                                 )
                                 .await?
                                 {
@@ -610,11 +616,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     &failure_context,
                                     selected,
                                     failure,
-                                    &mut failed_candidates,
-                                    &mut same_candidate_retries,
+                                    &mut V3RelayProviderFailurePolicyState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        trace: &mut trace,
+                                    },
                                     &mut retry_selected,
                                     &mut pending_provider_failure,
-                                    &mut trace,
                                 )
                                 .await?
                                 {
@@ -654,11 +662,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             &failure_context,
                             selected,
                             failure,
-                            &mut failed_candidates,
-                            &mut same_candidate_retries,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
                             &mut retry_selected,
                             &mut pending_provider_failure,
-                            &mut trace,
                         )
                         .await?
                         {
@@ -707,11 +717,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 &failure_context,
                                 selected,
                                 failure,
-                                &mut failed_candidates,
-                                &mut same_candidate_retries,
+                                &mut V3RelayProviderFailurePolicyState {
+                                    failed_candidates: &mut failed_candidates,
+                                    same_candidate_retries: &mut same_candidate_retries,
+                                    trace: &mut trace,
+                                },
                                 &mut retry_selected,
                                 &mut pending_provider_failure,
-                                &mut trace,
                             )
                             .await?
                             {
@@ -750,11 +762,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             &failure_context,
                             selected,
                             failure,
-                            &mut failed_candidates,
-                            &mut same_candidate_retries,
+                            &mut V3RelayProviderFailurePolicyState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                trace: &mut trace,
+                            },
                             &mut retry_selected,
                             &mut pending_provider_failure,
-                            &mut trace,
                         )
                         .await?
                         {
@@ -782,11 +796,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                     &failure_context,
                                     selected,
                                     failure,
-                                    &mut failed_candidates,
-                                    &mut same_candidate_retries,
+                                    &mut V3RelayProviderFailurePolicyState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        trace: &mut trace,
+                                    },
                                     &mut retry_selected,
                                     &mut pending_provider_failure,
-                                    &mut trace,
                                 )
                                 .await?
                                 {
@@ -849,11 +865,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                                 &failure_context,
                                 selected,
                                 failure,
-                                &mut failed_candidates,
-                                &mut same_candidate_retries,
+                                &mut V3RelayProviderFailurePolicyState {
+                                    failed_candidates: &mut failed_candidates,
+                                    same_candidate_retries: &mut same_candidate_retries,
+                                    trace: &mut trace,
+                                },
                                 &mut retry_selected,
                                 &mut pending_provider_failure,
-                                &mut trace,
                             )
                             .await?
                             {
@@ -1096,11 +1114,9 @@ async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     failure: V3AnthropicRelayProviderFailure,
-    failed_candidates: &mut BTreeSet<String>,
-    same_candidate_retries: &mut BTreeMap<String, usize>,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pending_provider_failure: &mut Option<V3AnthropicRelayProviderFailure>,
-    trace: &mut Vec<&'static str>,
 ) -> Result<Option<V3AnthropicRelayProviderFailure>, V3AnthropicRelayRuntimeError> {
     let result = run_v3_relay_provider_failure_policy(
         context,
@@ -1108,11 +1124,7 @@ async fn handle_provider_failure(
         failure.status,
         failure_error_type(&failure),
         provider_failure_message(&failure),
-        &mut V3RelayProviderFailurePolicyState {
-            failed_candidates,
-            same_candidate_retries,
-            trace,
-        },
+        state,
     )
     .await
     .map_err(V3AnthropicRelayRuntimeError::Target)?;
@@ -1122,7 +1134,7 @@ async fn handle_provider_failure(
             Ok(None)
         }
         V3RelayProviderFailureDecision::RetrySame(selected) => {
-            *retry_selected = Some(selected);
+            *retry_selected = Some(*selected);
             Ok(None)
         }
         V3RelayProviderFailureDecision::ProjectTerminal => Ok(Some(failure)),

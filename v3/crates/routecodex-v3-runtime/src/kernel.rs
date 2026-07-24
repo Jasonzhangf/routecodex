@@ -884,26 +884,30 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     );
                 }
                 match run_v3_direct_provider_failure_policy(
-                    &provider_health,
-                    &hook_registry,
-                    &availability,
-                    expanded.as_ref(),
+                    &V3DirectProviderFailurePolicyContext {
+                        provider_health: &provider_health,
+                        hook_registry: &hook_registry,
+                        availability: &availability,
+                        expanded: expanded.as_ref(),
+                        now_epoch_ms,
+                    },
                     &policy.target,
                     source,
-                    &mut failed_candidates,
-                    &mut same_candidate_retries,
-                    now_epoch_ms,
-                    &mut trace,
+                    &mut V3DirectProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
                 )
                 .await
                 {
                     Ok(V3DirectProviderFailureDecision::Reselect) => continue,
                     Ok(V3DirectProviderFailureDecision::RetrySame(selected)) => {
-                        retry_selected = Some(selected);
+                        retry_selected = Some(*selected);
                         continue;
                     }
                     Ok(V3DirectProviderFailureDecision::Project(projected)) => {
-                        return projected_error_output(projected, trace);
+                        return projected_error_output(*projected, trace);
                     }
                     Err(source) => return error_output(source, trace, &hook_registry),
                 }
@@ -954,26 +958,30 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         return error_output(source, trace, &hook_registry);
                     }
                     match run_v3_direct_provider_failure_policy(
-                        &provider_health,
-                        &hook_registry,
-                        &availability,
-                        expanded.as_ref(),
+                        &V3DirectProviderFailurePolicyContext {
+                            provider_health: &provider_health,
+                            hook_registry: &hook_registry,
+                            availability: &availability,
+                            expanded: expanded.as_ref(),
+                            now_epoch_ms,
+                        },
                         &policy.target,
                         source,
-                        &mut failed_candidates,
-                        &mut same_candidate_retries,
-                        now_epoch_ms,
-                        &mut trace,
+                        &mut V3DirectProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
                     )
                     .await
                     {
                         Ok(V3DirectProviderFailureDecision::Reselect) => continue,
                         Ok(V3DirectProviderFailureDecision::RetrySame(selected)) => {
-                            retry_selected = Some(selected);
+                            retry_selected = Some(*selected);
                             continue;
                         }
                         Ok(V3DirectProviderFailureDecision::Project(projected)) => {
-                            return projected_error_output(projected, trace);
+                            return projected_error_output(*projected, trace);
                         }
                         Err(source) => return error_output(source, trace, &hook_registry),
                     }
@@ -1128,8 +1136,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
 
 enum V3DirectProviderFailureDecision {
     Reselect,
-    RetrySame(routecodex_v3_target::V3Target10ConcreteProviderSelected),
-    Project(V3Error06ClientProjected),
+    RetrySame(Box<routecodex_v3_target::V3Target10ConcreteProviderSelected>),
+    Project(Box<V3Error06ClientProjected>),
+}
+
+struct V3DirectProviderFailurePolicyContext<'ctx, R: V3ProviderAvailabilityReader + ?Sized> {
+    provider_health: &'ctx V3ProviderFailureRuntimeHealth,
+    hook_registry: &'ctx V3HookRegistry,
+    availability: &'ctx R,
+    expanded: Option<&'ctx routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    now_epoch_ms: u64,
+}
+
+struct V3DirectProviderFailurePolicyState<'state> {
+    failed_candidates: &'state mut BTreeSet<String>,
+    same_candidate_retries: &'state mut BTreeMap<String, usize>,
+    trace: &'state mut Vec<&'static str>,
 }
 
 fn record_v3_direct_provider_failure(
@@ -1166,21 +1188,20 @@ fn record_v3_direct_provider_success(
 }
 
 async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    hook_registry: &V3HookRegistry,
-    availability: &R,
-    expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    context: &V3DirectProviderFailurePolicyContext<'_, R>,
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     source: V3Error01SourceRaised,
-    failed_candidates: &mut BTreeSet<String>,
-    same_candidate_retries: &mut BTreeMap<String, usize>,
-    now_epoch_ms: u64,
-    trace: &mut Vec<&'static str>,
+    state: &mut V3DirectProviderFailurePolicyState<'_>,
 ) -> Result<V3DirectProviderFailureDecision, V3Error01SourceRaised> {
-    record_v3_direct_provider_failure(provider_health, selected, &source, now_epoch_ms)?;
+    record_v3_direct_provider_failure(
+        context.provider_health,
+        selected,
+        &source,
+        context.now_epoch_ms,
+    )?;
 
     let failed_key = candidate_key(&selected.candidate);
-    let expanded_candidates = match expanded {
+    let expanded_candidates = match context.expanded {
         Some(expanded) => &expanded.candidates,
         None => {
             return Err(runtime_source(
@@ -1189,38 +1210,47 @@ async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
             ))
         }
     };
-    let mut failed_with_current = failed_candidates.clone();
+    let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
-    let remaining =
-        remaining_available_candidates(expanded_candidates, availability, &failed_with_current);
+    let remaining = remaining_available_candidates(
+        expanded_candidates,
+        context.availability,
+        &failed_with_current,
+    );
     let provider_scope = V3ErrorActionScope::ProviderInstance {
         provider_id: selected.candidate.provider_id.clone(),
     };
-    let projected = hook_registry.run_error(source, provider_scope, remaining);
-    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    let projected = context
+        .hook_registry
+        .run_error(source, provider_scope, remaining);
+    state.trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     if projected
         .body
         .pointer("/error/decision")
         .and_then(Value::as_str)
         == Some("target_local_reselect")
     {
-        failed_candidates.insert(failed_key);
-        trace.push("V3TargetLocalReselected");
+        state.failed_candidates.insert(failed_key);
+        state.trace.push("V3TargetLocalReselected");
         return Ok(V3DirectProviderFailureDecision::Reselect);
     }
     if selected.default_floor_protected || selected.candidate.default_pool_member {
-        let retries_done = same_candidate_retries.entry(failed_key).or_insert(0);
+        let retries_done = state.same_candidate_retries.entry(failed_key).or_insert(0);
         if *retries_done < V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET {
             *retries_done = retries_done.saturating_add(1);
-            trace.push("V3DefaultFloorBackoffWait");
+            state.trace.push("V3DefaultFloorBackoffWait");
             if V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS > 0 {
                 tokio::time::sleep(Duration::from_millis(V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS))
                     .await;
             }
-            return Ok(V3DirectProviderFailureDecision::RetrySame(selected.clone()));
+            return Ok(V3DirectProviderFailureDecision::RetrySame(Box::new(
+                selected.clone(),
+            )));
         }
     }
-    Ok(V3DirectProviderFailureDecision::Project(projected))
+    Ok(V3DirectProviderFailureDecision::Project(Box::new(
+        projected,
+    )))
 }
 
 fn release_terminal_failure_locator(

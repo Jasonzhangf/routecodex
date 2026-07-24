@@ -737,15 +737,18 @@ async fn pending_endpoint(
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
-                &path,
-                &request_id,
-                frame.status,
-                &frame.error_chain,
-                match &frame.body {
-                    V3Server16Body::Json(value) => Some(value),
-                    V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                V3ErrorProjectionConsoleInput {
+                    endpoint: &path,
+                    request_id: &request_id,
+                    status: frame.status,
+                    error_chain: &frame.error_chain,
+                    body: match &frame.body {
+                        V3Server16Body::Json(value) => Some(value),
+                        V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                    },
+                    project_path: resolve_v3_console_project_path(&request_headers, &Value::Null)
+                        .as_deref(),
                 },
-                resolve_v3_console_project_path(&request_headers, &Value::Null).as_deref(),
             ) {
                 return response;
             }
@@ -1034,12 +1037,14 @@ async fn pending_endpoint(
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
-                &path,
-                &request_id,
-                output.status,
-                error_chain,
-                openai_chat_error_body_for_console(&output.client_body),
-                request_console_project_path.as_deref(),
+                V3ErrorProjectionConsoleInput {
+                    endpoint: &path,
+                    request_id: &request_id,
+                    status: output.status,
+                    error_chain,
+                    body: openai_chat_error_body_for_console(&output.client_body),
+                    project_path: request_console_project_path.as_deref(),
+                },
             ) {
                 return response;
             }
@@ -1065,12 +1070,14 @@ async fn pending_endpoint(
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
-                &path,
-                &request_id,
-                output.status,
-                error_chain,
-                Some(&output.client_response),
-                request_console_project_path.as_deref(),
+                V3ErrorProjectionConsoleInput {
+                    endpoint: &path,
+                    request_id: &request_id,
+                    status: output.status,
+                    error_chain,
+                    body: Some(&output.client_response),
+                    project_path: request_console_project_path.as_deref(),
+                },
             ) {
                 return response;
             }
@@ -1096,12 +1103,14 @@ async fn pending_endpoint(
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
-                &path,
-                &request_id,
-                output.status,
-                error_chain,
-                gemini_error_body_for_console(&output.client_body),
-                request_console_project_path.as_deref(),
+                V3ErrorProjectionConsoleInput {
+                    endpoint: &path,
+                    request_id: &request_id,
+                    status: output.status,
+                    error_chain,
+                    body: gemini_error_body_for_console(&output.client_body),
+                    project_path: request_console_project_path.as_deref(),
+                },
             ) {
                 return response;
             }
@@ -1221,12 +1230,14 @@ async fn pending_endpoint(
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
                 &trace_scope,
-                &path,
-                &request_id,
-                output.status,
-                error_chain,
-                relay_error_body_for_console(&output.client_body),
-                request_console_project_path.as_deref(),
+                V3ErrorProjectionConsoleInput {
+                    endpoint: &path,
+                    request_id: &request_id,
+                    status: output.status,
+                    error_chain,
+                    body: relay_error_body_for_console(&output.client_body),
+                    project_path: request_console_project_path.as_deref(),
+                },
             ) {
                 return response;
             }
@@ -2125,24 +2136,28 @@ fn insert_v3_projection_header(headers: &mut HeaderMap, name: &'static str, valu
     );
 }
 
+struct V3ErrorProjectionConsoleInput<'input> {
+    endpoint: &'input str,
+    request_id: &'input str,
+    status: u16,
+    error_chain: &'input [&'static str],
+    body: Option<&'input Value>,
+    project_path: Option<&'input str>,
+}
+
 fn record_and_emit_v3_error_projection(
     state: &V3ListenerState,
     trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
-    endpoint: &str,
-    request_id: &str,
-    status: u16,
-    error_chain: &[&'static str],
-    body: Option<&Value>,
-    project_path: Option<&str>,
+    input: V3ErrorProjectionConsoleInput<'_>,
 ) -> Option<Response<Body>> {
     if let Err(error) = state.debug.record_node_event(
         trace_scope,
         "V3Error06ClientProjected",
         "projected",
         Some(json!({
-            "status": status,
-            "error_chain": error_chain,
-            "body": body
+            "status": input.status,
+            "error_chain": input.error_chain,
+            "body": input.body
         })),
     ) {
         return Some(foundation_output_response(project_v3_debug_failure(
@@ -2152,12 +2167,12 @@ fn record_and_emit_v3_error_projection(
     }
     emit_v3_error_console_line_for_state(
         state,
-        endpoint,
-        request_id,
-        status,
-        error_chain,
-        body,
-        project_path,
+        input.endpoint,
+        input.request_id,
+        input.status,
+        input.error_chain,
+        input.body,
+        input.project_path,
     );
     None
 }
@@ -6066,17 +6081,19 @@ mod tests {
         let response = record_and_emit_v3_error_projection(
             &state,
             &trace_scope,
-            "/v1/responses",
-            "req-error-console",
-            500,
-            &V3_ERROR_CHAIN_NODE_IDS,
-            Some(&json!({
-                "error": {
-                    "type":"runtime_error",
-                    "message":"controlled error"
-                }
-            })),
-            None,
+            V3ErrorProjectionConsoleInput {
+                endpoint: "/v1/responses",
+                request_id: "req-error-console",
+                status: 500,
+                error_chain: &V3_ERROR_CHAIN_NODE_IDS,
+                body: Some(&json!({
+                    "error": {
+                        "type":"runtime_error",
+                        "message":"controlled error"
+                    }
+                })),
+                project_path: None,
+            },
         );
 
         assert!(response.is_none());

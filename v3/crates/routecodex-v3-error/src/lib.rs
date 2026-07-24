@@ -258,6 +258,41 @@ pub const V3_ERROR_CHAIN_NODE_IDS: [&str; 6] = [
     "V3Error06ClientProjected",
 ];
 
+#[derive(Debug, Clone)]
+pub struct V3ErrorHandlingCenterInput {
+    pub source: V3Error01SourceRaised,
+    pub action_scope: V3ErrorActionScope,
+    pub candidates_remaining: usize,
+    pub source_status: Option<u16>,
+}
+
+pub struct V3ErrorHandlingCenter;
+
+impl V3ErrorHandlingCenter {
+    pub fn handle(input: V3ErrorHandlingCenterInput) -> V3Error06ClientProjected {
+        let classified = build_v3_error_02_classified_from_v3_error_01(input.source);
+        let action = build_v3_error_03_target_local_action_from_v3_error_02(
+            classified,
+            input.action_scope,
+            input.candidates_remaining,
+        );
+        let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(
+            action,
+            input.candidates_remaining,
+        );
+        let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
+        let mut projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+        if let Some(status) = input.source_status.filter(|status| *status >= 400) {
+            projected.status = status;
+        }
+        debug_assert!(
+            projected.status >= 400,
+            "V3 ErrorHandlingCenter must never project an error as HTTP success"
+        );
+        projected
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HttpBoundaryErrorKind {
     MalformedJson,
@@ -309,15 +344,12 @@ pub fn project_v3_http_boundary_error(
     };
     let source =
         build_v3_error_01_source_raised(source_kind, "V3Server03HttpRequestRaw", code, detail);
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let action = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::None,
-        0,
-    );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    build_v3_error_06_client_projected_from_v3_error_05(execution)
+    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    })
 }
 
 pub fn project_v3_pending_endpoint_error(
@@ -332,15 +364,12 @@ pub fn project_v3_pending_endpoint_error(
             event.method, event.path, event.server_id
         ),
     );
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let action = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::None,
-        0,
-    );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    let mut projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+    let mut projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    });
     projected.body["error"]["server_id"] = serde_json::Value::String(event.server_id);
     projected.body["error"]["method"] = serde_json::Value::String(event.method);
     projected.body["error"]["path"] = serde_json::Value::String(event.path);

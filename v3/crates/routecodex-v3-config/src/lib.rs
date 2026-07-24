@@ -1,3 +1,4 @@
+mod defaults;
 mod store;
 mod types;
 mod v2_compat;

@@ -1,14 +1,122 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>V3 Protocol Normalization Tool Governance Boundary</title></head>
-<body>
-<h1>V3 Protocol Normalization Tool Governance Boundary</h1>
-<p>Normalization maps adjacent protocols and validates shape only. Tool identity pairing and tool governance belong to Chat Process govern nodes.</p>
-<h2>Request chain</h2>
-<pre>ServerReqInbound01ClientRaw -&gt; HubReqInbound02Standardized -&gt; HubReqChatProcess03Governed -&gt; VrRoute04SelectedTarget -&gt; HubReqOutbound05ProviderSemantic -&gt; ProviderReqCompat06ProviderCompat -&gt; ProviderReqOutbound07TransportRequest</pre>
-<h2>Response chain</h2>
-<pre>ProviderRespInbound01Raw -&gt; ProviderRespCompat02ProviderCompat -&gt; HubRespInbound03Parsed -&gt; HubRespChatProcess04Governed -&gt; HubRespContinuation05Committed -&gt; HubRespOutbound06ClientSemantic -&gt; ServerRespOutbound07ClientFrame</pre>
-<h2>Compat skeleton</h2>
-<ul><li>ProviderReqCompat06ProviderCompat: no protocol remap, no tool governance, no fallback.</li><li>ProviderRespCompat02ProviderCompat: no harvest/apply_patch/servertool/stopless, no side-channel injection, no fallback-to-success.</li></ul>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>V3 Protocol Normalization / Tool Governance Boundary Review</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });</script>
+  <style>
+    :root { color-scheme: light; --bg:#f5f1e9; --panel:#fffdfa; --ink:#172033; --muted:#647083; --line:#d8d0c2; --accent:#0f766e; --accent-dark:#134e4a; --accent-soft:#dff4ef; --danger:#be123c; --code:#f6f0e7; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif; background:radial-gradient(circle at 10% 0%, rgba(15,118,110,.12), transparent 30%), radial-gradient(circle at 90% 10%, rgba(217,119,6,.12), transparent 30%), linear-gradient(180deg,#fbf7ef 0%,var(--bg) 100%); color:var(--ink); }
+    main { max-width:1680px; margin:0 auto; padding:34px 22px 72px; }
+    header.hero, section.panel { background:rgba(255,253,250,.96); border:1px solid var(--line); border-radius:24px; box-shadow:0 18px 48px rgba(23,32,51,.08); padding:28px; margin:18px 0; }
+    header.hero { background:linear-gradient(135deg, rgba(15,118,110,.14), rgba(255,253,250,.96)); }
+    .eyebrow { display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:var(--accent-soft); color:var(--accent-dark); font-weight:800; font-size:.9rem; }
+    h1 { margin:14px 0 10px; font-size:clamp(2.2rem,4.8vw,4.8rem); line-height:.96; letter-spacing:-.055em; }
+    h2 { margin:0 0 14px; font-size:clamp(1.45rem,2.6vw,2.35rem); letter-spacing:-.025em; }
+    h3 { margin:0 0 8px; font-size:1.12rem; letter-spacing:-.012em; }
+    p { margin:0; color:var(--muted); line-height:1.55; }
+    code { font-family:"SFMono-Regular","Menlo","Consolas",monospace; font-size:.88em; background:var(--code); border:1px solid rgba(216,208,194,.9); border-radius:7px; padding:.08rem .35rem; }
+    .meta-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+    .meta-pill { border:1px solid var(--line); background:rgba(255,255,255,.74); border-radius:999px; padding:8px 12px; color:var(--muted); font-size:.92rem; }
+    .flow-stack { display:grid; gap:22px; }
+    .flow-box { overflow-x:auto; background:linear-gradient(180deg,rgba(15,118,110,.045),rgba(255,255,255,.92)); border:1px solid var(--line); border-radius:18px; padding:22px; }
+    pre.mermaid { min-width:1120px; margin:0; font-size:20px; line-height:1.45; }
+    .logic-grid, .note-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
+    .logic-card, .note-card { border:1px solid var(--line); border-radius:18px; background:white; padding:16px; min-height:150px; border-top:5px solid var(--accent); }
+    table { width:100%; border-collapse:collapse; background:white; border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:.96rem; }
+    th,td { border:1px solid var(--line); padding:11px 12px; vertical-align:top; text-align:left; line-height:1.45; }
+    th { background:var(--accent-soft); color:var(--accent-dark); font-weight:800; }
+    .callout { border-left:5px solid var(--danger); background:#fff1f2; border-radius:16px; padding:16px 18px; line-height:1.58; color:#7f1d1d; }
+    ul { margin:0; color:var(--muted); line-height:1.55; }
+  </style>
+</head>
+<body data-review-surface="v3-protocol-normalization-tool-governance-boundary">
+  <main>
+    <header class="hero">
+      <span class="eyebrow">normalization boundary review · dedicated surface</span>
+      <h1>V3 Protocol Normalization / Tool Governance Boundary Review</h1>
+      <p>Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, servertool, stopless, and continuation semantics stay in Chat Process govern nodes.</p>
+      <div class="meta-row">
+        <span class="meta-pill">Canonical Markdown source: <code>docs/architecture/wiki/v3-protocol-normalization-tool-governance-boundary.md</code></span>
+        <span class="meta-pill">Review surface class: <code>V3 dedicated annotated HTML</code></span>
+        <span class="meta-pill">Generic Markdown renderer: <code>forbidden</code></span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Separated request / response diagrams</h2>
+      <div class="flow-stack">
+        <section><h3>Request normalization vs Req04 governance</h3><div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 105, &quot;nodeSpacing&quot;: 65}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;20px&quot;}} }%%
+flowchart TD
+  title_note[&quot;&lt;b&gt;Request normalization vs Req04 governance&lt;/b&gt;&lt;br/&gt;&lt;small&gt;generated dedicated review surface&lt;/small&gt;&quot;]
+  N0[&quot;&lt;b&gt;ServerReqInbound01ClientRaw&lt;/b&gt;&quot;]
+  N1[&quot;&lt;b&gt;HubReqInbound02Standardized&lt;/b&gt;&quot;]
+  N2[&quot;&lt;b&gt;HubReqChatProcess03Governed&lt;/b&gt;&quot;]
+  N3[&quot;&lt;b&gt;HubReqOutbound05ProviderSemantic&lt;/b&gt;&quot;]
+  N4[&quot;&lt;b&gt;ProviderReqCompat06ProviderCompat&lt;/b&gt;&quot;]
+  title_note --&gt; N0
+  N0 --&gt;|entry shape normalization only| N1
+  N1 --&gt;|tool identity pairing and orphan checks| N2
+  N2 --&gt;|governed request to provider semantic| N3
+  N3 --&gt;|compat only, no tool governance| N4
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
+  class N0,N1,N2,N3,N4 node;</pre></div></section>
+        <section><h3>Response normalization vs Resp03 governance</h3><div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 105, &quot;nodeSpacing&quot;: 65}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;20px&quot;}} }%%
+flowchart TD
+  title_note[&quot;&lt;b&gt;Response normalization vs Resp03 governance&lt;/b&gt;&lt;br/&gt;&lt;small&gt;generated dedicated review surface&lt;/small&gt;&quot;]
+  N0[&quot;&lt;b&gt;ProviderRespInbound01Raw&lt;/b&gt;&quot;]
+  N1[&quot;&lt;b&gt;ProviderRespCompat02ProviderCompat&lt;/b&gt;&quot;]
+  N2[&quot;&lt;b&gt;HubRespInbound03Parsed&lt;/b&gt;&quot;]
+  N3[&quot;&lt;b&gt;HubRespChatProcess04Governed&lt;/b&gt;&quot;]
+  N4[&quot;&lt;b&gt;HubRespOutbound06ClientSemantic&lt;/b&gt;&quot;]
+  title_note --&gt; N0
+  N0 --&gt;|provider compat only| N1
+  N1 --&gt;|response shape normalization only| N2
+  N2 --&gt;|tool/servertool/stopless governance| N3
+  N3 --&gt;|save then project after governance| N4
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
+  class N0,N1,N2,N3,N4 node;</pre></div></section>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Node logic cards</h2>
+      <div class="logic-grid"><article class="logic-card">
+    <h3>Normalization is not governance</h3>
+    <p>Codecs map protocols and preserve invalid tool identity shapes for Chat Process rejection or governance.</p>
+  </article>
+<article class="logic-card">
+    <h3>Compat is not fallback</h3>
+    <p>Provider compat nodes perform provider micro-adjustments only; no route, model, tool, or fallback policy.</p>
+  </article>
+<article class="logic-card">
+    <h3>Chat Process owns tool semantics</h3>
+    <p>Tool pairing, duplicate identity, orphan output, servertool, stopless, and continuation belong to Req04/Resp03.</p>
+  </article></div>
+    </section>
+
+    <section class="panel">
+      <h2>Resource / error / side-channel section</h2>
+      <table><thead><tr><th>Resource</th><th>Owner</th><th>Rule</th></tr></thead><tbody><tr><td><code>v3.hub.tool_governance_truth</code></td><td>Req04 / Resp03 Chat Process</td><td>Tool identity and governance result.</td></tr><tr><td><code>v3.protocol_conversion.field_parity_contract</code></td><td>verification manifest</td><td>Field parity matrix and red fixtures.</td></tr><tr><td><code>v3.hub.provider_wire_payload</code></td><td>ReqOutbound/provider codec</td><td>Provider-bound field legality after governance.</td></tr></tbody></table>
+    </section>
+
+    <section class="panel">
+      <h2>Review checklist</h2>
+      <ul><li>OpenAI Chat tool identity preserved through normalization</li><li>Gemini functionResponse pairing governed at Req04</li><li>Provider compat nodes do not own fallback or tool governance</li><li>Resp Chat Process rejects duplicate canonical tool identity</li></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Source-section evidence</h2>
+      <p>Detected source sections: <code>## Contract</code></p>
+    </section>
+
+    <section class="panel">
+      <h2>Canonical sources</h2>
+      <ul><li><code>docs/architecture/wiki/v3-protocol-normalization-tool-governance-boundary.md</code></li><li><code>docs/architecture/wiki/html/v3-mainline-caller-flow.html</code></li><li><code>docs/architecture/v3-mainline-call-map.yml</code></li><li><code>docs/architecture/v3-resource-operation-map.yml</code></li><li><code>docs/architecture/v3-function-map.yml</code></li><li><code>docs/architecture/v3-verification-map.yml</code></li></ul>
+    </section>
+  </main>
 </body>
 </html>

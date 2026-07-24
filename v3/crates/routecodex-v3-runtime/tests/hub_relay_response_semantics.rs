@@ -341,10 +341,9 @@ fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
     assert_eq!(payload["output"][0]["call_id"], "call_real_exec");
     assert_eq!(payload["output"][0]["name"], "exec_command");
     assert!(
-        serde_json::to_string(payload)
+        !serde_json::to_string(payload)
             .unwrap()
-            .contains("call_stopless_reasoning")
-            == false,
+            .contains("call_stopless_reasoning"),
         "tool_call branch must not run stop hook projection: {payload}"
     );
 }

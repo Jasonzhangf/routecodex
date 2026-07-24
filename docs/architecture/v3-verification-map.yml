@@ -660,12 +660,15 @@ features:
       - parse_v3_config_02_authoring builds V3Config02AuthoringParsed
       - validate_v3_config_03_schema_from_v3_config_02 rejects invalid schema
       - build_v3_config_04_resource_registry_from_v3_config_03 creates resource and hook declarations
+      - Compact native `[pipelines.hub_v1]` authoring may omit internal endpoint/resource/hook boilerplate and still deterministically derives the closed Hub V1 manifest
+      - Hub V1 servers may omit internal execution declarations and still derive the closed direct/relay/json/sse/continuation policy
       - publish_v3_config_05_manifest_from_v3_config_04 emits the deterministic published manifest and auth handles
     required_contract:
       - v3.config.compile chain owner_feature_id resolves through the V3 function map and verification map
       - v3-cfg-01 through v3-cfg-04 remain adjacent config compiler edges
       - Config owns config file IO; Runtime/Server/Provider cannot read config source files directly
       - Secrets are emitted only as auth handles and never enter published manifest debug or client payloads
+      - User-facing V3 config does not require listing fixed Hub V1 hook/resource lifecycle internals
     required_gates:
       - npm run verify:v3-resource-relation-edge-lock
       - npm run test:v3-resource-relation-edge-lock-red-fixtures

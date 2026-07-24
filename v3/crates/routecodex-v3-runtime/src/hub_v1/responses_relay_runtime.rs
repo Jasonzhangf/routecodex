@@ -5,8 +5,8 @@ use crate::provider_failure_runtime_policy::{
     v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailureDecision, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS,
-    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
+    V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -1385,7 +1385,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let mut provider_send_attempts = 0usize;
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let shared_retry_policy = retry_policy.as_shared_policy();
-    let provider_failure_health = V3ProviderFailureRuntimeHealth::from(provider_health.clone());
+    let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
         server_id: &input.server_id,
@@ -1400,18 +1400,18 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         let selected = if let Some(selected) = retry_selected.take() {
             selected
         } else {
-            match resolve_v3_relay_target(
+            match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
                 manifest,
-                &input.server_id,
-                "responses",
-                "/v1/responses",
-                &route_facts_body,
-                &failed_candidates,
-                &provider_health,
-                v3_relay_provider_policy_now_epoch_ms()
+                server_id: &input.server_id,
+                entry_kind: "responses",
+                endpoint_path: "/v1/responses",
+                body: &route_facts_body,
+                request_local_excluded_candidates: &failed_candidates,
+                provider_health: &provider_health,
+                now_ms: v3_relay_provider_policy_now_epoch_ms()
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
-            ) {
+            }) {
                 Ok(selected) => selected,
                 Err(error) => {
                     if let Some(failure) = pending_provider_failure.take() {
@@ -2062,7 +2062,7 @@ async fn handle_v3_responses_relay_provider_failure(
             Ok(None)
         }
         V3RelayProviderFailureDecision::RetrySame(selected) => {
-            *state.retry_selected = Some(selected);
+            *state.retry_selected = Some(*selected);
             Ok(None)
         }
         V3RelayProviderFailureDecision::ProjectTerminal => Ok(Some(failure)),

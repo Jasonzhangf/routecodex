@@ -113,6 +113,9 @@ features:
       - v3/crates/routecodex-v3-config/src/store.rs
       - v3/crates/routecodex-v3-config/src/lib.rs
       - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-config/src/defaults.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/src/v2_compat.rs
     resource_bindings:
       - v3.config.file_source
       - v3.config.authoring_parsed
@@ -135,6 +138,8 @@ features:
       - validate_v3_config_03_schema_from_v3_config_02
       - build_v3_config_04_resource_registry_from_v3_config_03
       - publish_v3_config_05_manifest_from_v3_config_04
+      - default_hub_v1_authoring
+      - default_server_execution
     allowed_paths:
       - v3/crates/routecodex-v3-config
       - docs/architecture/v3-resource-operation-map.yml

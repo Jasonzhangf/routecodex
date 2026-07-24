@@ -40,7 +40,7 @@ impl V3RelayProviderFailureRetryPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3RelayProviderFailureDecision {
     Reselect,
-    RetrySame(V3Target10ConcreteProviderSelected),
+    RetrySame(Box<V3Target10ConcreteProviderSelected>),
     ProjectTerminal,
 }
 
@@ -77,6 +77,21 @@ pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) trace: &'state mut Vec<&'static str>,
+}
+
+pub(crate) struct V3RelayProviderTargetResolutionInput<
+    'input,
+    R: V3ProviderAvailabilityReader + ?Sized,
+> {
+    pub(crate) manifest: &'input V3Config05ManifestPublished,
+    pub(crate) server_id: &'input str,
+    pub(crate) entry_kind: &'input str,
+    pub(crate) endpoint_path: &'input str,
+    pub(crate) body: &'input Value,
+    pub(crate) request_local_excluded_candidates: &'input BTreeSet<String>,
+    pub(crate) provider_health: &'input R,
+    pub(crate) now_ms: u64,
+    pub(crate) deterministic_sample: u64,
 }
 
 struct V3RelayExcludedAvailability<
@@ -203,17 +218,17 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .map_err(|error| error.to_string())?;
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    if let Ok(alternative) = resolve_v3_relay_target(
-        context.manifest,
-        context.server_id,
-        context.entry_kind,
-        context.endpoint_path,
-        context.route_facts_body,
-        &excluded_with_failed,
-        context.provider_health,
-        v3_relay_provider_policy_now_epoch_ms()?,
-        context.deterministic_sample,
-    ) {
+    if let Ok(alternative) = resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
+        manifest: context.manifest,
+        server_id: context.server_id,
+        entry_kind: context.entry_kind,
+        endpoint_path: context.endpoint_path,
+        body: context.route_facts_body,
+        request_local_excluded_candidates: &excluded_with_failed,
+        provider_health: context.provider_health,
+        now_ms: v3_relay_provider_policy_now_epoch_ms()?,
+        deterministic_sample: context.deterministic_sample,
+    }) {
         let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
         if alternative_key != candidate_key || !alternative.default_floor_protected {
             let wait_ms = (health_record.failure_count > 1)
@@ -227,14 +242,16 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             return Ok(V3RelayProviderFailurePolicyResult {
                 decision: V3RelayProviderFailureDecision::Reselect,
                 event: build_v3_relay_provider_failure_policy_event(
-                    selected.candidate,
-                    status,
-                    error_type,
-                    message,
-                    health_record,
-                    "switch_provider",
-                    Some(alternative_key),
-                    wait_ms,
+                    V3RelayProviderFailurePolicyEventInput {
+                        candidate: selected.candidate,
+                        status,
+                        error_type,
+                        message,
+                        health_record,
+                        action: "switch_provider",
+                        next_provider_key: Some(alternative_key),
+                        wait_ms,
+                    },
                 ),
             });
         }
@@ -248,14 +265,16 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             return Ok(V3RelayProviderFailurePolicyResult {
                 decision: V3RelayProviderFailureDecision::ProjectTerminal,
                 event: build_v3_relay_provider_failure_policy_event(
-                    selected.candidate,
-                    status,
-                    error_type,
-                    message,
-                    health_record,
-                    "terminal_default_floor_exhausted",
-                    None,
-                    None,
+                    V3RelayProviderFailurePolicyEventInput {
+                        candidate: selected.candidate,
+                        status,
+                        error_type,
+                        message,
+                        health_record,
+                        action: "terminal_default_floor_exhausted",
+                        next_provider_key: None,
+                        wait_ms: None,
+                    },
                 ),
             });
         }
@@ -268,16 +287,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             tokio::time::sleep(Duration::from_millis(wait_ms)).await;
         }
         return Ok(V3RelayProviderFailurePolicyResult {
-            decision: V3RelayProviderFailureDecision::RetrySame(selected.clone()),
+            decision: V3RelayProviderFailureDecision::RetrySame(Box::new(selected.clone())),
             event: build_v3_relay_provider_failure_policy_event(
-                selected.candidate,
-                status,
-                error_type,
-                message,
-                health_record,
-                "default_floor_retry_wait",
-                Some(candidate_key),
-                Some(wait_ms),
+                V3RelayProviderFailurePolicyEventInput {
+                    candidate: selected.candidate,
+                    status,
+                    error_type,
+                    message,
+                    health_record,
+                    action: "default_floor_retry_wait",
+                    next_provider_key: Some(candidate_key),
+                    wait_ms: Some(wait_ms),
+                },
             ),
         });
     }
@@ -294,16 +315,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         }
         return Ok(V3RelayProviderFailurePolicyResult {
-            decision: V3RelayProviderFailureDecision::RetrySame(selected.clone()),
+            decision: V3RelayProviderFailureDecision::RetrySame(Box::new(selected.clone())),
             event: build_v3_relay_provider_failure_policy_event(
-                selected.candidate,
-                status,
-                error_type,
-                message,
-                health_record,
-                "retry_provider",
-                Some(candidate_key),
-                wait_ms,
+                V3RelayProviderFailurePolicyEventInput {
+                    candidate: selected.candidate,
+                    status,
+                    error_type,
+                    message,
+                    health_record,
+                    action: "retry_provider",
+                    next_provider_key: Some(candidate_key),
+                    wait_ms,
+                },
             ),
         });
     }
@@ -311,53 +334,47 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     Ok(V3RelayProviderFailurePolicyResult {
         decision: V3RelayProviderFailureDecision::Reselect,
         event: build_v3_relay_provider_failure_policy_event(
-            selected.candidate,
-            status,
-            error_type,
-            message,
-            health_record,
-            "exclude_candidate",
-            None,
-            None,
+            V3RelayProviderFailurePolicyEventInput {
+                candidate: selected.candidate,
+                status,
+                error_type,
+                message,
+                health_record,
+                action: "exclude_candidate",
+                next_provider_key: None,
+                wait_ms: None,
+            },
         ),
     })
 }
 
 pub(crate) fn resolve_v3_relay_target<R: V3ProviderAvailabilityReader + ?Sized>(
-    manifest: &V3Config05ManifestPublished,
-    server_id: &str,
-    entry_kind: &str,
-    endpoint_path: &str,
-    body: &Value,
-    request_local_excluded_candidates: &BTreeSet<String>,
-    provider_health: &R,
-    now_ms: u64,
-    deterministic_sample: u64,
+    input: V3RelayProviderTargetResolutionInput<'_, R>,
 ) -> Result<V3Target10ConcreteProviderSelected, String> {
-    let facts = crate::build_v3_router_request_facts_for_entry(body, entry_kind);
+    let facts = crate::build_v3_router_request_facts_for_entry(input.body, input.entry_kind);
     let router = V3VirtualRouter::default();
     let classified = router
-        .classify_request_with_facts(manifest, server_id, endpoint_path, facts)
+        .classify_request_with_facts(input.manifest, input.server_id, input.endpoint_path, facts)
         .map_err(|error| format!("{error:?}"))?;
     let plan = router
-        .resolve_route_pool_plan(manifest, classified)
+        .resolve_route_pool_plan(input.manifest, classified)
         .map_err(|error| format!("{error:?}"))?;
     let hit = router
-        .hit_opaque_target_plan_once(plan, deterministic_sample)
+        .hit_opaque_target_plan_once(plan, input.deterministic_sample)
         .map_err(|error| format!("{error:?}"))?;
     let target = V3TargetInterpreter::default();
     let kind = target.classify_kind(hit);
     let expanded = target
-        .expand_candidates(manifest, kind, deterministic_sample)
+        .expand_candidates(input.manifest, kind, input.deterministic_sample)
         .map_err(|error| error.to_string())?;
     target
         .select_available(
             expanded,
             &V3RelayExcludedAvailability {
-                base: provider_health,
-                excluded: request_local_excluded_candidates,
+                base: input.provider_health,
+                excluded: input.request_local_excluded_candidates,
             },
-            now_ms,
+            input.now_ms,
         )
         .map_err(|error| format!("{error:?}"))
 }
@@ -392,25 +409,29 @@ pub(crate) fn v3_relay_provider_candidate_key_parts(
     )
 }
 
-fn build_v3_relay_provider_failure_policy_event(
+struct V3RelayProviderFailurePolicyEventInput {
     candidate: V3TargetCandidate,
     status: u16,
     error_type: Option<String>,
     message: String,
     health_record: V3ProviderFailureRecord,
-    action: &str,
+    action: &'static str,
     next_provider_key: Option<String>,
     wait_ms: Option<u64>,
+}
+
+fn build_v3_relay_provider_failure_policy_event(
+    input: V3RelayProviderFailurePolicyEventInput,
 ) -> V3RelayProviderFailurePolicyEvent {
     V3RelayProviderFailurePolicyEvent {
-        candidate,
-        status,
-        error_type,
-        message,
-        health_record,
-        action: action.to_string(),
-        next_provider_key,
-        wait_ms,
+        candidate: input.candidate,
+        status: input.status,
+        error_type: input.error_type,
+        message: input.message,
+        health_record: input.health_record,
+        action: input.action.to_string(),
+        next_provider_key: input.next_provider_key,
+        wait_ms: input.wait_ms,
     }
 }
 

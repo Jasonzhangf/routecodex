@@ -36,11 +36,17 @@ pub struct V3PipelinesAuthoringConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct V3HubV1AuthoringConfig {
+    #[serde(default = "default_hub_v1_skeleton")]
     pub skeleton: String,
+    #[serde(default)]
     pub entry_protocols: Vec<String>,
+    #[serde(default)]
     pub hook_set_id: String,
+    #[serde(default)]
     pub entry_protocol_bindings: Vec<V3EntryProtocolBindingAuthoringConfig>,
+    #[serde(default)]
     pub resources: BTreeMap<String, V3HubResourceAuthoringConfig>,
+    #[serde(default)]
     pub hooks: Vec<V3HubHookAuthoringConfig>,
 }
 
@@ -790,6 +796,10 @@ pub struct V3RoutePoolTargetManifest {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_hub_v1_skeleton() -> String {
+    "hub_v1".to_string()
 }
 
 fn default_responses_endpoint() -> Vec<String> {

@@ -174,6 +174,37 @@ fn parses_full_config_v3_without_interpreting_targets() {
 }
 
 #[test]
+fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
+    let compact = FULL_CONFIG.replacen(
+        "version = 3\n",
+        "version = 3\n\n[pipelines.hub_v1]\nskeleton = \"hub_v1\"\n",
+        1,
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&compact).unwrap()).unwrap();
+
+    let hub_v1 = manifest
+        .hub_v1
+        .as_ref()
+        .expect("compact native V3 authoring must derive the closed Hub V1 pipeline");
+    assert_eq!(
+        hub_v1.hooks.len(),
+        V3HubFixedNode::ALL.len() * V3HubHookPhase::ALL.len()
+    );
+    assert_eq!(hub_v1.entry_protocol_bindings.len(), 4);
+
+    let execution = manifest.servers["primary"]
+        .execution
+        .as_ref()
+        .expect("compact native V3 authoring must derive closed server execution policy");
+    assert_eq!(execution.allowed_modes, vec!["direct", "relay"]);
+    assert_eq!(
+        execution.continuation.scope_keys,
+        vec!["entry_protocol", "server", "routing_group", "session"]
+    );
+}
+
+#[test]
 fn rejects_recursive_forwarder_cycle() {
     let invalid = FULL_CONFIG.replace(
         "targets = [{ kind = \"forwarder\", id = \"fwd.gpt-5.6\" }]",

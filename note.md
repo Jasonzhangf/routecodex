@@ -32754,3 +32754,25 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Required generic actions remain only: `recoverable_no_penalty`, `disable_until_restart`, `periodic_recovery`. Provider-specific rules may map signatures into these three, but must not introduce a fourth runtime action path.
 - Example: `provider_id=glmrelay_openai`, `http_status=200`, `finish_reason=stop`, `usage_total_tokens=0`, content contains `mac超负荷运载，应该是挂了` -> configured `periodic_recovery` or other selected generic action. This matcher must live in config/compiled manifest, not Rust hardcode.
 - Runtime must apply provider error action policy before Resp03 stopless/servertool governance; Error06 redaction only affects client display and cannot drive retry/backoff.
+
+# 2026-07-24T13:45+08:00 V3 provider error unified interface contract gap audit
+
+- Scope: docs-only contract/gap/prompt work for `feature_id:v3.provider_error_unified_interface_contract`; no runtime code, config, global install, restart, or live mutation.
+- Fixed skeleton in `docs/goals/v3-provider-error-unified-interface-contract-plan.md`: three entries (`direct_code`, `response_semantic`, `hook_codec`) -> one `ProviderErrorRulePort::normalize_provider_error_signal` -> exits (`error_chain`, `route_execution`, `health`, `client_projection`, `observability`).
+- Gap evidence: live sample `~/.rcc/codex-samples/openai-responses/ports/5555/openai-responses-router-gpt-5.5-20260724T120002045-611803-2288/` is HTTP 200 SSE diagnostic text with zero usage, but current response projects `status=200`, `response_status=requires_action`, `provider_failure_events=[]`, `stopless_activation=true`.
+- Source gap evidence: `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs::openai_chat_provider_diagnostic_message` hardcodes provider diagnostic phrase detection (`mac超负荷运载` / `挂了`) and reports a codec error; this detection point is before Resp03 but ownership must become config-compiled provider policy + unified signal, not runtime phrase branch.
+- Required repair direction: add config manifest policy, normalized ProviderErrorSignal, action classes (`recoverable_no_penalty`, `disable_until_restart`, `periodic_recovery`), exit bundle, red gates for hardcoded provider phrases, sample replay, global install/restart/live replay before claiming closeout.
+
+## 2026-07-24 11:13 CST - V3 review surface quality gate hardening
+- Finding: `v3-mainline-caller-flow.html` and `v3-req04-tool-governance-review.html` used dedicated annotated renderers, but `v3-mainline-skeleton-sop.html` fell back to generic Markdown rendering, so the locked SOP review surface was visually/semantically below the already accepted tool-governance review standard.
+- Fix: `scripts/architecture/wiki-html-lib.mjs` now generates `v3-mainline-skeleton-sop.html` with a dedicated review renderer: hero/meta, separated request/response diagrams, node logic cards, error resources, SSE Edge SOP, lock fingerprint table, change authorization contract, and canonical sources.
+- Gate: `scripts/architecture/verify-architecture-wiki-html-sync.mjs` now audits SOP HTML markers and fails if the V3 locked SOP falls back to generic Markdown HTML or lacks separate request/response diagrams.
+- Skill hardening: `.agents/skills/rcc-v3-architecture/SKILL.md` now states locked V3 SOP pages and small-skeleton pages must use generated annotated HTML with the shared review surface shape; generic Markdown-to-HTML is forbidden for final locked review surfaces.
+- Gates passed: `npm run render:architecture-wiki-html`, `npm run verify:architecture-wiki-html-sync`, `npm run verify:v3-mainline-caller-flow`, `npm run verify:v3-architecture-docs`, `git diff --check`.
+
+## 2026-07-24T14:20+08:00 V3 dedicated review surface gap closeout
+- Finding: four V3 review surfaces still used weak/generic HTML or lacked machine-checkable review markers: `v3-entry-protocol-endpoint-binding`, `v3-openai-chat-relay-controlled-runtime`, `v3-gemini-relay-controlled-runtime`, and `v3-protocol-normalization-tool-governance-boundary`.
+- Fix: `scripts/architecture/wiki-html-lib.mjs` now routes those pages through a dedicated V3 review renderer with hero/meta, separate request/response Mermaid diagrams, node logic cards, resource/checklist tables, canonical sources, and `data-review-surface` markers; `verify:architecture-wiki-html-sync` audits those markers and fails generic renderer fallback.
+- Registry: `v3-protocol-normalization-tool-governance-boundary.md` is explicitly registered in `architecture-wiki-lib.mjs`, so render/sync covers the page instead of leaving stale HTML.
+- Skill hardening: `.agents/skills/rcc-v3-architecture/SKILL.md` now locks controlled-runtime and protocol/entry-boundary surfaces to dedicated annotated HTML, not generic Markdown rendering.
+- Gates passed: `node --check` for touched architecture scripts, `npm run render:architecture-wiki-html`, `npm run verify:architecture-wiki-html-sync`, `node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs`, `npm run verify:v3-mainline-caller-flow`, `npm run verify:v3-architecture-docs`, `git diff --check`.

@@ -92,9 +92,28 @@ fn expected_entry_protocol_execution_modes(
 fn compile_hub_v1(
     authoring: Option<V3HubV1AuthoringConfig>,
 ) -> Result<Option<V3HubV1Manifest>, V3ConfigError> {
-    let Some(authoring) = authoring else {
+    let Some(mut authoring) = authoring else {
         return Ok(None);
     };
+    let defaults = crate::defaults::default_hub_v1_authoring();
+    if authoring.skeleton.trim().is_empty() {
+        authoring.skeleton = defaults.skeleton.clone();
+    }
+    if authoring.entry_protocols.is_empty() {
+        authoring.entry_protocols = defaults.entry_protocols.clone();
+    }
+    if authoring.hook_set_id.trim().is_empty() {
+        authoring.hook_set_id = defaults.hook_set_id.clone();
+    }
+    if authoring.entry_protocol_bindings.is_empty() {
+        authoring.entry_protocol_bindings = defaults.entry_protocol_bindings.clone();
+    }
+    if authoring.resources.is_empty() {
+        authoring.resources = defaults.resources.clone();
+    }
+    if authoring.hooks.is_empty() {
+        authoring.hooks = defaults.hooks.clone();
+    }
     if authoring.skeleton != "hub_v1" {
         return Err(validation("hub_v1 skeleton must be hub_v1"));
     }
@@ -469,11 +488,10 @@ fn compile_servers(
             }
             let execution = match server.execution {
                 Some(execution) => Some(compile_server_execution(&id, execution)?),
-                None if hub_v1_enabled => {
-                    return Err(validation(format!(
-                        "hub_v1 server {id} is missing execution declarations"
-                    )))
-                }
+                None if hub_v1_enabled => Some(compile_server_execution(
+                    &id,
+                    crate::defaults::default_server_execution(),
+                )?),
                 None => None,
             };
             Ok((

@@ -1,10 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { renderArchitectureWikiHtmlPages } from './wiki-html-lib.mjs';
+import {
+  auditV3DedicatedReviewSurfacesHtml,
+  auditV3MainlineSkeletonSopHtmlText,
+  renderArchitectureWikiHtmlPages,
+} from './wiki-html-lib.mjs';
 import {
   auditV3Req04ToolGovernanceReviewHtmlText,
   V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH,
 } from './v3-req04-tool-governance-review-lib.mjs';
+import { V3_MAINLINE_SKELETON_SOP_PATH } from './v3-mainline-caller-flow-lib.mjs';
 
 const root = process.cwd();
 const expected = renderArchitectureWikiHtmlPages(root);
@@ -22,6 +27,8 @@ for (const [relPath, content] of expected.entries()) {
   }
 }
 
+failures.push(...auditV3DedicatedReviewSurfacesHtml(expected));
+
 const req04HtmlPath = path.join(
   'docs/architecture/wiki/html',
   path.basename(V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH).replace(/\.md$/u, '.html'),
@@ -31,6 +38,18 @@ if (!req04Expected) {
   failures.push(`${req04HtmlPath}: missing generated Req04 HTML expectation`);
 } else {
   failures.push(...auditV3Req04ToolGovernanceReviewHtmlText(req04Expected, req04HtmlPath));
+}
+
+
+const sopHtmlPath = path.join(
+  'docs/architecture/wiki/html',
+  path.basename(V3_MAINLINE_SKELETON_SOP_PATH).replace(/\.md$/u, '.html'),
+);
+const sopExpected = expected.get(sopHtmlPath);
+if (!sopExpected) {
+  failures.push(`${sopHtmlPath}: missing generated V3 mainline SOP HTML expectation`);
+} else {
+  failures.push(...auditV3MainlineSkeletonSopHtmlText(sopExpected, sopHtmlPath));
 }
 
 if (failures.length > 0) {

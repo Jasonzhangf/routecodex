@@ -357,7 +357,7 @@ impl V3ManagedLifecycle {
                     child.id()
                 )));
             }
-            if let Ok(status) = self.query_live(&declaration).await {
+            if let Ok(status) = self.query_live(declaration).await {
                 if status.state == V3ManagedRunState::Running {
                     return Ok(status);
                 }
@@ -1216,8 +1216,8 @@ fn exec_restart_adoption_candidate_matches_current_process(
                 "exec restart adoption candidate pid/control cache does not match".to_string(),
             ));
         }
-        if PathBuf::from(&control.socket_path)
-            != managed_control_socket_path(&published.instance_id)
+        if Path::new(&control.socket_path)
+            != managed_control_socket_path(&published.instance_id).as_path()
         {
             return Err(V3LifecycleError::IdentityMismatch(
                 "exec restart adoption candidate has non-canonical control socket".to_string(),

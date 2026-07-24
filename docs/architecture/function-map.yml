@@ -9169,7 +9169,7 @@ owners:
     status: active
     summary: "V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract"
     owner_kind: rust_ssot
-    owner_scope: "routecodex-v3-config owns V2 root/provider TOML detection, V2-to-V3 authoring projection, canonical Hub V1 endpoint/server execution declarations, provider secret-handle materialization, and manifest publication for V3 runtime consumption; runtime/server/CLI only consume V3Config05ManifestPublished"
+    owner_scope: "routecodex-v3-config owns V2 root/provider TOML detection, V2-to-V3 authoring projection, shared Hub V1 endpoint/server execution defaults, provider secret-handle materialization, and manifest publication for V3 runtime consumption; runtime/server/CLI only consume V3Config05ManifestPublished"
     owner_module: v3/crates/routecodex-v3-config/src/v2_compat.rs
     resource_bindings:
       writes:
@@ -9191,12 +9191,11 @@ owners:
     canonical_builders:
       - compile_v2_config_02_authoring_from_file
       - compile_v2_root
-      - default_v2_hub_v1_authoring
-      - default_v2_server_execution
       - compile_v2_providers
       - compile_v2_route_groups
     allowed_paths:
       - v3/crates/routecodex-v3-config/src/lib.rs
+      - v3/crates/routecodex-v3-config/src/defaults.rs
       - v3/crates/routecodex-v3-config/src/store.rs
       - v3/crates/routecodex-v3-config/src/v2_compat.rs
       - v3/crates/routecodex-v3-config/src/validate.rs
