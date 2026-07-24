@@ -184,6 +184,28 @@ const cases = [
     diagnostic: /request\.tool_choice\.allowed_function_names/u,
   },
   {
+    name: 'Gemini thinkingConfig budget extension row removed',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '    - extended_openai_chat_field: request.reasoning.budget_tokens\n      semantic_id: request.reasoning.budget_tokens\n',
+    to: '    - extended_openai_chat_field: request.reasoning.budget_removed\n      semantic_id: request.reasoning.budget_removed\n',
+    diagnostic: /request\.reasoning\.budget_tokens|thinkingBudget/u,
+  },
+  {
+    name: 'Gemini includeThoughts collapses into native reasoning_effort',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        gemini:\n          - request.generationConfig.thinkingConfig.thinkingLevel\n      source_classification: canonical_chat_fields\n',
+    to: '        gemini:\n          - request.generationConfig.thinkingConfig.thinkingLevel\n          - request.generationConfig.thinkingConfig.includeThoughts\n      source_classification: canonical_chat_fields\n',
+    diagnostic: /reasoning_effort.*includeThoughts|must not collapse Gemini request\.generationConfig\.thinkingConfig\.includeThoughts|source field gemini\.request\.generationConfig\.thinkingConfig\.includeThoughts mapped to superset/u,
+  },
+  {
+    name: 'Gemini thinkingConfig helper removed from codec',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
+    from: 'collect_v3_gemini_request_thinking_config_semantics',
+    to: 'collect_v3_gemini_request_thinking_config_removed',
+    all: true,
+    diagnostic: /collect_v3_gemini_request_thinking_config_semantics/u,
+  },
+  {
     name: 'Gemini toolConfig helper removed from codec',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
     from: 'collect_v3_gemini_request_tool_config_semantics',
