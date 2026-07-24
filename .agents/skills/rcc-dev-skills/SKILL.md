@@ -208,6 +208,7 @@ description: RouteCodex 调试与架构路由入口
 - Hub Pipeline Rust 残留引用 gate：先跑 `verify:hub-pipeline-native-reference-gate` 和 red fixture，区分 private loader、owner-specific host、white-box mock、direct-native evidence、doc stale owner；runtime 禁 import direct-native helper，docs/wiki 禁把 broad `native-exports.ts` 写成语义 owner。
 - Thin-wrapper closeout 不能以空扫描为证据：`verify:architecture-thin-wrapper-only` 必须覆盖根仓 bridge/handler/converter/executor host 面并在 `rootHostCheckedFiles=0` 时失败；red fixture 要分别锁 second writer、TS ErrorErr 分类、flat metadata fallback、semantic payload fallback、malformed Rust plan downgrade 和 broad/dead facade 复活。
 - V3 Relay hook/resource 声明面：Config 只发布 Manifest 声明，Runtime 只消费 `V3Config05ManifestPublished` 并借用资源/Hook 声明；禁止 runtime 读 config 文件/目录、动态发现/加载 hook、把 side-channel resource 写进 provider/client body，或为了 hook 规划 retain/full clone/JSON round-trip/SSE materialize/snapshot-copy 当前节点业务 payload。
+- V3 compact Hub config live closeout: after `v3.config.compact_hub_v1_defaults` is locked, real `~/.rcc/config.v3.toml` and `/Volumes/extension/.rcc/config.v3.toml` must contain only `[pipelines.hub_v1] skeleton = "hub_v1"` for Hub internals; remove expanded entry/hook/resource/server execution blocks, run `rccv3 config check`, scan for expanded fields, then use only `routecodex restart --port 5555` and provider-request dry-run for live evidence.
 
 ## 快查命令
 - 查 owner：
