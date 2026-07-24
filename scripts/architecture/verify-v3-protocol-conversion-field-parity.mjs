@@ -6,10 +6,12 @@ const paths = {
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   responsesTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+  responsesAnthropicProviderTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
   anthropicTests: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
   openaiTests: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   functionMap: 'docs/architecture/v3-function-map.yml',
@@ -26,6 +28,7 @@ for (const phrase of [
   'Responses entry -> OpenAI Chat provider wire -> Responses client projection',
   'Anthropic Messages entry -> Responses provider wire -> Anthropic Messages client projection',
   'OpenAI Chat entry -> OpenAI Chat provider wire -> OpenAI Chat client projection',
+  'Responses entry -> Anthropic Messages provider wire -> Responses client projection',
   '`metadata` and `client_metadata` in client protocol bodies are data-plane fields',
   'Forbidden owners: server handler, SSE transport, provider transport, continuation store, MetadataCenter, TS runtime, V2 sharedmodule code.',
   'RouteCodex-created control fields',
@@ -46,6 +49,8 @@ for (const phrase of [
   '"metadata"',
   '"client_metadata"',
   '"stop"',
+  'responses_reasoning_request_config_as_openai_chat_reasoning_effort',
+  '"reasoning_effort"',
 ]) requireText(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, phrase);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
   '"max_output_tokens"',
@@ -107,6 +112,52 @@ for (const phrase of [
 ]) requireText(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, phrase);
 forbid(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
 
+const responsesRequestToAnthropic = functionSlice(
+  text.anthropicCodec,
+  paths.anthropicCodec,
+  'pub fn encode_v3_responses_semantic_as_anthropic_request',
+  'pub fn project_v3_anthropic_message_as_responses_response',
+);
+for (const phrase of [
+  'pub fn encode_v3_responses_semantic_as_anthropic_request',
+  'if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {',
+  'responses_reasoning_request_config_as_anthropic_thinking',
+  'responses_reasoning_effort_as_anthropic_budget',
+  '"budget_tokens"',
+  'output.insert("thinking".to_string(), thinking)',
+]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
+forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
+
+const providerReqCompat = functionSlice(
+  text.providerReqCompat,
+  paths.providerReqCompat,
+  'fn build_v3_provider_standard_protocol_payload_from_req07',
+  'fn __v3_provider_req_compat_slice_end__',
+);
+for (const phrase of [
+  'V3HubProviderWireProtocol::Anthropic',
+  'build_v3_responses_original_input_surface_from_chat_canonical',
+  'input.original_responses_payload()',
+]) requireText(providerReqCompat, `${paths.providerReqCompat}::anthropic_original_responses_surface`, phrase);
+forbid(providerReqCompat, `${paths.providerReqCompat}::anthropic_original_responses_surface`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
+
+const responsesOriginalInputSurface = functionSlice(
+  text.requestOutboundFormat,
+  paths.requestOutboundFormat,
+  'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
+  'fn has_responses_non_message_input_surface',
+);
+for (const phrase of [
+  'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
+  'original.get("input")?;',
+  'merge_chat_governance_into_original_responses_surface',
+  'normalize_responses_payload_for_provider_standard',
+]) requireText(responsesOriginalInputSurface, `${paths.requestOutboundFormat}::responses_original_input_surface`, phrase);
+forbid(responsesOriginalInputSurface, `${paths.requestOutboundFormat}::responses_original_input_surface`, [
+  /original\.get\("input"\)\.and_then\(Value::as_array\)\?/,
+  /MetadataCenter|metadata_center|runtime_control/i,
+]);
+
 const responsesToAnthropic = functionSlice(
   text.anthropicProjection,
   paths.anthropicProjection,
@@ -129,6 +180,15 @@ for (const [owner, body, phrases] of [
     'responses_openai_chat_field_parity_response_matrix',
     '"metadata":{"client":"metadata-kept"}',
     'OpenAI Chat provider wire must not forward non-standard client_metadata',
+    'body["reasoning_effort"]',
+    'OpenAI Chat provider wire must project Responses reasoning to reasoning_effort',
+  ]],
+  [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
+    'responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking',
+    'responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking',
+    'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
+    'json!({"type":"enabled","budget_tokens":4096})',
+    '"type":"thinking"',
   ]],
   [paths.anthropicTests, text.anthropicTests, [
     'anthropic_responses_field_parity_request_matrix',
@@ -146,6 +206,7 @@ for (const [owner, body, phrases] of [
     'feature_id: v3.protocol_conversion_field_parity',
     'v3-protocol-field-parity-responses-chat-req-01',
     'v3-protocol-field-parity-responses-chat-resp-01',
+    'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-anthropic-responses-req-01',
     'v3-protocol-field-parity-responses-anthropic-resp-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
@@ -153,17 +214,20 @@ for (const [owner, body, phrases] of [
     'npm run test:v3-protocol-conversion-field-parity-red-fixtures',
     'build_v3_chat_canonical_request_from_responses_payload',
     'build_v3_openai_chat_standard_request_from_chat_canonical',
+    'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
   ]],
   [paths.mainlineMap, text.mainlineMap, [
     'chain_id: v3.protocol_conversion_field_parity',
     'binding_kind: protocol_field_parity_test_over_existing_relay_chain',
     'v3-protocol-field-parity-responses-chat-req-01',
+    'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
   ]],
   [paths.verificationMap, text.verificationMap, [
     'feature_id: v3.protocol_conversion_field_parity',
     'Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop',
     'Anthropic thinking is preserved under Responses reasoning.thinking',
+    'Responses reasoning.effort/summary request config reaches Anthropic provider wire as thinking',
     'npm run test:v3-protocol-conversion-field-parity',
   ]],
   [paths.resourceMap, text.resourceMap, [

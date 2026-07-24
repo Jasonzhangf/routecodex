@@ -86,6 +86,56 @@ fn responses_custom_tool_call_raw_input_encodes_as_anthropic_tool_use_object() {
 }
 
 #[test]
+fn responses_reasoning_request_config_projects_to_anthropic_thinking_wire() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": true,
+        "reasoning":{"effort":"medium","summary":"detailed"},
+        "input":[
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"keep reasoning enabled"}]
+            }
+        ]
+    }))
+    .expect("Responses reasoning request config must be valid Anthropic wire");
+
+    assert_eq!(
+        provider_request["thinking"],
+        json!({"type":"enabled","budget_tokens":4096})
+    );
+    assert!(
+        provider_request.get("reasoning").is_none(),
+        "Responses reasoning must be projected to Anthropic thinking, not leaked as provider body reasoning: {provider_request}"
+    );
+}
+
+#[test]
+fn responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": false,
+        "reasoning":{
+            "effort":"high",
+            "summary":"auto",
+            "thinking":{"type":"enabled","budget_tokens":8192}
+        },
+        "input":"preserve Anthropic-compatible thinking"
+    }))
+    .expect("Responses reasoning.thinking must stay lossless for Anthropic wire");
+
+    assert_eq!(
+        provider_request["thinking"],
+        json!({"type":"enabled","budget_tokens":8192})
+    );
+    assert!(
+        provider_request.get("reasoning").is_none(),
+        "Anthropic provider wire must not carry Responses reasoning config: {provider_request}"
+    );
+}
+
+#[test]
 fn responses_replay_safe_reasoning_null_content_does_not_enter_anthropic_messages() {
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",

@@ -11,6 +11,7 @@ Supported V3 runtime paths in this slice:
 1. Responses entry -> OpenAI Chat provider wire -> Responses client projection.
 2. Anthropic Messages entry -> Responses provider wire -> Anthropic Messages client projection.
 3. OpenAI Chat entry -> OpenAI Chat provider wire -> OpenAI Chat client projection.
+4. Responses entry -> Anthropic Messages provider wire -> Responses client projection.
 
 V2 reference files are read-only comparison sources:
 
@@ -25,6 +26,7 @@ V2 reference files are read-only comparison sources:
 | Responses request -> OpenAI Chat provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs` + `v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs` | Adjacent Req02/Req07 Chat canonical -> provider standard mapping only |
 | OpenAI Chat provider response -> Responses semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs` | Provider RespInbound codec / semantic projection only |
 | Anthropic request -> Responses provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs` | Anthropic entry codec mapping only |
+| Responses request -> Anthropic provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs` + `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs` | Req07/Compat06 must preserve original Responses request reasoning config until Anthropic thinking wire encoding |
 | Responses provider response -> Anthropic client projection | `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs` | Client protocol projection only |
 | Chat request/response pass-through | `v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs` and `openai_chat_relay_runtime.rs` | Preserve same-protocol payload; no cross-protocol repair |
 
@@ -60,6 +62,12 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `stop` | preserved | request matrix |
 | RouteCodex control fields | rejected before wire | negative gate already existing; keep covered |
 
+### Responses request -> OpenAI Chat provider wire
+
+| Responses field | OpenAI Chat provider wire | Required test |
+| --- | --- | --- |
+| `reasoning.effort` / `reasoning.summary` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
+
 ### OpenAI Chat provider response -> Responses projection
 
 | Chat field | Responses projection | Required test |
@@ -73,6 +81,15 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `finish_reason` | `finish_reason` and status terminality | response matrix |
 | `usage.prompt_tokens/completion_tokens/total_tokens` | `usage.input_tokens/output_tokens/total_tokens` | response matrix |
 | malformed custom-tool wrapper | explicit error, not `{}` or text fallback | negative test |
+
+### Responses request -> Anthropic provider wire
+
+| Responses field | Anthropic provider wire / Responses client projection | Required test |
+| --- | --- | --- |
+| `reasoning.effort` / `reasoning.summary` | top-level Anthropic `thinking` request config with deterministic `budget_tokens` | `responses_reasoning_request_config_projects_to_anthropic_thinking_wire` and runtime provider-wire matrix |
+| `reasoning.thinking` | exact top-level Anthropic `thinking` object preserved for Anthropic-compatible projection | `responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape` |
+| original Responses request surface after Req04 governance | preserved through `ProviderReqCompat06ProviderCompat` before Anthropic wire codec for both `input[]` and string `input` request forms | `responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking` and `responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking` |
+| Anthropic provider `thinking` JSON/SSE response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` and SSE reasoning tests |
 
 ### Anthropic request -> Responses provider semantic
 

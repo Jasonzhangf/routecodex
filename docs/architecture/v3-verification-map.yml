@@ -1313,6 +1313,7 @@ features:
     owner_scope: "Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths without server/SSE/provider-transport/MetadataCenter repair owners."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
@@ -1323,10 +1324,12 @@ features:
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
     required_unit:
-      - Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format, and token fields while rejecting non-standard client_metadata from provider wire.
+      - Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format, token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
       - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
       - Anthropic thinking is preserved under Responses reasoning.thinking rather than compressed to effort-only state.
+      - Responses reasoning.effort/summary request config reaches Anthropic provider wire as thinking for both `input[]` and string `input`, and never leaks as Responses reasoning.
+      - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
       - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
     required_blackbox:

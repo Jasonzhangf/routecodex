@@ -36,7 +36,10 @@ impl ResponsesTransport for AnthropicProviderJsonTransport {
                 "type":"message",
                 "role":"assistant",
                 "model":"MiniMax-M3",
-                "content":[{"type":"text","text":"RCC_V3_MINIMAX_BASIC_OK"}],
+                "content":[
+                    {"type":"thinking","thinking":"basic plan"},
+                    {"type":"text","text":"RCC_V3_MINIMAX_BASIC_OK"}
+                ],
                 "usage":{"input_tokens":7,"output_tokens":5},
                 "stop_reason":"end_turn"
             }))
@@ -90,14 +93,156 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     };
     assert_eq!(client["id"], "msg_minimax_json");
     assert_eq!(client["status"], "completed");
-    assert_eq!(client["output"][0]["role"], "assistant");
+    assert_eq!(client["output"][0]["type"], "reasoning");
+    assert_eq!(client["output"][0]["summary"][0]["text"], "basic plan");
+    assert_eq!(client["output"][1]["role"], "assistant");
     assert_eq!(
-        client["output"][0]["content"][0]["text"],
+        client["output"][1]["content"][0]["text"],
         "RCC_V3_MINIMAX_BASIC_OK"
     );
     assert_eq!(client["usage"]["input_tokens"], 7);
     assert_eq!(client["usage"]["output_tokens"], 5);
     assert_eq!(client["usage"]["total_tokens"], 12);
+}
+
+#[tokio::test]
+async fn responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            request_id: "req-responses-reasoning-to-anthropic-thinking".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"Use reasoning before answer"}]}],
+                "reasoning":{"effort":"medium","summary":"detailed"},
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        captured["thinking"],
+        json!({"type":"enabled","budget_tokens":4096})
+    );
+    assert!(
+        captured.get("reasoning").is_none(),
+        "Anthropic provider request must receive thinking, not Responses reasoning: {captured}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking(
+) {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            request_id: "req-responses-string-reasoning-to-anthropic-thinking".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":"Use reasoning before answering this string-input request",
+                "reasoning":{"effort":"medium","summary":"detailed"},
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        captured["thinking"],
+        json!({"type":"enabled","budget_tokens":4096})
+    );
+    assert!(
+        captured.get("reasoning").is_none(),
+        "Anthropic provider request must receive thinking for string input without leaking Responses reasoning: {captured}"
+    );
+}
+
+struct AnthropicProviderJsonReasoningTransport;
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderJsonReasoningTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        assert_eq!(
+            request.url(),
+            "http://controlled.invalid/anthropic/v1/messages"
+        );
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"msg_minimax_json_reasoning",
+                "type":"message",
+                "role":"assistant",
+                "model":"MiniMax-M3",
+                "content":[
+                    {"type":"thinking","thinking":"plan before answer","signature":"sig-json-1"},
+                    {"type":"text","text":"answer"}
+                ],
+                "usage":{"input_tokens":7,"output_tokens":5},
+                "stop_reason":"end_turn"
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning() {
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            request_id: "req-responses-anthropic-json-reasoning".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
+                "stream":false
+            }),
+        },
+        &AnthropicProviderJsonReasoningTransport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let client = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(client["output"][0]["type"], "reasoning");
+    assert_eq!(
+        client["output"][0]["summary"][0]["text"],
+        "plan before answer"
+    );
+    assert_eq!(client["output"][0]["encrypted_content"], "sig-json-1");
+    assert_eq!(client["output"][1]["content"][0]["text"], "answer");
 }
 
 struct AnthropicProviderSseReasoningTransport;

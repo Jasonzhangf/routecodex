@@ -122,7 +122,75 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             request.insert(key.to_string(), value.clone());
         }
     }
+    if let Some(reasoning_effort) =
+        responses_reasoning_request_config_as_openai_chat_reasoning_effort(root)
+    {
+        request.insert("reasoning_effort".to_string(), reasoning_effort);
+    }
     Ok(Value::Object(request))
+}
+
+fn responses_reasoning_request_config_as_openai_chat_reasoning_effort(
+    root: &Map<String, Value>,
+) -> Option<Value> {
+    if let Some(reasoning_effort) = root.get("reasoning_effort") {
+        return Some(reasoning_effort.clone());
+    }
+    let reasoning = root.get("reasoning");
+    let effort = reasoning
+        .and_then(|reasoning| {
+            reasoning
+                .get("effort")
+                .or_else(|| reasoning.get("mode"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| reasoning.and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+        .map(|effort| effort.to_ascii_lowercase());
+    if matches!(
+        effort.as_deref(),
+        Some("none" | "off" | "disabled" | "disable" | "false")
+    ) {
+        return None;
+    }
+    if let Some(effort) = effort {
+        return Some(Value::String(effort));
+    }
+    let reasoning = reasoning?;
+    let Value::Object(object) = reasoning else {
+        return None;
+    };
+    let summary_requests_reasoning = object
+        .get("summary")
+        .and_then(responses_reasoning_summary_requests_openai_chat_reasoning_effort)
+        .unwrap_or(false);
+    if summary_requests_reasoning || object.get("context").is_some() {
+        return Some(Value::String("medium".to_string()));
+    }
+    None
+}
+
+fn responses_reasoning_summary_requests_openai_chat_reasoning_effort(
+    summary: &Value,
+) -> Option<bool> {
+    match summary {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) => {
+            let value = value.trim().to_ascii_lowercase();
+            if value.is_empty() {
+                Some(false)
+            } else {
+                Some(!matches!(
+                    value.as_str(),
+                    "none" | "off" | "disabled" | "disable" | "false"
+                ))
+            }
+        }
+        Value::Array(items) => Some(!items.is_empty()),
+        Value::Object(object) => Some(!object.is_empty()),
+        _ => None,
+    }
 }
 
 fn append_v3_openai_chat_message_preserving_tool_adjacency(

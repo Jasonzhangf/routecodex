@@ -104,8 +104,17 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
                 input.provider_semantic_payload(),
             )
         }
-        V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::Gemini => {
+        V3HubProviderWireProtocol::Anthropic => {
+            if let Some(original_surface) =
+                build_v3_responses_original_input_surface_from_chat_canonical(
+                    input.provider_semantic_payload(),
+                    input.original_responses_payload(),
+                )
+            {
+                return Ok(original_surface);
+            }
             Ok(input.provider_semantic_payload().clone())
         }
+        V3HubProviderWireProtocol::Gemini => Ok(input.provider_semantic_payload().clone()),
     }
 }

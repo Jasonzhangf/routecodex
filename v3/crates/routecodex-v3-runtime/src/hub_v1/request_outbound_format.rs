@@ -158,7 +158,7 @@ pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical(
     original_responses_payload: Option<&Value>,
 ) -> Option<Value> {
     let original = original_responses_payload?;
-    original.get("input").and_then(Value::as_array)?;
+    original.get("input")?;
     let mut projected = strip_private_fields(original);
     merge_chat_governance_into_original_responses_surface(&mut projected, payload);
     if !has_responses_non_message_input_surface(&projected) {

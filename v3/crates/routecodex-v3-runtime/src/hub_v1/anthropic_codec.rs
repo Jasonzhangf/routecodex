@@ -227,11 +227,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
             responses_tool_choice_as_anthropic_tool_choice(tool_choice)?,
         );
     }
-    if let Some(thinking) = object
-        .get("reasoning")
-        .and_then(|reasoning| reasoning.get("thinking"))
-        .cloned()
-    {
+    if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {
         output.insert("thinking".to_string(), thinking);
     }
     for key in ["metadata", "temperature", "top_p", "top_k", "user"] {
@@ -258,6 +254,133 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         ),
     );
     Ok(Value::Object(output))
+}
+
+fn responses_reasoning_request_config_as_anthropic_thinking(
+    object: &Map<String, Value>,
+) -> Option<Value> {
+    let reasoning = object.get("reasoning");
+    if let Some(thinking) = reasoning.and_then(|reasoning| reasoning.get("thinking")) {
+        return Some(thinking.clone());
+    }
+
+    let effort = responses_reasoning_effort(reasoning, object.get("reasoning_effort"));
+    let explicit_budget = reasoning
+        .and_then(|reasoning| reasoning.get("budget_tokens"))
+        .or_else(|| reasoning.and_then(|reasoning| reasoning.get("thinking_budget")))
+        .and_then(responses_reasoning_budget_tokens);
+    if !responses_reasoning_config_requests_thinking(reasoning, effort.as_deref(), explicit_budget)
+    {
+        return None;
+    }
+
+    let mut thinking = Map::new();
+    thinking.insert("type".to_string(), Value::String("enabled".to_string()));
+    thinking.insert(
+        "budget_tokens".to_string(),
+        json!(explicit_budget.unwrap_or_else(|| {
+            responses_reasoning_effort_as_anthropic_budget(effort.as_deref())
+        })),
+    );
+    if let Some(display) = reasoning.and_then(|reasoning| reasoning.get("display")) {
+        thinking.insert("display".to_string(), display.clone());
+    }
+    Some(Value::Object(thinking))
+}
+
+fn responses_reasoning_effort(
+    reasoning: Option<&Value>,
+    legacy_reasoning_effort: Option<&Value>,
+) -> Option<String> {
+    reasoning
+        .and_then(|reasoning| {
+            reasoning
+                .get("effort")
+                .or_else(|| reasoning.get("mode"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| legacy_reasoning_effort.and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+        .map(|effort| effort.to_ascii_lowercase())
+}
+
+fn responses_reasoning_config_requests_thinking(
+    reasoning: Option<&Value>,
+    effort: Option<&str>,
+    explicit_budget: Option<u64>,
+) -> bool {
+    if matches!(
+        effort,
+        Some("none" | "off" | "disabled" | "disable" | "false")
+    ) {
+        return false;
+    }
+    if explicit_budget.is_some() {
+        return true;
+    }
+    if let Some(effort) = effort {
+        return !effort.trim().is_empty();
+    }
+    let Some(reasoning) = reasoning else {
+        return false;
+    };
+    match reasoning {
+        Value::Object(object) => {
+            let summary_requests_reasoning = object
+                .get("summary")
+                .and_then(responses_reasoning_summary_requests_thinking)
+                .unwrap_or(false);
+            let context_requests_reasoning = object.get("context").is_some();
+            summary_requests_reasoning || context_requests_reasoning
+        }
+        Value::String(value) => {
+            let value = value.trim().to_ascii_lowercase();
+            !value.is_empty()
+                && !matches!(
+                    value.as_str(),
+                    "none" | "off" | "disabled" | "disable" | "false"
+                )
+        }
+        _ => false,
+    }
+}
+
+fn responses_reasoning_summary_requests_thinking(summary: &Value) -> Option<bool> {
+    match summary {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) => {
+            let value = value.trim().to_ascii_lowercase();
+            if value.is_empty() {
+                Some(false)
+            } else {
+                Some(!matches!(
+                    value.as_str(),
+                    "none" | "off" | "disabled" | "disable" | "false"
+                ))
+            }
+        }
+        Value::Array(items) => Some(!items.is_empty()),
+        Value::Object(object) => Some(!object.is_empty()),
+        _ => None,
+    }
+}
+
+fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
+        .filter(|budget| *budget > 0)
+}
+
+fn responses_reasoning_effort_as_anthropic_budget(effort: Option<&str>) -> u64 {
+    match effort.unwrap_or("medium") {
+        "minimal" | "low" => 1024,
+        "medium" | "auto" => 4096,
+        "high" => 8192,
+        "xhigh" | "max" | "maximum" => 16384,
+        _ => 4096,
+    }
 }
 
 pub fn project_v3_anthropic_message_as_responses_response(

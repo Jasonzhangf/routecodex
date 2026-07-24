@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.3971",
+  "version": "0.90.3976",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -257,7 +257,7 @@
     "test:v3-h2-p6-controlled-replay": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test h2_p6_controlled_replay -- --nocapture",
     "verify:v3-resource-relation-edge-lock": "node scripts/architecture/verify-v3-resource-relation-edge-lock.mjs",
     "test:v3-resource-relation-edge-lock-red-fixtures": "node scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs",
-    "test:v3-protocol-conversion-field-parity": "CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_runtime_integration anthropic_responses_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_same_protocol_field_parity -- --nocapture",
+    "test:v3-protocol-conversion-field-parity": "CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_runtime_integration anthropic_responses_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_same_protocol_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_anthropic_provider_wire_integration -- --nocapture",
     "verify:v3-protocol-conversion-field-parity": "node scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs",
     "test:v3-protocol-conversion-field-parity-red-fixtures": "node scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs",
     "verify:v3-stopless-resource-control": "node scripts/architecture/verify-v3-stopless-resource-control.mjs",

@@ -1802,11 +1802,12 @@ features:
 
   - feature_id: v3.protocol_conversion_field_parity
     owner_crates: [routecodex-v3-runtime]
-    owner_scope: "V2/V3 protocol conversion field parity contract for Responses -> OpenAI Chat -> Responses, Anthropic Messages -> Responses -> Anthropic Messages, and OpenAI Chat -> OpenAI Chat Relay paths; fields remain data-plane payload semantics and never MetadataCenter control state."
+    owner_scope: "V2/V3 protocol conversion field parity contract for Responses -> OpenAI Chat -> Responses, Responses -> Anthropic Messages -> Responses, Anthropic Messages -> Responses -> Anthropic Messages, and OpenAI Chat -> OpenAI Chat Relay paths; fields remain data-plane payload semantics and never MetadataCenter control state."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
@@ -1823,17 +1824,23 @@ features:
     mainline_bindings:
       - v3-protocol-field-parity-responses-chat-req-01
       - v3-protocol-field-parity-responses-chat-resp-01
+      - v3-protocol-field-parity-responses-anthropic-req-01
       - v3-protocol-field-parity-anthropic-responses-req-01
       - v3-protocol-field-parity-responses-anthropic-resp-01
       - v3-protocol-field-parity-openai-chat-same-protocol-01
     entry_symbols:
       - build_v3_chat_canonical_request_from_responses_payload
       - build_v3_openai_chat_standard_request_from_chat_canonical
+      - build_provider_req_compat_06_from_v3_hub_req_outbound_07
       - build_v3_responses_provider_response_from_openai_chat_payload
       - encode_v3_anthropic_request_as_responses_semantic
+      - encode_v3_responses_semantic_as_anthropic_request
       - project_v3_responses_json_as_anthropic_message
       - responses_openai_chat_field_parity_request_matrix
       - responses_openai_chat_field_parity_response_matrix
+      - responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking
+      - responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking
+      - responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning
       - anthropic_responses_field_parity_request_matrix
       - anthropic_responses_field_parity_response_matrix
       - anthropic_responses_field_parity_rejects_malformed_function_arguments
@@ -1842,10 +1849,12 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
       - docs/goals/v3-protocol-conversion-field-parity-test-design.md

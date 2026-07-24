@@ -3396,6 +3396,7 @@ async fn responses_openai_chat_field_parity_request_matrix() {
                 "logit_bias":{"42":1},
                 "seed":123,
                 "response_format":{"type":"json_object"},
+                "reasoning":{"effort":"medium","summary":"detailed"},
                 "max_output_tokens":321,
                 "metadata":{"client":"metadata-kept"},
                 "client_metadata":{"codex":"client-metadata-kept"},
@@ -3438,6 +3439,11 @@ async fn responses_openai_chat_field_parity_request_matrix() {
     assert_eq!(body["logit_bias"], json!({"42":1}));
     assert_eq!(body["seed"], 123);
     assert_eq!(body["response_format"], json!({"type":"json_object"}));
+    assert_eq!(body["reasoning_effort"], "medium");
+    assert!(
+        body.get("reasoning").is_none(),
+        "OpenAI Chat provider wire must project Responses reasoning to reasoning_effort without leaking the Responses reasoning object: {body}"
+    );
     assert_eq!(body["max_output_tokens"], 321);
     assert_eq!(body["metadata"], json!({"client":"metadata-kept"}));
     assert!(

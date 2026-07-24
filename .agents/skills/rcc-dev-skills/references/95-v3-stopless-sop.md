@@ -371,3 +371,18 @@ Rules:
 - Live closeout must include `scripts/tests/stopless-5555-live-probe.mjs` after global install and managed `routecodex restart --port 5555`.
 - `invalid_stopless_continuation_loop` with visible raw stop schema JSON is a Chat Process stopless lifecycle gap. First inspect Resp03 stopless terminal/projection handling, especially GuardTerminal cleaned visible payload projection, Req04 restored no-op consumption, current-turn guidance, and stop schema visible-text stripping.
 - Do not fix this class in SSE framing, server handler, RespOutbound, continuation store transport, or error projection.
+
+## Reasoning mapping precheck for Stopless summary issues
+
+When a V3 `/v1/responses` stop/end_turn unexpectedly triggers Stopless despite the client requesting reasoning, first verify protocol reasoning mapping before changing Stopless:
+
+1. Check client request `reasoning` config in the canonical sample request.
+2. Check provider-request, not client response only:
+   - Anthropic provider wire must contain top-level `thinking`; raw top-level Responses `reasoning` must be absent.
+   - OpenAI Chat provider wire must contain top-level `reasoning_effort`; raw top-level Responses `reasoning` must be absent.
+3. Check provider response normalization before Resp03:
+   - Anthropic `thinking` / `thinking_delta` / `redacted_thinking` / signature must become Responses `output[].type="reasoning"` with `summary[].text` and/or `encrypted_content`.
+   - OpenAI Chat `reasoning_content` / structured `message.reasoning` must become the same canonical Responses reasoning item and must not leak private `reasoning.content`.
+4. Stopless summary gate only reads canonical Responses reasoning summary. Do not infer reasoning from visible `<think>` text or from request `reasoning.summary` config; `summary` is a carrier/config request, while `thinking` maps to canonical `reasoning`.
+
+Required focused gates: `hub_anthropic_codec_characterization`, `responses_relay_anthropic_provider_wire_integration`, `responses_openai_chat_field_parity_request_matrix`, OpenAI Chat provider reasoning response tests, `verify:v3-protocol-conversion-field-parity`, and red fixtures.
