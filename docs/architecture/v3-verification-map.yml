@@ -510,6 +510,7 @@ features:
       - scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
     mainline_bindings:
       - v3-protocol-anthropic-01
+      - v3-protocol-anthropic-shape-branch-01
       - v3-protocol-anthropic-02
       - v3-protocol-anthropic-03
       - v3-protocol-anthropic-04
@@ -520,6 +521,8 @@ features:
     required_contract:
       - client input to Hub request semantic is Anthropic entry-protocol bound
       - Hub request semantic to provider wire preserves messages tool_use tool_result tools system and thinking fields
+      - Anthropic image source.url, source.data, and source.media_type shape branches are classified into distinct Chat image URL, inline media data, and media MIME semantics without changing provider wire payload
+      - collect_v3_anthropic_request_shape_branch_semantics is the adjacent codec owner for Anthropic image shape-branch source semantics
       - provider raw to Hub response semantic preserves JSON or SSE transport intent without materializing an SSE stream
       - Hub response semantic to client projection preserves text thinking tool_use and explicit provider errors
       - RouteCodex internal control fields fail fast instead of entering provider or client payload

@@ -22,6 +22,7 @@ const paths = {
   responsesTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   responsesAnthropicProviderTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
   anthropicTests: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
+  anthropicCodecTests: 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs',
   openaiTests: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   geminiTests: 'v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs',
   functionMap: 'docs/architecture/v3-function-map.yml',
@@ -956,6 +957,28 @@ function requireShapeCaseFields(groupId, kind, item, allowedOwnerFiles) {
   }
   if (item?.required_test && !/^[a-z0-9_]+$/u.test(item.required_test)) {
     failures.push(`${paths.fieldMatrix}: ${groupId} shape branch required_test must be a concrete Rust test symbol, got ${item.required_test}`);
+  }
+  if (item?.protocol === 'anthropic' && item?.owner_file === paths.anthropicCodec) {
+    for (const phrase of [
+      'collect_v3_anthropic_request_shape_branch_semantics',
+      'V3AnthropicChatShapeBranchSemantic',
+      'request.messages[].content[].image.source.url',
+      'request.messages[].content[].image.source.data',
+      'request.messages[].content[].image.source.media_type',
+      'ChatImageUrlUrl',
+      'ChatInlineMediaData',
+      'ChatMediaMimeType',
+    ]) requireText(text.anthropicCodec, paths.anthropicCodec, phrase);
+    requireNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.url"', 'ChatImageUrlUrl');
+    requireNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.data"', 'ChatInlineMediaData');
+    requireNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.media_type"', 'ChatMediaMimeType');
+    forbidNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.url"', 'ChatInlineMediaData');
+    forbidNear(text.anthropicCodec, paths.anthropicCodec, '"request.messages[].content[].image.source.data"', 'ChatMediaMimeType');
+    if (item?.required_test) requireText(text.anthropicCodecTests, paths.anthropicCodecTests, item.required_test);
+    requireText(text.mainlineMap, paths.mainlineMap, 'v3-protocol-anthropic-shape-branch-01');
+    requireText(text.mainlineMap, paths.mainlineMap, 'collect_v3_anthropic_request_shape_branch_semantics');
+    requireText(text.functionMap, paths.functionMap, 'collect_v3_anthropic_request_shape_branch_semantics');
+    requireText(text.verificationMap, paths.verificationMap, 'collect_v3_anthropic_request_shape_branch_semantics');
   }
   if (item?.protocol === 'gemini' && item?.owner_file === paths.geminiCodec) {
     for (const phrase of [

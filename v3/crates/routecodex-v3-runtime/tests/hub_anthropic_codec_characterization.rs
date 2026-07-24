@@ -3,9 +3,11 @@ use routecodex_v3_runtime::{
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
     characterize_v3_anthropic_hub_semantic_to_provider_wire,
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
+    collect_v3_anthropic_request_shape_branch_semantics,
     encode_v3_responses_semantic_as_anthropic_request,
-    project_v3_anthropic_message_as_responses_response, V3AnthropicCodecError,
-    V3AnthropicCodecStage, V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
+    project_v3_anthropic_message_as_responses_response, V3AnthropicChatShapeBranchSemantic,
+    V3AnthropicCodecError, V3AnthropicCodecStage, V3HubEntryProtocol, V3HubProviderWireProtocol,
+    V3HubTransportIntent,
 };
 use serde_json::json;
 
@@ -45,6 +47,124 @@ fn request_characterization_preserves_anthropic_json_tool_result_and_reasoning_s
         wire.trace().stage,
         V3AnthropicCodecStage::HubSemanticToProviderWire
     );
+}
+
+fn anthropic_image_shape_request() -> serde_json::Value {
+    json!({
+        "model": "claude-sonnet",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "url", "url": "https://example.test/cat.png"}},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}},
+                {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0x"}}
+            ]
+        }]
+    })
+}
+
+#[test]
+fn anthropic_image_source_url_maps_only_to_chat_image_url_url() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatImageUrlUrl
+        && semantic.source_field == "request.messages[].content[].image.source.url"
+        && semantic.value == "https://example.test/cat.png"));
+    assert!(!semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData
+        && semantic.source_field == "request.messages[].content[].image.source.url"));
+}
+
+#[test]
+fn anthropic_image_base64_data_maps_to_chat_inline_media_data() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData
+        && semantic.source_field == "request.messages[].content[].image.source.data"
+        && semantic.value == "iVBORw0KGgo="));
+}
+
+#[test]
+fn anthropic_image_base64_media_type_maps_to_chat_media_mime_type() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType
+        && semantic.source_field == "request.messages[].content[].image.source.media_type"
+        && semantic.value == "image/png"));
+}
+
+#[test]
+fn anthropic_image_url_does_not_map_to_inline_media_data() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(!semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData
+        && semantic.source_field == "request.messages[].content[].image.source.url"));
+}
+
+#[test]
+fn anthropic_image_base64_data_does_not_map_to_chat_media_mime_type() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(!semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType
+        && semantic.source_field == "request.messages[].content[].image.source.data"));
+}
+
+#[test]
+fn anthropic_image_base64_does_not_collapse_to_chat_image_url_url() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(!semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatImageUrlUrl
+        && semantic.source_field == "request.messages[].content[].image.source.data"));
+}
+
+#[test]
+fn anthropic_document_base64_data_maps_to_chat_file_file_data() {
+    let semantics = collect_v3_anthropic_request_shape_branch_semantics(
+        &anthropic_image_shape_request(),
+        V3HubEntryProtocol::Anthropic,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3AnthropicChatShapeBranchSemantic::ChatFileFileData
+        && semantic.source_field == "request.messages[].content[].document.source.data"
+        && semantic.value == "JVBERi0x"));
+}
+
+#[test]
+fn anthropic_image_shape_branch_semantics_do_not_mutate_provider_wire_payload() {
+    let request = anthropic_image_shape_request();
+    let semantic = characterize_v3_anthropic_client_input_to_hub_semantic(
+        request.clone(),
+        V3HubEntryProtocol::Anthropic,
+        V3HubTransportIntent::Json,
+    )
+    .unwrap();
+    let wire = characterize_v3_anthropic_hub_semantic_to_provider_wire(semantic).unwrap();
+    assert_eq!(wire.payload(), &request);
 }
 
 #[test]

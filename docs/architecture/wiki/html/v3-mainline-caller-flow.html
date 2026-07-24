@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>36 functional paths</span>
-        <span>236 caller edges</span>
+        <span>237 caller edges</span>
       </div>
     </header>
 
@@ -543,7 +543,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_hub_pipeline_v1_relay_request_source_slice"><code>v3.hub_pipeline.v1.relay_request_source_slice</code></a><br/>v 3.hub_pipeline.v 1.relay_request_source_slice</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>5</td><td><code>v3.hub_relay_request_semantics</code></td><td><code>sha256:70ac7faab527…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_pipeline_v1_response"><code>v3.hub_pipeline.v1.response</code></a><br/>07 Hub Relay 响应链</td><td><span class="status audited_locked">locked by Jason</span></td><td>6</td><td>9</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:6c9652ec050d…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_pipeline_v1_relay_response_source_slice"><code>v3.hub_pipeline.v1.relay_response_source_slice</code></a><br/>v 3.hub_pipeline.v 1.relay_response_source_slice</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>6</td><td><code>v3.hub_relay_response_semantics</code></td><td><code>sha256:b0a19bb8282d…</code></td></tr>
-<tr><td><a href="#chain-v3_protocol_anthropic_characterization"><code>v3.protocol.anthropic.characterization</code></a><br/>v 3.protocol.anthropic.characterization</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>7</td><td><code>v3.protocol_anthropic_codec_characterization</code></td><td><code>sha256:01387c1c223b…</code></td></tr>
+<tr><td><a href="#chain-v3_protocol_anthropic_characterization"><code>v3.protocol.anthropic.characterization</code></a><br/>v 3.protocol.anthropic.characterization</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>9</td><td><code>v3.protocol_anthropic_codec_characterization</code></td><td><code>sha256:feb4e3e6caac…</code></td></tr>
 <tr><td><a href="#chain-v3_protocol_openai_chat_characterization"><code>v3.protocol.openai_chat.characterization</code></a><br/>v 3.protocol.openai_chat.characterization</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>7</td><td><code>v3.protocol_openai_chat_codec_characterization</code></td><td><code>sha256:09e2d27ad992…</code></td></tr>
 <tr><td><a href="#chain-v3_protocol_gemini_characterization"><code>v3.protocol.gemini.characterization</code></a><br/>v 3.protocol.gemini.characterization</td><td><span class="status pending_review">pending review</span></td><td>7</td><td>9</td><td><code>v3.protocol_gemini_codec_characterization</code></td><td><code>sha256:b4612403a310…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_pipeline_v1_relay_payload_copy_runtime_probes"><code>v3.hub_pipeline.v1.relay_payload_copy_runtime_probes</code></a><br/>v 3.hub_pipeline.v 1.relay_payload_copy_runtime_probes</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>4</td><td><code>v3.hub_relay_payload_copy_runtime_probes</code></td><td><code>sha256:251a25d50d6b…</code></td></tr>
@@ -672,7 +672,7 @@ flowchart TD
             <span class="chain-id">v 3.protocol.anthropic.characterization</span>
             <span>V3AnthropicClientInput01Raw → V3AnthropicClientProjection06Semantic</span>
             <span><code>v3.protocol.anthropic.characterization</code></span>
-            <span>4 edges · 7 resources · v3-runtime, v3-runtime::hub_v1</span>
+            <span>5 edges · 9 resources · v3-runtime, v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_protocol_openai_chat_characterization">
@@ -1419,7 +1419,7 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.protocol.anthropic.characterization</span>
         <span class="summary-sub">V3AnthropicClientInput01Raw → V3AnthropicClientProjection06Semantic</span>
-        <span class="summary-sub">4 edges · <code>v3.protocol.anthropic.characterization</code> · V3AnthropicClientInput01Raw → V3AnthropicClientProjection06Semantic</span>
+        <span class="summary-sub">5 edges · <code>v3.protocol.anthropic.characterization</code> · V3AnthropicClientInput01Raw → V3AnthropicClientProjection06Semantic</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Characterization-only Anthropic request/response codec evidence. These edges do not register Hub hooks or create a second runtime lifecycle.</p>
@@ -1427,7 +1427,7 @@ flowchart TD
           <span>owner: <code>v3.protocol_anthropic_codec_characterization</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
           <span>modules: <code>v3-runtime · v3-runtime::hub_v1</code></span>
-          <span>resources: <code>7</code></span>
+          <span>resources: <code>9</code></span>
 
 
         </div>
@@ -1441,6 +1441,7 @@ flowchart TD
   n_v3_protocol_anthropic_characterization_4[&quot;&lt;b&gt;Anthropic Hub Response 05 Semantic&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AnthropicHubResponse05Semantic&lt;/small&gt;&quot;]
   n_v3_protocol_anthropic_characterization_5[&quot;&lt;b&gt;Anthropic Client Projection 06 Semantic&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AnthropicClientProjection06Semantic&lt;/small&gt;&quot;]
   n_v3_protocol_anthropic_characterization_0 --&gt;|v3-protocol-anthropic-01&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_anthropic_characterization_1
+  n_v3_protocol_anthropic_characterization_0 --&gt;|v3-protocol-anthropic-shape-branch-01&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_anthropic_characterization_1
   n_v3_protocol_anthropic_characterization_1 --&gt;|v3-protocol-anthropic-02&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_anthropic_characterization_2
   n_v3_protocol_anthropic_characterization_3 --&gt;|v3-protocol-anthropic-03&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_anthropic_characterization_4
   n_v3_protocol_anthropic_characterization_4 --&gt;|v3-protocol-anthropic-04&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_protocol_anthropic_characterization_5
@@ -1452,6 +1453,7 @@ flowchart TD
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
 <tbody>
 <tr><td><code>v3-protocol-anthropic-01</code></td><td><code>V3AnthropicClientInput01Raw</code><br/>→ <code>V3AnthropicHubRequest02Semantic</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.entry_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.provider_semantic</code></div></td><td><code>request_characterization_preserves_anthropic_json_tool_result_and_reasoning_shape</code><br/><small>routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs</small></td><td><code>characterize_v3_anthropic_client_input_to_hub_semantic</code><br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small></td></tr>
+<tr><td><code>v3-protocol-anthropic-shape-branch-01</code></td><td><code>V3AnthropicClientInput01Raw</code><br/>→ <code>V3AnthropicHubRequest02Semantic</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.entry_protocol</code> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.provider_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.protocol_conversion.field_parity_contract</code></div></td><td><code>anthropic_image_source_url_maps_only_to_chat_image_url_url</code><br/><small>routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs</small></td><td><code>collect_v3_anthropic_request_shape_branch_semantics</code><br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small></td></tr>
 <tr><td><code>v3-protocol-anthropic-02</code></td><td><code>V3AnthropicHubRequest02Semantic</code><br/>→ <code>V3AnthropicProviderWire03Payload</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code> <code>v3.hub.provider_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div></td><td><code>request_characterization_preserves_anthropic_json_tool_result_and_reasoning_shape</code><br/><small>routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs</small></td><td><code>characterize_v3_anthropic_hub_semantic_to_provider_wire</code><br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small></td></tr>
 <tr><td><code>v3-protocol-anthropic-03</code></td><td><code>V3AnthropicProviderRaw04Response</code><br/>→ <code>V3AnthropicHubResponse05Semantic</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code> <code>v3.hub.provider_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div></td><td><code>sse_characterization_preserves_individual_reasoning_and_tool_events_without_materialization</code><br/><small>routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs</small></td><td><code>characterize_v3_anthropic_provider_raw_to_hub_response_semantic</code><br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small></td></tr>
 <tr><td><code>v3-protocol-anthropic-04</code></td><td><code>V3AnthropicHubResponse05Semantic</code><br/>→ <code>V3AnthropicClientProjection06Semantic</code></td><td><span class="status anchored">anchored</span></td><td><span class="status test-bound" title="test/characterization evidence over declared owner path">test-bound</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code> <code>v3.hub.entry_protocol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div></td><td><code>sse_characterization_preserves_individual_reasoning_and_tool_events_without_materialization</code><br/><small>routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs</small></td><td><code>characterize_v3_anthropic_hub_response_semantic_to_client_projection</code><br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small></td></tr>

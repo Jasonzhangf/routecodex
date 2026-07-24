@@ -12,6 +12,18 @@ function fail(message) { failures.push(message); }
 function requireAll(text, owner, phrases) {
   for (const phrase of phrases) if (!text.includes(phrase)) fail(owner + ': missing ' + phrase);
 }
+function requireNear(text, owner, anchor, phrase, window = 260) {
+  const index = text.indexOf(anchor);
+  if (index < 0) { fail(owner + ': missing ' + anchor); return; }
+  const segment = text.slice(index, index + window);
+  if (!segment.includes(phrase)) fail(owner + ': ' + anchor + ' must map near ' + phrase);
+}
+function forbidNear(text, owner, anchor, phrase, window = 260) {
+  const index = text.indexOf(anchor);
+  if (index < 0) { fail(owner + ': missing ' + anchor); return; }
+  const segment = text.slice(index, index + window);
+  if (segment.includes(phrase)) fail(owner + ': ' + anchor + ' must not collapse near ' + phrase);
+}
 function forbidAll(text, owner, patterns) {
   for (const pattern of patterns) if (pattern.test(text)) fail(owner + ': forbidden ' + pattern);
 }
@@ -34,7 +46,23 @@ requireAll(source, sourcePath, [
   'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
   'resource_handle', 'MalformedProviderError',
   'MalformedSseEvent',
+  'collect_v3_anthropic_request_shape_branch_semantics',
+  'V3AnthropicChatShapeBranchSemantic',
+  'V3AnthropicRequestShapeBranchSemantic',
+  'request.messages[].content[].image.source.url',
+  'request.messages[].content[].image.source.data',
+  'request.messages[].content[].image.source.media_type',
+  'ChatImageUrlUrl',
+  'ChatInlineMediaData',
+  'ChatMediaMimeType',
 ]);
+
+requireNear(source, sourcePath, '"request.messages[].content[].image.source.url"', 'ChatImageUrlUrl');
+requireNear(source, sourcePath, '"request.messages[].content[].image.source.data"', 'ChatInlineMediaData');
+requireNear(source, sourcePath, '"request.messages[].content[].image.source.media_type"', 'ChatMediaMimeType');
+forbidNear(source, sourcePath, '"request.messages[].content[].image.source.url"', 'ChatInlineMediaData');
+forbidNear(source, sourcePath, '"request.messages[].content[].image.source.data"', 'ChatMediaMimeType');
+
 forbidAll(source, sourcePath, [
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
@@ -45,6 +73,12 @@ forbidAll(source, sourcePath, [
 requireAll(tests, 'focused Anthropic codec tests', [
   'tool_result', 'tool_use', 'thinking', 'V3HubTransportIntent::Sse',
   'MalformedProviderError', 'MalformedSseEvent', 'SideChannelLeaked', 'ProviderProtocolNotAnthropic',
+  'anthropic_image_source_url_maps_only_to_chat_image_url_url',
+  'anthropic_image_base64_data_maps_to_chat_inline_media_data',
+  'anthropic_image_base64_media_type_maps_to_chat_media_mime_type',
+  'anthropic_image_url_does_not_map_to_inline_media_data',
+  'anthropic_image_base64_data_does_not_map_to_chat_media_mime_type',
+  'anthropic_image_shape_branch_semantics_do_not_mutate_provider_wire_payload',
 ]);
 
 for (const path of [
@@ -65,6 +99,8 @@ const maps = [
 ];
 for (const [file, text] of maps) requireAll(text, file, [
   'v3.protocol_anthropic_codec_characterization', 'v3-protocol-anthropic-01',
+  'v3-protocol-anthropic-shape-branch-01',
+  'collect_v3_anthropic_request_shape_branch_semantics',
   'v3-protocol-anthropic-02', 'v3-protocol-anthropic-03', 'v3-protocol-anthropic-04',
 ]);
 requireAll(readFileSync(resolve(root, 'docs/architecture/v3-resource-operation-map.yml'), 'utf8'), 'resource map', [

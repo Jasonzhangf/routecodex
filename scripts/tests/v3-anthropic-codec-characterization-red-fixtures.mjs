@@ -12,6 +12,14 @@ const fixtures = [
   ['side-channel guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', '"metadata_center"', '"mc_removed"', /missing metadata_center/],
   ['provider error guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'MalformedProviderError', 'MalformedProviderFailure', /missing MalformedProviderError/],
   ['SSE coverage removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
+  ['shape branch helper removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'collect_v3_anthropic_request_shape_branch_semantics', 'collect_v3_anthropic_request_branch_semantics_removed', /missing collect_v3_anthropic_request_shape_branch_semantics/],
+  ['image url collapses to inline media data', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', `"request.messages[].content[].image.source.url",
+                            V3AnthropicChatShapeBranchSemantic::ChatImageUrlUrl,`, `"request.messages[].content[].image.source.url",
+                            V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, /image\.source\.url.*must map near ChatImageUrlUrl|image\.source\.url.*must not collapse near ChatInlineMediaData/],
+  ['image data collapses to MIME type', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', `"request.messages[].content[].image.source.data",
+                                V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, `"request.messages[].content[].image.source.data",
+                                V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType,`, /image\.source\.data.*must map near ChatInlineMediaData|image\.source\.data.*must not collapse near ChatMediaMimeType/],
+  ['shape branch required test removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'anthropic_image_source_url_maps_only_to_chat_image_url_url', 'anthropic_image_source_url_removed', /missing anthropic_image_source_url_maps_only_to_chat_image_url_url/],
 ];
 
 const failures = [];

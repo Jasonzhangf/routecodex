@@ -1223,11 +1223,13 @@ features:
       - v3.response.client_payload
     mainline_bindings:
       - v3-protocol-anthropic-01
+      - v3-protocol-anthropic-shape-branch-01
       - v3-protocol-anthropic-02
       - v3-protocol-anthropic-03
       - v3-protocol-anthropic-04
     entry_symbols:
       - characterize_v3_anthropic_client_input_to_hub_semantic
+      - collect_v3_anthropic_request_shape_branch_semantics
       - characterize_v3_anthropic_hub_semantic_to_provider_wire
       - characterize_v3_anthropic_provider_raw_to_hub_response_semantic
       - characterize_v3_anthropic_hub_response_semantic_to_client_projection

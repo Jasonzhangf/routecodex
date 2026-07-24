@@ -18,6 +18,23 @@ pub struct V3AnthropicCodecTrace {
     pub transport_intent: V3HubTransportIntent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3AnthropicChatShapeBranchSemantic {
+    ChatImageUrlUrl,
+    ChatInlineMediaData,
+    ChatMediaMimeType,
+    ChatFileFileData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3AnthropicRequestShapeBranchSemantic {
+    pub message_index: usize,
+    pub content_index: usize,
+    pub source_field: &'static str,
+    pub chat_semantic: V3AnthropicChatShapeBranchSemantic,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3AnthropicHubRequestSemantic {
     payload: Value,
@@ -90,6 +107,90 @@ pub fn validate_v3_anthropic_provider_response_payload(
         V3HubTransportIntent::Json => validate_json_response(payload),
         V3HubTransportIntent::Sse => validate_sse_event(payload),
     }
+}
+
+pub fn collect_v3_anthropic_request_shape_branch_semantics(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<Vec<V3AnthropicRequestShapeBranchSemantic>, V3AnthropicCodecError> {
+    validate_v3_anthropic_client_input_payload(payload, entry_protocol)?;
+    let messages = payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or(V3AnthropicCodecError::MessagesNotArray)?;
+    let mut semantics = Vec::new();
+    for (message_index, message) in messages.iter().enumerate() {
+        let Some(content) = message.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for (content_index, part) in content.iter().enumerate() {
+            match part.get("type").and_then(Value::as_str) {
+                Some("image") => {
+                    let source = part.get("source").and_then(Value::as_object).ok_or(
+                        V3AnthropicCodecError::MalformedField {
+                            field: "image source",
+                        },
+                    )?;
+                    match source.get("type").and_then(Value::as_str) {
+                        Some("url") => push_anthropic_shape_string(
+                            &mut semantics,
+                            message_index,
+                            content_index,
+                            source,
+                            "url",
+                            "request.messages[].content[].image.source.url",
+                            V3AnthropicChatShapeBranchSemantic::ChatImageUrlUrl,
+                        )?,
+                        Some("base64") => {
+                            push_anthropic_shape_string(
+                                &mut semantics,
+                                message_index,
+                                content_index,
+                                source,
+                                "data",
+                                "request.messages[].content[].image.source.data",
+                                V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,
+                            )?;
+                            push_anthropic_shape_string(
+                                &mut semantics,
+                                message_index,
+                                content_index,
+                                source,
+                                "media_type",
+                                "request.messages[].content[].image.source.media_type",
+                                V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType,
+                            )?;
+                        }
+                        _ => {
+                            return Err(V3AnthropicCodecError::MalformedField {
+                                field: "image source type",
+                            });
+                        }
+                    }
+                }
+                Some("document") => {
+                    let source = part.get("source").and_then(Value::as_object).ok_or(
+                        V3AnthropicCodecError::MalformedField {
+                            field: "document source",
+                        },
+                    )?;
+                    if source.get("type").and_then(Value::as_str) == Some("base64") {
+                        push_anthropic_shape_string(
+                            &mut semantics,
+                            message_index,
+                            content_index,
+                            source,
+                            "data",
+                            "request.messages[].content[].document.source.data",
+                            V3AnthropicChatShapeBranchSemantic::ChatFileFileData,
+                        )?;
+                    }
+                }
+                _ => continue,
+            }
+        }
+    }
+    Ok(semantics)
 }
 
 pub fn encode_v3_anthropic_request_as_responses_semantic(
@@ -771,6 +872,32 @@ fn side_channel_label(key: &str) -> &'static str {
         "resource_handle" => "resource_handle",
         _ => "unknown",
     }
+}
+
+fn push_anthropic_shape_string(
+    semantics: &mut Vec<V3AnthropicRequestShapeBranchSemantic>,
+    message_index: usize,
+    content_index: usize,
+    source: &Map<String, Value>,
+    provider_field: &'static str,
+    source_field: &'static str,
+    chat_semantic: V3AnthropicChatShapeBranchSemantic,
+) -> Result<(), V3AnthropicCodecError> {
+    let value = source
+        .get(provider_field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: source_field,
+        })?;
+    semantics.push(V3AnthropicRequestShapeBranchSemantic {
+        message_index,
+        content_index,
+        source_field,
+        chat_semantic,
+        value: value.to_owned(),
+    });
+    Ok(())
 }
 
 fn encode_anthropic_messages_as_responses_semantic(
