@@ -4411,3 +4411,7 @@ Tags: #v3-architecture #review-surface #request-response-split #error-resources
 ## 2026-07-24 - V3 SSE transport boundary locked
 - V3 SSE edge is now locked as transport-only in `docs/architecture/wiki/v3-mainline-skeleton-sop.md` and `v3.sse.transport_boundary`; provider/client protocol semantics must stay in provider/protocol codec or `RespOutbound`, not server/SSE closeout.
 - `V3SseConsoleCloseoutStream` may only observe transport EOF, stream error, and client drop. It must not parse SSE event names or `data` JSON for `response.completed`, `response.requires_action`, `response.failed`, tool, continuation, stopless, servertool, routing, or error-policy decisions.
+
+## 2026-07-24 - V3 stopless lifecycle review gap
+- `test:v3-stopless-state-machine-docs-red-fixtures` currently fails from temp-copy dependency drift (`wiki-html-lib.mjs` imports missing `v3-mainline-caller-flow-lib.mjs`), so stopless state-machine red mutations are masked and the gate cannot be used as lock evidence until fixed.
+- Live 5555 stopless probe after global install/restart failed with `invalid_stopless_continuation_loop`: after `routecodex hook run reasoningStop` no-op rounds, the final provider response completed with raw stop schema JSON in visible assistant text instead of structured `reasoningStop` terminal or normal tool progress. Owner remains V3 Chat Process stopless Resp03/Req04 lifecycle; do not patch SSE, server handler, RespOutbound, continuation store transport, or error projection for this class.

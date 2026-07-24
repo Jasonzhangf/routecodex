@@ -363,3 +363,10 @@ Rules:
 - Do not run ordinary apply_patch/client-tool governance before the tool_call servertool hook gets first pass.
 - Do not repair `status`, `finish_reason`, `stop_reason`, tool frames, history, or guidance in Resp04; Resp04 only saves/releases already-governed Resp03 truth.
 - If map/SOP edges mention the old merged response hook, update them to the split hook symbols and refresh the architecture lock with a manual authorization record.
+
+## Stopless live closeout review rule (2026-07-24)
+
+- `verify:v3-stopless-state-machine-docs` green is not enough. Always run `test:v3-stopless-state-machine-docs-red-fixtures`; if the red fixture fails with `ERR_MODULE_NOT_FOUND`, fix the fixture temp-copy dependency first because mutation diagnostics are masked.
+- Live closeout must include `scripts/tests/stopless-5555-live-probe.mjs` after global install and managed `routecodex restart --port 5555`.
+- `invalid_stopless_continuation_loop` with visible raw stop schema JSON is a Chat Process stopless lifecycle gap. First inspect Resp03 stopless terminal/projection handling, Req04 restored no-op consumption, current-turn guidance, and stop schema visible-text stripping.
+- Do not fix this class in SSE framing, server handler, RespOutbound, continuation store transport, or error projection.
