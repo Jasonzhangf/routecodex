@@ -5,12 +5,8 @@ use crate::nodes::{
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_error_03_target_local_action_from_v3_error_02,
-    build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
-    build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, V3Error06ClientProjected, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderAvailabilityRegistry,
@@ -266,15 +262,12 @@ fn project_p5_failure(
         code,
         message,
     );
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let action = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::None,
-        0,
-    );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    });
     V3FoundationRuntimeOutput {
         status: projected.status,
         body: projected.body,
@@ -359,15 +352,12 @@ pub fn project_v3_debug_failure(
         "v3_debug_failure",
         error.to_string(),
     );
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let action = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::None,
-        0,
-    );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    });
     V3FoundationRuntimeOutput {
         status: projected.status,
         body: projected.body,
@@ -389,15 +379,12 @@ fn build_pending_projection(input: &V3FoundationRuntimeInput) -> V3Error06Client
             input.method, input.path, input.server_id
         ),
     );
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let action = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::None,
-        0,
-    );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    build_v3_error_06_client_projected_from_v3_error_05(execution)
+    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    })
 }
 
 #[cfg(test)]

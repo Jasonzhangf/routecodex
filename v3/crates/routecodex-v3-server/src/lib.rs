@@ -745,7 +745,7 @@ async fn pending_endpoint(
                     V3Server16Body::Json(value) => Some(value),
                     V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
                 },
-                None,
+                resolve_v3_console_project_path(&request_headers, &Value::Null).as_deref(),
             ) {
                 return response;
             }
@@ -3630,11 +3630,6 @@ fn format_v3_console_cwd(project_path: Option<&str>) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|path| path.display().to_string())
-        })
         .unwrap_or_else(|| "-".to_string());
     trim_v3_path_for_log(&project, 80)
 }
@@ -5843,11 +5838,7 @@ mod tests {
 
     #[test]
     fn console_prefix_orders_port_entry_cwd_before_content() {
-        let expected_cwd = std::env::current_dir().unwrap().display().to_string();
-        assert_eq!(
-            format_v3_console_project_port(None, 5555),
-            format!("{expected_cwd}:5555")
-        );
+        assert_eq!(format_v3_console_project_port(None, 5555), "-:5555");
         let line = format_v3_error_console_line_with_port(
             "5555",
             "responses",
@@ -5863,11 +5854,39 @@ mod tests {
             None,
         );
         assert!(
-            line.starts_with(&format!("[5555] [responses] cwd={expected_cwd} ")),
+            line.starts_with("[5555] [responses] cwd=- "),
             "console prefix must be port, protocol entry, cwd, then content: {line}"
         );
         assert!(line.contains("❌ [responses]"));
         assert!(line.contains("request req-prefix failed"));
+    }
+
+    #[test]
+    fn malformed_json_error_console_uses_header_project_path_not_server_cwd() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-routecodex-workdir",
+            HeaderValue::from_static("/Volumes/extension/code/OneStop"),
+        );
+        let line = format_v3_error_console_line_with_port(
+            "5555",
+            "responses",
+            "req-malformed",
+            400,
+            &V3_ERROR_CHAIN_NODE_IDS,
+            Some(&json!({
+                "error": {
+                    "code": "malformed_json",
+                    "message": "malformed JSON request body"
+                }
+            })),
+            resolve_v3_console_project_path(&headers, &Value::Null).as_deref(),
+        );
+
+        assert!(
+            line.starts_with("[5555] [responses] cwd=/Volumes/extension/code/OneStop "),
+            "malformed request line must preserve header project cwd: {line}"
+        );
     }
 
     #[test]

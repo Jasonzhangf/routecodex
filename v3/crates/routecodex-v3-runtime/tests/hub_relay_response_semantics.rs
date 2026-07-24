@@ -330,7 +330,10 @@ fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
 
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     assert_eq!(resp03.tool_call_count(), 1);
-    assert_eq!(resp03.servertool_action(), V3HubServertoolResponseAction::None);
+    assert_eq!(
+        resp03.servertool_action(),
+        V3HubServertoolResponseAction::None
+    );
     let resp04 = hooks.commit(resp03).unwrap();
     let payload = resp04.finalized_payload();
     assert_eq!(payload["status"], "requires_action");

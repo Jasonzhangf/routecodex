@@ -114,7 +114,6 @@ pub(crate) fn commit_v3_hub_relay_response(
     })
 }
 
-
 pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
     canonical_request: &Value,
     finalized_response: &Value,

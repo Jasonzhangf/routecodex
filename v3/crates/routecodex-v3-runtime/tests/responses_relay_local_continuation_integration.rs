@@ -6,17 +6,17 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_runtime_with_local_continuation,
+    execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control,
+    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control,
     V3ResponsesRelayClientBody, V3ResponsesRelayLocalContinuationScope,
     V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
     V3ResponsesRelayStoplessControlScope, V3ResponsesRelayStoplessControlState,
     V3StoplessCenterPhase,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_local_continuation,
-    execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -1413,11 +1413,9 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action");
-            assert!(
-                serde_json::to_string(&body)
-                    .unwrap()
-                    .contains("routecodex hook run reasoningStop")
-            );
+            assert!(serde_json::to_string(&body)
+                .unwrap()
+                .contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first cleanup turn must be JSON"),
     }
@@ -3259,8 +3257,8 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
 }
 
 #[tokio::test]
-async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call_with_unescaped_raw_input()
- {
+async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call_with_unescaped_raw_input(
+) {
     let original_tools = json!([
         {
             "type":"custom",
@@ -3677,8 +3675,8 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
 }
 
 #[tokio::test]
-async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_returns_responses_sse()
- {
+async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_returns_responses_sse(
+) {
     let original_tools = json!([
         {
             "type":"custom",
@@ -3921,8 +3919,8 @@ targets = [{ kind = "provider_model", provider = "controlled", model = "response
     .unwrap()
 }
 
-fn manifest_with_unsupported_provider_wire_target()
--> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest_with_unsupported_provider_wire_target(
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let mut manifest = manifest();
     manifest
         .providers

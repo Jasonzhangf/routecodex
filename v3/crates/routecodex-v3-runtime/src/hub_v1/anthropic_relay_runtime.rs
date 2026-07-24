@@ -1,10 +1,10 @@
 use super::*;
 use crate::provider_failure_runtime_policy::{
+    resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, resolve_v3_relay_target,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample,
+    V3RelayProviderFailureRetryPolicy,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
@@ -12,20 +12,16 @@ use crate::{
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    V3_ERROR_CHAIN_NODE_IDS, V3ErrorActionScope, V3ErrorSourceKind,
-    build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_error_03_target_local_action_from_v3_error_02,
-    build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
-    build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05,
+    build_v3_error_01_source_raised, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody, V3ResponsesProviderTarget,
     build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
+    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
+    V3ProviderResponseBody, V3ResponsesProviderTarget,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -1239,25 +1235,17 @@ fn error_output(
     mut trace: Vec<&'static str>,
 ) -> V3AnthropicRelayRuntimeOutput {
     let _ = client_response;
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let local = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::ProviderInstance {
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
-        0,
-    );
-    let exhausted = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(local, 0);
-    let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
+        candidates_remaining: 0,
+        source_status: Some(status),
+    });
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
-    let client_status = if status >= 400 {
-        status
-    } else {
-        projected.status
-    };
     V3AnthropicRelayRuntimeOutput {
-        status: client_status,
+        status: projected.status,
         client_response: projected.body,
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),

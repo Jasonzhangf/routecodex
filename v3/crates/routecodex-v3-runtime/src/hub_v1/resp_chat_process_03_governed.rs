@@ -304,7 +304,10 @@ fn complete_or_repair_v3_resp03_tool_frames(
     let Some(status) = object.get("status").and_then(Value::as_str) else {
         return input;
     };
-    if !matches!(status, "completed" | "requires_action" | "in_progress" | "queued") {
+    if !matches!(
+        status,
+        "completed" | "requires_action" | "in_progress" | "queued"
+    ) {
         return input;
     }
     let mut changed = false;
@@ -349,7 +352,6 @@ fn inspect_v3_resp03_finish_reason(
     }
     V3Resp03FinishReasonBranch::Other
 }
-
 
 fn response_has_v3_resp03_tool_call_finish_reason(input: &V3HubRespInbound02Normalized) -> bool {
     response_v3_resp03_finish_reasons(input.provider_payload().as_ref())

@@ -5,10 +5,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    V3AnthropicRelayRuntimeInput, execute_v3_anthropic_relay_runtime,
-    project_v3_responses_json_as_anthropic_message, project_v3_responses_sse_as_anthropic_events,
+    execute_v3_anthropic_relay_runtime, project_v3_responses_json_as_anthropic_message,
+    project_v3_responses_sse_as_anthropic_events, V3AnthropicRelayRuntimeInput,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Mutex;
 
 struct JsonTransport {
@@ -103,16 +103,12 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 17, "trace={:?}", output.node_trace);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
-    assert!(
-        output
-            .node_trace
-            .contains(&"ProviderReqCompat06ProviderCompat")
-    );
-    assert!(
-        output
-            .node_trace
-            .contains(&"ProviderRespCompat02ProviderCompat")
-    );
+    assert!(output
+        .node_trace
+        .contains(&"ProviderReqCompat06ProviderCompat"));
+    assert!(output
+        .node_trace
+        .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
 }

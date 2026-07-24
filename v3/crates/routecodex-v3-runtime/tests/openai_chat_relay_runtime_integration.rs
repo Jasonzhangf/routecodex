@@ -5,10 +5,10 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
-    execute_v3_openai_chat_relay_runtime,
+    execute_v3_openai_chat_relay_runtime, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Mutex;
 
 struct JsonTransport {
@@ -143,16 +143,12 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 17);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
-    assert!(
-        output
-            .node_trace
-            .contains(&"ProviderReqCompat06ProviderCompat")
-    );
-    assert!(
-        output
-            .node_trace
-            .contains(&"ProviderRespCompat02ProviderCompat")
-    );
+    assert!(output
+        .node_trace
+        .contains(&"ProviderReqCompat06ProviderCompat"));
+    assert!(output
+        .node_trace
+        .contains(&"ProviderRespCompat02ProviderCompat"));
     assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
     let client_response = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => value,
@@ -394,18 +390,18 @@ async fn sse_runtime_preserves_split_frames_tool_delta_terminal_and_done_order()
         .collect::<Vec<_>>();
     assert_eq!(events.len(), 4);
     assert_eq!(
-        serde_json::from_str::<Value>(events[0].trim_start_matches("data: ").trim()).unwrap()["choices"]
-            [0]["delta"]["role"],
+        serde_json::from_str::<Value>(events[0].trim_start_matches("data: ").trim()).unwrap()
+            ["choices"][0]["delta"]["role"],
         "assistant",
     );
     assert_eq!(
-        serde_json::from_str::<Value>(events[1].trim_start_matches("data: ").trim()).unwrap()["choices"]
-            [0]["delta"]["tool_calls"][0]["function"]["arguments"],
+        serde_json::from_str::<Value>(events[1].trim_start_matches("data: ").trim()).unwrap()
+            ["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
         "{\"q\":\"beta\"}"
     );
     assert_eq!(
-        serde_json::from_str::<Value>(events[2].trim_start_matches("data: ").trim()).unwrap()["choices"]
-            [0]["finish_reason"],
+        serde_json::from_str::<Value>(events[2].trim_start_matches("data: ").trim()).unwrap()
+            ["choices"][0]["finish_reason"],
         "tool_calls"
     );
     assert_eq!(events[3], "data: [DONE]\n\n");
@@ -615,11 +611,9 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
             V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
         };
         let items = stream.collect::<Vec<_>>().await;
-        assert!(
-            items
-                .iter()
-                .any(|item| item.as_ref().is_err_and(|error| error.contains(expected)))
-        );
+        assert!(items
+            .iter()
+            .any(|item| item.as_ref().is_err_and(|error| error.contains(expected))));
     }
 }
 

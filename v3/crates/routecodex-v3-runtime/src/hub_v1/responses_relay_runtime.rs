@@ -1,35 +1,32 @@
 use super::*;
 use crate::provider_failure_runtime_policy::{
-    V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
-    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy, resolve_v3_relay_target,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderFailureDecision, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
+    V3RelayProviderFailureRetryPolicy, V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS,
+    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    V3_ERROR_CHAIN_NODE_IDS, V3ErrorActionScope, V3ErrorSourceKind,
-    build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_error_03_target_local_action_from_v3_error_02,
-    build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
-    build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05,
+    build_v3_error_01_source_raised, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3Provider12ResponsesWirePayload,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore,
-    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
-    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
     build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_http_request_from_parts,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
+    ResponsesTransport, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
+    V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore, V3ProviderResp14Raw,
+    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
+    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
-    SseField, SseIncrementalDecoder, SseTransportLimits, build_v3_sse_transport_in_01_raw_chunk,
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -1589,18 +1586,17 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
-                let hook_provider_value = if provider_wire_protocol
-                    == V3HubProviderWireProtocol::Anthropic
-                {
-                    try_before_resp03!(
-                        project_v3_anthropic_message_as_responses_response(&provider_value)
-                            .map_err(|error| {
-                                V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
-                            })
-                    )
-                } else {
-                    provider_value.clone()
-                };
+                let hook_provider_value =
+                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                        try_before_resp03!(project_v3_anthropic_message_as_responses_response(
+                            &provider_value
+                        )
+                        .map_err(|error| {
+                            V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
+                        }))
+                    } else {
+                        provider_value.clone()
+                    };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         V3HubProviderWireProtocol::Responses
@@ -1608,7 +1604,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_wire_protocol
                     };
                 let (action, finalized_provider_value, response_stopless_state) =
-                    try_before_resp03!(run_json_response_hooks(
+                    match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             provider_value: &hook_provider_value,
                             provider_semantic_body: &provider_semantic_body,
@@ -1625,7 +1621,46 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             transition_updated_at,
                         },
                         &mut trace,
-                    ));
+                    ) {
+                        Ok(value) => value,
+                        Err(error) if is_v3_responses_provider_response_failure(&error) => {
+                            let failure = provider_runtime_failure(
+                                provider_response_hook_failure(
+                                    error,
+                                    &input.request_id,
+                                    &selected_target_provider_id,
+                                ),
+                                &selected_target_provider_id,
+                                Some(selected_observability),
+                            );
+                            let terminal_failure = try_before_resp03!(
+                                handle_v3_responses_relay_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut V3ResponsesRelayProviderRetryState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        retry_selected: &mut retry_selected,
+                                        pending_provider_failure: &mut pending_provider_failure,
+                                        provider_failure_events: &mut provider_failure_events,
+                                        trace: &mut trace,
+                                    },
+                                )
+                                .await
+                            );
+                            if let Some(failure) = terminal_failure {
+                                clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                    manifest,
+                                    stopless_control.as_ref(),
+                                    stopless_state.as_ref(),
+                                )?;
+                                return Ok(provider_failure_output(failure, trace, 0));
+                            }
+                            continue;
+                        }
+                        Err(error) => try_before_resp03!(Err(error)),
+                    };
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
                     stopless_control.as_ref(),
@@ -1638,18 +1673,16 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
-                try_before_resp03!(
-                    provider_health
-                        .record_provider_success(
-                            &selected_target_provider_id,
-                            Some(&selected_target_auth_alias),
-                            Some(&selected_target_model_id),
-                            v3_responses_relay_now_epoch_ms()?,
-                        )
-                        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
-                            error.to_string()
-                        ))
-                );
+                try_before_resp03!(provider_health
+                    .record_provider_success(
+                        &selected_target_provider_id,
+                        Some(&selected_target_auth_alias),
+                        Some(&selected_target_model_id),
+                        v3_responses_relay_now_epoch_ms()?,
+                    )
+                    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
+                        error.to_string()
+                    )));
                 let mut observability = selected_observability;
                 observability.provider_status = Some(provider_status);
                 observability.provider_id = Some(provider_id);
@@ -1735,7 +1768,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         provider_wire_protocol
                     };
                 let (action, finalized_provider_value, response_stopless_state) =
-                    try_before_resp03!(run_json_response_hooks(
+                    match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             provider_value: &provider_value,
                             provider_semantic_body: &provider_semantic_body,
@@ -1752,7 +1785,46 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             transition_updated_at,
                         },
                         &mut trace,
-                    ));
+                    ) {
+                        Ok(value) => value,
+                        Err(error) if is_v3_responses_provider_response_failure(&error) => {
+                            let failure = provider_runtime_failure(
+                                provider_response_hook_failure(
+                                    error,
+                                    &input.request_id,
+                                    &selected_target_provider_id,
+                                ),
+                                &selected_target_provider_id,
+                                Some(selected_observability),
+                            );
+                            let terminal_failure = try_before_resp03!(
+                                handle_v3_responses_relay_provider_failure(
+                                    &failure_context,
+                                    selected,
+                                    failure,
+                                    &mut V3ResponsesRelayProviderRetryState {
+                                        failed_candidates: &mut failed_candidates,
+                                        same_candidate_retries: &mut same_candidate_retries,
+                                        retry_selected: &mut retry_selected,
+                                        pending_provider_failure: &mut pending_provider_failure,
+                                        provider_failure_events: &mut provider_failure_events,
+                                        trace: &mut trace,
+                                    },
+                                )
+                                .await
+                            );
+                            if let Some(failure) = terminal_failure {
+                                clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                    manifest,
+                                    stopless_control.as_ref(),
+                                    stopless_state.as_ref(),
+                                )?;
+                                return Ok(provider_failure_output(failure, trace, 0));
+                            }
+                            continue;
+                        }
+                        Err(error) => try_before_resp03!(Err(error)),
+                    };
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
                     stopless_control.as_ref(),
@@ -1765,18 +1837,16 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
-                try_before_resp03!(
-                    provider_health
-                        .record_provider_success(
-                            &selected_target_provider_id,
-                            Some(&selected_target_auth_alias),
-                            Some(&selected_target_model_id),
-                            v3_responses_relay_now_epoch_ms()?,
-                        )
-                        .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
-                            error.to_string()
-                        ))
-                );
+                try_before_resp03!(provider_health
+                    .record_provider_success(
+                        &selected_target_provider_id,
+                        Some(&selected_target_auth_alias),
+                        Some(&selected_target_model_id),
+                        v3_responses_relay_now_epoch_ms()?,
+                    )
+                    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderHealth(
+                        error.to_string()
+                    )));
                 stream_observation
                     .record_event(&json!({
                         "type":"response.completed",
@@ -2267,15 +2337,12 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "selected_target_exhausted",
                 "all selected provider candidates are unavailable",
             );
-            let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-            let local = build_v3_error_03_target_local_action_from_v3_error_02(
-                classified,
-                V3ErrorActionScope::None,
-                0,
-            );
-            let exhausted = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(local, 0);
-            let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
-            let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
+            let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+                source: source.clone(),
+                action_scope: V3ErrorActionScope::None,
+                candidates_remaining: 0,
+                source_status: None,
+            });
             error_output(
                 source,
                 projected.status,
@@ -2530,10 +2597,9 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
     provider_semantic_body: &Value,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    if is_v3_openai_chat_zero_output_provider_diagnostic_payload(payload) {
+    if let Some(message) = openai_chat_provider_diagnostic_message(payload) {
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            "OpenAI Chat provider returned zero-output upstream diagnostic instead of model output"
-                .to_string(),
+            message,
         ));
     }
 
@@ -2625,38 +2691,46 @@ fn build_v3_responses_provider_response_from_openai_chat_payload(
     Ok(Value::Object(response))
 }
 
-fn is_v3_openai_chat_zero_output_provider_diagnostic_payload(payload: &Value) -> bool {
-    let Some(usage) = extract_v3_runtime_usage_summary(payload) else {
-        return false;
-    };
-    if usage.input_tokens != Some(0)
-        || usage.output_tokens != Some(0)
-        || usage.total_tokens != Some(0)
-    {
-        return false;
-    }
+fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option<String> {
+    let usage = extract_v3_runtime_usage_summary(payload);
+    let usage_zero = usage.as_ref().is_some_and(|usage| {
+        usage.input_tokens == Some(0)
+            && usage.output_tokens == Some(0)
+            && usage.total_tokens == Some(0)
+    });
+    let usage_missing_or_zero = usage.is_none() || usage_zero;
     payload
         .get("choices")
         .and_then(Value::as_array)
-        .is_some_and(|choices| {
-            choices.iter().any(|choice| {
-                choice.get("finish_reason").and_then(Value::as_str) == Some("stop")
-                    && choice
-                        .get("message")
-                        .and_then(Value::as_object)
-                        .is_some_and(|message| {
-                            message
-                                .get("tool_calls")
-                                .and_then(Value::as_array)
-                                .is_none_or(Vec::is_empty)
-                                && message.get("content").and_then(Value::as_str).is_some_and(
-                                    |content| {
-                                        content
-                                            .trim_start()
-                                            .starts_with("upstream returned zero output tokens")
-                                    },
-                                )
-                        })
+        .and_then(|choices| {
+            choices.iter().find_map(|choice| {
+                if choice.get("finish_reason").and_then(Value::as_str) != Some("stop") {
+                    return None;
+                }
+                let message = choice.get("message").and_then(Value::as_object)?;
+                if !message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_none_or(Vec::is_empty)
+                {
+                    return None;
+                }
+                let content = message.get("content").and_then(Value::as_str)?.trim();
+                if usage_zero && content.starts_with("upstream returned zero output tokens") {
+                    return Some(
+                        "OpenAI Chat provider returned zero-output upstream diagnostic instead of model output"
+                            .to_string(),
+                    );
+                }
+                if usage_missing_or_zero
+                    && content.contains("mac超负荷运载")
+                    && content.contains("挂了")
+                {
+                    return Some(format!(
+                        "OpenAI Chat provider returned upstream overload diagnostic instead of model output: {content}"
+                    ));
+                }
+                None
             })
         })
 }
@@ -4725,6 +4799,31 @@ fn provider_response_stream_failure(
     }
 }
 
+fn is_v3_responses_provider_response_failure(error: &V3ResponsesRelayRuntimeError) -> bool {
+    matches!(
+        error,
+        V3ResponsesRelayRuntimeError::Provider(_)
+            | V3ResponsesRelayRuntimeError::ProviderJson(_)
+            | V3ResponsesRelayRuntimeError::ProviderSseTransport(_)
+            | V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(_)
+    )
+}
+
+fn provider_response_hook_failure(
+    error: V3ResponsesRelayRuntimeError,
+    request_id: &str,
+    provider_id: &str,
+) -> V3ProviderError {
+    match error {
+        V3ResponsesRelayRuntimeError::Provider(error) => error,
+        other => V3ProviderError::ResponseBody {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("provider response event codec failed: {other}"),
+        },
+    }
+}
+
 fn provider_failure_output(
     failure: V3ResponsesRelayProviderFailure,
     trace: Vec<&'static str>,
@@ -4783,18 +4882,14 @@ fn error_output(
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
     let _ = client_response;
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let local = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        V3ErrorActionScope::ProviderInstance {
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
         candidates_remaining,
-    );
-    let exhausted =
-        build_v3_error_04_target_exhaustion_decision_from_v3_error_03(local, candidates_remaining);
-    let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhausted);
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(decision);
+        source_status: Some(status),
+    });
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     if let Some(observability) = observability.as_mut() {
         observability.response_status = Some("error".to_string());
@@ -4805,13 +4900,8 @@ fn error_output(
             observability.provider_id = Some(provider_id.to_string());
         }
     }
-    let client_status = if status >= 400 {
-        status
-    } else {
-        projected.status
-    };
     V3ResponsesRelayRuntimeOutput {
-        status: client_status,
+        status: projected.status,
         client_body: V3ResponsesRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -4824,7 +4914,7 @@ fn error_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::{StreamExt, stream};
+    use futures_util::{stream, StreamExt};
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
 
@@ -4849,8 +4939,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn responses_relay_routes_reasoning_from_original_responses_surface_after_chat_canonicalization()
-     {
+    async fn responses_relay_routes_reasoning_from_original_responses_surface_after_chat_canonicalization(
+    ) {
         let authoring = parse_v3_config_02_authoring(
             r#"
 version = 3
@@ -5114,6 +5204,53 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
             response["output"][0]["text"],
             "upstream returned zero output tokens is only quoted text here"
         );
+    }
+
+    #[test]
+    fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
+        let error = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_overload_diagnostic",
+                "model": "glm-5.2",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "mac超负荷运载，应该是挂了"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": null
+            }),
+            &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
+        )
+        .expect_err("upstream overload diagnostic must be provider failure, not success content");
+
+        assert!(
+            error.to_string().contains("upstream overload diagnostic"),
+            "wrong error: {error}"
+        );
+    }
+
+    #[test]
+    fn openai_chat_overload_text_with_real_usage_remains_success() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_overload_visible_text",
+                "model": "glm-5.2",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "mac超负荷运载，应该是挂了"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens":12,"completion_tokens":9,"total_tokens":21}
+            }),
+            &json!({"tools": []}),
+        )
+        .expect("visible overload-looking content with real usage stays model output");
+
+        assert_eq!(response["status"], "completed");
     }
 
     #[test]
@@ -5575,11 +5712,9 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         .await
         .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("provider response event stream ended before response.completed")
-        );
+        assert!(error
+            .to_string()
+            .contains("provider response event stream ended before response.completed"));
     }
 
     #[tokio::test]
@@ -5649,18 +5784,14 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         )
         .await;
         assert!(projected[0].as_ref().unwrap().contains("response.created"));
-        assert!(
-            projected[1]
-                .as_ref()
-                .unwrap()
-                .contains("response.output_item.done")
-        );
-        assert!(
-            projected[2]
-                .as_ref()
-                .unwrap()
-                .contains("response.completed")
-        );
+        assert!(projected[1]
+            .as_ref()
+            .unwrap()
+            .contains("response.output_item.done"));
+        assert!(projected[2]
+            .as_ref()
+            .unwrap()
+            .contains("response.completed"));
         assert!(projected[3].as_ref().unwrap().contains("response.done"));
         assert_eq!(projected[4].as_ref().unwrap(), "data: [DONE]\n\n");
     }
@@ -5767,11 +5898,9 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         .await
         .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("Anthropic provider event stream ended without message_stop")
-        );
+        assert!(error
+            .to_string()
+            .contains("Anthropic provider event stream ended without message_stop"));
     }
 
     #[tokio::test]

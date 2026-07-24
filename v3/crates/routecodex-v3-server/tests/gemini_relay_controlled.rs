@@ -1,17 +1,17 @@
 use axum::{
-    Json, Router,
     body::Body,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::Response,
     routing::post,
+    Json, Router,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{net::TcpListener, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
@@ -155,15 +155,13 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .await
         .unwrap();
     assert_eq!(json_response.status(), StatusCode::OK);
-    assert!(
-        json_response
-            .headers()
-            .get("x-routecodex-v3-node-trace")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("V3ServerRespOutbound06ClientFrame")
-    );
+    assert!(json_response
+        .headers()
+        .get("x-routecodex-v3-node-trace")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("V3ServerRespOutbound06ClientFrame"));
     let json_body: Value = json_response.json().await.unwrap();
     assert_eq!(
         json_body["candidates"][0]["content"]["parts"][0]["text"],

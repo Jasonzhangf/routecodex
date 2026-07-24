@@ -4,12 +4,8 @@ use crate::nodes::{
 };
 use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
-    build_v3_error_03_target_local_action_from_v3_error_02,
-    build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
-    build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05, V3Error01SourceRaised,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -242,16 +238,12 @@ fn responses_direct_error_hook(
     scope: V3ErrorActionScope,
     candidates_remaining: usize,
 ) -> V3Error06ClientProjected {
-    let classified = build_v3_error_02_classified_from_v3_error_01(source);
-    let action = build_v3_error_03_target_local_action_from_v3_error_02(
-        classified,
-        scope,
+    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: scope,
         candidates_remaining,
-    );
-    let exhaustion =
-        build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, candidates_remaining);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    build_v3_error_06_client_projected_from_v3_error_05(execution)
+        source_status: None,
+    })
 }
 
 #[cfg(test)]
