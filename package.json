@@ -451,6 +451,8 @@
     "verify:route-metadata-preselected-route-owner": "node scripts/architecture/verify-route-metadata-preselected-route-owner.mjs",
     "test:v3-sse-transport-core": "CARGO_NET_OFFLINE=true cargo test -p routecodex-v3-sse --manifest-path v3/Cargo.toml -- --nocapture",
     "render:v3-mainline-caller-flow": "node scripts/architecture/render-v3-mainline-caller-flow.mjs",
+    "verify:v3-hub-pipeline-core-manifests": "node scripts/architecture/verify-v3-hub-pipeline-core-manifests.mjs",
+    "test:v3-hub-pipeline-core-manifest-red-fixtures": "node scripts/tests/v3-hub-pipeline-core-manifest-red-fixtures.mjs",
     "verify:v3-mainline-caller-flow": "node scripts/architecture/verify-v3-mainline-caller-flow.mjs",
     "test:v3-mainline-caller-flow-red-fixtures": "node scripts/tests/v3-mainline-caller-flow-red-fixtures.mjs"
   },

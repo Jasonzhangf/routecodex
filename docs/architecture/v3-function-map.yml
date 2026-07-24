@@ -779,6 +779,10 @@ features:
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.hub_pipeline.v1.request.mainline.yml
+      - docs/architecture/manifests/v3.hub_pipeline.v1.response.mainline.yml
+      - scripts/architecture/verify-v3-hub-pipeline-core-manifests.mjs
+      - scripts/tests/v3-hub-pipeline-core-manifest-red-fixtures.mjs
       - scripts/architecture/verify-v3-hub-v1-node-file-topology.mjs
       - scripts/tests/v3-hub-v1-node-file-topology-red-fixtures.mjs
       - package.json
@@ -788,6 +792,8 @@ features:
       - src
       - sharedmodule
     required_gates:
+      - npm run verify:v3-hub-pipeline-core-manifests
+      - npm run test:v3-hub-pipeline-core-manifest-red-fixtures
       - npm run verify:v3-hub-v1-node-file-topology
       - npm run test:v3-hub-v1-node-file-topology-red-fixtures
       - npm run verify:v3-p6-freeze

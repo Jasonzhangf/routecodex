@@ -199,6 +199,8 @@ features:
     contract:
       - docs/architecture/v3-resource-operation-map.yml
       - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.hub_pipeline.v1.request.mainline.yml
+      - docs/architecture/manifests/v3.hub_pipeline.v1.response.mainline.yml
       - docs/architecture/wiki/v3-hub-pipeline-static-skeleton.md
     test_design:
       - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
@@ -218,6 +220,8 @@ features:
       - Relay and new protocols fill hooks without changing or renumbering the skeleton
       - servertool followup Dry Run JSON SSE retry and Error paths use existing hook slots and the sole response exit
     required_gates:
+      - npm run verify:v3-hub-pipeline-core-manifests
+      - npm run test:v3-hub-pipeline-core-manifest-red-fixtures
       - npm run verify:v3-hub-v1-node-file-topology
       - npm run test:v3-hub-v1-node-file-topology-red-fixtures
       - npm run verify:v3-architecture-docs
