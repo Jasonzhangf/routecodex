@@ -59,6 +59,7 @@ for (const token of [
   '`provider-request` 在 V3 live 中不是手工构造、dry-run 构造或 Hub 重建样本',
   '唯一 owner 是 live provider transport cutpoint recorder',
   'SSE 情况下 `response.json.rawSse` 至少能对账',
+  '`response.json.materializedResponse` 必须保存 Resp05 finalized semantic JSON',
   'V2/legacy `provider-request` 不属于默认集',
   '显式 `--snap-stages provider-request`',
   'force-local debug 捕获',
@@ -110,6 +111,7 @@ for (const token of [
   '"provider-response.json"',
   '"response.json"',
   '"rawSse"',
+  '"materializedResponse"',
 ]) {
   if (!`${v3Server}\n${v3ResponsesRelayRuntime}`.includes(token)) {
     failures.push(`V3 live server must capture real provider cutpoint samples: ${token}`);

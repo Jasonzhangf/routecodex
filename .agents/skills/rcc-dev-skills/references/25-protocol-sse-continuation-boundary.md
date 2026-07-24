@@ -171,3 +171,22 @@ Forbidden in MetadataCenter:
 - Locator fields become immutable after construction. Commit must reject invalid expiry and duplicate remote response IDs; load must reject every owner/scope/pin mismatch, expiry, and provider unavailability without cross-provider reselection or local-owner fallback.
 - The locator codec must deny unknown fields so `local_context`, `history`, `tool_state`, or equivalent local Chat Process truth cannot be silently persisted or restored.
 - Keep the remote-binding resource `binding_pending` until Resp04 commit, Req03 load/classification, and pinned Target execution edges are actually wired and verified. Passing isolated store/codec tests does not prove usable continuation runtime.
+
+## V3 Relay SSE Materialized Snapshot Rule
+
+For `/v1/responses` Relay, provider SSE is still transport framing until the provider event codec materializes it. The required owner path is:
+
+```text
+ProviderRespInbound01Raw SSE frames
+  -> provider/protocol event codec
+  -> Resp02 canonical terminal JSON
+  -> Resp03/Resp04 governed/finalized response
+  -> Resp05 client JSON/SSE projection
+```
+
+Debug/sample persistence must record both surfaces for SSE responses:
+
+- `rawSse`: transport evidence, captured incrementally and never used as semantic truth.
+- `materializedResponse`: Resp04-finalized JSON semantic truth used for client projection and auditing.
+
+Do not make server/SSE transport re-parse `rawSse` to prove semantic state. If a provider emits a `response.*` SSE event that the codec does not understand, fail fast in the provider event codec rather than silently discarding it or patching it in snapshot/server code.

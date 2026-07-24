@@ -70,6 +70,7 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
+    pub finalized_response: Option<Value>,
     pub provider_snapshots: Option<V3ResponsesRelayProviderSnapshots>,
 }
 
@@ -943,6 +944,10 @@ impl std::fmt::Debug for V3ResponsesRelayRuntimeOutput {
             .field("error_chain", &self.error_chain)
             .field("observability", &self.observability)
             .field("stream_observation", &self.stream_observation)
+            .field(
+                "finalized_response",
+                &self.finalized_response.as_ref().map(|_| "present"),
+            )
             .finish()
     }
 }
@@ -1742,6 +1747,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 observability.stopless_activation =
                     response_has_stopless_activation(&finalized_provider_value);
+                let finalized_response = finalized_provider_value.clone();
                 let client_body = project_v3_responses_relay_client_body(
                     client_response_transport_intent,
                     finalized_provider_value,
@@ -1753,6 +1759,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     error_chain: None,
                     observability: Some(observability),
                     stream_observation: None,
+                    finalized_response: Some(finalized_response),
                     provider_snapshots: None,
                 });
             }
@@ -1972,6 +1979,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     response_has_stopless_activation(&finalized_provider_value);
                 let client_response_is_sse =
                     client_response_transport_intent == V3HubTransportIntent::Sse;
+                let finalized_response = finalized_provider_value.clone();
                 let client_body = project_v3_responses_relay_client_body(
                     client_response_transport_intent,
                     finalized_provider_value,
@@ -1987,6 +1995,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     } else {
                         None
                     },
+                    finalized_response: Some(finalized_response),
                     provider_snapshots: None,
                 });
             }
@@ -3716,6 +3725,7 @@ async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     let _owner = V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER;
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut terminal_response: Option<Value> = None;
+    let mut response_scaffold: Option<Value> = None;
     let mut output_items: Vec<Value> = Vec::new();
     let mut output_text = String::new();
     while let Some(chunk) = provider.next().await {
@@ -3724,6 +3734,7 @@ async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
             &chunk,
             &mut decoder,
             observation,
+            &mut response_scaffold,
             &mut output_items,
             &mut output_text,
         )? {
@@ -4590,6 +4601,7 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
     observation: &V3RuntimeStreamObservation,
+    response_scaffold: &mut Option<Value>,
     output_items: &mut Vec<Value>,
     output_text: &mut String,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
@@ -4620,18 +4632,30 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
         collect_v3_runtime_responses_event_payload_evidence(
             event_type.as_deref(),
             &event,
+            response_scaffold,
             output_items,
             output_text,
-        );
+        )?;
         let semantic_event_type = event_type
             .as_deref()
             .or_else(|| event.get("type").and_then(Value::as_str));
         match semantic_event_type {
+            Some("response.created" | "response.in_progress") => {
+                if response_scaffold.is_none() {
+                    *response_scaffold = Some(
+                        event
+                            .get("response")
+                            .cloned()
+                            .unwrap_or_else(|| event.clone()),
+                    );
+                }
+            }
             Some("response.completed" | "response.done" | "response.requires_action") => {
                 let mut response = event
                     .get("response")
                     .cloned()
                     .unwrap_or_else(|| event.clone());
+                merge_v3_runtime_responses_scaffold(&mut response, response_scaffold.as_ref());
                 attach_required_action_from_sse_event(&mut response, &event);
                 apply_responses_stream_protocol_events_to_terminal_response(
                     &mut response,
@@ -4652,10 +4676,35 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
                     message.to_string(),
                 ));
             }
+            Some(
+                "response.output_item.added"
+                | "response.output_item.done"
+                | "response.output_text.delta"
+                | "response.output_text.done"
+                | "response.function_call_arguments.delta"
+                | "response.function_call_arguments.done",
+            ) => {}
+            Some(other) if other.starts_with("response.") => {
+                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    format!("V3 Responses Relay response event type {other} is unsupported"),
+                ));
+            }
             _ => {}
         }
     }
     Ok(terminal_response)
+}
+
+fn merge_v3_runtime_responses_scaffold(response: &mut Value, scaffold: Option<&Value>) {
+    let (Some(response), Some(scaffold)) = (
+        response.as_object_mut(),
+        scaffold.and_then(Value::as_object),
+    ) else {
+        return;
+    };
+    for (key, value) in scaffold {
+        response.entry(key.clone()).or_insert_with(|| value.clone());
+    }
 }
 
 fn attach_required_action_from_sse_event(response: &mut Value, event: &Value) {
@@ -4755,11 +4804,22 @@ fn extract_v3_provider_event_error_payload_message(payload: &Value) -> Option<St
 fn collect_v3_runtime_responses_event_payload_evidence(
     event_type: Option<&str>,
     event: &Value,
+    response_scaffold: &mut Option<Value>,
     output_items: &mut Vec<Value>,
     output_text: &mut String,
-) {
+) -> Result<(), V3ResponsesRelayRuntimeError> {
     let semantic_event_type = event_type.or_else(|| event.get("type").and_then(Value::as_str));
     match semantic_event_type {
+        Some("response.created" | "response.in_progress") => {
+            if response_scaffold.is_none() {
+                *response_scaffold = Some(
+                    event
+                        .get("response")
+                        .cloned()
+                        .unwrap_or_else(|| event.clone()),
+                );
+            }
+        }
         Some("response.output_item.added" | "response.output_item.done") => {
             if let Some(item) = event.get("item").cloned() {
                 upsert_v3_runtime_responses_event_output_item(output_items, item);
@@ -4786,8 +4846,22 @@ fn collect_v3_runtime_responses_event_payload_evidence(
                 set_v3_runtime_responses_event_function_arguments(output_items, event, arguments);
             }
         }
+        Some(
+            "response.completed"
+            | "response.done"
+            | "response.requires_action"
+            | "response.failed"
+            | "response.incomplete"
+            | "response.error",
+        ) => {}
+        Some(other) if other.starts_with("response.") => {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!("V3 Responses Relay response event type {other} is unsupported"),
+            ));
+        }
         _ => {}
     }
+    Ok(())
 }
 
 fn upsert_v3_runtime_responses_event_output_item(output_items: &mut Vec<Value>, item: Value) {
@@ -5216,6 +5290,7 @@ fn error_output(
         error_chain: Some(projected.chain.to_vec()),
         observability,
         stream_observation: None,
+        finalized_response: None,
         provider_snapshots: None,
     }
 }
@@ -6332,6 +6407,52 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
 
         assert!(error.to_string().contains("new_api_panic"));
         assert!(error.to_string().contains("Panic detected"));
+    }
+
+    #[tokio::test]
+    async fn responses_provider_sse_materializes_created_tool_usage_without_silent_loss() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_scaffold\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
+            Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\",\"arguments\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\"}\n\n".to_vec()),
+            Ok(b"event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"requires_action\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}},\"required_action\":{\"type\":\"submit_tool_outputs\"}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["id"], "resp_scaffold");
+        assert_eq!(response["model"], "provider-model");
+        assert_eq!(response["created_at"], 123);
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["required_action"]["type"], "submit_tool_outputs");
+        assert_eq!(response["usage"]["total_tokens"], 5);
+        assert_eq!(response["output"][0]["call_id"], "call_1");
+        assert_eq!(response["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
+    }
+
+    #[tokio::test]
+    async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
+        )]));
+        let error = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("response.reasoning_summary.delta is unsupported"));
     }
 
     #[tokio::test]

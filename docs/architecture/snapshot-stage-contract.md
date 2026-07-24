@@ -18,7 +18,7 @@ V3 live `rccv3 start --snap` 默认必须打开四类真实边界快照：
 - 这是 V3 live 在线闭环的最小审计合同，必须能从 client request → provider request → provider response → client response 还原真实链路。
 - `provider-request` 在 V3 live 中不是手工构造、dry-run 构造或 Hub 重建样本；唯一 owner 是 live provider transport cutpoint recorder，在真实 provider send 前记录已经构造好的 provider transport request。
 - `provider-response` 在 V3 live 中记录真实 provider JSON body / SSE chunk / provider error response 经过 transport 时的原始观测，不消费 stream，不拥有 SSE 或响应语义。
-- `client-response` 在 V3 live 中必须记录实际回客户端的 JSON body 或 raw SSE frame；SSE 情况下 `response.json.rawSse` 至少能对账 `response.*` 事件和 `[DONE]`，不得只写 `stream:true/status/node_trace` 这类 metadata 占位样本。
+- `client-response` 在 V3 live 中必须记录实际回客户端的 JSON body 或 raw SSE frame；SSE 情况下 `response.json.rawSse` 至少能对账 `response.*` 事件和 `[DONE]`，且 `response.json.materializedResponse` 必须保存 Resp05 finalized semantic JSON（含 `output[].reasoning.summary` / tool calls / usage 等 canonical 语义），不得只写 `stream:true/status/node_trace` 这类 metadata 占位样本。
 - Hub/module snapshot hooks 仍必须拒绝 `provider-request` body；provider-request replay artifact 不得从 Hub、SSE、handler、RespOutbound、ReqInbound 或 MetadataCenter 重建。
 - V3 `--snap-stages "<selector>"` 可以局部选择上述 stage；显式 selector 覆盖默认四件套。
 - `provider-error`、`*.retry`、`*.contract`、`chat_process.*`、`hub_followup.*`、`servertool.*` 不属于默认最小集。

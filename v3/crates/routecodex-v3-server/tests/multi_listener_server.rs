@@ -97,6 +97,20 @@ fn assert_single_responses_sample_pair(
     );
 }
 
+fn read_single_responses_sample_response(samples_root: &std::path::Path) -> Value {
+    let entries = fs::read_dir(samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        entries.len(),
+        1,
+        "one live request should create one canonical sample directory under {samples_root:?}"
+    );
+    let response = fs::read_to_string(entries[0].path().join("response.json")).unwrap();
+    serde_json::from_str(&response).unwrap()
+}
+
 const HUB_V1_TEST_DECLARATION: &str = r#"
 [pipelines.hub_v1]
 skeleton = "hub_v1"
@@ -541,7 +555,7 @@ async fn controlled_responses_relay_upstream(
 data: {"id":"resp_sse"}
 
 event: response.completed
-data: {"response":{"id":"resp_sse","status":"completed"}}
+data: {"response":{"id":"resp_sse","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"relay sse reasoning summary"}]},{"type":"output_text","text":"relay sse final text"}],"output_text":"relay sse final text"}}
 
 data: [DONE]
 
@@ -1525,6 +1539,64 @@ async fn responses_relay_full_history_tool_pair_without_client_scope_reaches_pro
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_summary() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("relay-live-sse-materialized-response");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-relay-sse-sample");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay live sse materialized sample",
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("event: response.completed"));
+    assert!(body.contains("relay sse reasoning summary"));
+    let _capture = captures.recv().await.unwrap();
+
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample = read_single_responses_sample_response(&samples_root);
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    assert_eq!(sample["object"], "routecodex.v3.client_response_snapshot");
+    assert_eq!(sample["bodyKind"], "sse");
+    assert!(sample["rawSse"]
+        .as_str()
+        .unwrap()
+        .contains("response.completed"));
+    assert_eq!(sample["materializedResponse"]["id"], "resp_sse");
+    assert_eq!(sample["materializedResponse"]["status"], "completed");
+    assert_eq!(
+        sample["materializedResponse"]["output"][0]["summary"][0]["text"],
+        "relay sse reasoning summary"
+    );
+    assert_eq!(
+        sample["materializedResponse"]["output"][1]["text"],
+        "relay sse final text"
+    );
 }
 
 #[tokio::test]

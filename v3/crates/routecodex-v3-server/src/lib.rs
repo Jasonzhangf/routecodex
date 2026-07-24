@@ -2187,6 +2187,7 @@ struct V3LiveSnapClientResponseSseRecorder {
     node_trace: Vec<&'static str>,
     error_chain: Option<Vec<&'static str>>,
     observability: Option<Value>,
+    finalized_response: Option<Value>,
     raw_sse: Arc<Mutex<String>>,
     stream_error: Arc<Mutex<Option<String>>>,
 }
@@ -2211,6 +2212,7 @@ impl V3LiveSnapClientResponseSseRecorder {
                 .observability
                 .as_ref()
                 .map(project_v3_runtime_observability_debug),
+            finalized_response: output.finalized_response.clone(),
             raw_sse: Arc::new(Mutex::new(String::new())),
             stream_error: Arc::new(Mutex::new(None)),
         }
@@ -2265,6 +2267,7 @@ impl V3LiveSnapClientResponseSseRecorder {
             "status": self.status,
             "bodyKind": "sse",
             "rawSse": raw_sse,
+            "materializedResponse": self.finalized_response.clone(),
             "node_trace": self.node_trace.clone(),
             "error_chain": self.error_chain.clone(),
             "observability": self.observability.clone(),
@@ -2365,6 +2368,7 @@ fn capture_v3_responses_relay_response(
                 "bodyKind": "sse",
                 "rawSse": "",
                 "stream": true,
+                "materializedResponse": output.finalized_response.clone(),
                 "status": output.status,
                 "node_trace": output.node_trace.clone(),
                 "error_chain": output.error_chain.clone(),
