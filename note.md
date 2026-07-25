@@ -33147,3 +33147,8 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Matrix repair: `request.temperature` no longer owns top_p; `request.top_p` owns Gemini `topP`; `request.top_k` is partial after Gemini source extraction; Gemini `stopSequences` maps to native `request.stop`, not a new extension row.
 - Scope boundary: source/codec + matrix/gate closeout only. No WebUI/admin, no V2/sharedmodule runtime edits, no live config, no global install, no restart, no runtime/live completion claim.
 - Verification PASS: Gemini red/green codec gates, protocol field parity render/verify/tests/red fixtures, V3 architecture docs, module boundaries, Rust-only, resource map, function-map compile gate, mainline caller flow render/verify/red fixtures, architecture wiki HTML sync, cargo fmt, and git diff check.
+
+## 2026-07-25T13:18+08:00 V3 console terminal display-width closeout
+- Jason corrected that console alignment must use terminal display width, not Rust string width; emoji status tags such as ✅/❌/🧭 are double-width while ▶ is single-width.
+- Source owner: `v3/crates/routecodex-v3-server/src/lib.rs`; `format_v3_console_timed_content` and scope padding now use explicit display-width padding, and console tests lock whole data-value highlighting plus tag/timestamp alignment.
+- Live closeout after clean-worktree build/global install/restart: `routecodex restart --port 5555`, `/health` on 127.0.0.1 and 192.168.0.6, and live `/v1/responses` session `console-align-live-92041ba25-051638` all passed. Log assertion proved every request/route/error/stopless/complete/usage line has identical tag+time display width and whole data values are ANSI-white.
