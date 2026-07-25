@@ -331,10 +331,13 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {
         output.insert("thinking".to_string(), thinking);
     }
-    for key in ["metadata", "temperature", "top_p", "top_k", "user"] {
+    for key in ["temperature", "top_p", "top_k"] {
         if let Some(value) = object.get(key) {
             output.insert(key.to_string(), value.to_owned());
         }
+    }
+    if let Some(metadata) = responses_metadata_as_anthropic_metadata(object)? {
+        output.insert("metadata".to_string(), metadata);
     }
     if let Some(value) = object
         .get("max_output_tokens")
@@ -355,6 +358,44 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         ),
     );
     Ok(Value::Object(output))
+}
+
+fn responses_metadata_as_anthropic_metadata(
+    object: &Map<String, Value>,
+) -> Result<Option<Value>, V3AnthropicCodecError> {
+    let user = object.get("user").and_then(Value::as_str).map(str::trim);
+    let user = user.filter(|value| !value.is_empty());
+    let metadata = object.get("metadata");
+    let mut user_id: Option<String> = user.map(str::to_string);
+    if let Some(metadata) = metadata {
+        let metadata = metadata
+            .as_object()
+            .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
+        for (key, value) in metadata {
+            if key != "user_id" {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "metadata.unsupported",
+                });
+            }
+            let candidate = value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "metadata.user_id",
+                })?;
+            if user_id
+                .as_deref()
+                .is_some_and(|existing| existing != candidate)
+            {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "metadata.user_id",
+                });
+            }
+            user_id = Some(candidate.to_string());
+        }
+    }
+    Ok(user_id.map(|user_id| json!({"user_id": user_id})))
 }
 
 fn responses_reasoning_request_config_as_anthropic_thinking(
@@ -394,12 +435,7 @@ fn responses_reasoning_effort(
     legacy_reasoning_effort: Option<&Value>,
 ) -> Option<String> {
     reasoning
-        .and_then(|reasoning| {
-            reasoning
-                .get("effort")
-                .or_else(|| reasoning.get("mode"))
-                .and_then(Value::as_str)
-        })
+        .and_then(|reasoning| reasoning.get("effort").and_then(Value::as_str))
         .or_else(|| legacy_reasoning_effort.and_then(Value::as_str))
         .map(str::trim)
         .filter(|effort| !effort.is_empty())

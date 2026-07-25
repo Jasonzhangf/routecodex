@@ -94,8 +94,8 @@
         <span class="stat-card"><strong>5</strong><span>source documents</span></span>
         <span class="stat-card"><strong>414</strong><span>source field paths</span></span>
         <span class="stat-card"><strong>413</strong><span>classified fields</span></span>
-        <span class="stat-card"><strong>67</strong><span>manual semantic groups</span></span>
-        <span class="stat-card"><strong>41</strong><span>semantic rows</span></span>
+        <span class="stat-card"><strong>69</strong><span>manual semantic groups</span></span>
+        <span class="stat-card"><strong>44</strong><span>semantic rows</span></span>
         <span class="stat-card"><strong>5</strong><span>implementation gaps</span></span>
       </div>
     </header>
@@ -255,12 +255,12 @@
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>103</code></td>
+    <td><code>104</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>214</code></td>
+    <td><code>221</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -302,7 +302,7 @@
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>214</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>221</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -316,7 +316,7 @@
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>103</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>104</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -1093,11 +1093,11 @@
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.toolConfig.functionCallingConfig.mode</code></li></ul>
+    <span class="muted">— no request field</span>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini mode may constrain call count but is not an exact boolean; requires explicit value contract.</div>
+    <div>Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean; keep it out of outbound parallelism unless a separate compatible target contract is approved.</div>
 
   </div></td>
   </tr>
@@ -1537,11 +1537,11 @@
     <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. reasoning content and usage stay separate.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.summary</code></li></ul>
+    <ul class="field-list"><li><code>request.reasoning.effort</code></li></ul>
     <h4>response fields</h4>
-    <ul class="field-list"><li><code>response.reasoning</code></li></ul>
+    <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Responses reasoning request config maps to effort/summary policy; response reasoning is separate.</div>
+    <div>Responses reasoning.effort maps to Chat reasoning_effort. Reasoning mode, summary policy, context policy, and response reasoning content are separate semantics.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1560,6 +1560,90 @@
     <span class="muted">— no response field</span>
     <h4>transform</h4>
     <div>Gemini thinkingLevel maps to Chat reasoning effort/level. includeThoughts and thinkingBudget are separate reasoning extension semantics; thoughtsTokenCount is usage, not request effort.</div>
+
+  </div></td>
+  </tr>
+<tr>
+    <td class="standard-cell">
+      <code>request.reasoning.summary_policy</code>
+      <div class="muted">group <code>reasoning.request_summary_policy</code></div>
+      <div><ul class="field-list"><li><code>request.reasoning.summary_policy</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning.summary_policy</code></li></ul>
+    </td>
+    <td class="standard-cell">
+      <strong>Standard Chat semantic meaning</strong>
+      <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort.</div>
+      <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized thinking; otherwise the field remains decision-required.</div></details>
+
+    </td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Compatible outbound mapping needs explicit target policy and Jason decision for non-equivalent targets.</span></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.reasoning.summary</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Preserve as request summary policy.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.thinking.display</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Compatible mapping may use Anthropic thinking display policy when thinking is enabled; exact summary levels are target-dependent.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>No direct equivalent in the audited Gemini request inventory.</div>
+
+  </div></td>
+  </tr>
+<tr>
+    <td class="standard-cell">
+      <code>request.reasoning.context_policy</code>
+      <div class="muted">group <code>reasoning.request_context_policy</code></div>
+      <div><ul class="field-list"><li><code>request.reasoning.context_policy</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning.context_policy</code></li></ul>
+    </td>
+    <td class="standard-cell">
+      <strong>Standard Chat semantic meaning</strong>
+      <div>Request policy controlling which prior reasoning context is visible to a target model.</div>
+      <details><summary>Chat shape / value rule</summary><div>Context policy is not effort, budget, visible reasoning text, or response summary.</div></details>
+
+    </td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">No runtime outbound mapping claimed; requires compatibility decision before target projection.</span></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.reasoning.context</code></li><li><code>request.reasoning.mode</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Preserve as protocol-neutral request policy until a target protocol has a compatible context/mode knob.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>No exact Anthropic Messages equivalent in this audited source set.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>No exact Gemini equivalent in this audited source set.</div>
 
   </div></td>
   </tr>
@@ -1588,11 +1672,11 @@
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.thinking.display</code></li></ul>
+    <span class="muted">— no request field</span>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic display controls visibility policy for thinking traces.</div>
+    <div>Anthropic display is a display-mode policy handled by reasoning.request_summary_policy, not a boolean include flag.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1791,27 +1875,27 @@
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.max_output_tokens</code></li></ul>
     <h4>response fields</h4>
-    <ul class="field-list"><li><code>response.usage.output_tokens</code></li></ul>
+    <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Responses max_output_tokens maps to Chat max_completion_tokens; usage output_tokens is response accounting, not request cap.</div>
+    <div>Responses max_output_tokens maps to Chat max_completion_tokens on OpenAI Chat outbound; usage output_tokens is response accounting and stays in usage groups.</div>
 
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.max_tokens</code></li></ul>
     <h4>response fields</h4>
-    <ul class="field-list"><li><code>response.usage.output_tokens</code></li></ul>
+    <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is usage.</div>
+    <div>Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is response usage only.</div>
 
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.maxOutputTokens</code></li></ul>
     <h4>response fields</h4>
-    <ul class="field-list"><li><code>response.usageMetadata.candidatesTokenCount</code></li></ul>
+    <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini maxOutputTokens maps to Chat max_completion_tokens; candidatesTokenCount is usage.</div>
+    <div>Gemini maxOutputTokens maps to Chat max_completion_tokens; candidatesTokenCount is response usage only.</div>
 
   </div></td>
   </tr>
@@ -2269,11 +2353,11 @@
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <span class="muted">— no request field</span>
+    <ul class="field-list"><li><code>request.generationConfig.responseLogprobs</code></li></ul>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
+    <div>Gemini responseLogprobs is the boolean enable flag for logprobs output.</div>
 
   </div></td>
   </tr>
@@ -2311,11 +2395,11 @@
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.generationConfig.logprobs</code></li><li><code>request.generationConfig.responseLogprobs</code></li></ul>
+    <ul class="field-list"><li><code>request.generationConfig.logprobs</code></li></ul>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
+    <div>Gemini logprobs is the top-logprobs count and requires responseLogprobs=true; responseLogprobs itself is not a count.</div>
 
   </div></td>
   </tr>
@@ -3210,8 +3294,8 @@
       <p>这一张是主审计表：每行以 OpenAI Chat 字段为主键。若是 OpenAI Chat 原生字段，主键必须和 OpenAI Chat source inventory 完全同名；若 OpenAI Chat 没有该语义，主键才是新增 extension 字段。表中逐字段列出 semantic id、request/response direction、Responses / OpenAI Chat / Anthropic / Gemini 等价字段，以及 owner、current_impl、gap。没有等价语义会明确显示 <code>—</code>，方便审计是否还有超集外语义。</p>
       <div class="grid">
     <article class="card"><h3>Contract</h3><div class="source-meta"><div>Chat Process protocol is OpenAI Chat plus extension fields. The canonical semantic id is the same string as fields[].extended_openai_chat_field. OpenAI Chat native request/response fields keep their exact OpenAI Chat field paths, including [] item notation; only semantics absent from OpenAI Chat receive protocol-neutral top-level request./response./edge. extension fields. Every source protocol field is mapped exactly once or explicitly classified as edge_only / unsupported_blocked. Runtime does not read this audit artifact.</div><div>base protocol: <code>openai_chat</code></div></div></article>
-    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>259</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>174</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
-    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>174</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
+    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>261</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>176</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
+    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>176</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
   </div><div class="table-wrap"><table>
     <thead><tr><th>OpenAI Chat field (native or extension)</th><th>canonical semantic id</th><th>direction / status</th><th>Responses equivalent fields</th><th>OpenAI Chat native / extended fields</th><th>Anthropic equivalent fields</th><th>Gemini equivalent fields</th><th>owner / current_impl / gap</th></tr></thead>
     <tbody><tr>
@@ -3288,20 +3372,20 @@
     <td class="standard-cell"><code>request.max_completion_tokens</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.max_completion_tokens</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><span class="muted">— no Responses equivalent</span></td>
+    <td><ul class="field-list"><li><code>request.max_output_tokens</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.max_completion_tokens</code></li></ul></td>
-    <td><span class="muted">— no Anthropic equivalent</span></td>
-    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><ul class="field-list"><li><code>request.max_tokens</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.generationConfig.maxOutputTokens</code></li></ul></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.max_tokens</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.max_tokens</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><ul class="field-list"><li><code>request.max_output_tokens</code></li></ul></td>
+    <td><span class="muted">— no Responses equivalent</span></td>
     <td><ul class="field-list"><li><code>request.max_tokens</code></li></ul></td>
-    <td><ul class="field-list"><li><code>request.max_tokens</code></li></ul></td>
-    <td><ul class="field-list"><li><code>request.generationConfig.maxOutputTokens</code></li></ul></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
   </tr>
 <tr>
@@ -3548,9 +3632,9 @@
     <td class="standard-cell"><code>request.metadata</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.metadata</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><ul class="field-list"><li><code>request.metadata</code></li><li><code>response.metadata</code></li><li><code>request.user</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.metadata</code></li><li><code>response.metadata</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.metadata</code></li></ul></td>
-    <td><ul class="field-list"><li><code>request.metadata.user_id</code></li><li><code>request.user_profile_id</code></li></ul></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
   </tr>
@@ -3678,11 +3762,31 @@
     <td class="standard-cell"><code>request.reasoning_effort</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.reasoning_effort</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.context</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.reasoning.effort</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.reasoning_effort</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; budget/visibility are separate request.reasoning.* extension rows; runtime mapping remains partial.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge partial">partial</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
+  </tr>
+<tr>
+    <td class="standard-cell"><code>request.reasoning.summary_policy</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning.summary_policy</code></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.summary</code></li></ul></td>
+    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
+    <td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a compatible target policy and needs explicit outbound owner.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+  </tr>
+<tr>
+    <td class="standard-cell"><code>request.reasoning.context_policy</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning.context_policy</code></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.context</code></li></ul></td>
+    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning.include_thoughts</code><br><span class="muted">added Chat extension field</span></td>
@@ -3690,9 +3794,9 @@
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
-    <td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts includeThoughts; Anthropic display and runtime cross-protocol closeout pending.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning.budget_tokens</code><br><span class="muted">added Chat extension field</span></td>
@@ -3828,9 +3932,9 @@
     <td class="standard-cell"><code>request.user</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.user</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><span class="muted">— no Responses equivalent</span></td>
     <td><ul class="field-list"><li><code>request.user</code></li></ul></td>
-    <td><span class="muted">— no Anthropic equivalent</span></td>
+    <td><ul class="field-list"><li><code>request.user</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.metadata.user_id</code></li><li><code>request.user_profile_id</code></li></ul></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
   </tr>
@@ -5825,7 +5929,7 @@
       <div>protocol-specific extension: <code>44</code></div>
       <div>edge-only: <code>1</code></div>
       <div>unsupported/lossy: <code>0</code></div>
-      <div>without semantic row: <code>22</code></div>
+      <div>without semantic row: <code>23</code></div>
     </div></article><article class="card"><h3>Gemini</h3><div class="source-meta">
       <div>protocol-specific extension: <code>94</code></div>
       <div>edge-only: <code>0</code></div>
@@ -6060,7 +6164,7 @@
         <td><span class="badge source_inventory_only">source_inventory_only</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>data_plane_metadata -&gt; chat.client_data.metadata</code></li></ul></td>
+        <td><ul class="field-list"><li><code>end_user_identifier -&gt; chat.client_data.user_identifier</code></li></ul></td>
         <td><span class="muted">— no Chat extension owner</span></td>
       </tr>
 <tr>
@@ -6790,7 +6894,7 @@
         <td><span class="badge source_inventory_only">source_inventory_only</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>data_plane_metadata -&gt; chat.client_data.metadata</code></li></ul></td>
+        <td><ul class="field-list"><li><code>end_user_identifier -&gt; chat.client_data.user_identifier</code></li></ul></td>
         <td><span class="muted">— no Chat extension owner</span></td>
       </tr>
 <tr>
@@ -7040,7 +7144,7 @@
         <td><span class="badge source_inventory_only">source_inventory_only</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>data_plane_metadata -&gt; chat.client_data.metadata</code></li></ul></td>
+        <td><ul class="field-list"><li><code>end_user_identifier -&gt; chat.client_data.user_identifier</code></li></ul></td>
         <td><span class="muted">— no Chat extension owner</span></td>
       </tr>
 <tr>
@@ -7100,7 +7204,7 @@
         <td><span class="badge partial">partial</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_include_thoughts -&gt; chat.reasoning.include_thoughts</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_summary_policy -&gt; chat.reasoning.summary_policy</code></li></ul></td>
         <td><details><summary><code>thinking_and_cache_control</code> · <span class="badge partial">partial</span></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div></details></td>
       </tr>
 <tr>
@@ -7150,7 +7254,7 @@
         <td><span class="badge source_inventory_only">source_inventory_only</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>data_plane_metadata -&gt; chat.client_data.metadata</code></li></ul></td>
+        <td><span class="muted">— no semantic_correspondence row</span></td>
         <td><span class="muted">— no Chat extension owner</span></td>
       </tr>
 <tr>
@@ -8470,7 +8574,21 @@
     <td><code>chat.reasoning.request_config</code></td>
     <td><span class="badge canonical_chat">canonical_chat</span></td>
     <td><span class="badge partial">partial</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.context</code></li></ul></td><td><ul class="field-list"><li><code>request.reasoning_effort</code></li></ul></td><td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.reasoning.effort</code></li></ul></td><td><ul class="field-list"><li><code>request.reasoning_effort</code></li></ul></td><td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_summary_policy</code></td>
+    <td><code>chat.reasoning.summary_policy</code></td>
+    <td><span class="badge request_reasoning_summary_policy">request.reasoning.summary_policy</span></td>
+    <td><span class="badge extension_declared">extension_declared</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.summary</code></li></ul></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td><td><span class="muted">—</span></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_context_policy</code></td>
+    <td><code>chat.reasoning.context_policy</code></td>
+    <td><span class="badge request_reasoning_context_policy">request.reasoning.context_policy</span></td>
+    <td><span class="badge extension_declared">extension_declared</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.context</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
   </tr>
 <tr>
     <td><code>reasoning.visible_and_opaque</code></td>
@@ -8526,7 +8644,14 @@
     <td><code>chat.client_data.metadata</code></td>
     <td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td>
     <td><span class="badge partial">partial</span></td>
-    <td><ul class="field-list"><li><code>request.metadata</code></li><li><code>response.metadata</code></li><li><code>request.user</code></li></ul></td><td><ul class="field-list"><li><code>request.metadata</code></li><li><code>request.user</code></li></ul></td><td><ul class="field-list"><li><code>request.metadata.user_id</code></li><li><code>request.user_profile_id</code></li></ul></td><td><span class="muted">—</span></td>
+    <td><ul class="field-list"><li><code>request.metadata</code></li><li><code>response.metadata</code></li></ul></td><td><ul class="field-list"><li><code>request.metadata</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+  </tr>
+<tr>
+    <td><code>end_user_identifier</code></td>
+    <td><code>chat.client_data.user_identifier</code></td>
+    <td><span class="badge request_user">request.user</span></td>
+    <td><span class="badge partial">partial</span></td>
+    <td><ul class="field-list"><li><code>request.user</code></li></ul></td><td><ul class="field-list"><li><code>request.user</code></li></ul></td><td><ul class="field-list"><li><code>request.metadata.user_id</code></li></ul></td><td><span class="muted">—</span></td>
   </tr>
 <tr>
     <td><code>safety_refusal</code></td>
@@ -8680,7 +8805,7 @@
     <td><code>chat.reasoning.include_thoughts</code></td>
     <td><span class="badge request_reasoning_include_thoughts">request.reasoning.include_thoughts</span></td>
     <td><span class="badge partial">partial</span></td>
-    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
+    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
   </tr>
 <tr>
     <td><code>reasoning.request_budget_tokens</code></td>

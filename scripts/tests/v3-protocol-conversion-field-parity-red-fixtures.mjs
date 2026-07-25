@@ -270,8 +270,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 214\n',
-    to: '    extension_declared: 213\n',
+    from: '    extension_declared: 221\n',
+    to: '    extension_declared: 220\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -376,8 +376,8 @@ const cases = [
   {
     name: 'Responses metadata dropped before Chat provider wire',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
-    from: '        "max_output_tokens",\n        "metadata",\n        "client_metadata",\n        "stop",',
-    to: '        "max_output_tokens",\n        "client_metadata",\n        "stop",',
+    from: '        "metadata",\n        "client_metadata",\n        "stop",',
+    to: '        "client_metadata",\n        "stop",',
     diagnostic: /metadata/,
   },
   {
@@ -393,6 +393,21 @@ const cases = [
     from: '        "client_metadata",\n        "stop",',
     to: '        "client_metadata",',
     diagnostic: /stop/,
+  },
+
+  {
+    name: 'Responses max_output_tokens sent directly to OpenAI Chat wire',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: 'row.entry("max_completion_tokens".to_string())\n                .or_insert(max_output_tokens);',
+    to: 'row.insert("max_output_tokens".to_string(), max_output_tokens);',
+    diagnostic: /max_output_tokens|max_completion_tokens/,
+  },
+  {
+    name: 'Responses Anthropic unsupported metadata silently forwarded',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    from: 'field: "metadata.unsupported",',
+    to: 'field: "metadata",',
+    diagnostic: /metadata\.unsupported/,
   },
   {
     name: 'OpenAI Chat response model dropped before Responses projection',

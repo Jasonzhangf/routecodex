@@ -113,7 +113,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         "stream",
         "response_format",
         "max_tokens",
-        "max_output_tokens",
         "metadata",
         "client_metadata",
         "stop",
@@ -121,6 +120,11 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         if let Some(value) = root.get(key) {
             request.insert(key.to_string(), value.clone());
         }
+    }
+    if let Some(value) = root.get("max_output_tokens") {
+        request
+            .entry("max_completion_tokens".to_string())
+            .or_insert_with(|| value.clone());
     }
     if let Some(reasoning_effort) =
         responses_reasoning_request_config_as_openai_chat_reasoning_effort(root)
@@ -138,12 +142,7 @@ fn responses_reasoning_request_config_as_openai_chat_reasoning_effort(
     }
     let reasoning = root.get("reasoning");
     let effort = reasoning
-        .and_then(|reasoning| {
-            reasoning
-                .get("effort")
-                .or_else(|| reasoning.get("mode"))
-                .and_then(Value::as_str)
-        })
+        .and_then(|reasoning| reasoning.get("effort").and_then(Value::as_str))
         .or_else(|| reasoning.and_then(Value::as_str))
         .map(str::trim)
         .filter(|effort| !effort.is_empty())

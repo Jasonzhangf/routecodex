@@ -30,8 +30,8 @@ audit_truth_contract:
   audited_status_counts:
     covered: 161
     covered_but_target_dependent: 1
-    partial: 103
-    extension_declared: 214
+    partial: 104
+    extension_declared: 221
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -53,7 +53,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 214
+      affected_count: 221
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -75,7 +75,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 103
+      affected_count: 104
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -1239,10 +1239,10 @@ chat_semantic_translation_groups:
         response_fields: []
         transform: Anthropic inverse flag maps to Chat parallel_tool_calls = !disable_parallel_tool_use.
       gemini:
-        request_fields:
-          - request.toolConfig.functionCallingConfig.mode
+        request_fields: []
         response_fields: []
-        transform: Gemini mode may constrain call count but is not an exact boolean; requires explicit value contract.
+        transform: Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean;
+          keep it out of outbound parallelism unless a separate compatible target contract is approved.
     chat_extension_fields: []
     current_impl: partial
     gap: Gemini parallelism exact value mapping requires runtime contract
@@ -1532,11 +1532,9 @@ chat_semantic_translation_groups:
       responses:
         request_fields:
           - request.reasoning.effort
-          - request.reasoning.mode
-          - request.reasoning.summary
-        response_fields:
-          - response.reasoning
-        transform: Responses reasoning request config maps to effort/summary policy; response reasoning is separate.
+        response_fields: []
+        transform: Responses reasoning.effort maps to Chat reasoning_effort. Reasoning mode, summary policy, context policy,
+          and response reasoning content are separate semantics.
       anthropic:
         request_fields:
           - request.thinking.type
@@ -1554,6 +1552,62 @@ chat_semantic_translation_groups:
     current_impl: partial
     gap: Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. reasoning content and
       usage stay separate.
+  - group_id: reasoning.request_summary_policy
+    standard_chat_field: request.reasoning.summary_policy
+    chat_fields:
+      - request.reasoning.summary_policy
+    direction: request
+    standard_semantic_meaning: Request policy asking a compatible target to produce reasoning summaries; not the summary
+      text itself and not reasoning effort.
+    chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content
+      or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized
+      thinking; otherwise the field remains decision-required.
+    protocol_mappings:
+      responses:
+        request_fields:
+          - request.reasoning.summary
+        response_fields: []
+        transform: Preserve as request summary policy.
+      anthropic:
+        request_fields:
+          - request.thinking.display
+        response_fields: []
+        transform: Compatible mapping may use Anthropic thinking display policy when thinking is enabled; exact summary
+          levels are target-dependent.
+      gemini:
+        request_fields: []
+        response_fields: []
+        transform: No direct equivalent in the audited Gemini request inventory.
+    chat_extension_fields:
+      - request.reasoning.summary_policy
+    current_impl: extension_declared
+    gap: Compatible outbound mapping needs explicit target policy and Jason decision for non-equivalent targets.
+  - group_id: reasoning.request_context_policy
+    standard_chat_field: request.reasoning.context_policy
+    chat_fields:
+      - request.reasoning.context_policy
+    direction: request
+    standard_semantic_meaning: Request policy controlling which prior reasoning context is visible to a target model.
+    chat_shape_rule: Context policy is not effort, budget, visible reasoning text, or response summary.
+    protocol_mappings:
+      responses:
+        request_fields:
+          - request.reasoning.context
+          - request.reasoning.mode
+        response_fields: []
+        transform: Preserve as protocol-neutral request policy until a target protocol has a compatible context/mode knob.
+      anthropic:
+        request_fields: []
+        response_fields: []
+        transform: No exact Anthropic Messages equivalent in this audited source set.
+      gemini:
+        request_fields: []
+        response_fields: []
+        transform: No exact Gemini equivalent in this audited source set.
+    chat_extension_fields:
+      - request.reasoning.context_policy
+    current_impl: extension_declared
+    gap: No runtime outbound mapping claimed; requires compatibility decision before target projection.
   - group_id: reasoning.request_include_thoughts
     standard_chat_field: request.reasoning.include_thoughts
     chat_fields:
@@ -1567,10 +1621,9 @@ chat_semantic_translation_groups:
         response_fields: []
         transform: Responses has no exact include-thoughts request flag in this audited source set.
       anthropic:
-        request_fields:
-          - request.thinking.display
+        request_fields: []
         response_fields: []
-        transform: Anthropic display controls visibility policy for thinking traces.
+        transform: Anthropic display is a display-mode policy handled by reasoning.request_summary_policy, not a boolean include flag.
       gemini:
         request_fields:
           - request.generationConfig.thinkingConfig.includeThoughts
@@ -1697,22 +1750,19 @@ chat_semantic_translation_groups:
       responses:
         request_fields:
           - request.max_output_tokens
-        response_fields:
-          - response.usage.output_tokens
-        transform: Responses max_output_tokens maps to Chat max_completion_tokens; usage output_tokens is response accounting,
-          not request cap.
+        response_fields: []
+        transform: Responses max_output_tokens maps to Chat max_completion_tokens on OpenAI Chat outbound; usage output_tokens
+          is response accounting and stays in usage groups.
       anthropic:
         request_fields:
           - request.max_tokens
-        response_fields:
-          - response.usage.output_tokens
-        transform: Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is usage.
+        response_fields: []
+        transform: Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is response usage only.
       gemini:
         request_fields:
           - request.generationConfig.maxOutputTokens
-        response_fields:
-          - response.usageMetadata.candidatesTokenCount
-        transform: Gemini maxOutputTokens maps to Chat max_completion_tokens; candidatesTokenCount is usage.
+        response_fields: []
+        transform: Gemini maxOutputTokens maps to Chat max_completion_tokens; candidatesTokenCount is response usage only.
     chat_extension_fields: []
     current_impl: covered
     gap: none
@@ -2050,10 +2100,10 @@ chat_semantic_translation_groups:
         transform: Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain
           explicit extension semantics.
       gemini:
-        request_fields: []
+        request_fields:
+          - request.generationConfig.responseLogprobs
         response_fields: []
-        transform: Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied
-          as raw payload truth.
+        transform: Gemini responseLogprobs is the boolean enable flag for logprobs output.
     chat_extension_fields:
       - request.logprobs
     current_impl: partial
@@ -2081,10 +2131,9 @@ chat_semantic_translation_groups:
       gemini:
         request_fields:
           - request.generationConfig.logprobs
-          - request.generationConfig.responseLogprobs
         response_fields: []
-        transform: Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied
-          as raw payload truth.
+        transform: Gemini logprobs is the top-logprobs count and requires responseLogprobs=true; responseLogprobs itself is
+          not a count.
     chat_extension_fields:
       - request.top_logprobs
     current_impl: partial
@@ -3881,16 +3930,35 @@ semantic_correspondence:
     current_impl: partial
     paths:
       responses:
-        - request.reasoning.mode
         - request.reasoning.effort
-        - request.reasoning.summary
-        - request.reasoning.context
       openai_chat:
         - request.reasoning_effort
       anthropic:
         - request.thinking.type
       gemini:
         - request.generationConfig.thinkingConfig.thinkingLevel
+  reasoning.request_summary_policy:
+    canonical_path: chat.reasoning.summary_policy
+    chat_extension: request.reasoning.summary_policy
+    current_impl: extension_declared
+    paths:
+      responses:
+        - request.reasoning.summary
+      openai_chat: []
+      anthropic:
+        - request.thinking.display
+      gemini: []
+  reasoning.request_context_policy:
+    canonical_path: chat.reasoning.context_policy
+    chat_extension: request.reasoning.context_policy
+    current_impl: extension_declared
+    paths:
+      responses:
+        - request.reasoning.mode
+        - request.reasoning.context
+      openai_chat: []
+      anthropic: []
+      gemini: []
   reasoning.visible_and_opaque:
     canonical_path: chat.reasoning.items
     chat_extension: canonical_chat
@@ -4036,14 +4104,22 @@ semantic_correspondence:
       responses:
         - request.metadata
         - response.metadata
-        - request.user
       openai_chat:
         - request.metadata
+      anthropic: []
+      gemini: null
+  end_user_identifier:
+    canonical_path: chat.client_data.user_identifier
+    chat_extension: request.user
+    current_impl: partial
+    paths:
+      responses:
+        - request.user
+      openai_chat:
         - request.user
       anthropic:
         - request.metadata.user_id
-        - request.user_profile_id
-      gemini: null
+      gemini: []
   safety_refusal:
     canonical_path: chat.safety
     chat_extension: protocol_specific_chat_extension
@@ -4354,8 +4430,7 @@ semantic_correspondence:
     paths:
       responses: []
       openai_chat: []
-      anthropic:
-        - request.thinking.display
+      anthropic: []
       gemini:
         - request.generationConfig.thinkingConfig.includeThoughts
   reasoning.request_budget_tokens:
@@ -4664,11 +4739,14 @@ extended_openai_chat_semantic_superset:
       current_impl: covered
       gap: runtime mapping partial or extension-only gap
       equivalent_fields:
-        responses: []
+        responses:
+          - request.max_output_tokens
         openai_chat:
           - request.max_completion_tokens
-        anthropic: []
-        gemini: []
+        anthropic:
+          - request.max_tokens
+        gemini:
+          - request.generationConfig.maxOutputTokens
       source_classification: canonical_chat_fields
       chat_extension_association: []
     - extended_openai_chat_field: request.max_tokens
@@ -4679,14 +4757,11 @@ extended_openai_chat_semantic_superset:
       current_impl: covered
       gap: none
       equivalent_fields:
-        responses:
-          - request.max_output_tokens
+        responses: []
         openai_chat:
           - request.max_tokens
-        anthropic:
-          - request.max_tokens
-        gemini:
-          - request.generationConfig.maxOutputTokens
+        anthropic: []
+        gemini: []
       source_classification: canonical_chat_fields
       chat_extension_association: []
     - extended_openai_chat_field: request.messages
@@ -5094,12 +5169,9 @@ extended_openai_chat_semantic_superset:
         responses:
           - request.metadata
           - response.metadata
-          - request.user
         openai_chat:
           - request.metadata
-        anthropic:
-          - request.metadata.user_id
-          - request.user_profile_id
+        anthropic: []
         gemini: []
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
@@ -5316,10 +5388,7 @@ extended_openai_chat_semantic_superset:
         runtime mapping remains partial.
       equivalent_fields:
         responses:
-          - request.reasoning.mode
           - request.reasoning.effort
-          - request.reasoning.summary
-          - request.reasoning.context
         openai_chat:
           - request.reasoning_effort
         anthropic:
@@ -5334,18 +5403,53 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: partial
+    - extended_openai_chat_field: request.reasoning.summary_policy
+      semantic_id: request.reasoning.summary_policy
+      direction: request
+      mapping_status: extension_added
+      semantic_owner: chat.extension_semantics
+      current_impl: extension_declared
+      gap: Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a compatible target
+        policy and needs explicit outbound owner.
+      equivalent_fields:
+        responses:
+          - request.reasoning.summary
+        openai_chat: []
+        anthropic:
+          - request.thinking.display
+        gemini: []
+      source_classification: protocol_specific_chat_extension_fields
+      chat_extension_association:
+        - extension_id: thinking_and_cache_control
+          extension_owner: chat.extensions.anthropic.thinking_cache
+          current_impl: extension_declared
+    - extended_openai_chat_field: request.reasoning.context_policy
+      semantic_id: request.reasoning.context_policy
+      direction: request
+      mapping_status: extension_added
+      semantic_owner: chat.extension_semantics
+      current_impl: extension_declared
+      gap: Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.
+      equivalent_fields:
+        responses:
+          - request.reasoning.mode
+          - request.reasoning.context
+        openai_chat: []
+        anthropic: []
+        gemini: []
+      source_classification: protocol_specific_chat_extension_fields
+      chat_extension_association: []
     - extended_openai_chat_field: request.reasoning.include_thoughts
       semantic_id: request.reasoning.include_thoughts
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: partial
-      gap: Gemini source codec extracts includeThoughts; Anthropic display and runtime cross-protocol closeout pending.
+      gap: Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.
       equivalent_fields:
         responses: []
         openai_chat: []
-        anthropic:
-          - request.thinking.display
+        anthropic: []
         gemini:
           - request.generationConfig.thinkingConfig.includeThoughts
       source_classification: protocol_specific_chat_extension_fields
@@ -5623,10 +5727,13 @@ extended_openai_chat_semantic_superset:
       current_impl: covered
       gap: none
       equivalent_fields:
-        responses: []
+        responses:
+          - request.user
         openai_chat:
           - request.user
-        anthropic: []
+        anthropic:
+          - request.metadata.user_id
+          - request.user_profile_id
         gemini: []
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []

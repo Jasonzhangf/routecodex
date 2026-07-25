@@ -63,7 +63,8 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
                 "model":"MiniMax-M3",
                 "input":[{"role":"user","content":[{"type":"input_text","text":"Return exactly: RCC_V3_MINIMAX_BASIC_OK"}]}],
                 "stream":false,
-                "max_output_tokens":64
+                "max_output_tokens":64,
+                "user":"anthropic-user-1"
             }),
         },
         &transport,
@@ -85,6 +86,8 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     );
     assert!(captured.get("input").is_none());
     assert!(captured.get("max_output_tokens").is_none());
+    assert!(captured.get("user").is_none());
+    assert_eq!(captured["metadata"], json!({"user_id":"anthropic-user-1"}));
 
     assert_eq!(output.status, 200);
     let client = match output.client_body {
@@ -103,6 +106,36 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     assert_eq!(client["usage"]["input_tokens"], 7);
     assert_eq!(client["usage"]["output_tokens"], 5);
     assert_eq!(client["usage"]["total_tokens"], 12);
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let error = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            request_id: "req-responses-anthropic-provider-unmappable-metadata".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"metadata"}]}],
+                "stream":false,
+                "metadata":{"client":"not-anthropic-wire-compatible"}
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("metadata.unsupported"),
+        "unmappable Responses metadata must fail before Anthropic provider wire send: {error}"
+    );
+    assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
 #[tokio::test]

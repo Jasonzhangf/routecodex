@@ -80,18 +80,18 @@ for (const phrase of [
   '"tool_choice"',
   '"parallel_tool_calls"',
   '"response_format"',
-  '"max_output_tokens"',
   '"metadata"',
   '"client_metadata"',
   '"stop"',
+  '"max_completion_tokens"',
   'responses_reasoning_request_config_as_openai_chat_reasoning_effort',
   '"reasoning_effort"',
 ]) requireText(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, phrase);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
-  '"max_output_tokens"',
   '"metadata"',
   '"client_metadata"',
   '"stop"',
+  '"max_completion_tokens"',
 ]);
 forbid(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
 
@@ -110,6 +110,7 @@ for (const phrase of [
   '"metadata_center"',
   '"runtime_control"',
 ]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::metadata_data_plane`, [/contains\("metadata"\)/, /metadata.*side-channel fields/i]);
 
 const chatToResponses = functionSlice(
@@ -160,6 +161,8 @@ for (const phrase of [
   'responses_reasoning_effort_as_anthropic_budget',
   '"budget_tokens"',
   'output.insert("thinking".to_string(), thinking)',
+  'responses_metadata_as_anthropic_metadata',
+  '"metadata.unsupported"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
 forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
 
@@ -216,6 +219,7 @@ for (const [owner, body, phrases] of [
     'responses_openai_chat_field_parity_response_matrix',
     '"metadata":{"client":"metadata-kept"}',
     'body["reasoning_effort"]',
+    'body["max_completion_tokens"]',
     'OpenAI Chat provider wire must project Responses reasoning to reasoning_effort',
     'OpenAI Chat provider wire must not forward non-standard client_metadata',
   ]],
@@ -223,6 +227,7 @@ for (const [owner, body, phrases] of [
     'responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking',
     'responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
+    'responses_relay_anthropic_provider_rejects_unmappable_metadata',
     'json!({"type":"enabled","budget_tokens":4096})',
     '"type":"thinking"',
   ]],
@@ -267,7 +272,7 @@ for (const [owner, body, phrases] of [
   ]],
   [paths.verificationMap, text.verificationMap, [
     'feature_id: v3.protocol_conversion_field_parity',
-    'Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop',
+    'Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop',
     'Anthropic thinking is preserved under Responses reasoning.thinking',
     'Responses reasoning.effort/summary request config reaches Anthropic provider wire as thinking',
     'npm run render:v3-protocol-semantic-field-matrix',
@@ -301,12 +306,12 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 214',
-  '`semantic_declared` | 59',
+  '`extension_declared` | 221',
+  '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
-  '`partial` | 94',
+  '`partial` | 104',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
   'gap.semantic_declared_runtime_closeout',
@@ -354,7 +359,7 @@ for (const [semantic, protocol, fields] of [
   ['tool.choice_and_parallelism', 'gemini', ['request.toolConfig.functionCallingConfig.mode', 'request.toolConfig.functionCallingConfig.allowedFunctionNames']],
   ['reasoning.request_config', 'anthropic', ['request.thinking.type']],
   ['reasoning.request_config', 'gemini', ['request.generationConfig.thinkingConfig.thinkingLevel']],
-  ['reasoning.request_include_thoughts', 'anthropic', ['request.thinking.display']],
+  ['reasoning.request_summary_policy', 'anthropic', ['request.thinking.display']],
   ['reasoning.request_include_thoughts', 'gemini', ['request.generationConfig.thinkingConfig.includeThoughts']],
   ['reasoning.request_budget_tokens', 'anthropic', ['request.thinking.budget_tokens']],
   ['reasoning.request_budget_tokens', 'gemini', ['request.generationConfig.thinkingConfig.thinkingBudget']],
@@ -1027,6 +1032,9 @@ function requireGeminiToolConfigSemanticContract(matrix) {
   if (parallel) {
     if ((parallel.protocol_mappings?.gemini?.request_fields ?? []).includes('request.toolConfig.functionCallingConfig.allowedFunctionNames')) {
       failures.push(`${paths.fieldMatrix}: Gemini allowedFunctionNames must not collapse into tool.parallelism`);
+    }
+    if ((parallel.protocol_mappings?.gemini?.request_fields ?? []).includes('request.toolConfig.functionCallingConfig.mode')) {
+      failures.push(`${paths.fieldMatrix}: Gemini mode is tool-choice policy and must not collapse into tool.parallelism`);
     }
     if (parallel.current_impl !== 'partial') failures.push(`${paths.fieldMatrix}: tool.parallelism remains partial until Gemini mode has an explicit boolean contract`);
   }

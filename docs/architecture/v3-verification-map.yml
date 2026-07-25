@@ -1340,7 +1340,7 @@ features:
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
     required_unit:
-      - Responses request to OpenAI Chat provider wire preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format, token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
+      - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format, token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
       - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
       - Anthropic thinking is preserved under Responses reasoning.thinking rather than compressed to effort-only state.

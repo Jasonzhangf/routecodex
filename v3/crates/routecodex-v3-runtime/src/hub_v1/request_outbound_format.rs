@@ -508,6 +508,10 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
     let mut normalized = strip_private_fields(payload);
     if let Some(row) = normalized.as_object_mut() {
         row.remove("client_metadata");
+        if let Some(max_output_tokens) = row.remove("max_output_tokens") {
+            row.entry("max_completion_tokens".to_string())
+                .or_insert(max_output_tokens);
+        }
     }
     let instructions = normalized
         .as_object_mut()

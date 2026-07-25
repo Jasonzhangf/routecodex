@@ -3450,7 +3450,11 @@ async fn responses_openai_chat_field_parity_request_matrix() {
         body.get("reasoning").is_none(),
         "OpenAI Chat provider wire must project Responses reasoning to reasoning_effort without leaking the Responses reasoning object: {body}"
     );
-    assert_eq!(body["max_output_tokens"], 321);
+    assert_eq!(body["max_completion_tokens"], 321);
+    assert!(
+        body.get("max_output_tokens").is_none(),
+        "OpenAI Chat provider wire must map Responses max_output_tokens to max_completion_tokens: {body}"
+    );
     assert_eq!(body["metadata"], json!({"client":"metadata-kept"}));
     assert!(
         body.get("client_metadata").is_none(),
