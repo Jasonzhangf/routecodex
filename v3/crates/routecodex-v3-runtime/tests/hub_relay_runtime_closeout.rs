@@ -83,8 +83,6 @@ impl ResponsesTransport for JsonThenSseTransport {
             ));
         }
         let stream = futures_util::stream::iter([
-            Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"delta\":\"sse ".to_vec()),
-            Ok(b"ok\"}\n\n".to_vec()),
             Ok(b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_closeout_sse\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
             Ok(b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\\\"closeout\\\"}\"}\n\n".to_vec()),
             Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_closeout_sse\",\"status\":\"completed\",\"usage\":{\"input_tokens\":13,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":7,\"total_tokens\":20}}}\n\n".to_vec()),
@@ -391,37 +389,13 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0]["model"], "responses-wire-model");
     assert!(captures[0].get("instructions").is_none());
-    assert_eq!(captures[0]["input"][0]["type"], "message");
-    assert_eq!(captures[0]["input"][0]["role"], "system");
-    assert_eq!(captures[0]["input"][0]["content"][0]["type"], "input_text");
-    assert!(
-        captures[0]["input"][0]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("当前轮推进准则")),
-        "Responses provider wire must carry Stopless guidance in provider-standard system input: {}",
-        captures[0]
-    );
-    assert_eq!(captures[0]["input"][1]["type"], "message");
-    assert_eq!(captures[0]["input"][1]["role"], "user");
-    assert_eq!(captures[0]["input"][1]["content"][0]["type"], "input_text");
-    assert_eq!(captures[0]["input"][1]["content"][0]["text"], "json");
+    assert_eq!(captures[0]["input"], "json");
+    assert!(!captures[0].to_string().contains("当前轮推进准则"));
     assert_eq!(captures[1]["model"], "responses-wire-model");
     assert_eq!(captures[1]["stream"], true);
     assert!(captures[1].get("instructions").is_none());
-    assert_eq!(captures[1]["input"][0]["type"], "message");
-    assert_eq!(captures[1]["input"][0]["role"], "system");
-    assert_eq!(captures[1]["input"][0]["content"][0]["type"], "input_text");
-    assert!(
-        captures[1]["input"][0]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("当前轮推进准则")),
-        "Responses provider wire must carry Stopless guidance in provider-standard system input: {}",
-        captures[1]
-    );
-    assert_eq!(captures[1]["input"][1]["type"], "message");
-    assert_eq!(captures[1]["input"][1]["role"], "user");
-    assert_eq!(captures[1]["input"][1]["content"][0]["type"], "input_text");
-    assert_eq!(captures[1]["input"][1]["content"][0]["text"], "sse");
+    assert_eq!(captures[1]["input"], "sse");
+    assert!(!captures[1].to_string().contains("当前轮推进准则"));
 }
 
 #[tokio::test]
@@ -1903,7 +1877,20 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     .await
     .unwrap();
     assert_eq!(output.status, 429);
-    assert_eq!(output.client_response["type"], "error");
+    assert_eq!(output.client_response["error"]["code"], "rate_limit_error");
+    assert_eq!(output.client_response["error"]["class"], "provider_failure");
+    assert_eq!(
+        output.client_response["error"]["stage"],
+        "V3ProviderReqOutbound09TransportRequest"
+    );
+    assert_eq!(
+        output.client_response["error"]["decision"],
+        "project_client_error"
+    );
+    assert_eq!(
+        output.client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
     assert_eq!(
         output.error_chain.as_ref().unwrap(),
         &V3_ERROR_CHAIN_NODE_IDS
