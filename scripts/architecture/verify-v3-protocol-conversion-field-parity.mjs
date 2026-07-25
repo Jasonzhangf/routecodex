@@ -390,6 +390,7 @@ requireManualSemanticTranslationGroups(fieldMatrix);
 requireShapeBranchTransformContract(fieldMatrix);
 requireGeminiToolConfigSemanticContract(fieldMatrix);
 requireGeminiThinkingConfigSemanticContract(fieldMatrix);
+requireGeminiGenerationConfigScalarSemanticContract(fieldMatrix);
 requireExtendedOpenAiChatSemanticSuperset(fieldMatrix);
 
 const expectedFieldMatrixHtml = renderV3ProtocolSemanticFieldMatrix();
@@ -1160,6 +1161,65 @@ function requireGeminiThinkingConfigSemanticContract(matrix) {
   ]) requireText(text.geminiTests, paths.geminiTests, testSymbol);
   for (const [owner, body] of [[paths.mainlineMap, text.mainlineMap], [paths.functionMap, text.functionMap], [paths.verificationMap, text.verificationMap]]) {
     for (const phrase of ['v3-protocol-gemini-thinking-config-01', 'collect_v3_gemini_request_thinking_config_semantics']) requireText(body, owner, phrase);
+  }
+}
+
+
+function requireGeminiGenerationConfigScalarSemanticContract(matrix) {
+  for (const [field, expected, forbidden, status] of [
+    ['request.frequency_penalty', ['request.generationConfig.frequencyPenalty'], ['request.generationConfig.presencePenalty', 'request.generationConfig.logprobs', 'request.generationConfig.seed'], 'partial'],
+    ['request.presence_penalty', ['request.generationConfig.presencePenalty'], ['request.generationConfig.frequencyPenalty', 'request.generationConfig.logprobs', 'request.generationConfig.seed'], 'partial'],
+    ['request.logprobs', ['request.generationConfig.responseLogprobs'], ['request.generationConfig.logprobs'], 'partial'],
+    ['request.top_logprobs', ['request.generationConfig.logprobs'], ['request.generationConfig.responseLogprobs'], 'partial'],
+    ['request.seed', ['request.generationConfig.seed'], ['request.generationConfig.frequencyPenalty', 'request.generationConfig.logprobs'], 'partial'],
+  ]) {
+    const row = supersetRowByField(matrix, field);
+    if (!row) {
+      failures.push(`${paths.fieldMatrix}: missing ${field} superset row`);
+      continue;
+    }
+    const gemini = row.equivalent_fields?.gemini ?? [];
+    for (const source of expected) if (!gemini.includes(source)) failures.push(`${paths.fieldMatrix}: ${field} must map Gemini ${source}`);
+    for (const source of forbidden) if (gemini.includes(source)) failures.push(`${paths.fieldMatrix}: ${field} must not collapse Gemini ${source}`);
+    if (row.current_impl !== status) failures.push(`${paths.fieldMatrix}: ${field} current_impl must be ${status} after Gemini generationConfig scalar source closeout`);
+  }
+  for (const phrase of [
+    'collect_v3_gemini_request_generation_config_scalar_semantics',
+    'V3GeminiChatGenerationConfigScalarSemantic',
+    'V3GeminiGenerationConfigScalarSemanticValue',
+    'GenerationConfigScalarNotInteger',
+    'request.generationConfig.frequencyPenalty',
+    'request.generationConfig.presencePenalty',
+    'request.generationConfig.responseLogprobs',
+    'request.generationConfig.logprobs',
+    'request.generationConfig.seed',
+    'ChatFrequencyPenalty',
+    'ChatPresencePenalty',
+    'ChatLogprobs',
+    'ChatTopLogprobs',
+    'ChatSeed',
+  ]) requireText(text.geminiCodec, paths.geminiCodec, phrase);
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.frequencyPenalty"', 'ChatFrequencyPenalty');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.presencePenalty"', 'ChatPresencePenalty');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.responseLogprobs"', 'ChatLogprobs');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.logprobs"', 'ChatTopLogprobs');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.seed"', 'ChatSeed');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.frequencyPenalty"', 'ChatPresencePenalty');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.responseLogprobs"', 'ChatTopLogprobs');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.logprobs"', 'ChatLogprobs');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.seed"', 'ChatTopLogprobs');
+  for (const testSymbol of [
+    'gemini_generation_config_frequency_penalty_maps_to_chat_frequency_penalty',
+    'gemini_generation_config_presence_penalty_maps_to_chat_presence_penalty',
+    'gemini_generation_config_response_logprobs_maps_to_chat_logprobs_request',
+    'gemini_generation_config_logprobs_maps_to_chat_top_logprobs_count',
+    'gemini_generation_config_seed_maps_to_chat_seed',
+    'gemini_generation_config_penalties_logprobs_and_seed_do_not_collapse',
+    'gemini_generation_config_scalar_malformed_fields_fail_closed',
+    'gemini_generation_config_scalar_semantics_do_not_mutate_provider_wire_payload',
+  ]) requireText(text.geminiTests, paths.geminiTests, testSymbol);
+  for (const [owner, body] of [[paths.mainlineMap, text.mainlineMap], [paths.functionMap, text.functionMap], [paths.verificationMap, text.verificationMap]]) {
+    for (const phrase of ['v3-protocol-gemini-generation-config-scalar-01', 'collect_v3_gemini_request_generation_config_scalar_semantics']) requireText(body, owner, phrase);
   }
 }
 

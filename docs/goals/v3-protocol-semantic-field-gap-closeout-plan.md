@@ -55,8 +55,8 @@ Out of scope:
 | Gap id | Count | Closeout requirement |
 | --- | ---: | --- |
 | `gap.runtime_extension_declared` | 214 | Implement declared extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
-| `gap.semantic_declared_runtime_closeout` | 59 | Implement manually declared native/extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
-| `gap.partial_cross_protocol_semantics` | 94 | Complete both request and response transforms for the affected semantic family. |
+| `gap.semantic_declared_runtime_closeout` | 50 | Implement manually declared native/extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
+| `gap.partial_cross_protocol_semantics` | 103 | Complete both request and response transforms for the affected semantic family. |
 | `gap.source_inventory_only` | 0 | Keep this at zero; new source fields must receive manual semantic owner/classification before runtime edits. |
 | `gap.shape_branch_transform` | 18 | `shape_branch_cases` are now documented/gated for the content/media/file rows; next closeout must add the named Rust positive/negative tests and adjacent codec implementation before changing any status. |
 | `gap.gemini_codec_shape_only` | 14 | Expand Gemini deep semantics or mark unsupported/lossy explicitly. |
@@ -74,6 +74,11 @@ Progress evidence:
   `mode` maps to Chat tool-choice policy, `allowedFunctionNames` maps to the protocol-neutral
   `request.tool_choice.allowed_function_names` extension, and neither collapses into tool
   declarations or `parallel_tool_calls`. Remaining Gemini deep semantics stay open.
+- Gemini `generationConfig` scalar source verification is closed for sampling/logprob/seed semantics in the Gemini codec characterization owner:
+  `collect_v3_gemini_request_generation_config_scalar_semantics` plus focused Rust tests prove
+  `frequencyPenalty` maps to `request.frequency_penalty`, `presencePenalty` maps to `request.presence_penalty`,
+  `responseLogprobs` maps to `request.logprobs`, `logprobs` maps to `request.top_logprobs`, and `seed` maps to
+  `request.seed`, without collapsing penalties, logprob flag/count, or seed. Remaining Gemini deep semantics stay open.
 
 ## Owner mapping
 

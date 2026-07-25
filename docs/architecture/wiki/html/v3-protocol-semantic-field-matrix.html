@@ -255,7 +255,7 @@
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>94</code></td>
+    <td><code>103</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
@@ -285,7 +285,7 @@
   </tr>
 <tr>
     <td><span class="badge semantic_declared">semantic_declared</span></td>
-    <td><code>59</code></td>
+    <td><code>50</code></td>
     <td>The OpenAI Chat native field or protocol-neutral extension has a manual semantic owner and transform rule, but runtime conversion closeout is not claimed.</td>
   </tr></tbody>
   </table></div>
@@ -309,14 +309,14 @@
 <tr>
     <td><code>gap.semantic_declared_runtime_closeout</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>semantic_declared</code></li></ul><div>count: <code>59</code></div></td>
+    <td><ul class="field-list"><li><code>semantic_declared</code></li></ul><div>count: <code>50</code></div></td>
     <td>These fields now have manual semantic owners and transform rules, but no runtime conversion completion evidence yet.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add field-family red tests and implement adjacent Rust codec owner before changing semantic_declared to covered, partial, or unsupported_blocked.</span></td>
   </tr>
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>94</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>103</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -2248,7 +2248,7 @@
       <details><summary>Chat shape / value rule</summary><div>Chat logprobs requests token-probability annotations only. It must not be collapsed with top_logprobs count or sampling penalties.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini responseLogprobs source codec extracts request.logprobs; cross-protocol/live closeout pending</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
@@ -2290,7 +2290,7 @@
       <details><summary>Chat shape / value rule</summary><div>Chat top_logprobs is a count associated with logprobs output. It is not frequency_penalty, presence_penalty, or Responses top_p.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini logprobs source codec extracts request.top_logprobs count; cross-protocol/live closeout pending</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.top_logprobs</code></li></ul>
@@ -2332,7 +2332,7 @@
       <details><summary>Chat shape / value rule</summary><div>Frequency penalty is independent from presence penalty, logit bias, seed, and logprob-output requests.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini frequencyPenalty source codec extracts request.frequency_penalty; cross-protocol/live closeout pending</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
@@ -2374,7 +2374,7 @@
       <details><summary>Chat shape / value rule</summary><div>Presence penalty is independent from frequency penalty, logit bias, seed, and logprob-output requests.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini presencePenalty source codec extracts request.presence_penalty; cross-protocol/live closeout pending</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
@@ -3242,7 +3242,7 @@
     <td><ul class="field-list"><li><code>request.frequency_penalty</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.frequencyPenalty</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini frequencyPenalty source codec extracts request.frequency_penalty; cross-protocol/live closeout pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.function_call</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3282,7 +3282,7 @@
     <td><ul class="field-list"><li><code>request.logprobs</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.responseLogprobs</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini responseLogprobs source codec extracts request.logprobs; cross-protocol/live closeout pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.max_completion_tokens</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3632,7 +3632,7 @@
     <td><ul class="field-list"><li><code>request.presence_penalty</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.presencePenalty</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini presencePenalty source codec extracts request.presence_penalty; cross-protocol/live closeout pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.prompt_cache_key</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3732,7 +3732,7 @@
     <td><ul class="field-list"><li><code>request.seed</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.seed</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">OpenAI Chat seed is covered; Gemini generationConfig.seed runtime parity pending</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">OpenAI Chat seed covered; Gemini generationConfig.seed source codec extracts request.seed; live closeout pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.service_tier</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3742,7 +3742,7 @@
     <td><ul class="field-list"><li><code>request.service_tier</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.service_tier</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.serviceTier</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.stop</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3812,7 +3812,7 @@
     <td><ul class="field-list"><li><code>request.top_logprobs</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.logprobs</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span><details><summary>extension <code>response_include_and_text</code></summary><div>owner: <code>chat.extensions.responses.output_contract</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini logprobs source codec extracts request.top_logprobs count; cross-protocol/live closeout pending</span><details><summary>extension <code>response_include_and_text</code></summary><div>owner: <code>chat.extensions.responses.output_contract</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.top_p</code><br><span class="muted">native exact OpenAI Chat field</span></td>

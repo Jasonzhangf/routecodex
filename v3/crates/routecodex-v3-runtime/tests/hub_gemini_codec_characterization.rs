@@ -3,11 +3,13 @@ use routecodex_v3_runtime::{
     characterize_v3_gemini_hub_response_semantic_to_client_projection,
     characterize_v3_gemini_hub_semantic_to_provider_wire,
     characterize_v3_gemini_provider_raw_to_hub_response_semantic,
+    collect_v3_gemini_request_generation_config_scalar_semantics,
     collect_v3_gemini_request_shape_branch_semantics,
     collect_v3_gemini_request_thinking_config_semantics,
-    collect_v3_gemini_request_tool_config_semantics, V3GeminiChatShapeBranchSemantic,
-    V3GeminiChatThinkingConfigSemantic, V3GeminiChatToolChoicePolicy,
-    V3GeminiChatToolConfigSemantic, V3GeminiCodecError, V3GeminiCodecStage,
+    collect_v3_gemini_request_tool_config_semantics, V3GeminiChatGenerationConfigScalarSemantic,
+    V3GeminiChatShapeBranchSemantic, V3GeminiChatThinkingConfigSemantic,
+    V3GeminiChatToolChoicePolicy, V3GeminiChatToolConfigSemantic, V3GeminiCodecError,
+    V3GeminiCodecStage, V3GeminiGenerationConfigScalarSemanticValue,
     V3GeminiThinkingConfigSemanticValue, V3GeminiToolConfigSemanticValue, V3HubEntryProtocol,
     V3HubProviderWireProtocol, V3HubTransportIntent,
 };
@@ -440,6 +442,144 @@ fn gemini_thinking_config_malformed_fields_fail_closed() {
 #[test]
 fn gemini_thinking_config_semantics_do_not_mutate_provider_wire_payload() {
     let request = gemini_thinking_config_request();
+    let semantic = characterize_v3_gemini_client_input_to_hub_semantic(
+        request.clone(),
+        V3HubEntryProtocol::Gemini,
+        V3HubTransportIntent::Json,
+    )
+    .unwrap();
+    let wire = characterize_v3_gemini_hub_semantic_to_provider_wire(semantic).unwrap();
+    assert_eq!(wire.payload(), &request);
+}
+
+fn gemini_generation_config_scalar_request() -> serde_json::Value {
+    json!({
+        "contents": [{"role": "user", "parts": [{"text": "sample"}]}],
+        "generationConfig": {
+            "frequencyPenalty": 0.4,
+            "presencePenalty": 0.7,
+            "responseLogprobs": true,
+            "logprobs": 5,
+            "seed": 12345
+        }
+    })
+}
+
+#[test]
+fn gemini_generation_config_frequency_penalty_maps_to_chat_frequency_penalty() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatFrequencyPenalty
+        && semantic.source_field == "request.generationConfig.frequencyPenalty"
+        && matches!(semantic.value, V3GeminiGenerationConfigScalarSemanticValue::Number(value) if (value - 0.4).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn gemini_generation_config_presence_penalty_maps_to_chat_presence_penalty() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatPresencePenalty
+        && semantic.source_field == "request.generationConfig.presencePenalty"
+        && matches!(semantic.value, V3GeminiGenerationConfigScalarSemanticValue::Number(value) if (value - 0.7).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn gemini_generation_config_response_logprobs_maps_to_chat_logprobs_request() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatLogprobs
+        && semantic.source_field == "request.generationConfig.responseLogprobs"
+        && matches!(
+            semantic.value,
+            V3GeminiGenerationConfigScalarSemanticValue::Boolean(true)
+        )));
+}
+
+#[test]
+fn gemini_generation_config_logprobs_maps_to_chat_top_logprobs_count() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatTopLogprobs
+        && semantic.source_field == "request.generationConfig.logprobs"
+        && matches!(
+            semantic.value,
+            V3GeminiGenerationConfigScalarSemanticValue::Integer(5)
+        )));
+}
+
+#[test]
+fn gemini_generation_config_seed_maps_to_chat_seed() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatSeed
+        && semantic.source_field == "request.generationConfig.seed"
+        && matches!(
+            semantic.value,
+            V3GeminiGenerationConfigScalarSemanticValue::Integer(12345)
+        )));
+}
+
+#[test]
+fn gemini_generation_config_penalties_logprobs_and_seed_do_not_collapse() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.frequencyPenalty"
+        && semantic.chat_semantic
+            != V3GeminiChatGenerationConfigScalarSemantic::ChatFrequencyPenalty));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.responseLogprobs"
+        && semantic.chat_semantic == V3GeminiChatGenerationConfigScalarSemantic::ChatTopLogprobs));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.logprobs"
+        && semantic.chat_semantic == V3GeminiChatGenerationConfigScalarSemantic::ChatLogprobs));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.seed"
+        && semantic.chat_semantic != V3GeminiChatGenerationConfigScalarSemantic::ChatSeed));
+}
+
+#[test]
+fn gemini_generation_config_scalar_malformed_fields_fail_closed() {
+    let err = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &json!({
+            "contents": [{"role": "user", "parts": [{"text": "sample"}]}],
+            "generationConfig": {"logprobs": "five"}
+        }),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        V3GeminiCodecError::GenerationConfigScalarNotInteger { .. }
+    ));
+}
+
+#[test]
+fn gemini_generation_config_scalar_semantics_do_not_mutate_provider_wire_payload() {
+    let request = gemini_generation_config_scalar_request();
     let semantic = characterize_v3_gemini_client_input_to_hub_semantic(
         request.clone(),
         V3HubEntryProtocol::Gemini,

@@ -584,7 +584,7 @@ features:
       - v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs
       - scripts/architecture/verify-v3-gemini-codec-characterization.mjs
       - scripts/tests/v3-gemini-codec-characterization-red-fixtures.mjs
-    mainline_bindings: [v3-protocol-gemini-01, v3-protocol-gemini-shape-branch-01, v3-protocol-gemini-tool-config-01, v3-protocol-gemini-thinking-config-01, v3-protocol-gemini-02, v3-protocol-gemini-03, v3-protocol-gemini-04]
+    mainline_bindings: [v3-protocol-gemini-01, v3-protocol-gemini-shape-branch-01, v3-protocol-gemini-tool-config-01, v3-protocol-gemini-thinking-config-01, v3-protocol-gemini-generation-config-scalar-01, v3-protocol-gemini-02, v3-protocol-gemini-03, v3-protocol-gemini-04]
     design: [docs/goals/v3-gemini-codec-characterization-plan.md]
     test_design: [docs/goals/v3-gemini-codec-characterization-test-design.md]
     required_contract:
@@ -592,6 +592,7 @@ features:
       - Gemini inlineData.data, inlineData.mimeType, fileData.mimeType, and fileData.fileUri shape branches are classified by the codec owner into distinct Chat media/file semantics without changing provider wire payload
       - Gemini toolConfig.functionCallingConfig.mode and allowedFunctionNames are classified by the codec owner into distinct Chat tool-choice policy and allowed-name extension semantics without changing provider wire payload
       - Gemini generationConfig.thinkingConfig.includeThoughts, thinkingBudget, and thinkingLevel are classified by the codec owner into distinct Chat reasoning visibility, budget-token, and level semantics without changing provider wire payload
+      - Gemini generationConfig frequencyPenalty, presencePenalty, responseLogprobs, logprobs, and seed are classified by the codec owner into distinct Chat sampling/logprob/seed semantics without changing provider wire payload
       - missing or orphan functionResponse identities are preserved by codec normalization and fail explicitly in Chat Process governance without repair
       - SSE input is one already-framed candidate event and is never byte-parsed or materialized
       - internal side-channel fields fail closed
@@ -601,6 +602,7 @@ features:
       - collect_v3_gemini_request_shape_branch_semantics
       - collect_v3_gemini_request_tool_config_semantics
       - collect_v3_gemini_request_thinking_config_semantics
+      - collect_v3_gemini_request_generation_config_scalar_semantics
     required_gates:
       - npm run test:v3-gemini-codec-characterization
       - npm run verify:v3-gemini-codec-characterization

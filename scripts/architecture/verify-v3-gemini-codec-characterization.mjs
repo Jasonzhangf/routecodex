@@ -65,6 +65,20 @@ requireAll(source, sourcePath, [
   'ChatToolChoicePolicy',
   'ChatToolChoiceAllowedFunctionNames',
   'ToolConfigAllowedFunctionNameNotString',
+  'collect_v3_gemini_request_generation_config_scalar_semantics',
+  'V3GeminiChatGenerationConfigScalarSemantic',
+  'V3GeminiGenerationConfigScalarSemanticValue',
+  'request.generationConfig.frequencyPenalty',
+  'request.generationConfig.presencePenalty',
+  'request.generationConfig.responseLogprobs',
+  'request.generationConfig.logprobs',
+  'request.generationConfig.seed',
+  'ChatFrequencyPenalty',
+  'ChatPresencePenalty',
+  'ChatLogprobs',
+  'ChatTopLogprobs',
+  'ChatSeed',
+  'GenerationConfigScalarNotInteger',
   'collect_v3_gemini_request_thinking_config_semantics',
   'V3GeminiChatThinkingConfigSemantic',
   'V3GeminiThinkingConfigSemanticValue',
@@ -94,6 +108,16 @@ requireNear(source, sourcePath, '"request.generationConfig.thinkingConfig.thinki
 forbidNear(source, sourcePath, '"request.generationConfig.thinkingConfig.thinkingBudget"', 'ChatMaxOutputTokens');
 forbidNear(source, sourcePath, '"request.generationConfig.thinkingConfig.includeThoughts"', 'ChatResponseReasoningContent');
 forbidNear(source, sourcePath, '"request.generationConfig.thinkingConfig.thinkingLevel"', 'ChatReasoningBudgetTokens');
+requireNear(source, sourcePath, '"request.generationConfig.frequencyPenalty"', 'ChatFrequencyPenalty');
+requireNear(source, sourcePath, '"request.generationConfig.presencePenalty"', 'ChatPresencePenalty');
+requireNear(source, sourcePath, '"request.generationConfig.responseLogprobs"', 'ChatLogprobs');
+requireNear(source, sourcePath, '"request.generationConfig.logprobs"', 'ChatTopLogprobs');
+requireNear(source, sourcePath, '"request.generationConfig.seed"', 'ChatSeed');
+forbidNear(source, sourcePath, '"request.generationConfig.frequencyPenalty"', 'ChatPresencePenalty');
+forbidNear(source, sourcePath, '"request.generationConfig.frequencyPenalty"', 'ChatSeed');
+forbidNear(source, sourcePath, '"request.generationConfig.responseLogprobs"', 'ChatTopLogprobs');
+forbidNear(source, sourcePath, '"request.generationConfig.logprobs"', 'ChatLogprobs');
+forbidNear(source, sourcePath, '"request.generationConfig.seed"', 'ChatTopLogprobs');
 forbidAll(source, sourcePath, [
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
@@ -128,6 +152,14 @@ requireAll(tests, 'focused Gemini codec tests', [
   'gemini_thinking_level_does_not_collapse_to_numeric_budget',
   'gemini_thinking_config_malformed_fields_fail_closed',
   'gemini_thinking_config_semantics_do_not_mutate_provider_wire_payload',
+  'gemini_generation_config_frequency_penalty_maps_to_chat_frequency_penalty',
+  'gemini_generation_config_presence_penalty_maps_to_chat_presence_penalty',
+  'gemini_generation_config_response_logprobs_maps_to_chat_logprobs_request',
+  'gemini_generation_config_logprobs_maps_to_chat_top_logprobs_count',
+  'gemini_generation_config_seed_maps_to_chat_seed',
+  'gemini_generation_config_penalties_logprobs_and_seed_do_not_collapse',
+  'gemini_generation_config_scalar_malformed_fields_fail_closed',
+  'gemini_generation_config_scalar_semantics_do_not_mutate_provider_wire_payload',
 ]);
 for (const path of [
   ...filesBelow('v3/crates/routecodex-v3-server/src'),
@@ -148,6 +180,8 @@ for (const file of ['docs/architecture/v3-function-map.yml', 'docs/architecture/
     'collect_v3_gemini_request_tool_config_semantics',
     'v3-protocol-gemini-thinking-config-01',
     'collect_v3_gemini_request_thinking_config_semantics',
+    'v3-protocol-gemini-generation-config-scalar-01',
+    'collect_v3_gemini_request_generation_config_scalar_semantics',
   ]);
 }
 const scripts = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).scripts ?? {};

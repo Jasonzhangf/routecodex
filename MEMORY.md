@@ -4562,3 +4562,9 @@ Tags: #v3-architecture #review-surface #request-response-split #error-resources
 - Anthropic `image.source.url` is source-bound in `anthropic_codec.rs::collect_v3_anthropic_request_shape_branch_semantics` to Chat-native `image_url.url` semantics (`ChatImageUrlUrl`); it must not collapse to inline media data.
 - Anthropic base64 image `source.data` maps to protocol-neutral `request.messages[].content[].inline_media.data` semantics (`ChatInlineMediaData`), while `source.media_type` maps separately to `request.messages[].content[].media.mime_type` (`ChatMediaMimeType`); data and MIME are red-locked against collapse.
 - Anthropic base64 document `source.data` maps to file data semantics (`ChatFileFileData`). The collector is characterization/source-binding only and must not mutate provider wire payload.
+
+
+## 2026-07-25 - V3 Gemini generationConfig scalar semantics
+- Gemini `generationConfig.frequencyPenalty` is source-bound in `gemini_codec.rs::collect_v3_gemini_request_generation_config_scalar_semantics` to Chat `request.frequency_penalty`; it must not collapse to presence penalty, logprobs, or seed.
+- Gemini `generationConfig.presencePenalty` maps to Chat `request.presence_penalty`; `responseLogprobs` maps to the boolean `request.logprobs`; `logprobs` maps to count-like `request.top_logprobs`; `seed` maps to Chat `request.seed`.
+- The scalar collector is characterization/source-binding only and must not mutate provider wire payload. Red fixtures lock helper presence plus responseLogprobs-vs-top_logprobs and frequency-vs-presence distinction.

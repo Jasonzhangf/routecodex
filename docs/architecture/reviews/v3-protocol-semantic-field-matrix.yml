@@ -30,13 +30,13 @@ audit_truth_contract:
   audited_status_counts:
     covered: 161
     covered_but_target_dependent: 1
-    partial: 94
+    partial: 103
     extension_declared: 214
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
     edge_only: 3
-    semantic_declared: 59
+    semantic_declared: 50
   gap_audit:
     - gap_id: gap.client_metadata.target_dependent
       category: fixed_doc_gate
@@ -64,7 +64,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - semantic_declared
-      affected_count: 59
+      affected_count: 50
       evidence: These fields now have manual semantic owners and transform rules, but no runtime conversion completion
         evidence yet.
       required_owner: v3 protocol codec owner selected per field family
@@ -75,7 +75,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 94
+      affected_count: 103
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -2056,8 +2056,8 @@ chat_semantic_translation_groups:
           as raw payload truth.
     chat_extension_fields:
       - request.logprobs
-    current_impl: semantic_declared
-    gap: semantic owner declared; runtime conversion closeout pending
+    current_impl: partial
+    gap: Gemini responseLogprobs source codec extracts request.logprobs; cross-protocol/live closeout pending
   - group_id: output.top_logprobs_count
     standard_chat_field: request.top_logprobs
     chat_fields:
@@ -2087,8 +2087,8 @@ chat_semantic_translation_groups:
           as raw payload truth.
     chat_extension_fields:
       - request.top_logprobs
-    current_impl: semantic_declared
-    gap: semantic owner declared; runtime conversion closeout pending
+    current_impl: partial
+    gap: Gemini logprobs source codec extracts request.top_logprobs count; cross-protocol/live closeout pending
   - group_id: sampling.frequency_penalty
     standard_chat_field: request.frequency_penalty
     chat_fields:
@@ -2115,8 +2115,8 @@ chat_semantic_translation_groups:
           as raw payload truth.
     chat_extension_fields:
       - request.frequency_penalty
-    current_impl: semantic_declared
-    gap: semantic owner declared; runtime conversion closeout pending
+    current_impl: partial
+    gap: Gemini frequencyPenalty source codec extracts request.frequency_penalty; cross-protocol/live closeout pending
   - group_id: sampling.presence_penalty
     standard_chat_field: request.presence_penalty
     chat_fields:
@@ -2143,8 +2143,8 @@ chat_semantic_translation_groups:
           as raw payload truth.
     chat_extension_fields:
       - request.presence_penalty
-    current_impl: semantic_declared
-    gap: semantic owner declared; runtime conversion closeout pending
+    current_impl: partial
+    gap: Gemini presencePenalty source codec extracts request.presence_penalty; cross-protocol/live closeout pending
   - group_id: participant.name
     standard_chat_field: request.messages[].name
     chat_fields:
@@ -4584,8 +4584,8 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
-      current_impl: semantic_declared
-      gap: semantic owner declared; runtime conversion closeout pending
+      current_impl: partial
+      gap: Gemini frequencyPenalty source codec extracts request.frequency_penalty; cross-protocol/live closeout pending
       equivalent_fields:
         responses: []
         openai_chat:
@@ -4645,8 +4645,8 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
-      current_impl: semantic_declared
-      gap: semantic owner declared; runtime conversion closeout pending
+      current_impl: partial
+      gap: Gemini responseLogprobs source codec extracts request.logprobs; cross-protocol/live closeout pending
       equivalent_fields:
         responses: []
         openai_chat:
@@ -5219,8 +5219,8 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
-      current_impl: semantic_declared
-      gap: semantic owner declared; runtime conversion closeout pending
+      current_impl: partial
+      gap: Gemini presencePenalty source codec extracts request.presence_penalty; cross-protocol/live closeout pending
       equivalent_fields:
         responses: []
         openai_chat:
@@ -5431,7 +5431,7 @@ extended_openai_chat_semantic_superset:
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
       current_impl: partial
-      gap: OpenAI Chat seed is covered; Gemini generationConfig.seed runtime parity pending
+      gap: OpenAI Chat seed covered; Gemini generationConfig.seed source codec extracts request.seed; live closeout pending
       equivalent_fields:
         responses: []
         openai_chat:
@@ -5446,7 +5446,7 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
-      current_impl: semantic_declared
+      current_impl: partial
       gap: semantic owner declared; runtime conversion closeout pending
       equivalent_fields:
         responses:
@@ -5585,8 +5585,8 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
-      current_impl: semantic_declared
-      gap: semantic owner declared; runtime conversion closeout pending
+      current_impl: partial
+      gap: Gemini logprobs source codec extracts request.top_logprobs count; cross-protocol/live closeout pending
       equivalent_fields:
         responses:
           - request.top_logprobs

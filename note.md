@@ -33060,3 +33060,11 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Change: added `collect_v3_anthropic_request_shape_branch_semantics` in the Anthropic codec owner, mapping URL -> `ChatImageUrlUrl`, base64 image data -> `ChatInlineMediaData`, media type -> `ChatMediaMimeType`, and document data -> `ChatFileFileData`; provider wire remains unchanged.
 - Gates: focused Anthropic codec tests/red fixtures, protocol field parity verifier/red fixtures/tests, rendered protocol matrix/mainline flow, architecture docs, module boundaries, rust-only, resource map, function-map compile gate, cargo fmt check, and git diff check all PASS; logs under `.agent-collab/runs/20260724T222004Z-Macstudio.local-54163-anthropic-shape-branch/verify-full-after-fmt.log`.
 - Known gap: overall protocol semantic field closeout is not complete; this only closes the Anthropic media shape branch source-binding slice.
+
+
+## 2026-07-25T00:55:00Z — V3 Gemini generationConfig scalar semantic source closeout
+- Scope: `feature_id:v3.protocol_gemini_generation_config_scalar_semantics`; source/codec/gate only, no config/live/global install/restart.
+- Root cause: Gemini `generationConfig` scalar fields were manually mapped in the protocol matrix but lacked adjacent codec source-binding evidence, so `frequencyPenalty`, `presencePenalty`, `responseLogprobs`, `logprobs`, and `seed` could still collapse into nearby sampling/logprob semantics.
+- Change: added `collect_v3_gemini_request_generation_config_scalar_semantics` in `gemini_codec.rs`, mapping `frequencyPenalty -> request.frequency_penalty`, `presencePenalty -> request.presence_penalty`, `responseLogprobs -> request.logprobs`, `logprobs -> request.top_logprobs`, and `seed -> request.seed`; provider wire remains unchanged.
+- Gates: Gemini codec tests/red fixtures, protocol field parity verifier/red fixtures/tests, rendered protocol matrix/mainline flow, architecture docs, module boundaries, rust-only, resource map, function-map compile gate, cargo fmt check, and git diff check all PASS; logs under `.agent-collab/runs/20260725T002045Z-Macstudio.local-46572-gemini-generation-scalar/verify-full.log`.
+- Known gap: overall protocol semantic matrix closeout is not complete; remaining Gemini response-format/media/audio/safety/citation/grounding/usage and other protocol families stay open.

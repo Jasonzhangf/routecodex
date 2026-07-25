@@ -224,6 +224,21 @@ const cases = [
     diagnostic: /collect_v3_gemini_request_thinking_config_semantics/u,
   },
   {
+    name: 'Gemini generationConfig scalar helper removed from codec',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
+    from: 'collect_v3_gemini_request_generation_config_scalar_semantics',
+    to: 'collect_v3_gemini_request_generation_config_scalar_removed',
+    all: true,
+    diagnostic: /collect_v3_gemini_request_generation_config_scalar_semantics/u,
+  },
+  {
+    name: 'Gemini responseLogprobs collapses into top_logprobs in codec',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
+    from: '"request.generationConfig.responseLogprobs",\n        V3GeminiChatGenerationConfigScalarSemantic::ChatLogprobs,',
+    to: '"request.generationConfig.responseLogprobs",\n        V3GeminiChatGenerationConfigScalarSemantic::ChatTopLogprobs,',
+    diagnostic: /responseLogprobs.*ChatLogprobs|responseLogprobs.*ChatTopLogprobs/u,
+  },
+  {
     name: 'Gemini toolConfig helper removed from codec',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
     from: 'collect_v3_gemini_request_tool_config_semantics',

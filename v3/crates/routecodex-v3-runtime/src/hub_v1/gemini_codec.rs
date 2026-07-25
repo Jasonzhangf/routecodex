@@ -67,6 +67,29 @@ pub struct V3GeminiRequestToolConfigSemantic {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3GeminiChatGenerationConfigScalarSemantic {
+    ChatFrequencyPenalty,
+    ChatPresencePenalty,
+    ChatLogprobs,
+    ChatTopLogprobs,
+    ChatSeed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum V3GeminiGenerationConfigScalarSemanticValue {
+    Number(f64),
+    Boolean(bool),
+    Integer(u64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct V3GeminiRequestGenerationConfigScalarSemantic {
+    pub source_field: &'static str,
+    pub chat_semantic: V3GeminiChatGenerationConfigScalarSemantic,
+    pub value: V3GeminiGenerationConfigScalarSemanticValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3GeminiChatThinkingConfigSemantic {
     ChatReasoningIncludeThoughts,
     ChatReasoningBudgetTokens,
@@ -156,6 +179,12 @@ pub enum V3GeminiCodecError {
     ThinkingConfigBudgetNotInteger,
     #[error("Gemini generationConfig.thinkingConfig.thinkingLevel must be a non-empty string")]
     ThinkingConfigLevelNotString,
+    #[error("Gemini generationConfig scalar must be a number: {field}")]
+    GenerationConfigScalarNotNumber { field: &'static str },
+    #[error("Gemini generationConfig scalar must be a boolean: {field}")]
+    GenerationConfigScalarNotBoolean { field: &'static str },
+    #[error("Gemini generationConfig scalar must be a non-negative integer: {field}")]
+    GenerationConfigScalarNotInteger { field: &'static str },
     #[error("Gemini response candidates must be an array")]
     CandidatesNotArray,
     #[error("Gemini provider error requires error.message")]
@@ -316,6 +345,58 @@ pub fn collect_v3_gemini_request_tool_config_semantics(
             value: V3GeminiToolConfigSemanticValue::AllowedFunctionNames(names),
         });
     }
+    Ok(semantics)
+}
+
+pub fn collect_v3_gemini_request_generation_config_scalar_semantics(
+    payload: &Value,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<Vec<V3GeminiRequestGenerationConfigScalarSemantic>, V3GeminiCodecError> {
+    validate_v3_gemini_client_input_payload(payload, entry_protocol)?;
+    let object = require_object(payload)?;
+    let Some(generation_config) = object.get("generationConfig") else {
+        return Ok(Vec::new());
+    };
+    let generation_config = generation_config
+        .as_object()
+        .ok_or(V3GeminiCodecError::GenerationConfigNotObject)?;
+
+    let mut semantics = Vec::new();
+    push_optional_generation_number(
+        &mut semantics,
+        generation_config,
+        "frequencyPenalty",
+        "request.generationConfig.frequencyPenalty",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatFrequencyPenalty,
+    )?;
+    push_optional_generation_number(
+        &mut semantics,
+        generation_config,
+        "presencePenalty",
+        "request.generationConfig.presencePenalty",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatPresencePenalty,
+    )?;
+    push_optional_generation_bool(
+        &mut semantics,
+        generation_config,
+        "responseLogprobs",
+        "request.generationConfig.responseLogprobs",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatLogprobs,
+    )?;
+    push_optional_generation_integer(
+        &mut semantics,
+        generation_config,
+        "logprobs",
+        "request.generationConfig.logprobs",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatTopLogprobs,
+    )?;
+    push_optional_generation_integer(
+        &mut semantics,
+        generation_config,
+        "seed",
+        "request.generationConfig.seed",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatSeed,
+    )?;
     Ok(semantics)
 }
 
@@ -480,6 +561,75 @@ fn push_optional_branch_string(
         source_field,
         chat_semantic,
         value: value.to_owned(),
+    });
+    Ok(())
+}
+
+fn push_optional_generation_number(
+    semantics: &mut Vec<V3GeminiRequestGenerationConfigScalarSemantic>,
+    generation_config: &Map<String, Value>,
+    provider_field: &'static str,
+    source_field: &'static str,
+    chat_semantic: V3GeminiChatGenerationConfigScalarSemantic,
+) -> Result<(), V3GeminiCodecError> {
+    let Some(raw) = generation_config.get(provider_field) else {
+        return Ok(());
+    };
+    let value = raw
+        .as_f64()
+        .ok_or(V3GeminiCodecError::GenerationConfigScalarNotNumber {
+            field: source_field,
+        })?;
+    semantics.push(V3GeminiRequestGenerationConfigScalarSemantic {
+        source_field,
+        chat_semantic,
+        value: V3GeminiGenerationConfigScalarSemanticValue::Number(value),
+    });
+    Ok(())
+}
+
+fn push_optional_generation_bool(
+    semantics: &mut Vec<V3GeminiRequestGenerationConfigScalarSemantic>,
+    generation_config: &Map<String, Value>,
+    provider_field: &'static str,
+    source_field: &'static str,
+    chat_semantic: V3GeminiChatGenerationConfigScalarSemantic,
+) -> Result<(), V3GeminiCodecError> {
+    let Some(raw) = generation_config.get(provider_field) else {
+        return Ok(());
+    };
+    let value = raw
+        .as_bool()
+        .ok_or(V3GeminiCodecError::GenerationConfigScalarNotBoolean {
+            field: source_field,
+        })?;
+    semantics.push(V3GeminiRequestGenerationConfigScalarSemantic {
+        source_field,
+        chat_semantic,
+        value: V3GeminiGenerationConfigScalarSemanticValue::Boolean(value),
+    });
+    Ok(())
+}
+
+fn push_optional_generation_integer(
+    semantics: &mut Vec<V3GeminiRequestGenerationConfigScalarSemantic>,
+    generation_config: &Map<String, Value>,
+    provider_field: &'static str,
+    source_field: &'static str,
+    chat_semantic: V3GeminiChatGenerationConfigScalarSemantic,
+) -> Result<(), V3GeminiCodecError> {
+    let Some(raw) = generation_config.get(provider_field) else {
+        return Ok(());
+    };
+    let value = raw
+        .as_u64()
+        .ok_or(V3GeminiCodecError::GenerationConfigScalarNotInteger {
+            field: source_field,
+        })?;
+    semantics.push(V3GeminiRequestGenerationConfigScalarSemantic {
+        source_field,
+        chat_semantic,
+        value: V3GeminiGenerationConfigScalarSemanticValue::Integer(value),
     });
     Ok(())
 }
