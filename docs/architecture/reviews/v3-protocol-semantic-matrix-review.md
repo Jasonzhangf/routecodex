@@ -164,6 +164,29 @@ It now tracks:
 
 `verify:v3-protocol-conversion-field-parity` parses this YAML and requires the key long-tail field rows. Red fixtures reject dropping `gemini.request_top_level_fields.toolConfig`.
 
+## 2026-07-25 long-tail re-audit conclusion
+
+After the matrix was realigned to OpenAI Chat native fields plus registered
+protocol-neutral extensions, the remaining long-tail still matters as a
+machine-readable audit surface, but it is not a meaningful single runtime
+closeout target.
+
+The correct use is field-family triage:
+- promote rows only when a real client/provider sample or compatibility
+  requirement proves runtime value;
+- implement one semantic family at a time in the adjacent Rust codec/runtime
+  owner;
+- keep positive and negative tests for target-valid projection, unsupported
+  fail-fast behavior, and no semantic collapse;
+- leave edge-only transport state and target-incompatible protocol decorations as
+  explicit non-runtime / unsupported rows until a real target slot exists.
+
+High-value remaining families are media/file shape branches, tool-choice and
+parallelism policy, token/logprob/sampling pairs, reasoning request policy versus
+response reasoning content, and prompt-cache/storage/continuation knobs that
+current clients actually use. Broadly closing every declared field would add
+surface area without proven V3 parity value.
+
 ## Extended OpenAI Chat semantic superset
 
 The field-level matrix now includes `extended_openai_chat_semantic_superset`.

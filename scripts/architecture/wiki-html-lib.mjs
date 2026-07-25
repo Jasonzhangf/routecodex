@@ -113,7 +113,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
       ['v3.response.provider_raw', 'provider response runtime', 'Raw provider truth before compat/inbound.'],
       ['v3.error.chain', 'routecodex-v3-error', 'Controlled 429/error path.'],
     ],
-    checklist: ['Req01-Req09 and Resp01-Resp06 only', 'No raw SSE body collection', 'No server-side Chat semantic parsing', 'Live provider replay remains pending'],
+    checklist: ['Req01-Req09 and Resp01-Resp06 only', 'No raw SSE body collection', 'No server-side Chat semantic parsing', 'No fallback', 'Live provider replay remains pending'],
   }],
   [V3_GEMINI_RELAY_CONTROLLED_RUNTIME_PATH, {
     id: 'v3-gemini-relay-controlled-runtime',
@@ -132,7 +132,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
       ['V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'provider compat before Hub parse'],
       ['ProviderRespCompat02ProviderCompat', 'V3HubRespChatProcess03Governed', 'candidate/functionCall/finishReason governance owner'],
       ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic', 'save then project client semantic'],
-      ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame', 'server transports JSON/SSE only'],
+      ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame', 'Body::from_stream / JSON body transport only'],
     ],
     logicCards: [
       ['Gemini codec owns Gemini semantics', 'URL/model, candidates, functionCall, finishReason, and stream terminal rules stay in Gemini codec/runtime.'],
@@ -144,7 +144,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
       ['v3.entry_protocol.binding_registry', 'V3 config/server', 'Gemini endpoint binding.'],
       ['v3.error.chain', 'routecodex-v3-error', 'Controlled provider errors and malformed bodies.'],
     ],
-    checklist: ['Gemini relay implemented in config registry', 'No synthetic [DONE]', 'No server-side candidate/functionCall parsing', 'Real Gemini provider remains out of scope'],
+    checklist: ['Gemini relay implemented in config registry', 'No synthetic [DONE]', 'No fallback', 'No server-side candidate/functionCall parsing', 'Real Gemini provider remains out of scope'],
   }],
   [V3_PROTOCOL_NORMALIZATION_TOOL_GOVERNANCE_BOUNDARY_PATH, {
     id: 'v3-protocol-normalization-tool-governance-boundary',

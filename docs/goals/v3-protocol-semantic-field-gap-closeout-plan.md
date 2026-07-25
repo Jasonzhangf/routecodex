@@ -80,6 +80,46 @@ Progress evidence:
   `responseLogprobs` maps to `request.logprobs`, `logprobs` maps to `request.top_logprobs`, and `seed` maps to
   `request.seed`, without collapsing penalties, logprob flag/count, or seed. Remaining Gemini deep semantics stay open.
 
+## 2026-07-25 long-tail meaningfulness re-audit
+
+After the multi-protocol semantic mapping was realigned around OpenAI Chat native
+fields plus registered protocol-neutral extensions, the remaining long-tail is no
+longer a useful single blanket implementation objective.
+
+Decision:
+- Keep the long-tail matrix as an audit / backlog truth surface.
+- Do not run a broad "close every long-tail field" goal.
+- Only promote a long-tail row to runtime work when it belongs to a named field
+  family with real client/provider value, an adjacent Rust codec owner, and a
+  red/green test plan.
+- `edge_only` transport state remains edge-only; it is not business runtime
+  work.
+- Unsupported or target-incompatible semantics may remain explicit
+  unsupported/lossy rows with fail-fast red tests; they must not be silently
+  copied into raw payload blobs, MetadataCenter, server handlers, SSE transport,
+  provider transport, or fallback paths.
+
+Meaningful next slices are field-family slices, not whole-protocol sweeps:
+- media/file shape branches where URL / file id / inline bytes / MIME can be
+  collapsed incorrectly;
+- tool-choice / parallelism / allowed-name semantics where provider policy can
+  invert or split;
+- token, logprob, sampling, seed, and max-token pairs that directly change
+  provider request behavior;
+- reasoning/thinking request policy versus response-visible reasoning content;
+- prompt cache / storage / continuation knobs only when a current client or live
+  sample uses them.
+
+Low-value long-tail rows should stay declared or unsupported until a real sample
+or product requirement justifies them. Examples: provider decoration fields,
+rare response annotations, audio/modalities branches without an exposed entry
+path, or protocol-only metadata that has no target-compatible slot.
+
+Current Responses provider-standard instruction truth remains: provider-visible
+`instructions` / Stopless guidance is preserved by lifting into a system
+`input_text` item and removing top-level `instructions`; tests must not expect
+top-level `instructions` on the Responses provider-standard wire.
+
 ## Owner mapping
 
 | Semantic family | Owner files |
@@ -242,7 +282,9 @@ Repair V3 protocol semantic normalization so Chat Process canonical fields prese
 4. Fix runtime owners after red gates are proven:
    - Stop mapping Responses `reasoning.summary/context/mode` to Chat `reasoning_effort` or Anthropic synthetic `thinking.budget_tokens`.
    - Preserve Anthropic inbound `thinking` without inventing `reasoning.effort=medium`.
-   - Preserve Responses top-level `instructions` on Responses target; only apply instruction-to-message projection for targets that lack top-level instructions.
+   - Preserve Responses provider-visible instructions by the provider-standard
+     system `input_text` lift; do not expect top-level `instructions` on the
+     Responses provider-standard wire.
    - Map Chat `max_completion_tokens` to Responses `max_output_tokens`; do not emit non-spec `max_tokens` to Responses wire.
    - Implement logprob enable/count pair constraints for Chat and Gemini target wire.
    - Implement Anthropic `tool_choice.disable_parallel_tool_use` inverse mapping without emitting top-level `parallel_tool_calls` to Anthropic wire.

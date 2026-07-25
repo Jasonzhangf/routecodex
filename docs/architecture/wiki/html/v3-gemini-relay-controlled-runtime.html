@@ -77,7 +77,7 @@ flowchart TD
   N0 --&gt;|provider compat before Hub parse| N1
   N1 --&gt;|candidate/functionCall/finishReason governance owner| N2
   N2 --&gt;|save then project client semantic| N3
-  N3 --&gt;|server transports JSON/SSE only| N4
+  N3 --&gt;|Body::from_stream / JSON body transport only| N4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
   class N0,N1,N2,N3,N4 node;</pre></div></section>
       </div>
@@ -106,7 +106,7 @@ flowchart TD
 
     <section class="panel">
       <h2>Review checklist</h2>
-      <ul><li>Gemini relay implemented in config registry</li><li>No synthetic [DONE]</li><li>No server-side candidate/functionCall parsing</li><li>Real Gemini provider remains out of scope</li></ul>
+      <ul><li>Gemini relay implemented in config registry</li><li>No synthetic [DONE]</li><li>No fallback</li><li>No server-side candidate/functionCall parsing</li><li>Real Gemini provider remains out of scope</li></ul>
     </section>
 
     <section class="panel">

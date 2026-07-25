@@ -111,7 +111,7 @@ for (const phrase of [
 requireOrder(runtime, runtimePath, [
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(',
   'trace.push("V3HubReqExecution05Planned")',
-  'let selected = resolve_target(',
+  'match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05(',
   'trace.push("V3HubReqTarget06Resolved")',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(',

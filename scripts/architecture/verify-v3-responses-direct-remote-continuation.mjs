@@ -36,7 +36,7 @@ for (const [owner, text, phrases] of [
     'execute_v3_responses_direct_runtime_kernel_core(',
     'static DEFAULT_RESPONSES_TRANSPORT',
     'fn default_responses_transport()',
-    'execute_v3_responses_direct_runtime_kernel_with_continuation(',
+    'execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(',
     '.load_for_req03(response_id, &scope.key, now_epoch_ms)',
     'locator.validate_capability_revision(&current_capability_revision)',
     'target.resolve_exact_provider_model_auth(',
@@ -59,7 +59,7 @@ for (const [owner, text, phrases] of [
     'V3RemoteContinuationObservation',
     'V3ProviderResponseBody::Sse(stream) => project_sse_stream(stream).await?',
     'SseIncrementalDecoder::new(SseTransportLimits::default())',
-    'build_sse_transport_in_01_raw_chunk(chunk)',
+    'build_v3_sse_transport_in_01_raw_chunk(chunk)',
     'observe_sse_frame_remote_continuation(',
     'frame.frame().fields()',
     'response_id_candidate: None',
@@ -99,8 +99,8 @@ for (const [owner, text, phrases] of [
     'build_responses_direct_continuation_scope(',
     'first_header_text(headers, &["session-id", "session_id", "x-session-id"])',
     'resolve_transparent_continuation_scope(',
-    'payload_needs_continuation_scope(payload)',
-    'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(',
+    'payload_needs_direct_continuation_scope(payload)',
+    'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
@@ -128,7 +128,7 @@ for (const [owner, text, phrases] of [
     'responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry',
     'responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry',
     'responses_relay_local_continuation_uses_body_client_metadata_without_inventing_headers',
-    'responses_relay_missing_client_scope_for_tool_turn_fails_before_provider_send',
+    'responses_relay_missing_client_scope_for_tool_output_fails_before_provider_send',
     'start_controlled_continuation_websocket',
     'p6_remote_continuation_manifest',
   ]],
@@ -162,7 +162,7 @@ if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= obs
   const observedStream = response.slice(observedStreamStart, observedStreamEnd);
   for (const phrase of [
     'observe_sse_remote_continuation_chunk(',
-    'build_sse_transport_in_01_raw_chunk(chunk)',
+    'build_v3_sse_transport_in_01_raw_chunk(chunk)',
     'observe_sse_frame_remote_continuation(frame.frame().fields(), response_id_candidate)?',
     'observation_state.record_pending_response_id(&response_id)?',
   ]) {

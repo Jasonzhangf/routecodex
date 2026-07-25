@@ -628,8 +628,13 @@ fn compile_providers(
             let auth = compile_auth(&id, provider.auth)?;
             let provider_type = provider.provider_type;
             let mut models = compile_models(&id, provider.models)?;
-            let responses = compile_provider_responses(&id, provider.responses)?;
-            apply_implicit_provider_model_capabilities(&provider_type, &mut models);
+            let responses = compile_provider_responses(&id, provider.responses, &models)?;
+            apply_implicit_provider_model_capabilities(
+                &provider_type,
+                responses.as_ref(),
+                &mut models,
+            );
+            validate_provider_remote_continuation_transport(&id, responses.as_ref(), &models)?;
             let health = compile_provider_health(&id, provider.health)?;
             let compatibility_profile =
                 normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
@@ -663,8 +668,10 @@ fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Optio
 fn compile_provider_responses(
     provider_id: &str,
     responses: Option<V3ProviderResponsesAuthoringConfig>,
+    models: &BTreeMap<String, V3ProviderModelManifest>,
 ) -> Result<Option<V3ProviderResponsesAuthoringConfig>, V3ConfigError> {
     let Some(responses) = responses else {
+        validate_provider_remote_continuation_transport(provider_id, None, models)?;
         return Ok(None);
     };
 
@@ -700,14 +707,47 @@ fn compile_provider_responses(
         }
     }
 
+    validate_provider_remote_continuation_transport(provider_id, Some(&responses), models)?;
     Ok(Some(responses))
+}
+
+fn validate_provider_remote_continuation_transport(
+    provider_id: &str,
+    responses: Option<&V3ProviderResponsesAuthoringConfig>,
+    models: &BTreeMap<String, V3ProviderModelManifest>,
+) -> Result<(), V3ConfigError> {
+    let has_websocket_v2_transport = matches!(
+        responses.map(|responses| &responses.transport),
+        Some(V3ResponsesTransportKind::WebsocketV2)
+    );
+    for model in models.values() {
+        if model
+            .capabilities
+            .iter()
+            .any(|capability| capability == "remote_continuation")
+            && !has_websocket_v2_transport
+        {
+            return Err(validation(format!(
+                "provider {provider_id} model {} remote_continuation requires responses websocket_v2 transport",
+                model.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn apply_implicit_provider_model_capabilities(
     provider_type: &str,
+    responses: Option<&V3ProviderResponsesAuthoringConfig>,
     models: &mut BTreeMap<String, V3ProviderModelManifest>,
 ) {
     if provider_type != "responses" {
+        return;
+    }
+    if !matches!(
+        responses.map(|responses| &responses.transport),
+        Some(V3ResponsesTransportKind::WebsocketV2)
+    ) {
         return;
     }
     for model in models.values_mut() {

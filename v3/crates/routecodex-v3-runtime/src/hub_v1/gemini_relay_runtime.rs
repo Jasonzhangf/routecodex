@@ -759,7 +759,7 @@ fn failure_error_type(failure: &V3GeminiRelayProviderFailure) -> Option<String> 
 }
 
 fn provider_failure_message(failure: &V3GeminiRelayProviderFailure) -> String {
-    failure
+    match failure
         .client_response
         .pointer("/error/message")
         .and_then(Value::as_str)
@@ -776,8 +776,10 @@ fn provider_failure_message(failure: &V3GeminiRelayProviderFailure) -> String {
                 .and_then(Value::as_str)
         })
         .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("provider returned HTTP {}", failure.status))
+    {
+        Some(value) => value.to_string(),
+        None => format!("provider returned HTTP {}", failure.status),
+    }
 }
 
 fn provider_failure_output(
@@ -785,7 +787,7 @@ fn provider_failure_output(
     trace: Vec<&'static str>,
 ) -> V3GeminiRelayRuntimeOutput {
     let message = provider_failure_message(&failure);
-    let code = failure
+    let code = match failure
         .client_response
         .pointer("/error/code")
         .and_then(Value::as_str)
@@ -796,14 +798,11 @@ fn provider_failure_output(
                 .and_then(Value::as_str)
         })
         .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            if failure.status == 502 {
-                "provider_transport_error".to_string()
-            } else {
-                format!("provider_http_{}", failure.status)
-            }
-        });
+    {
+        Some(value) => value.to_string(),
+        None if failure.status == 502 => "provider_transport_error".to_string(),
+        None => format!("provider_http_{}", failure.status),
+    };
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",

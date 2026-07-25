@@ -382,12 +382,26 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     'let failure_context = V3RelayProviderFailurePolicyContext {',
     `entry_kind: "${entryKind}"`,
     'match resolve_v3_relay_target(',
+  ]);
+  const handleStart = text.indexOf('async fn handle_provider_failure(');
+  if (handleStart < 0) {
+    requireOrderedSequence(text, owner, [
+      'let result = run_v3_relay_provider_failure_policy(',
+      '&mut V3RelayProviderFailurePolicyState {',
+      'V3RelayProviderFailureDecision::Reselect',
+      'V3RelayProviderFailureDecision::RetrySame',
+      'V3RelayProviderFailureDecision::ProjectTerminal',
+    ]);
+    return;
+  }
+  const handleSlice = text.slice(handleStart);
+  requireOrderedSequence(handleSlice, `${owner}: handle_provider_failure`, [
     'let result = run_v3_relay_provider_failure_policy(',
-    '&mut V3RelayProviderFailurePolicyState {',
     'V3RelayProviderFailureDecision::Reselect',
     'V3RelayProviderFailureDecision::RetrySame',
     'V3RelayProviderFailureDecision::ProjectTerminal',
   ]);
+  requireText(text, owner, '&mut V3RelayProviderFailurePolicyState {');
 }
 
 function forbid(text, owner, patterns) {

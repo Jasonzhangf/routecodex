@@ -451,9 +451,33 @@ fn responses_websocket_v2_transport_options_are_validated() {
 }
 
 #[test]
+fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
+    let explicit_http = FULL_CONFIG.replace(
+        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("remote_continuation requires responses websocket_v2 transport"));
+
+    let websocket = explicit_http.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
+}
+
+#[test]
 fn gpt_responses_models_publish_remote_continuation_without_explicit_capability_config() {
+    let websocket = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
+    );
     let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
     let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
     assert!(
         capabilities
@@ -470,7 +494,12 @@ fn gpt_responses_models_publish_remote_continuation_without_explicit_capability_
         "capabilities = [\"text\", \"reasoning\", \"tools\"]",
         "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
     );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap())
+            .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("remote_continuation requires responses websocket_v2 transport"));
 
     let non_responses = FULL_CONFIG.replacen("type = \"responses\"", "type = \"openai_chat\"", 1);
     let manifest =
