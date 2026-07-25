@@ -105,6 +105,24 @@ Claim：`feature_id:v3.responses_direct_remote_continuation_integration`
 runtime owner 是 Provider-owned Responses WebSocket v2 transport。`live_5555_pending` 必须保留到真实
 JSON/SSE 两轮均成功。
 
+## 9.1 V2 HTTP direct parity correction（2026-07-25）
+
+Jason corrected the live baseline: V2 already uses `cc.gpt-5.5` normally over the HTTP direct
+Responses path, so V3 must not make WebSocket v2 / `remote_continuation` a prerequisite for that
+V2 parity path.
+
+Corrected boundary:
+
+- HTTP JSON/SSE direct first turn that returns a provider function call commits the direct locator
+  even when the provider model lacks `remote_continuation`.
+- The tool-output turn must reuse the exact direct pin and send the V2-compatible data-plane fields
+  (`previous_response_id` plus `function_call_output`) without Virtual Router re-entry.
+- HTTP `submit_tool_outputs` parity must use the native upstream endpoint
+  `/v1/responses/{response_id}/submit_tool_outputs`; `response_id` / `responseId` is endpoint truth
+  and must not remain in the outgoing provider body.
+- WebSocket v2 remains a separate provider transport hardening feature for providers that actually
+  declare and pass that transport contract; it is not the acceptance gate for V2 HTTP direct parity.
+
 ## 10. Provider Responses WebSocket v2 slice
 
 官方 WebSocket Mode 合同：连接 `/v1/responses`，每轮发送一个 `response.create` JSON event；续接轮只发送

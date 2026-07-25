@@ -203,7 +203,16 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     let provider_id = target.provider_id;
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
-            let url_text = format!("{}/responses", target.base_url.trim_end_matches('/'));
+            let mut body = body;
+            let mut url_text = format!("{}/responses", target.base_url.trim_end_matches('/'));
+            if let Some(response_id) = extract_http_submit_tool_outputs_response_id(&mut body) {
+                url_text = build_http_submit_tool_outputs_url(
+                    &request_id,
+                    &provider_id,
+                    &url_text,
+                    &response_id,
+                )?;
+            }
             build_v3_transport_13_responses_http_request_from_parts(
                 request_id,
                 provider_id,
@@ -248,6 +257,50 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
             ))
         }
     }
+}
+
+fn extract_http_submit_tool_outputs_response_id(body: &mut Value) -> Option<String> {
+    let object = body.as_object_mut()?;
+    let raw_id = object
+        .get("response_id")
+        .and_then(Value::as_str)
+        .or_else(|| object.get("responseId").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let has_tool_outputs = object
+        .get("tool_outputs")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty());
+    if !has_tool_outputs {
+        return None;
+    }
+    let response_id = raw_id.to_string();
+    object.remove("response_id");
+    object.remove("responseId");
+    Some(response_id)
+}
+
+fn build_http_submit_tool_outputs_url(
+    request_id: &str,
+    provider_id: &str,
+    responses_url: &str,
+    response_id: &str,
+) -> Result<String, V3ProviderError> {
+    let mut url =
+        reqwest::Url::parse(responses_url).map_err(|error| V3ProviderError::InvalidBaseUrl {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: error.to_string(),
+        })?;
+    url.path_segments_mut()
+        .map_err(|()| V3ProviderError::InvalidBaseUrl {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: "responses URL cannot be a base for submit_tool_outputs".to_string(),
+        })?
+        .push(response_id)
+        .push("submit_tool_outputs");
+    Ok(url.to_string())
 }
 
 pub fn build_v3_transport_13_responses_http_request_from_parts(
@@ -1336,5 +1389,33 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("stopreason"));
+    }
+
+    #[test]
+    fn responses_http_submit_tool_outputs_uses_native_response_endpoint() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-responses-submit-tool-outputs",
+            responses_http_target(),
+            json!({
+                "model":"client-model",
+                "response_id":"resp_submit_http_v2_parity",
+                "tool_outputs":[{"call_id":"call_submit_http","output":"ok"}],
+                "stream":true
+            }),
+        )
+        .unwrap();
+        let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+        assert_eq!(
+            request.url(),
+            "https://api2.orangeai.cc/v1/responses/resp_submit_http_v2_parity/submit_tool_outputs"
+        );
+        assert_eq!(request.stream_intent(), V3ResponsesStreamIntent::Sse);
+        assert_eq!(
+            request.body()["tool_outputs"],
+            json!([{"call_id":"call_submit_http","output":"ok"}])
+        );
+        assert_eq!(request.body()["stream"], true);
+        assert!(request.body().get("response_id").is_none());
+        assert!(request.body().get("responseId").is_none());
     }
 }

@@ -210,6 +210,20 @@ flowchart LR
   provider still needs a verified Responses WebSocket v2 endpoint before `live_5555_pending` can be
   removed.
 
+## V2 HTTP direct parity correction
+
+- V3 direct must align to V2 HTTP direct for any provider selected by the generic routing/target
+  plan: HTTP-only JSON/SSE function-call continuation must not require a provider model capability
+  named `remote_continuation`.
+- On the V2 parity path, the first turn commits the direct locator from the provider response, and
+  the next turn sends `previous_response_id` plus `function_call_output` to the exact same
+  provider/model/auth pin with no Virtual Router re-entry.
+- Provider Responses HTTP submit parity uses the native endpoint
+  `/v1/responses/{response_id}/submit_tool_outputs`; `response_id` / `responseId` is removed from
+  the provider body after it is encoded into the endpoint.
+- WebSocket v2 remains a separate provider transport capability/hardening surface, not a blocker for
+  V2 HTTP direct parity.
+
 ## P6 local-live evidence
 
 - Actual built `v3/target/debug/routecodex-v3` loaded `v3/fixtures/config.p6.toml` and started

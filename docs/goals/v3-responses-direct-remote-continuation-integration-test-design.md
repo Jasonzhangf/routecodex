@@ -39,7 +39,7 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
 | pin/capability/provider availability mismatch | reject at Req06 |
 | duplicate commit | fail at Resp04; never overwrite |
 | streaming \`response.created\` only | forward as client SSE; do not commit a locator |
-| streaming function/custom tool call on HTTP-only provider | fail explicitly at Resp04 capability gate |
+| streaming function/custom tool call on HTTP-only provider | follow V2 direct HTTP parity: commit the direct locator and allow the next exact-pin `previous_response_id` + tool-output turn without requiring `remote_continuation` capability |
 
 ## Positive gates
 
@@ -60,9 +60,23 @@ conflicting truth is an Error01-06 failure. Provider/auth/control truth is side-
 - provider/model/auth/capability mismatch, expiry, unavailable provider;
 - still-running, already-terminal, and terminal provider failure;
 - HTTP-only streaming terminal response must not fail just because `response.created` is
-  `in_progress`; HTTP-only streaming tool-call response must fail before exposing a continuable
-  success because the selected provider lacks `remote_continuation`;
+  `in_progress`; HTTP-only streaming or JSON tool-call response must not fail just because the
+  selected provider lacks a WebSocket/`remote_continuation` capability when the V2 HTTP direct data
+  path is otherwise valid;
 - Error01-06 polarity and provider/client normal-payload isolation.
+
+## V2 HTTP direct parity correction（2026-07-25）
+
+- V3 direct must match V2 direct HTTP behavior for provider-owned Responses continuation. A
+  first-turn JSON/SSE function call on an HTTP-only provider commits the direct locator; the next
+  turn sends `previous_response_id` plus `function_call_output` back to the exact same
+  provider/model/auth pin.
+- `remote_continuation` remains a WebSocket v2 transport capability claim for providers that expose
+  that transport, but it is not a runtime prerequisite for the V2 HTTP direct parity path.
+- Provider HTTP submit parity is native endpoint based: a payload containing `response_id` /
+  `responseId` and non-empty `tool_outputs` must be sent to
+  `/v1/responses/{response_id}/submit_tool_outputs`, with the response id removed from the outgoing
+  body.
 
 ## Red baseline
 

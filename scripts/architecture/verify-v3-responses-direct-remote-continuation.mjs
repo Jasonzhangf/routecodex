@@ -82,6 +82,9 @@ for (const [owner, text, phrases] of [
   [providerTransportPath, providerTransport, [
     'pub struct V3Transport13ResponsesRequest',
     'ProviderResponsesTransport',
+    'extract_http_submit_tool_outputs_response_id',
+    'build_http_submit_tool_outputs_url',
+    '.push("submit_tool_outputs")',
     'connect_async(handshake)',
     'event.remove("stream")',
     'event.remove("background")',
@@ -106,7 +109,8 @@ for (const [owner, text, phrases] of [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
     'sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact_pin',
     'http_only_sse_terminal_response_streams_without_remote_continuation_commit',
-    'http_only_sse_function_call_errors_without_remote_continuation_capability',
+    'http_only_json_function_call_uses_v2_direct_http_continuation_without_remote_capability',
+    'http_only_sse_function_call_uses_v2_direct_http_continuation_without_remote_capability',
     'missing_locator_scope_mismatch_and_expiry_fail_before_router_or_provider_send',
     'capability_auth_and_provider_availability_drift_fail_at_req06_without_router_or_send',
     'pinned_terminal_provider_failure_uses_error01_06_without_reselection',
@@ -132,8 +136,8 @@ for (const [owner, text, phrases] of [
     'start_controlled_continuation_websocket',
     'p6_remote_continuation_manifest',
   ]],
-  [designPath, design, ['Resp04 commit', 'Req03 load', 'Req06 exact pin', 'Transport-bound continuation matrix']],
-  [planPath, plan, ['Provider Responses WebSocket v2 slice', 'Responses WebSocket v2 transport']],
+  [designPath, design, ['Resp04 commit', 'Req03 load', 'Req06 exact pin', 'V2 HTTP direct parity correction', 'Transport-bound continuation matrix']],
+  [planPath, plan, ['V2 HTTP direct parity correction', 'Provider Responses WebSocket v2 slice', 'Responses WebSocket v2 transport']],
 ]) {
   for (const phrase of phrases) requireText(text, owner, phrase);
 }
@@ -172,6 +176,7 @@ if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= obs
 forbid(runtime, runtimePath, [
   /execute_selected_continuation/,
   /fallback/i,
+  /require_remote_continuation_capabilities|remote_capability_error|lacks required remote_continuation/,
   /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
   /store\.release\(previous_response_id\)[\s\S]{0,120}store\.commit\(input\)/,
   /request_body\s*\[\s*["'](?:provider_id|auth_alias|continuation_owner|capability_revision|routing_group)["']\s*\]/,

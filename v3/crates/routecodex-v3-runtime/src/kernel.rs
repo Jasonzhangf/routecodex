@@ -1042,11 +1042,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             previous_response_id: previous_response_id.clone(),
                             selected_pin: selected_pin.clone(),
                             selected_capability_revision: selected_capability_revision.clone(),
-                            remote_capability_error: require_remote_continuation_capabilities(
-                                manifest,
-                                &selected_pin,
-                            )
-                            .err(),
                             now_epoch_ms,
                             committed_pending: false,
                         };
@@ -1093,15 +1088,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             let lifecycle_changed = previous_response_id.is_some() || pending_response_id.is_some();
             if lifecycle_changed {
                 if let Some(response_id) = pending_response_id {
-                    if let Err(error) =
-                        require_remote_continuation_capabilities(manifest, &selected_pin)
-                    {
-                        return error_output(
-                            runtime_source("V3HubRespContinuation04Committed", error),
-                            trace,
-                            &hook_registry,
-                        );
-                    }
                     let locator = V3RemoteContinuationLocator::new_direct(
                         response_id,
                         scope.key.clone(),
@@ -1439,7 +1425,6 @@ struct V3DirectSseRemoteContinuationPolicy {
     previous_response_id: Option<String>,
     selected_pin: V3RemoteContinuationPin,
     selected_capability_revision: String,
-    remote_capability_error: Option<String>,
     now_epoch_ms: u64,
     committed_pending: bool,
 }
@@ -1508,9 +1493,6 @@ impl V3DirectSseRemoteContinuationPolicy {
         else {
             return Ok(());
         };
-        if let Some(error) = self.remote_capability_error.clone() {
-            return Err(runtime_source("V3HubRespContinuation04Committed", error));
-        }
         let locator = V3RemoteContinuationLocator::new_direct(
             response_id,
             self.scope_key.clone(),
@@ -1590,37 +1572,6 @@ fn capability_revision_for_pin(
         provider.features,
         model.features,
     ))
-}
-
-fn require_remote_continuation_capabilities(
-    manifest: &V3Config05ManifestPublished,
-    pin: &V3RemoteContinuationPin,
-) -> Result<(), String> {
-    let provider = manifest.providers.get(&pin.provider_id).ok_or_else(|| {
-        format!(
-            "provider {} is absent for remote continuation",
-            pin.provider_id
-        )
-    })?;
-    let model = provider.models.get(&pin.model_id).ok_or_else(|| {
-        format!(
-            "provider {} model {} is absent for remote continuation",
-            pin.provider_id, pin.model_id
-        )
-    })?;
-    for required in ["remote_continuation", "tool_outputs"] {
-        if !model
-            .capabilities
-            .iter()
-            .any(|capability| capability == required)
-        {
-            return Err(format!(
-                "provider {} model {} lacks required {required} capability",
-                pin.provider_id, pin.model_id
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn runtime_source(stage: &'static str, error: impl std::fmt::Display) -> V3Error01SourceRaised {

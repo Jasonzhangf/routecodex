@@ -69,6 +69,11 @@ struct PendingSseWithoutRemoteContinuationTransport {
 }
 
 #[derive(Default)]
+struct PendingJsonWithoutRemoteContinuationTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
+#[derive(Default)]
 struct ThreeTurnTransport {
     requests: Mutex<Vec<Value>>,
 }
@@ -276,7 +281,35 @@ impl ResponsesTransport for PendingSseWithoutRemoteContinuationTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        self.requests.lock().unwrap().push(request.body().clone());
+        let mut requests = self.requests.lock().unwrap();
+        requests.push(request.body().clone());
+        let chunks = if requests.len() == 1 {
+            vec![
+                concat!(
+                    "event: response.created\n",
+                    "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_http_sse_pending\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                )
+                .as_bytes()
+                .to_vec(),
+                concat!(
+                    "event: response.output_item.done\n",
+                    "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_http_sse_pending\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_http_sse_pending\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
+                    "data: [DONE]\n\n",
+                )
+                .as_bytes()
+                .to_vec(),
+            ]
+        } else {
+            vec![
+                concat!(
+                    "event: response.completed\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_http_sse_done\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n",
+                    "data: [DONE]\n\n",
+                )
+                .as_bytes()
+                .to_vec(),
+            ]
+        };
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
             request.provider_id().to_string(),
@@ -285,26 +318,33 @@ impl ResponsesTransport for PendingSseWithoutRemoteContinuationTransport {
                 name: "content-type".into(),
                 value: b"text/event-stream".to_vec(),
             }],
-            Box::pin(stream::iter(
-                vec![
-                    concat!(
-                        "event: response.created\n",
-                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_http_sse_pending\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
-                    )
-                    .as_bytes()
-                    .to_vec(),
-                    concat!(
-                        "event: response.output_item.done\n",
-                        "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_http_sse_pending\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_http_sse_pending\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
-                        "data: [DONE]\n\n",
-                    )
-                    .as_bytes()
-                    .to_vec(),
-                ]
-                .into_iter()
-                .map(Ok),
-            )),
+            Box::pin(stream::iter(chunks.into_iter().map(Ok))),
         ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for PendingJsonWithoutRemoteContinuationTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let mut requests = self.requests.lock().unwrap();
+        requests.push(request.body().clone());
+        let body = if requests.len() == 1 {
+            json!({
+                "id":"resp_http_json_pending",
+                "status":"requires_action",
+                "output":[{"type":"function_call","call_id":"call_http_json_pending","name":"lookup","arguments":"{}"}]
+            })
+        } else {
+            json!({
+                "id":"resp_http_json_done",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"done"}]
+            })
+        };
+        json_response(&request, 200, body)
     }
 }
 
@@ -504,7 +544,74 @@ async fn http_only_sse_terminal_response_streams_without_remote_continuation_com
 }
 
 #[tokio::test]
-async fn http_only_sse_function_call_errors_without_remote_continuation_capability() {
+async fn http_only_json_function_call_uses_v2_direct_http_continuation_without_remote_capability() {
+    let manifest = http_only_manifest_without_remote_continuation();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = PendingJsonWithoutRemoteContinuationTransport::default();
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-json-pending",
+            json!({"model":"client","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 200, "{first:?}");
+    assert!(first
+        .node_trace
+        .contains(&"V3HubRespContinuation04Committed"));
+    assert_eq!(state.len().unwrap(), 1);
+    let V3ClientBody::Json(first_body) = &first.client_payload.body else {
+        panic!("HTTP direct pending JSON must be projected to client JSON")
+    };
+    assert_eq!(first_body["id"], "resp_http_json_pending");
+    assert_eq!(first_body["status"], "requires_action");
+
+    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-json-submit",
+            json!({
+                "model":"client",
+                "previous_response_id":"resp_http_json_pending",
+                "input":[{"type":"function_call_output","call_id":"call_http_json_pending","output":"ok"}]
+            }),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        2_000,
+    )
+    .await;
+    assert_eq!(second.client_payload.status, 200, "{second:?}");
+    assert!(second
+        .node_trace
+        .contains(&"V3HubReqContinuation03Classified"));
+    assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
+    assert_eq!(
+        count(&second.node_trace, "V3Router07OpaqueTargetHitOnce"),
+        0
+    );
+    assert_eq!(state.len().unwrap(), 0);
+
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1]["previous_response_id"],
+        "resp_http_json_pending"
+    );
+    assert_eq!(requests[1]["input"][0]["type"], "function_call_output");
+    assert_control_truth_isolated(&requests[1]);
+}
+
+#[tokio::test]
+async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_remote_capability() {
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = PendingSseWithoutRemoteContinuationTransport::default();
@@ -533,19 +640,49 @@ async fn http_only_sse_function_call_errors_without_remote_continuation_capabili
     assert!(String::from_utf8(first_chunk)
         .unwrap()
         .contains("resp_http_sse_pending"));
-    let error = stream
-        .next()
-        .await
-        .expect("function-call chunk must fail explicitly")
-        .expect_err("HTTP-only function call must not be delivered as continuable success");
-    assert!(error
-        .message
-        .contains("provider p model m lacks required remote_continuation capability"));
+    let remainder = collect_sse_text(stream).await;
+    assert!(remainder.contains("call_http_sse_pending"));
+    assert!(remainder.contains("[DONE]"));
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-sse-submit",
+            json!({
+                "model":"client",
+                "stream":true,
+                "previous_response_id":"resp_http_sse_pending",
+                "input":[{"type":"function_call_output","call_id":"call_http_sse_pending","output":"ok"}]
+            }),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        2_000,
+    )
+    .await;
+    assert_eq!(second.client_payload.status, 200, "{second:?}");
+    assert!(second
+        .node_trace
+        .contains(&"V3HubReqContinuation03Classified"));
+    assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
+    assert_eq!(
+        count(&second.node_trace, "V3Router07OpaqueTargetHitOnce"),
+        0
+    );
+    let second_body = collect_sse_body_text(second.client_payload.body).await;
+    assert!(second_body.contains("resp_http_sse_done"));
+    assert!(second_body.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 0);
 
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
+    assert_eq!(requests.len(), 2);
     assert_control_truth_isolated(&requests[0]);
+    assert_eq!(requests[1]["previous_response_id"], "resp_http_sse_pending");
+    assert_eq!(requests[1]["input"][0]["type"], "function_call_output");
+    assert_control_truth_isolated(&requests[1]);
 }
 
 async fn collect_sse_body_text(body: V3ClientBody) -> String {

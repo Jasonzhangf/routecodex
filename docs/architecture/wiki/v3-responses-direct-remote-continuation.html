@@ -45,6 +45,13 @@
     <li>Provider/client payloads contain no session, auth, owner, capability, or routing control truth.</li>
     <li>JSON and SSE controlled HTTP replay are required; current 5555 replay remains pending.</li>
   </ul>
+  <h2>V2 HTTP direct parity correction</h2>
+  <ul>
+    <li>HTTP-only JSON/SSE function-call continuation must follow V2 direct behavior and must not require a model capability named <code>remote_continuation</code>.</li>
+    <li>The second turn sends <code>previous_response_id</code> plus <code>function_call_output</code> to the exact same provider/model/auth pin without Virtual Router re-entry.</li>
+    <li>HTTP <code>submit_tool_outputs</code> uses <code>/v1/responses/{response_id}/submit_tool_outputs</code> and removes <code>response_id</code> / <code>responseId</code> from the provider body.</li>
+    <li>WebSocket v2 remains a separate provider transport hardening surface, not the acceptance gate for V2 HTTP direct parity.</li>
+  </ul>
   <p><a id="markdown-link" href="v3-responses-direct-mainline.md">Canonical Markdown</a> · <a id="manifest-link" href="../manifests/v3.responses_direct_remote_continuation.mainline.yml">Machine-readable manifest</a> · <a id="plan-link" href="../../goals/v3-responses-direct-remote-continuation-integration-plan.md">Implementation plan</a></p>
 </body>
 </html>
