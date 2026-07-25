@@ -139,18 +139,6 @@ impl V3ProviderFailureRuntimeHealth {
         }
     }
 
-    pub(crate) fn record_provider_failure(
-        &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        reason: Option<&str>,
-        now_ms: u64,
-    ) -> Result<(), String> {
-        self.record_provider_failure_record(provider_id, auth_alias, model_id, reason, now_ms)
-            .map(|_| ())
-    }
-
     pub(crate) fn record_provider_failure_record(
         &self,
         provider_id: &str,

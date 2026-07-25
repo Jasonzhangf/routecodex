@@ -19,6 +19,9 @@ if (!fs.existsSync(manifestPath)) {
 }
 
 const env = { ...process.env };
+if (!Object.prototype.hasOwnProperty.call(env, 'RUSTUP_TOOLCHAIN')) {
+  env.RUSTUP_TOOLCHAIN = 'stable';
+}
 if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
   env.CARGO_NET_OFFLINE = 'true';
 }

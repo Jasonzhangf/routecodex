@@ -354,6 +354,7 @@ pub struct V3Server16HttpFrame {
     pub error_node: &'static str,
     pub error_chain: Vec<&'static str>,
     pub node_trace: Vec<&'static str>,
+    pub observability: Option<V3RuntimeObservability>,
 }
 
 pub enum V3Server16Body {
@@ -1277,6 +1278,7 @@ async fn pending_endpoint(
         return responses_relay_output_response(output, stream_console_finalizer);
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        let console_payload = payload.clone();
         let frame = execute_responses_direct_server_frame(
             &state,
             &request_headers,
@@ -1297,14 +1299,17 @@ async fn pending_endpoint(
         ) {
             return response;
         }
-        emit_v3_frame_error_console_line(
-            &state.server,
+        let console_context = build_v3_console_emission_context(
+            &state,
+            &entry_protocol,
             &path,
             &request_id,
-            &frame,
-            request_console_project_path.as_deref(),
+            &request_headers,
+            &console_payload,
         );
-        responses_direct_output_response(frame)
+        let stream_console_finalizer =
+            emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
+        responses_direct_output_response_with_console(frame, stream_console_finalizer)
     } else if execution_mode == V3EntryProtocolExecutionMode::PendingNotImplemented {
         let pending_not_implemented = execution_mode.as_str();
         let Some(pending_owner) = pending_owner_symbol else {
@@ -2091,11 +2096,13 @@ async fn execute_responses_direct_server_frame(
             error,
         ));
     }
-    build_v3_server_16_http_frame_from_v3_resp_15(
+    let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
         output.client_payload,
         output.node_trace,
         output.error_chain,
-    )
+    );
+    frame.observability = output.observability;
+    frame
 }
 
 fn pending_binding_output_response(
@@ -3121,6 +3128,69 @@ fn emit_v3_observability_console_lines(
     }
 }
 
+fn emit_v3_direct_frame_console_lines(
+    context: &V3ConsoleEmissionContext,
+    frame: &V3Server16HttpFrame,
+    started_at: Instant,
+) -> Option<V3DirectSseConsoleFinalizer> {
+    let mut observability = frame.observability.clone();
+    if let Some(observability) = observability.as_mut() {
+        enrich_v3_direct_observability_from_frame(observability, frame);
+        emit_v3_frame_error_console_line_for_context(context, frame, observability);
+    } else {
+        let identity = resolve_v3_console_log_identity(context);
+        emit_v3_frame_error_console_line_for_state(
+            &context.state,
+            &context.endpoint,
+            &context.request_id,
+            frame,
+            identity.project_path.as_deref(),
+        );
+    }
+    let observability = observability?;
+    let is_sse = matches!(frame.body, V3Server16Body::Sse(_));
+    emit_v3_observability_console_lines(
+        context,
+        frame.status,
+        &frame.node_trace,
+        &observability,
+        started_at,
+        !is_sse,
+    );
+    is_sse.then(|| V3DirectSseConsoleFinalizer {
+        context: context.clone(),
+        status: frame.status,
+        node_trace: frame.node_trace.clone(),
+        observability,
+        started_at,
+    })
+}
+
+fn enrich_v3_direct_observability_from_frame(
+    observability: &mut V3RuntimeObservability,
+    frame: &V3Server16HttpFrame,
+) {
+    observability.transport = match &frame.body {
+        V3Server16Body::Json(_) => "json",
+        V3Server16Body::Bytes(_) => "bytes",
+        V3Server16Body::Sse(_) => "sse",
+    }
+    .to_string();
+    observability.provider_status = observability.provider_status.or(Some(frame.status));
+    let V3Server16Body::Json(body) = &frame.body else {
+        return;
+    };
+    if let Some(status) = read_v3_console_response_status(body) {
+        observability.response_status = Some(status);
+    }
+    if let Some(finish_reason) = read_v3_console_finish_reason(body) {
+        observability.finish_reason = Some(finish_reason);
+    }
+    if let Some(usage) = extract_v3_console_usage_summary(body) {
+        observability.usage = Some(usage);
+    }
+}
+
 fn should_emit_v3_request_complete_console_line(
     status: u16,
     observability: &V3RuntimeObservability,
@@ -3152,6 +3222,14 @@ struct V3SseConsoleFinalizer {
     node_trace: Vec<&'static str>,
     observability: V3RuntimeObservability,
     stream_observation: V3RuntimeStreamObservation,
+    started_at: Instant,
+}
+
+struct V3DirectSseConsoleFinalizer {
+    context: V3ConsoleEmissionContext,
+    status: u16,
+    node_trace: Vec<&'static str>,
+    observability: V3RuntimeObservability,
     started_at: Instant,
 }
 
@@ -3212,15 +3290,58 @@ impl V3SseConsoleFinalizer {
                 "message": message
             }
         });
-        let identity = resolve_v3_console_log_identity(&self.context);
-        emit_v3_error_console_line_for_state(
-            &self.context.state,
-            &self.context.endpoint,
-            &self.context.request_id,
+        emit_v3_error_console_line_for_context(
+            &self.context,
+            &self.observability,
             status,
             &V3_ERROR_CHAIN_NODE_IDS,
             Some(&body),
-            identity.project_path.as_deref(),
+        );
+    }
+}
+
+impl V3DirectSseConsoleFinalizer {
+    fn complete(self) {
+        let elapsed = self.started_at.elapsed();
+        emit_v3_stopless_console_line(&self.context, &self.observability);
+        if should_emit_v3_request_complete_console_line(self.status, &self.observability) {
+            emit_v3_request_complete_console_line(
+                &self.context,
+                self.status,
+                &self.node_trace,
+                &self.observability,
+                elapsed,
+            );
+        }
+        emit_v3_usage_console_line(
+            &self.context,
+            &self.node_trace,
+            &self.observability,
+            elapsed,
+        );
+    }
+
+    fn provider_stream_failed(self, error: &str) {
+        self.fail(502, "provider_response_sse_stream", error);
+    }
+
+    fn client_disconnected(self) {
+        self.fail(499, "client_disconnect", V3_SSE_CLIENT_DISCONNECTED_MESSAGE);
+    }
+
+    fn fail(self, status: u16, code: &str, message: &str) {
+        let body = json!({
+            "error": {
+                "code": code,
+                "message": message
+            }
+        });
+        emit_v3_error_console_line_for_context(
+            &self.context,
+            &self.observability,
+            status,
+            &V3_ERROR_CHAIN_NODE_IDS,
+            Some(&body),
         );
     }
 }
@@ -3895,6 +4016,12 @@ fn resolve_v3_foundation_console_auth_alias(
     None
 }
 
+fn read_v3_console_response_status(value: &Value) -> Option<String> {
+    read_v3_console_string_path(value, &["status"])
+        .or_else(|| read_v3_console_string_path(value, &["response", "status"]))
+        .or_else(|| read_v3_console_string_path(value, &["message", "status"]))
+}
+
 fn read_v3_console_finish_reason(value: &Value) -> Option<String> {
     read_v3_console_string_path(value, &["finish_reason"])
         .or_else(|| read_v3_console_string_path(value, &["finishReason"]))
@@ -3997,6 +4124,72 @@ fn emit_v3_frame_error_console_line(
     );
 }
 
+fn emit_v3_frame_error_console_line_for_state(
+    state: &V3ListenerState,
+    endpoint: &str,
+    request_id: &str,
+    frame: &V3Server16HttpFrame,
+    project_path: Option<&str>,
+) {
+    if frame.error_chain.is_empty() && frame.status < 400 {
+        return;
+    }
+    emit_v3_error_console_line_for_state(
+        state,
+        endpoint,
+        request_id,
+        frame.status,
+        &frame.error_chain,
+        match &frame.body {
+            V3Server16Body::Json(value) => Some(value),
+            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+        },
+        project_path,
+    );
+}
+
+fn emit_v3_frame_error_console_line_for_context(
+    context: &V3ConsoleEmissionContext,
+    frame: &V3Server16HttpFrame,
+    observability: &V3RuntimeObservability,
+) {
+    if frame.error_chain.is_empty() && frame.status < 400 {
+        return;
+    }
+    emit_v3_error_console_line_for_context(
+        context,
+        observability,
+        frame.status,
+        &frame.error_chain,
+        match &frame.body {
+            V3Server16Body::Json(value) => Some(value),
+            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+        },
+    );
+}
+
+fn emit_v3_error_console_line_for_context(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) {
+    let identity = resolve_v3_console_log_identity(context);
+    let content = format_v3_error_console_content(
+        &context.endpoint,
+        &context.request_id,
+        status,
+        error_chain,
+        body,
+    );
+    let line =
+        format_v3_console_line_for_observability(context, &identity, observability, &content);
+    let colorized = colorize_v3_error_console_line(&line);
+    append_v3_human_console_line(&context.state, &colorized);
+    eprintln!("{colorized}");
+}
+
 fn emit_v3_error_console_line(
     server: &V3ServerManifest,
     endpoint: &str,
@@ -4070,6 +4263,17 @@ fn format_v3_error_console_line_with_port(
     body: Option<&Value>,
     project_path: Option<&str>,
 ) -> String {
+    let content = format_v3_error_console_content(endpoint, request_id, status, error_chain, body);
+    format_v3_console_monitor_line(port_label, endpoint, project_path, &content)
+}
+
+fn format_v3_error_console_content(
+    endpoint: &str,
+    request_id: &str,
+    status: u16,
+    error_chain: &[&'static str],
+    body: Option<&Value>,
+) -> String {
     let error_code = body
         .and_then(|value| value.pointer("/error/code").and_then(Value::as_str))
         .or_else(|| body.and_then(|value| value.pointer("/error/type").and_then(Value::as_str)))
@@ -4082,7 +4286,7 @@ fn format_v3_error_console_line_with_port(
         .copied()
         .unwrap_or("V3Error06ClientProjected");
     let error_number = compact_v3_error_number(error_chain);
-    let content = format_v3_console_timed_content(
+    format_v3_console_timed_content(
         &format!("❌ [{endpoint}]"),
         &format!(
             "req={} event=failed status={} error={} subcode={} node={} message={}",
@@ -4093,8 +4297,7 @@ fn format_v3_error_console_line_with_port(
             error_node,
             format_v3_console_single_line_message(message)
         ),
-    );
-    format_v3_console_monitor_line(port_label, endpoint, project_path, &content)
+    )
 }
 
 fn compact_v3_error_number(error_chain: &[&'static str]) -> String {
@@ -5131,6 +5334,63 @@ fn wrap_v3_relay_sse_closeout_stream(
     })
 }
 
+struct V3DirectSseConsoleCloseoutStream {
+    stream: V3ClientSseStream,
+    closeout: Option<Box<dyn FnOnce(V3SseConsoleStreamTerminal) + Send>>,
+}
+
+impl V3DirectSseConsoleCloseoutStream {
+    fn emit_terminal(&mut self, terminal: V3SseConsoleStreamTerminal) {
+        if let Some(closeout) = self.closeout.take() {
+            closeout(terminal);
+        }
+    }
+}
+
+impl Unpin for V3DirectSseConsoleCloseoutStream {}
+
+impl futures_util::Stream for V3DirectSseConsoleCloseoutStream {
+    type Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let this = self.as_mut().get_mut();
+        match this.stream.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => Poll::Ready(Some(Ok(chunk))),
+            Poll::Ready(Some(Err(error))) => {
+                this.emit_terminal(V3SseConsoleStreamTerminal::Failed(format!(
+                    "{}: {}",
+                    error.code, error.message
+                )));
+                Poll::Ready(Some(Err(error)))
+            }
+            Poll::Ready(None) => {
+                this.emit_terminal(V3SseConsoleStreamTerminal::Completed);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for V3DirectSseConsoleCloseoutStream {
+    fn drop(&mut self) {
+        self.emit_terminal(V3SseConsoleStreamTerminal::Dropped);
+    }
+}
+
+fn wrap_v3_direct_sse_closeout_stream(
+    stream: V3ClientSseStream,
+    closeout: impl FnOnce(V3SseConsoleStreamTerminal) + Send + 'static,
+) -> V3ClientSseStream {
+    Box::pin(V3DirectSseConsoleCloseoutStream {
+        stream,
+        closeout: Some(Box::new(closeout)),
+    })
+}
+
 fn openai_chat_relay_output_response(output: V3OpenAiChatRelayRuntimeOutput) -> Response<Body> {
     let content_type = match &output.client_body {
         V3OpenAiChatRelayClientBody::Json(_) => "application/json",
@@ -5388,6 +5648,13 @@ fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Bod
 }
 
 fn responses_direct_output_response(frame: V3Server16HttpFrame) -> Response<Body> {
+    responses_direct_output_response_with_console(frame, None)
+}
+
+fn responses_direct_output_response_with_console(
+    frame: V3Server16HttpFrame,
+    stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
+) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
         .header("content-type", &frame.content_type)
@@ -5404,12 +5671,31 @@ fn responses_direct_output_response(frame: V3Server16HttpFrame) -> Response<Body
         }
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
+            let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
             return builder
                 .body(v3_client_sse_body(stream))
                 .expect("typed response");
         }
     };
     builder.body(Body::from(body)).expect("typed response")
+}
+
+fn wrap_v3_direct_sse_console_stream(
+    stream: V3ClientSseStream,
+    finalizer: Option<V3DirectSseConsoleFinalizer>,
+) -> V3ClientSseStream {
+    match finalizer {
+        Some(finalizer) => {
+            wrap_v3_direct_sse_closeout_stream(stream, move |terminal| match terminal {
+                V3SseConsoleStreamTerminal::Completed => finalizer.complete(),
+                V3SseConsoleStreamTerminal::Failed(error) => {
+                    finalizer.provider_stream_failed(&error)
+                }
+                V3SseConsoleStreamTerminal::Dropped => finalizer.client_disconnected(),
+            })
+        }
+        None => stream,
+    }
 }
 
 fn v3_client_sse_body(stream: V3ClientSseStream) -> Body {
@@ -5446,6 +5732,7 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
         },
         error_chain,
         node_trace,
+        observability: None,
     }
 }
 
@@ -5778,6 +6065,7 @@ pub fn build_v3_server_16_http_frame_from_v3_error_06(
         error_node: projected.chain[5],
         error_chain: projected.chain.to_vec(),
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+        observability: None,
     }
 }
 
@@ -5792,6 +6080,7 @@ pub fn build_v3_server_16_http_frame_from_v3_foundation_output(
         error_node: output.error_node,
         error_chain: output.error_chain,
         node_trace: output.node_trace,
+        observability: None,
     }
 }
 
@@ -5996,6 +6285,115 @@ mod tests {
             }
         }
         output
+    }
+
+    fn test_v3_console_log_file(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "routecodex-v3-{name}-{}-{}.log",
+            std::process::id(),
+            console_timestamp_hhmmss()
+        ))
+    }
+
+    fn test_v3_listener_state(log_file: &std::path::Path, port: u16) -> Arc<V3ListenerState> {
+        let mut servers = BTreeMap::new();
+        let server = V3ServerManifest {
+            id: format!("server-{port}"),
+            enabled: true,
+            bind: "127.0.0.1".to_string(),
+            port,
+            routing_group: "controlled".to_string(),
+            endpoints: vec!["responses".to_string()],
+            features: BTreeMap::new(),
+            execution: None,
+        };
+        servers.insert(server.id.clone(), server.clone());
+        let manifest = Arc::new(V3Config05ManifestPublished {
+            version: 3,
+            hub_v1: None,
+            servers,
+            providers: BTreeMap::new(),
+            forwarders: BTreeMap::new(),
+            route_groups: BTreeMap::new(),
+            features: BTreeMap::new(),
+            debug: V3DebugManifest {
+                log_console: false,
+                log_file: Some(log_file.to_string_lossy().to_string()),
+                snapshots: false,
+                snapshot_stages: None,
+                dry_run: false,
+                retention: BTreeMap::new(),
+            },
+            error: routecodex_v3_config::V3ErrorManifest {
+                policies: BTreeMap::new(),
+                provider_error_action_policy: Vec::new(),
+                client_error_projection_policy: Vec::new(),
+            },
+        });
+        let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
+        Arc::new(V3ListenerState {
+            server,
+            manifest_version: manifest.version,
+            manifest: Arc::clone(&manifest),
+            debug,
+            console_enabled: true,
+            request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
+            responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
+            responses_relay_local_continuation: Arc::new(
+                V3ResponsesRelayLocalContinuationState::default(),
+            ),
+            responses_relay_stopless_control: Arc::new(
+                V3ResponsesRelayStoplessControlState::default(),
+            ),
+            provider_health: Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
+                &manifest,
+            )),
+        })
+    }
+
+    fn test_direct_console_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-routecodex-session-id",
+            HeaderValue::from_static("direct-console-test"),
+        );
+        headers.insert(
+            "x-routecodex-workdir",
+            HeaderValue::from_static("/tmp/rules"),
+        );
+        headers
+    }
+
+    fn test_direct_observability(
+        provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+    ) -> V3RuntimeObservability {
+        V3RuntimeObservability {
+            entry_protocol: "responses".to_string(),
+            execution_mode: "direct".to_string(),
+            transport: "json".to_string(),
+            routing_group_id: Some("coding".to_string()),
+            pool_id: Some("direct".to_string()),
+            provider_id: Some("second".to_string()),
+            auth_alias: Some("key".to_string()),
+            provider_key: Some("second:key:gpt-5.5".to_string()),
+            provider_type: Some("openai-responses".to_string()),
+            model_id: Some("gpt-5.5".to_string()),
+            wire_model: Some("gpt-5.5".to_string()),
+            provider_status: Some(200),
+            response_status: Some("completed".to_string()),
+            finish_reason: Some("stop".to_string()),
+            stopless_activation: false,
+            attempts: Some(2),
+            unavailable_candidates: Vec::new(),
+            provider_failure_events,
+            target_path: vec!["direct".to_string(), "second".to_string()],
+            usage: Some(V3RuntimeUsageSummary {
+                input_tokens: Some(10),
+                output_tokens: Some(2),
+                total_tokens: Some(12),
+                cached_tokens: Some(5),
+            }),
+        }
     }
 
     #[test]
@@ -6346,6 +6744,179 @@ mod tests {
             colored.starts_with(ANSI_ERROR_RED),
             "provider error console line must be red: {colored:?}"
         );
+    }
+
+    #[test]
+    fn direct_frame_console_emits_provider_switch_complete_and_usage() {
+        let log_file = test_v3_console_log_file("direct-console-json");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-json",
+            &headers,
+            &json!({"model":"gpt-5.5"}),
+        );
+        let provider_failure = V3RuntimeProviderFailureObservation {
+            provider_key: "first:key:gpt-5.5".to_string(),
+            provider_id: "first".to_string(),
+            auth_alias: Some("key".to_string()),
+            model_id: "gpt-5.5".to_string(),
+            status: 502,
+            error_type: Some("provider_error".to_string()),
+            message: "upstream failed once".to_string(),
+            failure_count: 1,
+            health_state: "healthy".to_string(),
+            cooldown_until_ms: None,
+            action: "switch_provider".to_string(),
+            next_provider_key: Some("second:key:gpt-5.5".to_string()),
+            wait_ms: None,
+        };
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(json!({
+                "status": "completed",
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "total_tokens": 12,
+                    "cached_tokens": 5
+                }
+            })),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(test_direct_observability(vec![provider_failure])),
+        };
+
+        assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(
+            log.contains("❌ [provider-error]")
+                && log.contains("[provider-switch]")
+                && log.contains("[virtual-router-hit]")
+                && log.contains("event=completed")
+                && log.contains("[usage]")
+                && log.contains("req=req-direct-console-json"),
+            "direct JSON console must expose provider failure/switch, route hit, terminal completion and usage: {log}"
+        );
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_console_closeout_emits_completion_without_semantic_parsing() {
+        let log_file = test_v3_console_log_file("direct-console-sse-complete");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-sse",
+            &headers,
+            &json!({"model":"gpt-5.5","stream":true}),
+        );
+        let stream: V3ClientSseStream = Box::pin(stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n".to_vec(),
+        )]));
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Sse(stream),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                transport: "sse".to_string(),
+                response_status: Some("streaming".to_string()),
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+        };
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let response = responses_direct_output_response_with_console(frame, finalizer);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(std::str::from_utf8(&bytes)
+            .unwrap()
+            .contains("response.failed"));
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(
+            log.contains("[virtual-router-hit]")
+                && log.contains("event=completed")
+                && log.contains("[usage]")
+                && !log.contains("event=failed"),
+            "direct SSE closeout must treat SSE payload as transport bytes and wait for EOF, not parse response.failed as business failure: {log}"
+        );
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_console_closeout_emits_failure_on_stream_error() {
+        let log_file = test_v3_console_log_file("direct-console-sse-error");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-sse-error",
+            &headers,
+            &json!({"model":"gpt-5.5","stream":true}),
+        );
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_stream_error",
+            "provider stream broke",
+        );
+        let stream: V3ClientSseStream = Box::pin(stream::iter(vec![Err::<Vec<u8>, _>(source)]));
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Sse(stream),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                transport: "sse".to_string(),
+                response_status: Some("streaming".to_string()),
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+        };
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let response = responses_direct_output_response_with_console(frame, finalizer);
+        assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(
+            log.contains("event=failed")
+                && log.contains("sessionID:direct-console-test")
+                && log.contains("second.gpt-5.5")
+                && log.contains("[direct")
+                && log.contains("status=502")
+                && log.contains("subcode=provider_response_sse_stream")
+                && log.contains("provider stream broke"),
+            "direct SSE transport error must emit a visible terminal failed console line: {log}"
+        );
+        let _ = std::fs::remove_file(&log_file);
     }
 
     #[test]
