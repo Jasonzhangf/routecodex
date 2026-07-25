@@ -26,7 +26,9 @@ pub(crate) fn build_resource_registry(
 ) -> Result<V3Config04ResourceRegistryBuilt, V3ConfigError> {
     let authoring = validated.authoring;
     let hub_v1 = compile_hub_v1(authoring.pipelines.hub_v1)?;
-    let providers = compile_providers(authoring.providers)?;
+    let compiled_providers = compile_providers(authoring.providers)?;
+    let providers = compiled_providers.providers;
+    let provider_error_action_policies = compiled_providers.provider_error_action_policies;
     let forwarders = compile_forwarders(authoring.forwarders, &providers)?;
     validate_client_aliases(&providers, &forwarders)?;
     let route_groups = compile_route_groups(authoring.route_groups, &providers, &forwarders)?;
@@ -45,7 +47,7 @@ pub(crate) fn build_resource_registry(
         route_groups,
         features: authoring.features,
         debug: compile_debug(authoring.debug)?,
-        error: compile_error(authoring.error)?,
+        error: compile_error(authoring.error, provider_error_action_policies)?,
     })
 }
 
@@ -594,69 +596,87 @@ fn compile_server_execution(
     })
 }
 
+struct V3CompiledProviders {
+    providers: BTreeMap<String, V3ProviderManifest>,
+    provider_error_action_policies: Vec<V3ProviderErrorActionPolicyAuthoringConfig>,
+}
+
 fn compile_providers(
     authoring: BTreeMap<String, V3ProviderAuthoringConfig>,
-) -> Result<BTreeMap<String, V3ProviderManifest>, V3ConfigError> {
-    authoring
-        .into_iter()
-        .map(|(id, provider)| {
-            require_id("provider", &id)?;
-            if provider.provider_type.trim().is_empty() {
-                return Err(validation(format!("provider {id} type is empty")));
-            }
-            if !matches!(
-                provider.provider_type.as_str(),
-                "responses" | "anthropic" | "gemini" | "openai_chat"
-            ) {
-                return Err(validation(format!(
-                    "provider {id} declares unknown protocol {}",
-                    provider.provider_type
-                )));
-            }
-            if provider.base_url.trim().is_empty() {
-                return Err(validation(format!("provider {id} base_url is empty")));
-            }
-            if provider.models.is_empty() {
-                return Err(validation(format!("provider {id} has no models")));
-            }
-            if !provider.models.contains_key(&provider.default_model) {
-                return Err(validation(format!(
-                    "provider {id} default_model {} is not a canonical models key",
-                    provider.default_model
-                )));
-            }
-            let auth = compile_auth(&id, provider.auth)?;
-            let provider_type = provider.provider_type;
-            let mut models = compile_models(&id, provider.models)?;
-            let responses = compile_provider_responses(&id, provider.responses, &models)?;
-            apply_implicit_provider_model_capabilities(
-                &provider_type,
-                responses.as_ref(),
-                &mut models,
-            );
-            validate_provider_remote_continuation_transport(&id, responses.as_ref(), &models)?;
-            let health = compile_provider_health(&id, provider.health)?;
-            let compatibility_profile =
-                normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
-            Ok((
-                id.clone(),
-                V3ProviderManifest {
-                    id,
-                    enabled: provider.enabled,
-                    provider_type,
-                    base_url: provider.base_url.trim_end_matches('/').to_string(),
-                    default_model: provider.default_model,
-                    auth,
-                    models,
-                    responses,
-                    concurrency: provider.concurrency,
-                    health,
-                    compatibility_profile,
-                    features: provider.features,
+) -> Result<V3CompiledProviders, V3ConfigError> {
+    let mut providers = BTreeMap::new();
+    let mut provider_error_action_policies = Vec::new();
+    for (id, provider) in authoring {
+        require_id("provider", &id)?;
+        if provider.provider_type.trim().is_empty() {
+            return Err(validation(format!("provider {id} type is empty")));
+        }
+        if !matches!(
+            provider.provider_type.as_str(),
+            "responses" | "anthropic" | "gemini" | "openai_chat"
+        ) {
+            return Err(validation(format!(
+                "provider {id} declares unknown protocol {}",
+                provider.provider_type
+            )));
+        }
+        if provider.base_url.trim().is_empty() {
+            return Err(validation(format!("provider {id} base_url is empty")));
+        }
+        if provider.models.is_empty() {
+            return Err(validation(format!("provider {id} has no models")));
+        }
+        if !provider.models.contains_key(&provider.default_model) {
+            return Err(validation(format!(
+                "provider {id} default_model {} is not a canonical models key",
+                provider.default_model
+            )));
+        }
+        let auth = compile_auth(&id, provider.auth)?;
+        let provider_type = provider.provider_type;
+        let mut models = compile_models(&id, provider.models)?;
+        let responses = compile_provider_responses(&id, provider.responses, &models)?;
+        apply_implicit_provider_model_capabilities(&provider_type, responses.as_ref(), &mut models);
+        validate_provider_remote_continuation_transport(&id, responses.as_ref(), &models)?;
+        let health = compile_provider_health(&id, provider.health)?;
+        let compatibility_profile =
+            normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
+        let semantic_error_policy = provider.semantic_error_policy;
+        provider_error_action_policies.extend(semantic_error_policy.into_iter().map(|policy| {
+            V3ProviderErrorActionPolicyAuthoringConfig {
+                policy_id: policy.policy_id,
+                scope: V3ProviderErrorPolicyScopeAuthoringConfig {
+                    provider_id: Some(id.clone()),
+                    provider_type: Some(provider_type.clone()),
+                    model_id: None,
+                    routing_group: None,
                 },
-            ))
-        })
-        .collect()
+                matcher: policy.matcher,
+                action: policy.action,
+            }
+        }));
+        providers.insert(
+            id.clone(),
+            V3ProviderManifest {
+                id,
+                enabled: provider.enabled,
+                provider_type,
+                base_url: provider.base_url.trim_end_matches('/').to_string(),
+                default_model: provider.default_model,
+                auth,
+                models,
+                responses,
+                concurrency: provider.concurrency,
+                health,
+                compatibility_profile,
+                features: provider.features,
+            },
+        );
+    }
+    Ok(V3CompiledProviders {
+        providers,
+        provider_error_action_policies,
+    })
 }
 
 fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Option<String> {
@@ -1424,7 +1444,10 @@ fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V
     })
 }
 
-fn compile_error(authoring: V3ErrorAuthoringConfig) -> Result<V3ErrorManifest, V3ConfigError> {
+fn compile_error(
+    mut authoring: V3ErrorAuthoringConfig,
+    provider_scoped_policies: Vec<V3ProviderErrorActionPolicyAuthoringConfig>,
+) -> Result<V3ErrorManifest, V3ConfigError> {
     let policies = authoring
         .policies
         .into_iter()
@@ -1443,6 +1466,9 @@ fn compile_error(authoring: V3ErrorAuthoringConfig) -> Result<V3ErrorManifest, V
             ))
         })
         .collect::<Result<_, V3ConfigError>>()?;
+    authoring
+        .provider_error_action_policy
+        .extend(provider_scoped_policies);
     let provider_error_action_policy =
         compile_provider_error_action_policies(authoring.provider_error_action_policy)?;
     let client_error_projection_policy =

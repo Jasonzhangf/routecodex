@@ -4594,3 +4594,13 @@ Tags: #v3-architecture #review-surface #request-response-split #error-resources
 - V3 human console alignment must be based on terminal display width, not byte/char count. Status glyphs differ: `▶` is single-width, while `✅`, `❌`, and `🧭` render double-width in the target terminal. Padding helpers in `v3/crates/routecodex-v3-server/src/lib.rs` must account for this before comparing columns.
 - Data highlighting means whole data values are white: session id, project, provider/model, route, request id, status, responseStatus, finish_reason, transport, usage/time values, and multi-word messages. Do not reintroduce per-digit highlighting inside mixed values like `gpt-5.5` or request ids.
 - Live closeout for commit `92041ba25`: clean worktree build + global install + `routecodex restart --port 5555` + health on 127/LAN + live `/v1/responses` log assertion for session `console-align-live-92041ba25-051638` passed.
+
+## 2026-07-25 — V3 provider-local semantic error policy placement
+- V3 provider-specific fake-success response rules (e.g. HTTP 200 + stop + zero usage + diagnostic text) belong under `providers.<id>.semantic_error_policy[]` in authoring config, not as provider-specific branches in runtime and not only under global `error.provider_error_action_policy`.
+- The config compiler is the owner that injects deterministic `provider_id` + `provider_type` scope and publishes the existing unified `manifest.error.provider_error_action_policy`; runtime remains manifest-driven and provider-generic.
+- Verification for this source slice: focused `routecodex-v3-config` provider error policy tests plus V3 module-boundary, architecture-docs, cargo-fmt, and `git diff --check`; live config/restart/replay is a separate authorized step.
+
+## 2026-07-25 — V3 provider semantic error live config closeout
+- Live V3 config now places the glmrelay fake-success matcher under `providers.glmrelay_openai.semantic_error_policy[]` in both `/Volumes/extension/.rcc/config.v3.toml` and `/Users/fanzhang/.rcc/config.v3.toml`; the shared `error.client_error_projection_policy` stays global by `reason_code`.
+- Verified current installed `rccv3 config check -c` accepts the provider-local syntax for both files, and 4444/5555 health stayed OK after `routecodex restart --port 5555`.
+- Live replay after restart proved provider failures still enter retry/reselect; the exact 200 zero-usage diagnostic branch did not recur during this run, so its post-change live proof remains opportunistic while source/config gates are closed.

@@ -418,6 +418,7 @@ fn compile_v2_providers(
                         }
                     }),
                     health: None,
+                    semantic_error_policy: Vec::new(),
                     compatibility_profile,
                     features: BTreeMap::new(),
                 },

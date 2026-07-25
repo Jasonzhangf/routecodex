@@ -33152,3 +33152,19 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Jason corrected that console alignment must use terminal display width, not Rust string width; emoji status tags such as ✅/❌/🧭 are double-width while ▶ is single-width.
 - Source owner: `v3/crates/routecodex-v3-server/src/lib.rs`; `format_v3_console_timed_content` and scope padding now use explicit display-width padding, and console tests lock whole data-value highlighting plus tag/timestamp alignment.
 - Live closeout after clean-worktree build/global install/restart: `routecodex restart --port 5555`, `/health` on 127.0.0.1 and 192.168.0.6, and live `/v1/responses` session `console-align-live-92041ba25-051638` all passed. Log assertion proved every request/route/error/stopless/complete/usage line has identical tag+time display width and whole data values are ANSI-white.
+
+## 2026-07-25T13:30+08:00 V3 provider-local semantic error policy config surface
+- Scope: source/config compiler only for provider-wrapped-success semantic errors; no live `~/.rcc`/`/Volumes/extension/.rcc` mutation, install, restart, or provider replay.
+- Diagnosis: runtime already consumes `manifest.error.provider_error_action_policy`; first divergence was config authoring lacking provider-local policy placement, which forced provider-specific rules into global error config.
+- Change: added `providers.<id>.semantic_error_policy[]` authoring; config compiler injects `provider_id` + `provider_type` scope and publishes the existing unified `provider_error_action_policy` manifest, preserving runtime/provider-generic matching.
+- Red evidence: focused config contract failed before implementation with TOML parse error `unknown field semantic_error_policy`.
+- Verification PASS: focused provider error policy tests, `verify:v3-module-boundaries`, `verify:v3-architecture-docs`, `verify:v3-cargo-fmt`, and `git diff --check`.
+- Known gap: full `config_v3_contract` suite still has an unrelated existing failure in `v2_compat_projects_gpt_responses_remote_capabilities_without_websocket` around remote continuation capability expectations; not changed in this provider semantic policy scope.
+
+## 2026-07-25T14:02+08:00 V3 provider-local semantic error policy live closeout
+- Live config moved provider-specific fake-success policy from global `error.provider_error_action_policy` into `providers.glmrelay_openai.semantic_error_policy` in both `/Volumes/extension/.rcc/config.v3.toml` and `/Users/fanzhang/.rcc/config.v3.toml`; global client projection policy remains shared by reason_code.
+- Installed/restarted: built with `RUSTUP_TOOLCHAIN=stable npm run build:min`, installed snapshot, then used only `routecodex restart --port 5555`; restart log showed V3 aggregate listeners `0.0.0.0:4444,0.0.0.0:5555` and no start fallback.
+- Current installed `rccv3 config check -c` passes for both live config files with provider-local policy syntax; `/health` passes on 4444 and 5555.
+- Live blackbox replay against 5555 using an existing request body returned 200 completed after provider failures were rerouted through the provider failure path; this run hit 500 new_api_panic failures, not the specific HTTP 200 zero-usage diagnostic branch.
+- Existing pre-change samples/logs prove the policy matcher maps HTTP 200 diagnostic zero-usage provider bodies to `provider_semantic_error` and `switch_provider`; post-change source/config checks prove the same policy now comes from provider-local authoring.
+- Remaining risk: no post-change live provider response happened to reproduce the exact 200 zero-usage diagnostic branch; next natural live occurrence should confirm the same log line under provider-local config.

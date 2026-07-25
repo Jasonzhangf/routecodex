@@ -26,28 +26,6 @@ action = "target_local_reselect"
 cooldown_ms = 1000
 max_attempts = 3
 
-[[error.provider_error_action_policy]]
-policy_id = "glmrelay_openai_200_diagnostic_zero_usage"
-
-[error.provider_error_action_policy.scope]
-provider_id = "glmrelay_openai"
-provider_type = "openai_chat"
-
-[error.provider_error_action_policy.match]
-http_status = 200
-
-[error.provider_error_action_policy.match.sse]
-finish_reason = "stop"
-usage_total_tokens = 0
-content_contains_any = ["provider diagnostic text"]
-
-[error.provider_error_action_policy.action]
-kind = "periodic_recovery"
-reason_code = "provider_diagnostic_zero_usage"
-retry_mode = "reselect_before_client_projection"
-cooldown_ms = 300000
-disable_scope = "provider_model"
-
 [[error.client_error_projection_policy]]
 policy_id = "provider_busy_code_only"
 
@@ -78,6 +56,24 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_API_KEY" }] }
 responses = { process = "chat", streaming = "always" }
 concurrency = { max_in_flight = 8, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 health = { enabled = true, failure_threshold = 3, cooldown_ms = 30000 }
+
+[[providers.cc.semantic_error_policy]]
+policy_id = "cc_200_diagnostic_zero_usage"
+
+[providers.cc.semantic_error_policy.match]
+http_status = 200
+
+[providers.cc.semantic_error_policy.match.sse]
+finish_reason = "stop"
+usage_total_tokens = 0
+content_contains_any = ["provider diagnostic text"]
+
+[providers.cc.semantic_error_policy.action]
+kind = "periodic_recovery"
+reason_code = "provider_diagnostic_zero_usage"
+retry_mode = "reselect_before_client_projection"
+cooldown_ms = 300000
+disable_scope = "provider_model"
 
 [providers.cc.models."gpt-5.5"]
 wire_name = "gpt-5.5"
@@ -190,11 +186,15 @@ fn parses_full_config_v3_without_interpreting_targets() {
     let provider_error_policy = &manifest.error.provider_error_action_policy[0];
     assert_eq!(
         provider_error_policy.policy_id,
-        "glmrelay_openai_200_diagnostic_zero_usage"
+        "cc_200_diagnostic_zero_usage"
     );
     assert_eq!(
         provider_error_policy.scope.provider_id.as_deref(),
-        Some("glmrelay_openai")
+        Some("cc")
+    );
+    assert_eq!(
+        provider_error_policy.scope.provider_type.as_deref(),
+        Some("responses")
     );
     assert_eq!(provider_error_policy.matcher.http_status, Some(200));
     assert_eq!(
@@ -370,9 +370,20 @@ fn rejects_unknown_fields_and_secret_literals() {
 
 #[test]
 fn validates_provider_error_policy_manifest_rules() {
-    let missing_scope = FULL_CONFIG.replace(
-        "provider_id = \"glmrelay_openai\"\nprovider_type = \"openai_chat\"\n",
-        "",
+    let missing_scope = format!(
+        r#"{FULL_CONFIG}
+
+[[error.provider_error_action_policy]]
+policy_id = "global_unscoped_text_matcher"
+
+[error.provider_error_action_policy.match]
+content_contains_any = ["provider diagnostic text"]
+
+[error.provider_error_action_policy.action]
+kind = "recoverable_no_penalty"
+reason_code = "provider_diagnostic"
+retry_mode = "reselect_before_client_projection"
+"#
     );
     let error =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&missing_scope).unwrap())
@@ -399,6 +410,36 @@ fn validates_provider_error_policy_manifest_rules() {
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&secret_text).unwrap())
         .unwrap_err();
     assert!(error.to_string().contains("content matcher"), "{error}");
+}
+
+#[test]
+fn rejects_duplicate_provider_error_policy_ids_across_provider_local_and_global_surfaces() {
+    let duplicate = format!(
+        r#"{FULL_CONFIG}
+
+[[error.provider_error_action_policy]]
+policy_id = "cc_200_diagnostic_zero_usage"
+
+[error.provider_error_action_policy.scope]
+provider_id = "cc"
+
+[error.provider_error_action_policy.match]
+http_status = 503
+
+[error.provider_error_action_policy.action]
+kind = "recoverable_no_penalty"
+reason_code = "provider_unavailable"
+retry_mode = "reselect_before_client_projection"
+"#
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&duplicate).unwrap())
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate provider error action policy cc_200_diagnostic_zero_usage"),
+        "{error}"
+    );
 }
 
 #[test]

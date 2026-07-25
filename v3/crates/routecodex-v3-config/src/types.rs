@@ -282,6 +282,15 @@ pub struct V3ProviderErrorActionPolicyAuthoringConfig {
     pub action: V3ProviderErrorActionAuthoringConfig,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderSemanticErrorPolicyAuthoringConfig {
+    pub policy_id: String,
+    #[serde(rename = "match")]
+    pub matcher: V3ProviderErrorMatcherAuthoringConfig,
+    pub action: V3ProviderErrorActionAuthoringConfig,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderErrorPolicyScopeAuthoringConfig {
@@ -468,6 +477,8 @@ pub struct V3ProviderAuthoringConfig {
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
+    #[serde(default)]
+    pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default, alias = "compatibilityProfile")]
     pub compatibility_profile: Option<String>,
     #[serde(default)]
