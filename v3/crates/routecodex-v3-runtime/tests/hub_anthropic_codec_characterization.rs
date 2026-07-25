@@ -221,13 +221,17 @@ fn responses_reasoning_request_config_projects_to_anthropic_thinking_wire() {
     }))
     .expect("Responses reasoning request config must be valid Anthropic wire");
 
-    assert_eq!(
-        provider_request["thinking"],
-        json!({"type":"enabled","budget_tokens":4096})
+    assert!(
+        provider_request.get("thinking").is_none(),
+        "Responses effort/summary must not synthesize Anthropic thinking budget: {provider_request}"
     );
     assert!(
         provider_request.get("reasoning").is_none(),
-        "Responses reasoning must be projected to Anthropic thinking, not leaked as provider body reasoning: {provider_request}"
+        "Responses reasoning must not leak as provider body reasoning: {provider_request}"
+    );
+    assert!(
+        provider_request["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
+        "Responses reasoning summary must be compatibly projected as target-valid Anthropic system marker: {provider_request}"
     );
 }
 
@@ -403,6 +407,36 @@ fn responses_builtin_tool_types_encode_with_anthropic_names_and_object_tool_choi
     }))
     .expect("Responses required tool_choice must encode as Anthropic any");
     assert_eq!(required_choice["tool_choice"], json!({"type":"any"}));
+}
+
+#[test]
+fn responses_object_tool_choice_preserves_anthropic_disable_parallel_without_top_level_leak() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": false,
+        "tool_choice": {
+            "type":"function",
+            "name":"lookup",
+            "disable_parallel_tool_use": true
+        },
+        "parallel_tool_calls": false,
+        "input": "Lookup once.",
+        "tools": [{
+            "type":"function",
+            "name":"lookup",
+            "parameters":{"type":"object","properties":{"q":{"type":"string"}}}
+        }]
+    }))
+    .expect("Responses tool_choice object must project to Anthropic tool_choice");
+
+    assert_eq!(
+        provider_request["tool_choice"],
+        json!({"type":"tool","name":"lookup","disable_parallel_tool_use":true})
+    );
+    assert!(
+        provider_request.get("parallel_tool_calls").is_none(),
+        "Anthropic provider wire must not receive non-spec top-level parallel_tool_calls: {provider_request}"
+    );
 }
 
 #[test]

@@ -248,10 +248,7 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
         );
     }
     if let Some(thinking) = object.get("thinking") {
-        output.insert(
-            "reasoning".to_string(),
-            json!({"effort":"medium","thinking":thinking}),
-        );
+        output.insert("reasoning".to_string(), json!({"thinking":thinking}));
     }
     for key in [
         "metadata",
@@ -305,6 +302,9 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         .and_then(responses_system_as_anthropic_system)
     {
         system_parts.push(system);
+    }
+    if let Some(marker) = responses_reasoning_policy_as_anthropic_system_marker(object) {
+        system_parts.push(marker);
     }
     let messages = if let Some(messages) = object.get("messages") {
         chat_messages_as_anthropic_messages(messages, &mut system_parts)?
@@ -405,101 +405,65 @@ fn responses_reasoning_request_config_as_anthropic_thinking(
     if let Some(thinking) = reasoning.and_then(|reasoning| reasoning.get("thinking")) {
         return Some(thinking.clone());
     }
-
-    let effort = responses_reasoning_effort(reasoning, object.get("reasoning_effort"));
     let explicit_budget = reasoning
         .and_then(|reasoning| reasoning.get("budget_tokens"))
         .or_else(|| reasoning.and_then(|reasoning| reasoning.get("thinking_budget")))
-        .and_then(responses_reasoning_budget_tokens);
-    if !responses_reasoning_config_requests_thinking(reasoning, effort.as_deref(), explicit_budget)
-    {
-        return None;
-    }
-
+        .and_then(responses_reasoning_budget_tokens)?;
     let mut thinking = Map::new();
     thinking.insert("type".to_string(), Value::String("enabled".to_string()));
-    thinking.insert(
-        "budget_tokens".to_string(),
-        json!(explicit_budget.unwrap_or_else(|| {
-            responses_reasoning_effort_as_anthropic_budget(effort.as_deref())
-        })),
-    );
+    thinking.insert("budget_tokens".to_string(), json!(explicit_budget));
     if let Some(display) = reasoning.and_then(|reasoning| reasoning.get("display")) {
         thinking.insert("display".to_string(), display.clone());
     }
     Some(Value::Object(thinking))
 }
 
-fn responses_reasoning_effort(
-    reasoning: Option<&Value>,
-    legacy_reasoning_effort: Option<&Value>,
+fn responses_reasoning_policy_as_anthropic_system_marker(
+    object: &Map<String, Value>,
 ) -> Option<String> {
-    reasoning
-        .and_then(|reasoning| reasoning.get("effort").and_then(Value::as_str))
-        .or_else(|| legacy_reasoning_effort.and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .map(|effort| effort.to_ascii_lowercase())
+    let reasoning = object.get("reasoning")?.as_object()?;
+    let mut policies = Vec::new();
+    if let Some(summary) = reasoning.get("summary") {
+        if let Some(value) = reasoning_policy_value(summary) {
+            policies.push(format!("summary_policy={value}"));
+        }
+    }
+    if let Some(context) = reasoning.get("context") {
+        if let Some(value) = reasoning_policy_value(context) {
+            policies.push(format!("context_policy={value}"));
+        }
+    }
+    if let Some(mode) = reasoning.get("mode") {
+        if let Some(value) = reasoning_policy_value(mode) {
+            policies.push(format!("mode_policy={value}"));
+        }
+    }
+    if policies.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "<routecodex_reasoning_request {}></routecodex_reasoning_request>",
+            policies.join(" ")
+        ))
+    }
 }
 
-fn responses_reasoning_config_requests_thinking(
-    reasoning: Option<&Value>,
-    effort: Option<&str>,
-    explicit_budget: Option<u64>,
-) -> bool {
-    if matches!(
-        effort,
-        Some("none" | "off" | "disabled" | "disable" | "false")
-    ) {
-        return false;
-    }
-    if explicit_budget.is_some() {
-        return true;
-    }
-    if let Some(effort) = effort {
-        return !effort.trim().is_empty();
-    }
-    let Some(reasoning) = reasoning else {
-        return false;
-    };
-    match reasoning {
-        Value::Object(object) => {
-            let summary_requests_reasoning = object
-                .get("summary")
-                .and_then(responses_reasoning_summary_requests_thinking)
-                .unwrap_or(false);
-            let context_requests_reasoning = object.get("context").is_some();
-            summary_requests_reasoning || context_requests_reasoning
-        }
-        Value::String(value) => {
-            let value = value.trim().to_ascii_lowercase();
-            !value.is_empty()
+fn reasoning_policy_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Bool(false) | Value::Null => None,
+        Value::Bool(true) => Some("true".to_string()),
+        Value::String(text) => {
+            let text = text.trim();
+            (!text.is_empty()
                 && !matches!(
-                    value.as_str(),
-                    "none" | "off" | "disabled" | "disable" | "false"
-                )
-        }
-        _ => false,
-    }
-}
-
-fn responses_reasoning_summary_requests_thinking(summary: &Value) -> Option<bool> {
-    match summary {
-        Value::Bool(value) => Some(*value),
-        Value::String(value) => {
-            let value = value.trim().to_ascii_lowercase();
-            if value.is_empty() {
-                Some(false)
-            } else {
-                Some(!matches!(
-                    value.as_str(),
+                    text.to_ascii_lowercase().as_str(),
                     "none" | "off" | "disabled" | "disable" | "false"
                 ))
-            }
+            .then(|| text.to_string())
         }
-        Value::Array(items) => Some(!items.is_empty()),
-        Value::Object(object) => Some(!object.is_empty()),
-        _ => None,
+        Value::Number(number) => Some(number.to_string()),
+        Value::Array(items) => (!items.is_empty()).then(|| "array".to_string()),
+        Value::Object(object) => (!object.is_empty()).then(|| "object".to_string()),
     }
 }
 
@@ -508,16 +472,6 @@ fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
         .as_u64()
         .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
         .filter(|budget| *budget > 0)
-}
-
-fn responses_reasoning_effort_as_anthropic_budget(effort: Option<&str>) -> u64 {
-    match effort.unwrap_or("medium") {
-        "minimal" | "low" => 1024,
-        "medium" | "auto" => 4096,
-        "high" => 8192,
-        "xhigh" | "max" | "maximum" => 16384,
-        _ => 4096,
-    }
 }
 
 pub fn project_v3_anthropic_message_as_responses_response(
@@ -1656,8 +1610,8 @@ fn responses_tool_choice_as_anthropic_tool_choice(
             field: "tool_choice",
         });
     };
-    match object.get("type").and_then(Value::as_str) {
-        Some("function") | Some("tool") => Ok(object
+    let mut projected = match object.get("type").and_then(Value::as_str) {
+        Some("function") | Some("tool") => object
             .get("name")
             .or_else(|| {
                 object
@@ -1668,15 +1622,27 @@ fn responses_tool_choice_as_anthropic_tool_choice(
             .map(|name| json!({"type":"tool","name":name}))
             .ok_or(V3AnthropicCodecError::MalformedField {
                 field: "tool_choice.name",
-            })?),
-        Some("auto") | Some("any") | Some("none") => Ok(json!({
+            })?,
+        Some("auto") | Some("any") | Some("none") => json!({
             "type": object.get("type").cloned().unwrap_or(Value::Null)
-        })),
-        Some("required") => Ok(json!({"type":"any"})),
-        _ => Err(V3AnthropicCodecError::MalformedField {
-            field: "tool_choice",
         }),
+        Some("required") => json!({"type":"any"}),
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "tool_choice",
+            })
+        }
+    };
+    if let Some(disable_parallel) = object.get("disable_parallel_tool_use") {
+        projected
+            .as_object_mut()
+            .ok_or(V3AnthropicCodecError::PayloadNotObject)?
+            .insert(
+                "disable_parallel_tool_use".to_string(),
+                disable_parallel.clone(),
+            );
     }
+    Ok(projected)
 }
 
 fn anthropic_usage_as_responses_usage(value: Option<&Value>) -> Option<Value> {

@@ -250,7 +250,7 @@ must not use `pending_audit`.
 | `covered` | 161 | Runtime/test owner currently implements the audited semantic for the named path. |
 | `covered_but_target_dependent` | 1 | Runtime implements the field only where the target protocol legally supports it; target-incompatible projection must be stripped or rejected by provider-wire owner. |
 | `partial` | 104 | Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete. |
-| `extension_declared` | 221 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |
+| `extension_declared` | 220 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |
 | `semantic_declared` | 50 | The OpenAI Chat native field or protocol-neutral extension has a manual semantic owner and transform rule, but runtime conversion closeout is not claimed. |
 | `source_inventory_only` | 0 | The source field is inventoried and searchable, but no runtime semantic mapping is claimed; this status must stay at zero after source-owner closeout. |
 | `shape_branch_gap` | 18 | Mapping requires branch-specific transform logic by source type/value shape before runtime closeout. |
@@ -266,7 +266,7 @@ runtime-closeout work.
 | Gap id | Category | Affected status/count | Evidence | Closeout owner/rule |
 | --- | --- | --- | --- | --- |
 | `gap.client_metadata.target_dependent` | fixed doc gate | `covered_but_target_dependent` / 1 | OpenAI Chat provider wire preserves standard `metadata` but strips non-standard `client_metadata`; old docs implied unconditional preservation. | Keep target-dependent provider-wire behavior explicit; no MetadataCenter/fallback preservation of unsupported `client_metadata`. |
-| `gap.runtime_extension_declared` | runtime closeout | `extension_declared` / 221 | Protocol-neutral OpenAI Chat extension fields and owners exist, but runtime conversion completion is not claimed. | Pick the adjacent protocol codec owner per field family, add red fixture first, then implement and prove source/blackbox/live evidence before marking covered. |
+| `gap.runtime_extension_declared` | runtime closeout | `extension_declared` / 220 | Protocol-neutral OpenAI Chat extension fields and owners exist, but runtime conversion completion is not claimed. | Pick the adjacent protocol codec owner per field family, add red fixture first, then implement and prove source/blackbox/live evidence before marking covered. |
 | `gap.semantic_declared_runtime_closeout` | runtime closeout | `semantic_declared` / 50 | These fields now have manual semantic owners and transform rules, but no runtime conversion completion evidence yet. | Add field-family red tests and implement adjacent Rust codec owner before changing `semantic_declared` to covered, partial, or unsupported_blocked. |
 | `gap.partial_cross_protocol_semantics` | runtime closeout | `partial` / 104 | Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini. | Close request and response directions together in `hub_v1` protocol codec owners; no server/SSE/provider-transport repair. |
 | `gap.source_inventory_only` | semantic owner closeout | `source_inventory_only` / 0 | All previously `source_inventory_only` fields now have manual semantic owner groups, explicit transform rules, and non-runtime completion status. | Keep `source_inventory_only` at zero; new source fields must be classified before runtime edits. |
@@ -287,8 +287,8 @@ Follow-up implementation plan for closing the non-covered gaps:
 ### Gemini thinkingConfig source split
 
 - `request.generationConfig.thinkingConfig.thinkingLevel` maps to native `request.reasoning_effort` / reasoning level semantics.
-- `request.generationConfig.thinkingConfig.includeThoughts` maps to extension `request.reasoning.include_thoughts`; it must not become response reasoning content.
-- `request.generationConfig.thinkingConfig.thinkingBudget` maps to extension `request.reasoning.budget_tokens`; it must not become `maxOutputTokens` or usage `thoughtsTokenCount`.
+- `request.generationConfig.thinkingConfig.includeThoughts` maps to extension `request.reasoning_include_thoughts`; it must not become response reasoning content.
+- `request.generationConfig.thinkingConfig.thinkingBudget` maps to extension `request.reasoning_budget_tokens`; it must not become `maxOutputTokens` or usage `thoughtsTokenCount`.
 
 ### Gemini generationConfig scalar source split
 

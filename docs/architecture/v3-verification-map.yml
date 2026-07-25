@@ -1344,7 +1344,7 @@ features:
       - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
       - Anthropic thinking is preserved under Responses reasoning.thinking rather than compressed to effort-only state.
-      - Responses reasoning.effort/summary request config reaches Anthropic provider wire as thinking for both `input[]` and string `input`, and never leaks as Responses reasoning.
+      - Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker for both `input[]` and string `input`, and never leaks as Responses reasoning or synthetic Anthropic thinking.
       - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
       - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.

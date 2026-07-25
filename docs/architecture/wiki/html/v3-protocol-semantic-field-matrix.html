@@ -260,7 +260,7 @@
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>221</code></td>
+    <td><code>220</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -302,7 +302,7 @@
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>221</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>220</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -1565,10 +1565,10 @@
   </tr>
 <tr>
     <td class="standard-cell">
-      <code>request.reasoning.summary_policy</code>
+      <code>request.reasoning_summary_policy</code>
       <div class="muted">group <code>reasoning.request_summary_policy</code></div>
-      <div><ul class="field-list"><li><code>request.reasoning.summary_policy</code></li></ul></div>
-      <ul class="field-list"><li><code>request.reasoning.summary_policy</code></li></ul>
+      <div><ul class="field-list"><li><code>request.reasoning_summary_policy</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_summary_policy</code></li></ul>
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
@@ -1607,10 +1607,10 @@
   </tr>
 <tr>
     <td class="standard-cell">
-      <code>request.reasoning.context_policy</code>
+      <code>request.reasoning_context_policy</code>
       <div class="muted">group <code>reasoning.request_context_policy</code></div>
-      <div><ul class="field-list"><li><code>request.reasoning.context_policy</code></li></ul></div>
-      <ul class="field-list"><li><code>request.reasoning.context_policy</code></li></ul>
+      <div><ul class="field-list"><li><code>request.reasoning_context_policy</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_context_policy</code></li></ul>
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
@@ -1649,10 +1649,10 @@
   </tr>
 <tr>
     <td class="standard-cell">
-      <code>request.reasoning.include_thoughts</code>
+      <code>request.reasoning_include_thoughts</code>
       <div class="muted">group <code>reasoning.request_include_thoughts</code></div>
-      <div><ul class="field-list"><li><code>request.reasoning.include_thoughts</code></li></ul></div>
-      <ul class="field-list"><li><code>request.reasoning.include_thoughts</code></li></ul>
+      <div><ul class="field-list"><li><code>request.reasoning_include_thoughts</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_include_thoughts</code></li></ul>
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
@@ -1685,16 +1685,16 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini includeThoughts maps to request.reasoning.include_thoughts and never to response reasoning content.</div>
+    <div>Gemini includeThoughts maps to request.reasoning_include_thoughts and never to response reasoning content.</div>
 
   </div></td>
   </tr>
 <tr>
     <td class="standard-cell">
-      <code>request.reasoning.budget_tokens</code>
+      <code>request.reasoning_budget_tokens</code>
       <div class="muted">group <code>reasoning.request_budget_tokens</code></div>
-      <div><ul class="field-list"><li><code>request.reasoning.budget_tokens</code></li></ul></div>
-      <ul class="field-list"><li><code>request.reasoning.budget_tokens</code></li></ul>
+      <div><ul class="field-list"><li><code>request.reasoning_budget_tokens</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_budget_tokens</code></li></ul>
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
@@ -1727,7 +1727,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini thinkingBudget maps to request.reasoning.budget_tokens and never to generationConfig.maxOutputTokens.</div>
+    <div>Gemini thinkingBudget maps to request.reasoning_budget_tokens and never to generationConfig.maxOutputTokens.</div>
 
   </div></td>
   </tr>
@@ -1817,10 +1817,10 @@
   </tr>
 <tr>
     <td class="standard-cell">
-      <code>request.generation.top_k</code>
+      <code>request.top_k</code>
       <div class="muted">group <code>sampling.top_k</code></div>
-      <div><ul class="field-list"><li><code>request.generation.top_k</code></li></ul></div>
-      <ul class="field-list"><li><code>request.generation.top_k</code></li></ul>
+      <div><ul class="field-list"><li><code>request.top_k</code></li></ul></div>
+      <ul class="field-list"><li><code>request.top_k</code></li></ul>
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
@@ -1844,7 +1844,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic top_k maps to generation.top_k extension.</div>
+    <div>Anthropic top_k maps to top_k extension.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1853,7 +1853,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini topK maps to generation.top_k extension.</div>
+    <div>Gemini topK maps to top_k extension.</div>
 
   </div></td>
   </tr>
@@ -3294,8 +3294,8 @@
       <p>这一张是主审计表：每行以 OpenAI Chat 字段为主键。若是 OpenAI Chat 原生字段，主键必须和 OpenAI Chat source inventory 完全同名；若 OpenAI Chat 没有该语义，主键才是新增 extension 字段。表中逐字段列出 semantic id、request/response direction、Responses / OpenAI Chat / Anthropic / Gemini 等价字段，以及 owner、current_impl、gap。没有等价语义会明确显示 <code>—</code>，方便审计是否还有超集外语义。</p>
       <div class="grid">
     <article class="card"><h3>Contract</h3><div class="source-meta"><div>Chat Process protocol is OpenAI Chat plus extension fields. The canonical semantic id is the same string as fields[].extended_openai_chat_field. OpenAI Chat native request/response fields keep their exact OpenAI Chat field paths, including [] item notation; only semantics absent from OpenAI Chat receive protocol-neutral top-level request./response./edge. extension fields. Every source protocol field is mapped exactly once or explicitly classified as edge_only / unsupported_blocked. Runtime does not read this audit artifact.</div><div>base protocol: <code>openai_chat</code></div></div></article>
-    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>261</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>176</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
-    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>176</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
+    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>260</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>175</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
+    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>175</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
   </div><div class="table-wrap"><table>
     <thead><tr><th>OpenAI Chat field (native or extension)</th><th>canonical semantic id</th><th>direction / status</th><th>Responses equivalent fields</th><th>OpenAI Chat native / extended fields</th><th>Anthropic equivalent fields</th><th>Gemini equivalent fields</th><th>owner / current_impl / gap</th></tr></thead>
     <tbody><tr>
@@ -3769,8 +3769,8 @@
     <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; budget/visibility are separate request.reasoning.* extension rows; runtime mapping remains partial.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge partial">partial</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.reasoning.summary_policy</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.reasoning.summary_policy</code></td>
+    <td class="standard-cell"><code>request.reasoning_summary_policy</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_summary_policy</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><ul class="field-list"><li><code>request.reasoning.summary</code></li></ul></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -3779,8 +3779,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a compatible target policy and needs explicit outbound owner.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.reasoning.context_policy</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.reasoning.context_policy</code></td>
+    <td class="standard-cell"><code>request.reasoning_context_policy</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_context_policy</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.context</code></li></ul></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -3789,8 +3789,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.</span></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.reasoning.include_thoughts</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.reasoning.include_thoughts</code></td>
+    <td class="standard-cell"><code>request.reasoning_include_thoughts</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_include_thoughts</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -3799,8 +3799,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.reasoning.budget_tokens</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.reasoning.budget_tokens</code></td>
+    <td class="standard-cell"><code>request.reasoning_budget_tokens</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_budget_tokens</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -3854,7 +3854,7 @@
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><ul class="field-list"><li><code>request.stop</code></li></ul></td>
-    <td><span class="muted">— no Anthropic equivalent</span></td>
+    <td><ul class="field-list"><li><code>request.stop_sequences</code></li></ul></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
   </tr>
@@ -4029,8 +4029,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.candidate_count</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.candidate_count</code></td>
+    <td class="standard-cell"><code>request.candidate_count</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.candidate_count</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -4039,8 +4039,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.image_config</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.image_config</code></td>
+    <td class="standard-cell"><code>request.image_config</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.image_config</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -4049,8 +4049,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.media_resolution</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.media_resolution</code></td>
+    <td class="standard-cell"><code>request.media_resolution</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.media_resolution</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -4059,8 +4059,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.response_format.image</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.response_format.image</code></td>
+    <td class="standard-cell"><code>request.response_image_format</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.response_image_format</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -4069,8 +4069,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.response_format.text</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.response_format.text</code></td>
+    <td class="standard-cell"><code>request.response_text_format</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.response_text_format</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -4079,8 +4079,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.stop_sequences</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.stop_sequences</code></td>
+    <td class="standard-cell"><code>request.stop_sequences</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.stop_sequences</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -4717,16 +4717,6 @@
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>prompt_cache</code></summary><div>owner: <code>chat.extensions.responses.prompt_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
-  </tr>
-<tr>
-    <td class="standard-cell"><code>request.stop_sequences</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.stop_sequences</code></td>
-    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
-    <td><span class="muted">— no Responses equivalent</span></td>
-    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
-    <td><ul class="field-list"><li><code>request.stop_sequences</code></li></ul></td>
-    <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.system</code><br><span class="muted">added Chat extension field</span></td>
@@ -5899,8 +5889,8 @@
     <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
-    <td class="standard-cell"><code>request.generation.top_k</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.generation.top_k</code></td>
+    <td class="standard-cell"><code>request.top_k</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.top_k</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
@@ -7194,7 +7184,7 @@
         <td><span class="badge partial">partial</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_budget_tokens -&gt; chat.reasoning.budget_tokens</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_budget_tokens -&gt; chat.reasoning_budget_tokens</code></li></ul></td>
         <td><details><summary><code>thinking_and_cache_control</code> · <span class="badge partial">partial</span></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div></details></td>
       </tr>
 <tr>
@@ -7204,7 +7194,7 @@
         <td><span class="badge partial">partial</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_summary_policy -&gt; chat.reasoning.summary_policy</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_summary_policy -&gt; chat.reasoning_summary_policy</code></li></ul></td>
         <td><details><summary><code>thinking_and_cache_control</code> · <span class="badge partial">partial</span></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div></details></td>
       </tr>
 <tr>
@@ -8174,7 +8164,7 @@
         <td><span class="badge partial">partial</span></td>
         <td><code>generation_config_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_include_thoughts -&gt; chat.reasoning.include_thoughts</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_include_thoughts -&gt; chat.reasoning_include_thoughts</code></li></ul></td>
         <td><details><summary><code>generation_config</code> · <span class="badge partial">partial</span></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div></details></td>
       </tr>
 <tr>
@@ -8184,7 +8174,7 @@
         <td><span class="badge partial">partial</span></td>
         <td><code>generation_config_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_budget_tokens -&gt; chat.reasoning.budget_tokens</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_budget_tokens -&gt; chat.reasoning_budget_tokens</code></li></ul></td>
         <td><details><summary><code>generation_config</code> · <span class="badge partial">partial</span></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div></details></td>
       </tr>
 <tr>
@@ -8578,15 +8568,15 @@
   </tr>
 <tr>
     <td><code>reasoning.request_summary_policy</code></td>
-    <td><code>chat.reasoning.summary_policy</code></td>
-    <td><span class="badge request_reasoning_summary_policy">request.reasoning.summary_policy</span></td>
+    <td><code>chat.reasoning_summary_policy</code></td>
+    <td><span class="badge request_reasoning_summary_policy">request.reasoning_summary_policy</span></td>
     <td><span class="badge extension_declared">extension_declared</span></td>
     <td><ul class="field-list"><li><code>request.reasoning.summary</code></li></ul></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td><td><span class="muted">—</span></td>
   </tr>
 <tr>
     <td><code>reasoning.request_context_policy</code></td>
-    <td><code>chat.reasoning.context_policy</code></td>
-    <td><span class="badge request_reasoning_context_policy">request.reasoning.context_policy</span></td>
+    <td><code>chat.reasoning_context_policy</code></td>
+    <td><span class="badge request_reasoning_context_policy">request.reasoning_context_policy</span></td>
     <td><span class="badge extension_declared">extension_declared</span></td>
     <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.context</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
   </tr>
@@ -8802,15 +8792,15 @@
   </tr>
 <tr>
     <td><code>reasoning.request_include_thoughts</code></td>
-    <td><code>chat.reasoning.include_thoughts</code></td>
-    <td><span class="badge request_reasoning_include_thoughts">request.reasoning.include_thoughts</span></td>
+    <td><code>chat.reasoning_include_thoughts</code></td>
+    <td><span class="badge request_reasoning_include_thoughts">request.reasoning_include_thoughts</span></td>
     <td><span class="badge partial">partial</span></td>
     <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
   </tr>
 <tr>
     <td><code>reasoning.request_budget_tokens</code></td>
-    <td><code>chat.reasoning.budget_tokens</code></td>
-    <td><span class="badge request_reasoning_budget_tokens">request.reasoning.budget_tokens</span></td>
+    <td><code>chat.reasoning_budget_tokens</code></td>
+    <td><span class="badge request_reasoning_budget_tokens">request.reasoning_budget_tokens</span></td>
     <td><span class="badge partial">partial</span></td>
     <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.budget_tokens</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingBudget</code></li></ul></td>
   </tr></tbody>

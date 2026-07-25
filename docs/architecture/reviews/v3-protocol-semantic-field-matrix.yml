@@ -31,7 +31,7 @@ audit_truth_contract:
     covered: 161
     covered_but_target_dependent: 1
     partial: 104
-    extension_declared: 221
+    extension_declared: 220
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -53,7 +53,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 221
+      affected_count: 220
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -1533,8 +1533,8 @@ chat_semantic_translation_groups:
         request_fields:
           - request.reasoning.effort
         response_fields: []
-        transform: Responses reasoning.effort maps to Chat reasoning_effort. Reasoning mode, summary policy, context policy,
-          and response reasoning content are separate semantics.
+        transform: Responses reasoning.effort maps to Chat reasoning_effort. Reasoning mode, summary policy, context policy, and
+          response reasoning content are separate semantics.
       anthropic:
         request_fields:
           - request.thinking.type
@@ -1553,15 +1553,15 @@ chat_semantic_translation_groups:
     gap: Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. reasoning content and
       usage stay separate.
   - group_id: reasoning.request_summary_policy
-    standard_chat_field: request.reasoning.summary_policy
+    standard_chat_field: request.reasoning_summary_policy
     chat_fields:
-      - request.reasoning.summary_policy
+      - request.reasoning_summary_policy
     direction: request
     standard_semantic_meaning: Request policy asking a compatible target to produce reasoning summaries; not the summary
       text itself and not reasoning effort.
-    chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content
-      or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized
-      thinking; otherwise the field remains decision-required.
+    chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning
+      content or native reasoning_effort. Compatible outbound mappings require a target field that can request
+      visible/summarized thinking; otherwise the field remains decision-required.
     protocol_mappings:
       responses:
         request_fields:
@@ -1572,20 +1572,20 @@ chat_semantic_translation_groups:
         request_fields:
           - request.thinking.display
         response_fields: []
-        transform: Compatible mapping may use Anthropic thinking display policy when thinking is enabled; exact summary
-          levels are target-dependent.
+        transform: Compatible mapping may use Anthropic thinking display policy when thinking is enabled; exact summary levels
+          are target-dependent.
       gemini:
         request_fields: []
         response_fields: []
         transform: No direct equivalent in the audited Gemini request inventory.
     chat_extension_fields:
-      - request.reasoning.summary_policy
+      - request.reasoning_summary_policy
     current_impl: extension_declared
     gap: Compatible outbound mapping needs explicit target policy and Jason decision for non-equivalent targets.
   - group_id: reasoning.request_context_policy
-    standard_chat_field: request.reasoning.context_policy
+    standard_chat_field: request.reasoning_context_policy
     chat_fields:
-      - request.reasoning.context_policy
+      - request.reasoning_context_policy
     direction: request
     standard_semantic_meaning: Request policy controlling which prior reasoning context is visible to a target model.
     chat_shape_rule: Context policy is not effort, budget, visible reasoning text, or response summary.
@@ -1605,13 +1605,13 @@ chat_semantic_translation_groups:
         response_fields: []
         transform: No exact Gemini equivalent in this audited source set.
     chat_extension_fields:
-      - request.reasoning.context_policy
+      - request.reasoning_context_policy
     current_impl: extension_declared
     gap: No runtime outbound mapping claimed; requires compatibility decision before target projection.
   - group_id: reasoning.request_include_thoughts
-    standard_chat_field: request.reasoning.include_thoughts
+    standard_chat_field: request.reasoning_include_thoughts
     chat_fields:
-      - request.reasoning.include_thoughts
+      - request.reasoning_include_thoughts
     direction: request
     standard_semantic_meaning: Request flag controlling whether provider reasoning/thought traces may be included; not response reasoning content.
     chat_shape_rule: Boolean request governance. It must not be projected as assistant-visible reasoning text or usage.
@@ -1623,20 +1623,21 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic display is a display-mode policy handled by reasoning.request_summary_policy, not a boolean include flag.
+        transform: Anthropic display is a display-mode policy handled by reasoning.request_summary_policy, not a boolean include
+          flag.
       gemini:
         request_fields:
           - request.generationConfig.thinkingConfig.includeThoughts
         response_fields: []
-        transform: Gemini includeThoughts maps to request.reasoning.include_thoughts and never to response reasoning content.
+        transform: Gemini includeThoughts maps to request.reasoning_include_thoughts and never to response reasoning content.
     chat_extension_fields:
-      - request.reasoning.include_thoughts
+      - request.reasoning_include_thoughts
     current_impl: partial
     gap: Gemini source codec extracts includeThoughts; cross-protocol runtime closeout pending.
   - group_id: reasoning.request_budget_tokens
-    standard_chat_field: request.reasoning.budget_tokens
+    standard_chat_field: request.reasoning_budget_tokens
     chat_fields:
-      - request.reasoning.budget_tokens
+      - request.reasoning_budget_tokens
     direction: request
     standard_semantic_meaning: Requested reasoning token budget; distinct from output token cap and usage accounting.
     chat_shape_rule: Numeric request governance. It must not collapse into max_completion_tokens, maxOutputTokens, or usage
@@ -1655,9 +1656,9 @@ chat_semantic_translation_groups:
         request_fields:
           - request.generationConfig.thinkingConfig.thinkingBudget
         response_fields: []
-        transform: Gemini thinkingBudget maps to request.reasoning.budget_tokens and never to generationConfig.maxOutputTokens.
+        transform: Gemini thinkingBudget maps to request.reasoning_budget_tokens and never to generationConfig.maxOutputTokens.
     chat_extension_fields:
-      - request.reasoning.budget_tokens
+      - request.reasoning_budget_tokens
     current_impl: partial
     gap: Gemini source codec extracts thinkingBudget; cross-protocol runtime closeout pending.
   - group_id: sampling.temperature
@@ -1713,9 +1714,9 @@ chat_semantic_translation_groups:
     current_impl: covered
     gap: none
   - group_id: sampling.top_k
-    standard_chat_field: request.generation.top_k
+    standard_chat_field: request.top_k
     chat_fields:
-      - request.generation.top_k
+      - request.top_k
     direction: request
     standard_semantic_meaning: Top-K candidate sampling limit used by Anthropic/Gemini and absent from native OpenAI Chat.
     chat_shape_rule: Added Chat extension because OpenAI Chat native has top_p but no top_k field.
@@ -1728,14 +1729,14 @@ chat_semantic_translation_groups:
         request_fields:
           - request.top_k
         response_fields: []
-        transform: Anthropic top_k maps to generation.top_k extension.
+        transform: Anthropic top_k maps to top_k extension.
       gemini:
         request_fields:
           - request.generationConfig.topK
         response_fields: []
-        transform: Gemini topK maps to generation.top_k extension.
+        transform: Gemini topK maps to top_k extension.
     chat_extension_fields:
-      - request.generation.top_k
+      - request.top_k
     current_impl: extension_declared
     gap: extension only; target support varies
   - group_id: sampling.max_output_tokens
@@ -2132,8 +2133,8 @@ chat_semantic_translation_groups:
         request_fields:
           - request.generationConfig.logprobs
         response_fields: []
-        transform: Gemini logprobs is the top-logprobs count and requires responseLogprobs=true; responseLogprobs itself is
-          not a count.
+        transform: Gemini logprobs is the top-logprobs count and requires responseLogprobs=true; responseLogprobs itself is not
+          a count.
     chat_extension_fields:
       - request.top_logprobs
     current_impl: partial
@@ -3938,8 +3939,8 @@ semantic_correspondence:
       gemini:
         - request.generationConfig.thinkingConfig.thinkingLevel
   reasoning.request_summary_policy:
-    canonical_path: chat.reasoning.summary_policy
-    chat_extension: request.reasoning.summary_policy
+    canonical_path: chat.reasoning_summary_policy
+    chat_extension: request.reasoning_summary_policy
     current_impl: extension_declared
     paths:
       responses:
@@ -3949,8 +3950,8 @@ semantic_correspondence:
         - request.thinking.display
       gemini: []
   reasoning.request_context_policy:
-    canonical_path: chat.reasoning.context_policy
-    chat_extension: request.reasoning.context_policy
+    canonical_path: chat.reasoning_context_policy
+    chat_extension: request.reasoning_context_policy
     current_impl: extension_declared
     paths:
       responses:
@@ -4424,8 +4425,8 @@ semantic_correspondence:
         - request.messages[].content[].tool_result.is_error
       gemini: []
   reasoning.request_include_thoughts:
-    canonical_path: chat.reasoning.include_thoughts
-    chat_extension: request.reasoning.include_thoughts
+    canonical_path: chat.reasoning_include_thoughts
+    chat_extension: request.reasoning_include_thoughts
     current_impl: partial
     paths:
       responses: []
@@ -4434,8 +4435,8 @@ semantic_correspondence:
       gemini:
         - request.generationConfig.thinkingConfig.includeThoughts
   reasoning.request_budget_tokens:
-    canonical_path: chat.reasoning.budget_tokens
-    chat_extension: request.reasoning.budget_tokens
+    canonical_path: chat.reasoning_budget_tokens
+    chat_extension: request.reasoning_budget_tokens
     current_impl: partial
     paths:
       responses: []
@@ -5403,15 +5404,15 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: partial
-    - extended_openai_chat_field: request.reasoning.summary_policy
-      semantic_id: request.reasoning.summary_policy
+    - extended_openai_chat_field: request.reasoning_summary_policy
+      semantic_id: request.reasoning_summary_policy
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a compatible target
         policy and needs explicit outbound owner.
-      equivalent_fields:
+      equivalent_fields: &a1
         responses:
           - request.reasoning.summary
         openai_chat: []
@@ -5423,14 +5424,14 @@ extended_openai_chat_semantic_superset:
         - extension_id: thinking_and_cache_control
           extension_owner: chat.extensions.anthropic.thinking_cache
           current_impl: extension_declared
-    - extended_openai_chat_field: request.reasoning.context_policy
-      semantic_id: request.reasoning.context_policy
+    - extended_openai_chat_field: request.reasoning_context_policy
+      semantic_id: request.reasoning_context_policy
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.
-      equivalent_fields:
+      equivalent_fields: &a2
         responses:
           - request.reasoning.mode
           - request.reasoning.context
@@ -5439,14 +5440,14 @@ extended_openai_chat_semantic_superset:
         gemini: []
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.reasoning.include_thoughts
-      semantic_id: request.reasoning.include_thoughts
+    - extended_openai_chat_field: request.reasoning_include_thoughts
+      semantic_id: request.reasoning_include_thoughts
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.
-      equivalent_fields:
+      equivalent_fields: &a3
         responses: []
         openai_chat: []
         anthropic: []
@@ -5460,14 +5461,14 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: partial
-    - extended_openai_chat_field: request.reasoning.budget_tokens
-      semantic_id: request.reasoning.budget_tokens
+    - extended_openai_chat_field: request.reasoning_budget_tokens
+      semantic_id: request.reasoning_budget_tokens
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: Gemini source codec extracts thinkingBudget; Anthropic budget_tokens and runtime cross-protocol closeout pending.
-      equivalent_fields:
+      equivalent_fields: &a4
         responses: []
         openai_chat: []
         anthropic:
@@ -5574,7 +5575,8 @@ extended_openai_chat_semantic_superset:
         responses: []
         openai_chat:
           - request.stop
-        anthropic: []
+        anthropic:
+          - request.stop_sequences
         gemini: []
       source_classification: canonical_chat_fields
       chat_extension_association: []
@@ -5650,7 +5652,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: Gemini source codec extracts allowedFunctionNames; cross-protocol/live closeout pending.
-      equivalent_fields:
+      equivalent_fields: &a5
         responses: []
         openai_chat: []
         anthropic: []
@@ -5775,7 +5777,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a6
         responses:
           - request.background
         openai_chat: []
@@ -5793,7 +5795,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a7
         responses: []
         openai_chat: []
         anthropic:
@@ -5811,7 +5813,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a8
         responses: []
         openai_chat: []
         anthropic: []
@@ -5826,7 +5828,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a9
         responses: []
         openai_chat: []
         anthropic:
@@ -5844,7 +5846,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a10
         responses:
           - request.context_management
         openai_chat: []
@@ -5862,7 +5864,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a11
         responses:
           - request.conversation
         openai_chat: []
@@ -5880,7 +5882,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a12
         responses: []
         openai_chat: []
         anthropic: []
@@ -5888,14 +5890,14 @@ extended_openai_chat_semantic_superset:
           - request.generationConfig
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.generation.candidate_count
-      semantic_id: request.generation.candidate_count
+    - extended_openai_chat_field: request.candidate_count
+      semantic_id: request.candidate_count
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a13
         responses: []
         openai_chat: []
         anthropic: []
@@ -5903,14 +5905,14 @@ extended_openai_chat_semantic_superset:
           - request.generationConfig.candidateCount
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.generation.image_config
-      semantic_id: request.generation.image_config
+    - extended_openai_chat_field: request.image_config
+      semantic_id: request.image_config
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a14
         responses: []
         openai_chat: []
         anthropic: []
@@ -5918,14 +5920,14 @@ extended_openai_chat_semantic_superset:
           - request.generationConfig.imageConfig
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.generation.media_resolution
-      semantic_id: request.generation.media_resolution
+    - extended_openai_chat_field: request.media_resolution
+      semantic_id: request.media_resolution
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a15
         responses: []
         openai_chat: []
         anthropic: []
@@ -5933,14 +5935,14 @@ extended_openai_chat_semantic_superset:
           - request.generationConfig.mediaResolution
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.generation.response_format.image
-      semantic_id: request.generation.response_format.image
+    - extended_openai_chat_field: request.response_image_format
+      semantic_id: request.response_image_format
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a16
         responses: []
         openai_chat: []
         anthropic: []
@@ -5951,14 +5953,14 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: extension_declared
-    - extended_openai_chat_field: request.generation.response_format.text
-      semantic_id: request.generation.response_format.text
+    - extended_openai_chat_field: request.response_text_format
+      semantic_id: request.response_text_format
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a17
         responses: []
         openai_chat: []
         anthropic: []
@@ -5969,14 +5971,14 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: extension_declared
-    - extended_openai_chat_field: request.generation.stop_sequences
-      semantic_id: request.generation.stop_sequences
+    - extended_openai_chat_field: request.stop_sequences
+      semantic_id: request.stop_sequences
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a18
         responses: []
         openai_chat: []
         anthropic: []
@@ -5991,7 +5993,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a19
         responses:
           - request.include
         openai_chat: []
@@ -6009,7 +6011,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a20
         responses: []
         openai_chat: []
         anthropic:
@@ -6024,7 +6026,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a21
         responses:
           - request.instructions
         openai_chat: []
@@ -6039,7 +6041,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a22
         responses:
           - request.input[].custom_tool_call.id
         openai_chat: []
@@ -6054,7 +6056,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a23
         responses: []
         openai_chat: []
         anthropic: []
@@ -6068,7 +6070,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a24
         responses:
           - request.input[].function_call.caller
         openai_chat: []
@@ -6083,7 +6085,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a25
         responses:
           - request.input[].function_call.id
         openai_chat: []
@@ -6098,7 +6100,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a26
         responses:
           - request.input[].function_call.namespace
         openai_chat: []
@@ -6113,7 +6115,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a27
         responses:
           - request.input[].function_call.status
         openai_chat: []
@@ -6128,7 +6130,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a28
         responses:
           - request.input[].function_call_output.id
         openai_chat: []
@@ -6143,7 +6145,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a29
         responses: []
         openai_chat: []
         anthropic: []
@@ -6157,7 +6159,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a30
         responses:
           - request.input[].input_file.detail
         openai_chat: []
@@ -6172,7 +6174,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a31
         responses:
           - request.input[].input_file.prompt_cache_breakpoint.mode
         openai_chat: []
@@ -6187,7 +6189,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a32
         responses:
           - request.input[].input_image.prompt_cache_breakpoint.mode
         openai_chat: []
@@ -6202,7 +6204,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a33
         responses:
           - request.input[].input_text.prompt_cache_breakpoint.mode
         openai_chat: []
@@ -6217,7 +6219,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a34
         responses:
           - request.input[].input_text.type
         openai_chat: []
@@ -6232,7 +6234,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a35
         responses:
           - request.input[].item_reference.id
         openai_chat: []
@@ -6247,7 +6249,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a36
         responses:
           - request.input[].message.id
         openai_chat: []
@@ -6262,7 +6264,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a37
         responses:
           - request.input[].message.phase
         openai_chat: []
@@ -6277,7 +6279,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a38
         responses:
           - request.input[].message.status
         openai_chat: []
@@ -6292,7 +6294,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a39
         responses:
           - request.input[].message.type
         openai_chat: []
@@ -6307,7 +6309,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a40
         responses: []
         openai_chat: []
         anthropic: []
@@ -6322,7 +6324,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a41
         responses: []
         openai_chat: []
         anthropic: []
@@ -6337,7 +6339,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a42
         responses: []
         openai_chat: []
         anthropic: []
@@ -6352,7 +6354,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a43
         responses: []
         openai_chat: []
         anthropic: []
@@ -6367,7 +6369,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a44
         responses: []
         openai_chat: []
         anthropic: []
@@ -6382,7 +6384,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a45
         responses: []
         openai_chat: []
         anthropic: []
@@ -6397,7 +6399,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a46
         responses: []
         openai_chat: []
         anthropic: []
@@ -6412,7 +6414,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a47
         responses: []
         openai_chat: []
         anthropic: []
@@ -6427,7 +6429,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a48
         responses: []
         openai_chat: []
         anthropic: []
@@ -6442,7 +6444,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a49
         responses: []
         openai_chat: []
         anthropic: []
@@ -6460,7 +6462,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a50
         responses: []
         openai_chat: []
         anthropic: []
@@ -6478,7 +6480,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a51
         responses: []
         openai_chat: []
         anthropic: []
@@ -6493,7 +6495,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a52
         responses: []
         openai_chat: []
         anthropic: []
@@ -6508,7 +6510,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a53
         responses: []
         openai_chat: []
         anthropic: []
@@ -6523,7 +6525,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a54
         responses: []
         openai_chat: []
         anthropic: []
@@ -6538,7 +6540,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a55
         responses: []
         openai_chat: []
         anthropic: []
@@ -6553,7 +6555,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a56
         responses: []
         openai_chat: []
         anthropic: []
@@ -6568,7 +6570,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a57
         responses: []
         openai_chat: []
         anthropic: []
@@ -6583,7 +6585,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a58
         responses: []
         openai_chat: []
         anthropic: []
@@ -6598,7 +6600,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a59
         responses: []
         openai_chat: []
         anthropic: []
@@ -6613,7 +6615,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a60
         responses:
           - request.input[].reasoning.content[].text
         openai_chat: []
@@ -6628,7 +6630,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a61
         responses:
           - request.input[].reasoning.encrypted_content
         openai_chat: []
@@ -6643,7 +6645,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a62
         responses:
           - request.input[].reasoning.summary[].text
         openai_chat: []
@@ -6658,7 +6660,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a63
         responses: []
         openai_chat: []
         anthropic:
@@ -6676,7 +6678,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a64
         responses: []
         openai_chat: []
         anthropic:
@@ -6691,7 +6693,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a65
         responses: []
         openai_chat: []
         anthropic:
@@ -6706,7 +6708,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a66
         responses: []
         openai_chat: []
         anthropic:
@@ -6721,7 +6723,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a67
         responses: []
         openai_chat: []
         anthropic:
@@ -6736,7 +6738,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a68
         responses: []
         openai_chat: []
         anthropic:
@@ -6751,7 +6753,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a69
         responses: []
         openai_chat: []
         anthropic:
@@ -6766,7 +6768,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a70
         responses: []
         openai_chat: []
         anthropic:
@@ -6781,7 +6783,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a71
         responses: []
         openai_chat: []
         anthropic:
@@ -6796,7 +6798,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a72
         responses: []
         openai_chat: []
         anthropic:
@@ -6811,7 +6813,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a73
         responses: []
         openai_chat: []
         anthropic:
@@ -6826,7 +6828,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a74
         responses: []
         openai_chat: []
         anthropic:
@@ -6841,7 +6843,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a75
         responses: []
         openai_chat: []
         anthropic:
@@ -6856,7 +6858,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a76
         responses: []
         openai_chat: []
         anthropic:
@@ -6871,7 +6873,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a77
         responses: []
         openai_chat: []
         anthropic:
@@ -6886,7 +6888,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a78
         responses: []
         openai_chat: []
         anthropic:
@@ -6901,7 +6903,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a79
         responses: []
         openai_chat: []
         anthropic:
@@ -6919,7 +6921,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a80
         responses:
           - request.previous_response_id
         openai_chat: []
@@ -6937,7 +6939,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a81
         responses:
           - request.prompt
         openai_chat: []
@@ -6948,21 +6950,6 @@ extended_openai_chat_semantic_superset:
         - extension_id: prompt_cache
           extension_owner: chat.extensions.responses.prompt_cache
           current_impl: extension_declared
-    - extended_openai_chat_field: request.stop_sequences
-      semantic_id: request.stop_sequences
-      direction: request
-      mapping_status: extension_added
-      semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
-      gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
-        responses: []
-        openai_chat: []
-        anthropic:
-          - request.stop_sequences
-        gemini: []
-      source_classification: canonical_chat_fields
-      chat_extension_association: []
     - extended_openai_chat_field: request.system
       semantic_id: request.system
       direction: request
@@ -6970,7 +6957,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a82
         responses: []
         openai_chat: []
         anthropic:
@@ -6985,7 +6972,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a83
         responses: []
         openai_chat: []
         anthropic: []
@@ -7000,7 +6987,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a84
         responses: []
         openai_chat: []
         anthropic: []
@@ -7015,7 +7002,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a85
         responses: []
         openai_chat: []
         anthropic: []
@@ -7030,7 +7017,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a86
         responses: []
         openai_chat: []
         anthropic: []
@@ -7048,7 +7035,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a87
         responses: []
         openai_chat: []
         anthropic: []
@@ -7063,7 +7050,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a88
         responses: []
         openai_chat: []
         anthropic: []
@@ -7078,7 +7065,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a89
         responses: []
         openai_chat: []
         anthropic: []
@@ -7093,7 +7080,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a90
         responses: []
         openai_chat: []
         anthropic:
@@ -7111,7 +7098,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a91
         responses: []
         openai_chat: []
         anthropic: []
@@ -7126,7 +7113,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a92
         responses: []
         openai_chat: []
         anthropic: []
@@ -7141,7 +7128,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a93
         responses: []
         openai_chat: []
         anthropic:
@@ -7156,7 +7143,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a94
         responses: []
         openai_chat: []
         anthropic: []
@@ -7171,7 +7158,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a95
         responses: []
         openai_chat: []
         anthropic: []
@@ -7186,7 +7173,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a96
         responses: []
         openai_chat: []
         anthropic: []
@@ -7204,7 +7191,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a97
         responses: []
         openai_chat: []
         anthropic: []
@@ -7219,7 +7206,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a98
         responses: []
         openai_chat: []
         anthropic: []
@@ -7237,7 +7224,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a99
         responses: []
         openai_chat: []
         anthropic: []
@@ -7252,7 +7239,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a100
         responses: []
         openai_chat: []
         anthropic: []
@@ -7267,7 +7254,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a101
         responses: []
         openai_chat: []
         anthropic: []
@@ -7282,7 +7269,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a102
         responses: []
         openai_chat: []
         anthropic: []
@@ -7297,7 +7284,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a103
         responses: []
         openai_chat: []
         anthropic:
@@ -7312,7 +7299,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a104
         responses: []
         openai_chat: []
         anthropic: []
@@ -7327,7 +7314,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a105
         responses:
           - request.truncation
         openai_chat: []
@@ -7727,7 +7714,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a106
         responses: []
         openai_chat: []
         anthropic: []
@@ -7742,7 +7729,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a107
         responses: []
         openai_chat: []
         anthropic: []
@@ -7757,7 +7744,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a108
         responses: []
         openai_chat: []
         anthropic: []
@@ -7772,7 +7759,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a109
         responses: []
         openai_chat: []
         anthropic: []
@@ -7787,7 +7774,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a110
         responses: []
         openai_chat: []
         anthropic: []
@@ -7802,7 +7789,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a111
         responses: []
         openai_chat: []
         anthropic: []
@@ -7817,7 +7804,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a112
         responses:
           - response.completed_at
         openai_chat: []
@@ -7832,7 +7819,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a113
         responses: []
         openai_chat: []
         anthropic:
@@ -7847,7 +7834,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a114
         responses: []
         openai_chat: []
         anthropic:
@@ -7865,7 +7852,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a115
         responses: []
         openai_chat: []
         anthropic: []
@@ -7879,7 +7866,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a116
         responses: []
         openai_chat: []
         anthropic:
@@ -7894,7 +7881,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a117
         responses: []
         openai_chat: []
         anthropic:
@@ -7912,7 +7899,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a118
         responses: []
         openai_chat: []
         anthropic:
@@ -7927,7 +7914,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a119
         responses: []
         openai_chat: []
         anthropic: []
@@ -7941,7 +7928,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a120
         responses:
           - response.error.message
         openai_chat: []
@@ -7956,7 +7943,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a121
         responses:
           - response.instructions
         openai_chat: []
@@ -7971,7 +7958,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a122
         responses: []
         openai_chat: []
         anthropic: []
@@ -7986,7 +7973,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a123
         responses: []
         openai_chat: []
         anthropic: []
@@ -8001,7 +7988,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a124
         responses: []
         openai_chat: []
         anthropic: []
@@ -8016,7 +8003,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a125
         responses:
           - response.output
         openai_chat: []
@@ -8031,7 +8018,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: covered
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a126
         responses:
           - response.output[].custom_tool_call.call_id
         openai_chat: []
@@ -8046,7 +8033,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a127
         responses:
           - response.output[].custom_tool_call.name
         openai_chat: []
@@ -8061,7 +8048,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: covered
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a128
         responses:
           - response.output[].function_call.name
         openai_chat: []
@@ -8076,7 +8063,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a129
         responses:
           - response.output[].function_call.namespace
         openai_chat: []
@@ -8091,7 +8078,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a130
         responses:
           - response.output[].function_call.status
         openai_chat: []
@@ -8106,7 +8093,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a131
         responses:
           - response.output[].message.id
         openai_chat: []
@@ -8121,7 +8108,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a132
         responses:
           - response.output[].message.phase
         openai_chat: []
@@ -8136,7 +8123,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a133
         responses:
           - response.output[].message.role
         openai_chat: []
@@ -8151,7 +8138,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a134
         responses:
           - response.output[].message.status
         openai_chat: []
@@ -8166,7 +8153,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a135
         responses:
           - response.output[].output_text.logprobs
         openai_chat: []
@@ -8181,7 +8168,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a136
         responses:
           - response.output[].reasoning.content[].text
         openai_chat: []
@@ -8196,7 +8183,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a137
         responses:
           - response.output[].reasoning.encrypted_content
         openai_chat: []
@@ -8211,7 +8198,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a138
         responses:
           - response.output[].reasoning.summary[].text
         openai_chat: []
@@ -8226,7 +8213,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a139
         responses:
           - response.output[].refusal.refusal
         openai_chat: []
@@ -8241,7 +8228,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: covered
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a140
         responses:
           - response.output_text
         openai_chat: []
@@ -8256,7 +8243,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a141
         responses:
           - response.parallel_tool_calls
         openai_chat: []
@@ -8271,7 +8258,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a142
         responses:
           - response.previous_response_id
         openai_chat: []
@@ -8286,7 +8273,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a143
         responses:
           - response.prompt_cache_retention
         openai_chat: []
@@ -8301,7 +8288,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a144
         responses:
           - response.reasoning
         openai_chat: []
@@ -8316,7 +8303,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a145
         responses: []
         openai_chat: []
         anthropic:
@@ -8331,7 +8318,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a146
         responses:
           - response.safety_identifier
         openai_chat: []
@@ -8346,7 +8333,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a147
         responses:
           - response.text
         openai_chat: []
@@ -8361,7 +8348,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a148
         responses:
           - response.tool_choice
         openai_chat: []
@@ -8376,7 +8363,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a149
         responses:
           - response.tools
         openai_chat: []
@@ -8391,7 +8378,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a150
         responses:
           - response.top_logprobs
         openai_chat: []
@@ -8406,7 +8393,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a151
         responses:
           - response.truncation
         openai_chat: []
@@ -8421,7 +8408,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a152
         responses: []
         openai_chat: []
         anthropic:
@@ -8436,7 +8423,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a153
         responses: []
         openai_chat: []
         anthropic:
@@ -8451,7 +8438,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a154
         responses: []
         openai_chat: []
         anthropic:
@@ -8466,7 +8453,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a155
         responses: []
         openai_chat: []
         anthropic:
@@ -8481,7 +8468,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a156
         responses: []
         openai_chat: []
         anthropic: []
@@ -8496,7 +8483,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a157
         responses: []
         openai_chat: []
         anthropic: []
@@ -8511,7 +8498,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a158
         responses: []
         openai_chat: []
         anthropic: []
@@ -8526,7 +8513,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a159
         responses: []
         openai_chat: []
         anthropic:
@@ -8541,7 +8528,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a160
         responses: []
         openai_chat: []
         anthropic: []
@@ -8556,7 +8543,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a161
         responses: []
         openai_chat: []
         anthropic:
@@ -8571,7 +8558,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a162
         responses: []
         openai_chat: []
         anthropic:
@@ -8587,7 +8574,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a163
         responses: []
         openai_chat: []
         anthropic: []
@@ -8602,7 +8589,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a164
         responses:
           - response.user
         openai_chat: []
@@ -8647,7 +8634,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a165
         responses:
           - request.input[].function_call_output.output
         openai_chat: []
@@ -8664,7 +8651,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a166
         responses: []
         openai_chat: []
         anthropic: []
@@ -8679,7 +8666,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a167
         responses:
           - request.input[].function_call_output.status
         openai_chat: []
@@ -8695,7 +8682,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: covered
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a168
         responses:
           - response.output[].function_call_output.call_id
         openai_chat: []
@@ -8711,7 +8698,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a169
         responses:
           - response.output[].function_call_output.output
         openai_chat: []
@@ -8727,7 +8714,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a170
         responses:
           - request.input[].input_image.file_id
         openai_chat: []
@@ -8742,7 +8729,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: shape_branch_gap
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a171
         responses: []
         openai_chat: []
         anthropic: []
@@ -8757,7 +8744,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: shape_branch_gap
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a172
         responses: []
         openai_chat: []
         anthropic: []
@@ -8773,7 +8760,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: shape_branch_gap
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a173
         responses:
           - request.input[].input_file.file_url
         openai_chat: []
@@ -8789,7 +8776,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a174
         responses:
           - response.output[].custom_tool_call.input
         openai_chat: []
@@ -8797,14 +8784,14 @@ extended_openai_chat_semantic_superset:
         gemini: []
       source_classification: canonical_chat_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.generation.top_k
-      semantic_id: request.generation.top_k
+    - extended_openai_chat_field: request.top_k
+      semantic_id: request.top_k
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
       gap: runtime mapping partial or extension-only gap
-      equivalent_fields:
+      equivalent_fields: &a175
         responses: []
         openai_chat: []
         anthropic:
@@ -8849,3 +8836,1405 @@ implementation_gaps:
     required_owner: v3 protocol matrix + selected Rust codec tests
     closeout_status: needs_runtime_goal
     required_gate: npm run test:v3-protocol-conversion-field-parity
+canonical_extension_registry:
+  - field: request.reasoning_summary_policy
+    semantic_id: request.reasoning_summary_policy
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a1
+    projection_rule: Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a
+      compatible target policy and needs explicit outbound owner.
+  - field: request.reasoning_context_policy
+    semantic_id: request.reasoning_context_policy
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a2
+    projection_rule: Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.
+  - field: request.reasoning_include_thoughts
+    semantic_id: request.reasoning_include_thoughts
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a3
+    projection_rule: Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.
+  - field: request.reasoning_budget_tokens
+    semantic_id: request.reasoning_budget_tokens
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a4
+    projection_rule: Gemini source codec extracts thinkingBudget; Anthropic budget_tokens and runtime cross-protocol closeout pending.
+  - field: request.tool_choice.allowed_function_names
+    semantic_id: request.tool_choice.allowed_function_names
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a5
+    projection_rule: Gemini source codec extracts allowedFunctionNames; cross-protocol/live closeout pending.
+  - field: request.background
+    semantic_id: request.background
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a6
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.cache_control
+    semantic_id: request.cache_control
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a7
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.cached_content
+    semantic_id: request.cached_content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a8
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.container
+    semantic_id: request.container
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a9
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.context_management
+    semantic_id: request.context_management
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a10
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.conversation
+    semantic_id: request.conversation
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a11
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.generation
+    semantic_id: request.generation
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a12
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.candidate_count
+    semantic_id: request.candidate_count
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a13
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.image_config
+    semantic_id: request.image_config
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a14
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.media_resolution
+    semantic_id: request.media_resolution
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a15
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.response_image_format
+    semantic_id: request.response_image_format
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a16
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.response_text_format
+    semantic_id: request.response_text_format
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a17
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.stop_sequences
+    semantic_id: request.stop_sequences
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a18
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.include
+    semantic_id: request.include
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a19
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.inference_geo
+    semantic_id: request.inference_geo
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a20
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.instructions
+    semantic_id: request.instructions
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a21
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.custom_tool_call.id
+    semantic_id: request.messages.custom_tool_call.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a22
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.custom_tool_call.name
+    semantic_id: request.messages.custom_tool_call.name
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a23
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.function_call.caller
+    semantic_id: request.messages.function_call.caller
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a24
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.function_call.id
+    semantic_id: request.messages.function_call.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a25
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.function_call.namespace
+    semantic_id: request.messages.function_call.namespace
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a26
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.function_call.status
+    semantic_id: request.messages.function_call.status
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a27
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.function_call_output.id
+    semantic_id: request.messages.function_call_output.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a28
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.function_call_output.status
+    semantic_id: request.messages.function_call_output.status
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a29
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.input_file.detail
+    semantic_id: request.messages.input_file.detail
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a30
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.input_file.prompt_cache_breakpoint.mode
+    semantic_id: request.messages.input_file.prompt_cache_breakpoint.mode
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a31
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.input_image.prompt_cache_breakpoint.mode
+    semantic_id: request.messages.input_image.prompt_cache_breakpoint.mode
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a32
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.input_text.prompt_cache_breakpoint.mode
+    semantic_id: request.messages.input_text.prompt_cache_breakpoint.mode
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a33
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.input_text.type
+    semantic_id: request.messages.input_text.type
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a34
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.item_reference.id
+    semantic_id: request.messages.item_reference.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a35
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.message.id
+    semantic_id: request.messages.message.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a36
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.message.phase
+    semantic_id: request.messages.message.phase
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a37
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.message.status
+    semantic_id: request.messages.message.status
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a38
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.message.type
+    semantic_id: request.messages.message.type
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a39
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.code_execution_result.id
+    semantic_id: request.messages.parts_items.code_execution_result.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a40
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.code_execution_result.outcome
+    semantic_id: request.messages.parts_items.code_execution_result.outcome
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a41
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.code_execution_result.output
+    semantic_id: request.messages.parts_items.code_execution_result.output
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a42
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.executable_code.code
+    semantic_id: request.messages.parts_items.executable_code.code
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a43
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.executable_code.id
+    semantic_id: request.messages.parts_items.executable_code.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a44
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.executable_code.language
+    semantic_id: request.messages.parts_items.executable_code.language
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a45
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.function_response.parts
+    semantic_id: request.messages.parts_items.function_response.parts
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a46
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.media_resolution.level
+    semantic_id: request.messages.parts_items.media_resolution.level
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a47
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.part_metadata
+    semantic_id: request.messages.parts_items.part_metadata
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a48
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.thought
+    semantic_id: request.messages.parts_items.thought
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a49
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.thought_signature
+    semantic_id: request.messages.parts_items.thought_signature
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a50
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.tool_call.args
+    semantic_id: request.messages.parts_items.tool_call.args
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a51
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.tool_call.id
+    semantic_id: request.messages.parts_items.tool_call.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a52
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.tool_call.tool_type
+    semantic_id: request.messages.parts_items.tool_call.tool_type
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a53
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.tool_response.id
+    semantic_id: request.messages.parts_items.tool_response.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a54
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.tool_response.response
+    semantic_id: request.messages.parts_items.tool_response.response
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a55
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.tool_response.tool_type
+    semantic_id: request.messages.parts_items.tool_response.tool_type
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a56
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.video_metadata.end_offset
+    semantic_id: request.messages.parts_items.video_metadata.end_offset
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a57
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.video_metadata.fps
+    semantic_id: request.messages.parts_items.video_metadata.fps
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a58
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.parts_items.video_metadata.start_offset
+    semantic_id: request.messages.parts_items.video_metadata.start_offset
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a59
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.reasoning.content_items.text
+    semantic_id: request.messages.reasoning.content_items.text
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a60
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.reasoning.encrypted_content
+    semantic_id: request.messages.reasoning.encrypted_content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a61
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages.reasoning.summary_items.text
+    semantic_id: request.messages.reasoning.summary_items.text
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a62
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].content[].cache_control
+    semantic_id: request.messages[].content[].cache_control
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a63
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].content[].mid_conv_system.content
+    semantic_id: request.messages[].content[].mid_conv_system.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a64
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.bash_code_execution_tool_result.content
+    semantic_id: request.messages_items.content_items.bash_code_execution_tool_result.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a65
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.code_execution_tool_result.content
+    semantic_id: request.messages_items.content_items.code_execution_tool_result.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a66
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.container_upload.file_id
+    semantic_id: request.messages_items.content_items.container_upload.file_id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a67
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.document.context
+    semantic_id: request.messages_items.content_items.document.context
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a68
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.redacted_thinking.data
+    semantic_id: request.messages_items.content_items.redacted_thinking.data
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a69
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.server_tool_use.id
+    semantic_id: request.messages_items.content_items.server_tool_use.id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a70
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.server_tool_use.name
+    semantic_id: request.messages_items.content_items.server_tool_use.name
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a71
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.text_editor_code_execution_tool_result.content
+    semantic_id: request.messages_items.content_items.text_editor_code_execution_tool_result.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a72
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.thinking.signature
+    semantic_id: request.messages_items.content_items.thinking.signature
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a73
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.thinking.thinking
+    semantic_id: request.messages_items.content_items.thinking.thinking
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a74
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.tool_search_tool_result.content
+    semantic_id: request.messages_items.content_items.tool_search_tool_result.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a75
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.tool_use.caller
+    semantic_id: request.messages_items.content_items.tool_use.caller
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a76
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.web_fetch_tool_result.content
+    semantic_id: request.messages_items.content_items.web_fetch_tool_result.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a77
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages_items.content_items.web_search_tool_result.content
+    semantic_id: request.messages_items.content_items.web_search_tool_result.content
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a78
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.output_config.effort
+    semantic_id: request.output_config.effort
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a79
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.previous_response_id
+    semantic_id: request.previous_response_id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a80
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.prompt
+    semantic_id: request.prompt
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a81
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.system
+    semantic_id: request.system
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a82
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.system_instruction.parts
+    semantic_id: request.system_instruction.parts
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a83
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.system_instruction.role
+    semantic_id: request.system_instruction.role
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a84
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tool_config
+    semantic_id: request.tool_config
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a85
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tool_config.include_server_side_tool_invocations
+    semantic_id: request.tool_config.include_server_side_tool_invocations
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a86
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tool_config.retrieval_config.language_code
+    semantic_id: request.tool_config.retrieval_config.language_code
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a87
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tool_config.retrieval_config.lat_lng.latitude
+    semantic_id: request.tool_config.retrieval_config.lat_lng.latitude
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a88
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tool_config.retrieval_config.lat_lng.longitude
+    semantic_id: request.tool_config.retrieval_config.lat_lng.longitude
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a89
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools[].cache_control
+    semantic_id: request.tools[].cache_control
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a90
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.code_execution
+    semantic_id: request.tools_items.code_execution
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a91
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.computer_use
+    semantic_id: request.tools_items.computer_use
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a92
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.defer_loading
+    semantic_id: request.tools_items.defer_loading
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a93
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.file_search
+    semantic_id: request.tools_items.file_search
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a94
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.function_declarations_items.behavior
+    semantic_id: request.tools_items.function_declarations_items.behavior
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a95
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.function_declarations_items.parameters_json_schema
+    semantic_id: request.tools_items.function_declarations_items.parameters_json_schema
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a96
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.function_declarations_items.response
+    semantic_id: request.tools_items.function_declarations_items.response
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a97
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.function_declarations_items.response_json_schema
+    semantic_id: request.tools_items.function_declarations_items.response_json_schema
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a98
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.google_maps
+    semantic_id: request.tools_items.google_maps
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a99
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.google_search
+    semantic_id: request.tools_items.google_search
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a100
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.google_search_retrieval
+    semantic_id: request.tools_items.google_search_retrieval
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a101
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.mcp_servers
+    semantic_id: request.tools_items.mcp_servers
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a102
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.strict
+    semantic_id: request.tools_items.strict
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a103
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.tools_items.url_context
+    semantic_id: request.tools_items.url_context
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a104
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.truncation
+    semantic_id: request.truncation
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a105
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.candidates
+    semantic_id: response.candidates
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a106
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.candidates_items.avg_logprobs
+    semantic_id: response.candidates_items.avg_logprobs
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a107
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.candidates_items.content.role
+    semantic_id: response.candidates_items.content.role
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a108
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.candidates_items.index
+    semantic_id: response.candidates_items.index
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a109
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.candidates_items.logprobs_result
+    semantic_id: response.candidates_items.logprobs_result
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a110
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.candidates_items.token_count
+    semantic_id: response.candidates_items.token_count
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a111
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.completed_at
+    semantic_id: response.completed_at
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a112
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.container.expires_at
+    semantic_id: response.container.expires_at
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a113
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.container.id
+    semantic_id: response.container.id
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a114
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.content_items.content
+    semantic_id: response.content_items.content
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a115
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.content_items.data
+    semantic_id: response.content_items.data
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a116
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.content_items.signature
+    semantic_id: response.content_items.signature
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a117
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.content_items.thinking
+    semantic_id: response.content_items.thinking
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a118
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.content_items.tool_use_id
+    semantic_id: response.content_items.tool_use_id
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a119
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.error.message
+    semantic_id: response.error.message
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a120
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.instructions
+    semantic_id: response.instructions
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a121
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.model_status.message
+    semantic_id: response.model_status.message
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a122
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.model_status.model_stage
+    semantic_id: response.model_status.model_stage
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a123
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.model_status.retirement_time
+    semantic_id: response.model_status.retirement_time
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a124
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output
+    semantic_id: response.output
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a125
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.custom_tool_call.call_id
+    semantic_id: response.output_items.custom_tool_call.call_id
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: covered
+    source_fields: *a126
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.custom_tool_call.name
+    semantic_id: response.output_items.custom_tool_call.name
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a127
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.function_call.name
+    semantic_id: response.output_items.function_call.name
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: covered
+    source_fields: *a128
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.function_call.namespace
+    semantic_id: response.output_items.function_call.namespace
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a129
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.function_call.status
+    semantic_id: response.output_items.function_call.status
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a130
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.message.id
+    semantic_id: response.output_items.message.id
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a131
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.message.phase
+    semantic_id: response.output_items.message.phase
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a132
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.message.role
+    semantic_id: response.output_items.message.role
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a133
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.message.status
+    semantic_id: response.output_items.message.status
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a134
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.output_text.logprobs
+    semantic_id: response.output_items.output_text.logprobs
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a135
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.reasoning.content_items.text
+    semantic_id: response.output_items.reasoning.content_items.text
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a136
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.reasoning.encrypted_content
+    semantic_id: response.output_items.reasoning.encrypted_content
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a137
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.reasoning.summary_items.text
+    semantic_id: response.output_items.reasoning.summary_items.text
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a138
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.refusal.refusal
+    semantic_id: response.output_items.refusal.refusal
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a139
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_text
+    semantic_id: response.output_text
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: covered
+    source_fields: *a140
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.parallel_tool_calls
+    semantic_id: response.parallel_tool_calls
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a141
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.previous_response_id
+    semantic_id: response.previous_response_id
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a142
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.prompt_cache_retention
+    semantic_id: response.prompt_cache_retention
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a143
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.reasoning
+    semantic_id: response.reasoning
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a144
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.role
+    semantic_id: response.role
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a145
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.safety_identifier
+    semantic_id: response.safety_identifier
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a146
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.text
+    semantic_id: response.text
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a147
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.tool_choice
+    semantic_id: response.tool_choice
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a148
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.tools
+    semantic_id: response.tools
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a149
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.top_logprobs
+    semantic_id: response.top_logprobs
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a150
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.truncation
+    semantic_id: response.truncation
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a151
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.type
+    semantic_id: response.type
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a152
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.cache_creation
+    semantic_id: response.usage.cache_creation
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a153
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.cache_creation_input_tokens
+    semantic_id: response.usage.cache_creation_input_tokens
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a154
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.cache_read_input_tokens
+    semantic_id: response.usage.cache_read_input_tokens
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a155
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.cache_tokens_details
+    semantic_id: response.usage.cache_tokens_details
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a156
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.cached_content_token_count
+    semantic_id: response.usage.cached_content_token_count
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a157
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.candidates_tokens_details
+    semantic_id: response.usage.candidates_tokens_details
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a158
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.inference_geo
+    semantic_id: response.usage.inference_geo
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a159
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.prompt_tokens_details
+    semantic_id: response.usage.prompt_tokens_details
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a160
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.server_tool_use
+    semantic_id: response.usage.server_tool_use
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a161
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.service_tier
+    semantic_id: response.usage.service_tier
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a162
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.usage.tool_use_prompt_token_count
+    semantic_id: response.usage.tool_use_prompt_token_count
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a163
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.user
+    semantic_id: response.user
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a164
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].tool_result.output
+    semantic_id: request.messages[].tool_result.output
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a165
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].tool_result.name
+    semantic_id: request.messages[].tool_result.name
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a166
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].tool_result.is_error
+    semantic_id: request.messages[].tool_result.is_error
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a167
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.tool_result.call_id
+    semantic_id: response.tool_result.call_id
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: covered
+    source_fields: *a168
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.tool_result.output
+    semantic_id: response.tool_result.output
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a169
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].content[].image_file.file_id
+    semantic_id: request.messages[].content[].image_file.file_id
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a170
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].content[].media.inline_data
+    semantic_id: request.messages[].content[].media.inline_data
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: shape_branch_gap
+    source_fields: *a171
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].content[].media.mime_type
+    semantic_id: request.messages[].content[].media.mime_type
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: shape_branch_gap
+    source_fields: *a172
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.messages[].content[].file.file_url
+    semantic_id: request.messages[].content[].file.file_url
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: shape_branch_gap
+    source_fields: *a173
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: response.output_items.custom_tool_call.input
+    semantic_id: response.output_items.custom_tool_call.input
+    direction: response
+    stratum: response_payload
+    owner: chat.extension_semantics
+    current_impl: partial
+    source_fields: *a174
+    projection_rule: runtime mapping partial or extension-only gap
+  - field: request.top_k
+    semantic_id: request.top_k
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a175
+    projection_rule: runtime mapping partial or extension-only gap

@@ -3428,7 +3428,11 @@ async fn responses_openai_chat_field_parity_request_matrix() {
             .is_some_and(|content| content.starts_with("field parity system")),
         "client instructions must remain the leading provider system text: {body}"
     );
-    assert_eq!(body["messages"][1]["content"], "run request matrix");
+    assert_eq!(
+        body["messages"][1]["content"],
+        "<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>"
+    );
+    assert_eq!(body["messages"][2]["content"], "run request matrix");
     assert_eq!(
         body["tools"][0]["function"]["parameters"],
         json!({"type":"object","properties":{"q":{"type":"string"}},"required":["q"]})
@@ -3448,7 +3452,7 @@ async fn responses_openai_chat_field_parity_request_matrix() {
     assert_eq!(body["reasoning_effort"], "medium");
     assert!(
         body.get("reasoning").is_none(),
-        "OpenAI Chat provider wire must project Responses reasoning to reasoning_effort without leaking the Responses reasoning object: {body}"
+        "OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort and keep summary/context separate: {body}"
     );
     assert_eq!(body["max_completion_tokens"], 321);
     assert!(

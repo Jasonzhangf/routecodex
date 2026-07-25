@@ -31,6 +31,9 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     {
         messages.push(json!({"role":"system","content":instructions}));
     }
+    if let Some(marker) = responses_reasoning_policy_as_target_valid_system_marker(root) {
+        messages.push(json!({"role":"system","content":marker}));
+    }
     let original_tools = root.get("tools").cloned();
     let mut tools = original_tools
         .as_ref()
@@ -126,6 +129,10 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             .entry("max_completion_tokens".to_string())
             .or_insert_with(|| value.clone());
     }
+    if let Some(value) = root.get("top_logprobs") {
+        request.insert("logprobs".to_string(), Value::Bool(true));
+        request.insert("top_logprobs".to_string(), value.clone());
+    }
     if let Some(reasoning_effort) =
         responses_reasoning_request_config_as_openai_chat_reasoning_effort(root)
     {
@@ -153,42 +160,55 @@ fn responses_reasoning_request_config_as_openai_chat_reasoning_effort(
     ) {
         return None;
     }
-    if let Some(effort) = effort {
-        return Some(Value::String(effort));
-    }
-    let reasoning = reasoning?;
-    let Value::Object(object) = reasoning else {
-        return None;
-    };
-    let summary_requests_reasoning = object
-        .get("summary")
-        .and_then(responses_reasoning_summary_requests_openai_chat_reasoning_effort)
-        .unwrap_or(false);
-    if summary_requests_reasoning || object.get("context").is_some() {
-        return Some(Value::String("medium".to_string()));
-    }
-    None
+    effort.map(Value::String)
 }
 
-fn responses_reasoning_summary_requests_openai_chat_reasoning_effort(
-    summary: &Value,
-) -> Option<bool> {
-    match summary {
-        Value::Bool(value) => Some(*value),
-        Value::String(value) => {
-            let value = value.trim().to_ascii_lowercase();
-            if value.is_empty() {
-                Some(false)
-            } else {
-                Some(!matches!(
-                    value.as_str(),
+fn responses_reasoning_policy_as_target_valid_system_marker(
+    root: &Map<String, Value>,
+) -> Option<String> {
+    let reasoning = root.get("reasoning")?.as_object()?;
+    let mut policies = Vec::new();
+    if let Some(summary) = reasoning.get("summary") {
+        if let Some(value) = reasoning_policy_value(summary) {
+            policies.push(format!("summary_policy={value}"));
+        }
+    }
+    if let Some(context) = reasoning.get("context") {
+        if let Some(value) = reasoning_policy_value(context) {
+            policies.push(format!("context_policy={value}"));
+        }
+    }
+    if let Some(mode) = reasoning.get("mode") {
+        if let Some(value) = reasoning_policy_value(mode) {
+            policies.push(format!("mode_policy={value}"));
+        }
+    }
+    if policies.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "<routecodex_reasoning_request {}></routecodex_reasoning_request>",
+            policies.join(" ")
+        ))
+    }
+}
+
+fn reasoning_policy_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Bool(false) | Value::Null => None,
+        Value::Bool(true) => Some("true".to_string()),
+        Value::String(text) => {
+            let text = text.trim();
+            (!text.is_empty()
+                && !matches!(
+                    text.to_ascii_lowercase().as_str(),
                     "none" | "off" | "disabled" | "disable" | "false"
                 ))
-            }
+            .then(|| text.to_string())
         }
-        Value::Array(items) => Some(!items.is_empty()),
-        Value::Object(object) => Some(!object.is_empty()),
-        _ => None,
+        Value::Number(number) => Some(number.to_string()),
+        Value::Array(items) => (!items.is_empty()).then(|| "array".to_string()),
+        Value::Object(object) => (!object.is_empty()).then(|| "object".to_string()),
     }
 }
 

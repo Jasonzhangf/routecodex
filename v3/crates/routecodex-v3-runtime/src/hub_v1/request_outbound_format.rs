@@ -46,7 +46,10 @@ pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
         "temperature",
         "top_p",
         "max_output_tokens",
+        "max_completion_tokens",
         "max_tokens",
+        "top_logprobs",
+        "logprobs",
         "stream",
         "parallel_tool_calls",
         "user",
@@ -77,6 +80,7 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Value {
     if let Some(instructions) = instructions {
         lift_responses_instructions_into_input(&mut normalized, instructions);
     }
+    normalize_responses_target_token_and_logprob_fields(&mut normalized);
     normalized
 }
 
@@ -153,6 +157,28 @@ fn append_responses_system_instruction(item: &mut Value, instructions: String) {
     }
 }
 
+fn normalize_responses_target_token_and_logprob_fields(payload: &mut Value) {
+    let Some(row) = payload.as_object_mut() else {
+        return;
+    };
+    let max_output = row.remove("max_output_tokens");
+    let max_completion = row.remove("max_completion_tokens");
+    let legacy_max = row.remove("max_tokens");
+    if let Some(value) = max_output.or(max_completion).or(legacy_max) {
+        row.insert("max_output_tokens".to_string(), value);
+    }
+    let top_logprobs = row.remove("top_logprobs");
+    let logprobs_enabled = row
+        .remove("logprobs")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if logprobs_enabled {
+        if let Some(value) = top_logprobs {
+            row.insert("top_logprobs".to_string(), value);
+        }
+    }
+}
+
 pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical(
     payload: &Value,
     original_responses_payload: Option<&Value>,
@@ -161,26 +187,9 @@ pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical(
     original.get("input")?;
     let mut projected = strip_private_fields(original);
     merge_chat_governance_into_original_responses_surface(&mut projected, payload);
-    if !has_responses_non_message_input_surface(&projected) {
-        return Some(normalize_responses_payload_for_provider_standard(
-            &projected,
-        ));
-    }
-    Some(projected)
-}
-
-fn has_responses_non_message_input_surface(payload: &Value) -> bool {
-    payload
-        .get("input")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("message")
-                    != "message"
-            })
-        })
+    Some(normalize_responses_payload_for_provider_standard(
+        &projected,
+    ))
 }
 
 fn merge_chat_governance_into_original_responses_surface(projected: &mut Value, payload: &Value) {
@@ -197,7 +206,10 @@ fn merge_chat_governance_into_original_responses_surface(projected: &mut Value, 
         "temperature",
         "top_p",
         "max_output_tokens",
+        "max_completion_tokens",
         "max_tokens",
+        "top_logprobs",
+        "logprobs",
         "stream",
         "user",
         "logit_bias",

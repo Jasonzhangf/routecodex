@@ -186,3 +186,103 @@ docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
 - extension_declared、semantic_declared、shape_branch_gap、codec_shape_only、partial 只能因真实 owner 测试和实现减少。
 - 每个支持语义都有正/反向测试和 live 证据；不支持语义显式 fail-fast/lossy 并有红测锁定。
 ```
+
+## 2026-07-25 No-Invented-Field / Compatible Projection Repair Plan
+
+### Goal
+Repair V3 protocol semantic normalization so Chat Process canonical fields preserve all inbound semantics, outbound provider/client payloads obey target protocol specs, compatible projections are attempted before cleanup, and the canonical Chat semantic space has no invented provider-shaped hierarchy or duplicate semantic ownership.
+
+### Acceptance Criteria
+- Inbound normalization preserves every source protocol semantic as an OpenAI Chat native field or registered protocol-neutral extension; no source field is silently dropped.
+- Outbound projection emits only legal target protocol fields and applies mapping in this order: exact semantic mapping, compatible target-valid projection, last-resort unsupported/drop decision.
+- No canonical field path copies provider-specific nested shape unless it is native OpenAI Chat; all extensions are registered, protocol-neutral, same-stratum, and uniquely owned.
+- No semantic duplication: the same exact source field maps to one semantic owner unless it is explicitly marked as a parent shape object with child branch cases and no direct runtime owner.
+- No stratum shift without a declared compatible projection rule: request config does not become response content, response content does not become metadata, usage stays usage, tool child fields stay tool fields.
+- Reasoning/thinking without a structured target slot is compatibly projected through target-valid text/instruction content with a standard marker before cleanup/drop is considered.
+
+### In Scope
+- Matrix/gate hardening for semantic uniqueness, extension registry, no invented hierarchy, no stratum shift, compatible projection marker contract.
+- Runtime fixes in V3 Rust protocol owners only, especially:
+  - `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs`
+  - `v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs`
+  - `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs`
+  - `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs`
+  - `v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs`
+- Protocol matrix docs / generated HTML / red fixtures / test design updates.
+
+### Out of Scope
+- Provider config, global install, restart, production traffic changes, and V2 routing behavior.
+- `/Users/fanzhang/github/rules` edits.
+- Broad node topology refactor or unrelated lifecycle/server restart work.
+- Any fallback/degrade path that hides unsupported semantics.
+
+### Design Principles
+- OpenAI Chat is the base protocol skeleton; OpenAI Chat native fields keep exact native names.
+- Extensions are only for semantics absent from OpenAI Chat, and must be top-level/protocol-neutral at the same semantic stratum.
+- Parent shape objects are inventory-only unless child branches are explicitly mapped; runtime cannot use raw subtree presence as semantic ownership.
+- Container rows cannot own child source fields that component rows already own.
+- Compatible projection is deterministic and target-spec-valid, not fallback. It must be red/green tested and visibly marked when semantic class changes for target display.
+
+### Technical Plan
+1. Add a canonical extension registry to `docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml` with allowed extension ids, field paths, strata, owners, source fields, target projection rules, and forbidden provider-shaped names.
+2. Refactor matrix rows to remove duplicate semantic ownership:
+   - Collapse `content.text_string` and `content.text_part` into one visible-text semantic with shape variants.
+   - Split tool-call tuple rows from child component ownership; tuple/container rows reference child owners but do not own the same source fields.
+   - Split usage into prompt/input, completion/output, total, cache, reasoning/thought, tool prompt components; aggregate container rows do not directly own duplicate source fields.
+   - Replace provider-shaped canonical extensions such as `request.text.format` / `request.top_k` / nested `request.reasoning.*` with registered flat protocol-neutral extension names where needed.
+3. Harden `scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs` and red fixtures to fail on:
+   - unregistered canonical extension fields;
+   - provider-shaped invented hierarchy;
+   - duplicate exact source-field owners;
+   - request/response/content/tool/usage stratum shifts without a compatible projection contract;
+   - reasoning summary/context/display/type/budget/effort collapses;
+   - Responses `instructions` demotion on Responses target;
+   - logprobs/top_logprobs and Gemini responseLogprobs/logprobs pair violations;
+   - missing Anthropic inverse `disable_parallel_tool_use` mapping.
+4. Fix runtime owners after red gates are proven:
+   - Stop mapping Responses `reasoning.summary/context/mode` to Chat `reasoning_effort` or Anthropic synthetic `thinking.budget_tokens`.
+   - Preserve Anthropic inbound `thinking` without inventing `reasoning.effort=medium`.
+   - Preserve Responses top-level `instructions` on Responses target; only apply instruction-to-message projection for targets that lack top-level instructions.
+   - Map Chat `max_completion_tokens` to Responses `max_output_tokens`; do not emit non-spec `max_tokens` to Responses wire.
+   - Implement logprob enable/count pair constraints for Chat and Gemini target wire.
+   - Implement Anthropic `tool_choice.disable_parallel_tool_use` inverse mapping without emitting top-level `parallel_tool_calls` to Anthropic wire.
+   - Add response extension preservation for Chat/Anthropic/Gemini long-tail response fields, then compatible text/metadata projection where target spec permits.
+5. Render docs and update maps where source/test owner changes require it.
+
+### Test Plan
+- Red-first gates:
+  - `npm run test:v3-protocol-conversion-field-parity-red-fixtures`
+  - New/updated fixture cases for duplicate source ownership, invented canonical hierarchy, stratum shift, reasoning compatible projection, logprob pairs, Anthropic inverse parallelism, Responses instructions preservation.
+- Matrix/doc gates:
+  - `npm run render:v3-protocol-semantic-field-matrix`
+  - `npm run verify:v3-protocol-conversion-field-parity`
+  - `npm run verify:v3-architecture-docs`
+- Focused runtime tests:
+  - `npm run test:v3-protocol-conversion-field-parity`
+  - `npm run test:v3-gemini-codec-characterization`
+  - `npm run test:v3-anthropic-codec-characterization`
+  - targeted Rust tests covering Responses/OpenAI Chat/Anthropic/Gemini request and response projection.
+- Required hygiene:
+  - `cargo fmt --manifest-path v3/Cargo.toml --all -- --check`
+  - `git diff --check`
+
+### Implementation Order
+1. Diagnosis contract: lock unique owner graph and allowed paths from matrix/function map/mainline/verification map.
+2. Gate-first: add failing fixtures for the new invariants before changing runtime behavior.
+3. Matrix registry: introduce extension registry and remove duplicate/provider-shaped canonical field ownership.
+4. Runtime request repairs: reasoning, instructions, max tokens, logprobs, Anthropic inverse parallelism.
+5. Runtime response repairs: preserve long-tail response fields and define compatible target projections.
+6. Render/sync docs and maps.
+7. Run full verification stack and write closeout evidence.
+
+### Risks and Mitigations
+- Risk: compatible projection markers could become another invented semantic. Mitigation: keep markers outbound-only, target-valid, documented, and never used as inbound canonical truth.
+- Risk: removing duplicate rows could hide source fields. Mitigation: gate source inventory coverage before and after row refactor.
+- Risk: provider-specific extension names reappear. Mitigation: extension registry denylist and red fixtures.
+- Risk: broad runtime changes touch unrelated server/config flow. Mitigation: keep allowed paths to V3 protocol owners and docs/gates only.
+
+### Definition of Done
+- All new red fixtures fail before fixes and pass after fixes.
+- Matrix has registered extensions only, no duplicate exact source-field semantic owners, and no provider-shaped canonical hierarchy.
+- Runtime request/response projections obey exact -> compatible -> last-resort decision order.
+- Required gates pass and closeout evidence names the repaired files, tests, and remaining unsupported decision list.

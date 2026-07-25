@@ -12,6 +12,7 @@ const paths = {
   design: 'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   gapCloseoutPlan: 'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+  hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
@@ -85,6 +86,9 @@ for (const phrase of [
   '"stop"',
   '"max_completion_tokens"',
   'responses_reasoning_request_config_as_openai_chat_reasoning_effort',
+  'if let Some(marker) = responses_reasoning_policy_as_target_valid_system_marker(root) {',
+  'responses_reasoning_policy_as_target_valid_system_marker',
+  '<routecodex_reasoning_request',
   '"reasoning_effort"',
 ]) requireText(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, phrase);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
@@ -93,7 +97,7 @@ requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_
   '"stop"',
   '"max_completion_tokens"',
 ]);
-forbid(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
+forbid(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i, /summary_requests_reasoning \|\| object\.get\("context"\)\.is_some\(\).*medium/s]);
 
 const requestOutbound = functionSlice(
   text.requestOutboundFormat,
@@ -106,11 +110,22 @@ for (const phrase of [
   'normalize_openai_chat_messages_payload',
 ]) requireText(requestOutbound, `${paths.requestOutboundFormat}::build_v3_openai_chat_standard_request_from_chat_canonical`, phrase);
 for (const phrase of [
+  'normalize_responses_target_token_and_logprob_fields',
+  'row.remove("max_completion_tokens")',
+  'row.remove("max_tokens")',
+  'row.insert("max_output_tokens".to_string(), value)',
+  '.remove("logprobs")',
+  'row.insert("top_logprobs".to_string(), value)',
   'fn is_provider_outbound_control_key',
   '"metadata_center"',
   '"runtime_control"',
 ]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
+for (const phrase of [
+  'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
+  'openai_responses_provider_wire_drops_top_logprobs_when_logprobs_disabled',
+  'Responses provider wire must not emit non-spec max_tokens',
+]) requireText(text.hubTests, paths.hubTests, phrase);
 forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::metadata_data_plane`, [/contains\("metadata"\)/, /metadata.*side-channel fields/i]);
 
 const chatToResponses = functionSlice(
@@ -143,7 +158,7 @@ for (const phrase of [
   '"top_k"',
   '"parallel_tool_calls"',
   'object.get("stop_sequences")',
-  'json!({"effort":"medium","thinking":thinking})',
+  'json!({"thinking":thinking})',
   'anthropic_tool_choice_as_responses_tool_choice',
 ]) requireText(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, phrase);
 forbid(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
@@ -158,13 +173,15 @@ for (const phrase of [
   'pub fn encode_v3_responses_semantic_as_anthropic_request',
   'if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {',
   'responses_reasoning_request_config_as_anthropic_thinking',
-  'responses_reasoning_effort_as_anthropic_budget',
+  'if let Some(marker) = responses_reasoning_policy_as_anthropic_system_marker(object) {',
+  'responses_reasoning_policy_as_anthropic_system_marker',
+  '<routecodex_reasoning_request',
   '"budget_tokens"',
   'output.insert("thinking".to_string(), thinking)',
   'responses_metadata_as_anthropic_metadata',
   '"metadata.unsupported"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
-forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
+forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
 
 const providerReqCompat = functionSlice(
   text.providerReqCompat,
@@ -184,7 +201,7 @@ const responsesOriginalInputSurface = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
   'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
-  'fn has_responses_non_message_input_surface',
+  'fn merge_chat_governance_into_original_responses_surface',
 );
 for (const phrase of [
   'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
@@ -219,16 +236,18 @@ for (const [owner, body, phrases] of [
     'responses_openai_chat_field_parity_response_matrix',
     '"metadata":{"client":"metadata-kept"}',
     'body["reasoning_effort"]',
+    '<routecodex_reasoning_request summary_policy=detailed>',
     'body["max_completion_tokens"]',
-    'OpenAI Chat provider wire must project Responses reasoning to reasoning_effort',
+    'OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort',
     'OpenAI Chat provider wire must not forward non-standard client_metadata',
   ]],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
-    'responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking',
-    'responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking',
+    'responses_relay_reasoning_request_config_projects_anthropic_system_marker',
+    'responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
     'responses_relay_anthropic_provider_rejects_unmappable_metadata',
-    'json!({"type":"enabled","budget_tokens":4096})',
+    'must not synthesize thinking budget from Responses effort/summary',
+    '<routecodex_reasoning_request summary_policy=detailed>',
     '"type":"thinking"',
   ]],
   [paths.anthropicTests, text.anthropicTests, [
@@ -274,7 +293,7 @@ for (const [owner, body, phrases] of [
     'feature_id: v3.protocol_conversion_field_parity',
     'Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop',
     'Anthropic thinking is preserved under Responses reasoning.thinking',
-    'Responses reasoning.effort/summary request config reaches Anthropic provider wire as thinking',
+    'Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker',
     'npm run render:v3-protocol-semantic-field-matrix',
     'npm run test:v3-protocol-conversion-field-parity',
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
@@ -306,7 +325,7 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 221',
+  '`extension_declared` | 220',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
@@ -390,6 +409,7 @@ for (const gapId of ['gap.client_metadata.target_dependent', 'gap.gemini.field_c
 }
 
 requireNoPendingAuditStatus(fieldMatrix);
+requireCanonicalExtensionRegistry(fieldMatrix);
 requireAuditTruthContract(fieldMatrix);
 requireManualSemanticTranslationGroups(fieldMatrix);
 requireShapeBranchTransformContract(fieldMatrix);
@@ -497,6 +517,9 @@ for (const scriptName of [
 }
 if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
   failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);
+}
+for (const scriptName of ['test:v3-protocol-conversion-field-parity', 'test:v3-anthropic-codec-characterization', 'test:v3-gemini-codec-characterization', 'verify:v3-cargo-fmt']) {
+  if (!String(pkg.scripts?.[scriptName] ?? '').includes('cargo +stable')) failures.push(`${paths.packageJson}: ${scriptName} must use cargo +stable so the gate works without a global rustup default`);
 }
 
 if (failures.length) {
@@ -614,6 +637,44 @@ function requireNoPendingAuditStatus(matrix) {
   if (sourceOnlyHits.length) failures.push(`${paths.fieldMatrix}: current_impl=source_inventory_only is closed and must not reappear (${sourceOnlyHits.slice(0, 8).join(', ')})`);
 }
 
+function requireCanonicalExtensionRegistry(matrix) {
+  const registry = matrix?.canonical_extension_registry;
+  if (!Array.isArray(registry) || registry.length === 0) {
+    failures.push(`${paths.fieldMatrix}: missing canonical_extension_registry for OpenAI Chat extension fields`);
+    return;
+  }
+  const registryByField = new Map();
+  for (const [index, row] of registry.entries()) {
+    for (const key of ['field', 'semantic_id', 'direction', 'stratum', 'owner', 'current_impl', 'source_fields', 'projection_rule']) {
+      if (row?.[key] == null) failures.push(`${paths.fieldMatrix}: canonical_extension_registry[${index}] missing ${key}`);
+    }
+    if (registryByField.has(row?.field)) failures.push(`${paths.fieldMatrix}: duplicate canonical_extension_registry field ${row?.field}`);
+    registryByField.set(row?.field, row);
+    if (!/^(request|response|edge)\.[A-Za-z0-9_\[\]\.]+$/u.test(row?.field ?? '')) {
+      failures.push(`${paths.fieldMatrix}: canonical extension field must be top-level request/response/edge path: ${row?.field}`);
+    }
+    if (/^(request|response)\.(reasoning|generation|text)\./u.test(row?.field ?? '')) {
+      failures.push(`${paths.fieldMatrix}: provider-shaped invented canonical extension hierarchy forbidden: ${row.field}`);
+    }
+    if (row?.field !== row?.semantic_id) failures.push(`${paths.fieldMatrix}: canonical extension semantic_id must equal field ${row?.field}`);
+  }
+  for (const row of matrix?.extended_openai_chat_semantic_superset?.fields ?? []) {
+    if (row?.mapping_status !== 'extension_added') continue;
+    const registered = registryByField.get(row.extended_openai_chat_field);
+    if (!registered) {
+      failures.push(`${paths.fieldMatrix}: extension field ${row.extended_openai_chat_field} missing canonical_extension_registry entry`);
+      continue;
+    }
+    for (const key of ['semantic_id', 'direction', 'current_impl']) {
+      if (registered[key] !== row[key]) failures.push(`${paths.fieldMatrix}: canonical_extension_registry.${row.extended_openai_chat_field}.${key} must match superset row`);
+    }
+  }
+  for (const row of registry) {
+    const superset = (matrix?.extended_openai_chat_semantic_superset?.fields ?? []).find((item) => item?.extended_openai_chat_field === row.field);
+    if (!superset || superset.mapping_status !== 'extension_added') failures.push(`${paths.fieldMatrix}: canonical_extension_registry.${row.field} must correspond to an extension_added superset row`);
+  }
+}
+
 function requireAuditTruthContract(matrix) {
   const contract = matrix?.audit_truth_contract;
   if (!contract) {
@@ -703,6 +764,7 @@ function walkCurrentImpl(value, pathParts, visit) {
   }
   if (!value || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
+    if (key === 'canonical_extension_registry') continue;
     if (key === 'current_impl') visit([...pathParts, key], child);
     else walkCurrentImpl(child, [...pathParts, key], visit);
   }
@@ -1115,22 +1177,22 @@ function requireGeminiThinkingConfigSemanticContract(matrix) {
   const include = byId.get('reasoning.request_include_thoughts');
   if (!include) failures.push(`${paths.fieldMatrix}: missing reasoning.request_include_thoughts semantic group`);
   else {
-    if (!(include.chat_fields ?? []).includes('request.reasoning.include_thoughts')) failures.push(`${paths.fieldMatrix}: reasoning.request_include_thoughts missing request.reasoning.include_thoughts chat field`);
+    if (!(include.chat_fields ?? []).includes('request.reasoning_include_thoughts')) failures.push(`${paths.fieldMatrix}: reasoning.request_include_thoughts missing request.reasoning_include_thoughts chat field`);
     const gemini = include.protocol_mappings?.gemini?.request_fields ?? [];
     if (!gemini.includes('request.generationConfig.thinkingConfig.includeThoughts')) failures.push(`${paths.fieldMatrix}: reasoning.request_include_thoughts must map Gemini includeThoughts`);
   }
   const budget = byId.get('reasoning.request_budget_tokens');
   if (!budget) failures.push(`${paths.fieldMatrix}: missing reasoning.request_budget_tokens semantic group`);
   else {
-    if (!(budget.chat_fields ?? []).includes('request.reasoning.budget_tokens')) failures.push(`${paths.fieldMatrix}: reasoning.request_budget_tokens missing request.reasoning.budget_tokens chat field`);
+    if (!(budget.chat_fields ?? []).includes('request.reasoning_budget_tokens')) failures.push(`${paths.fieldMatrix}: reasoning.request_budget_tokens missing request.reasoning_budget_tokens chat field`);
     const gemini = budget.protocol_mappings?.gemini?.request_fields ?? [];
     if (!gemini.includes('request.generationConfig.thinkingConfig.thinkingBudget')) failures.push(`${paths.fieldMatrix}: reasoning.request_budget_tokens must map Gemini thinkingBudget`);
     if ((budget.protocol_mappings?.gemini?.request_fields ?? []).includes('request.generationConfig.maxOutputTokens')) failures.push(`${paths.fieldMatrix}: Gemini thinkingBudget must not collapse into maxOutputTokens`);
   }
   for (const [field, expected, forbidden] of [
     ['request.reasoning_effort', ['request.generationConfig.thinkingConfig.thinkingLevel'], ['request.generationConfig.thinkingConfig.includeThoughts', 'request.generationConfig.thinkingConfig.thinkingBudget']],
-    ['request.reasoning.include_thoughts', ['request.generationConfig.thinkingConfig.includeThoughts'], ['request.generationConfig.thinkingConfig.thinkingBudget', 'request.generationConfig.thinkingConfig.thinkingLevel']],
-    ['request.reasoning.budget_tokens', ['request.generationConfig.thinkingConfig.thinkingBudget'], ['request.generationConfig.maxOutputTokens', 'response.usageMetadata.thoughtsTokenCount', 'request.generationConfig.thinkingConfig.includeThoughts']],
+    ['request.reasoning_include_thoughts', ['request.generationConfig.thinkingConfig.includeThoughts'], ['request.generationConfig.thinkingConfig.thinkingBudget', 'request.generationConfig.thinkingConfig.thinkingLevel']],
+    ['request.reasoning_budget_tokens', ['request.generationConfig.thinkingConfig.thinkingBudget'], ['request.generationConfig.maxOutputTokens', 'response.usageMetadata.thoughtsTokenCount', 'request.generationConfig.thinkingConfig.includeThoughts']],
   ]) {
     const row = supersetRowByField(matrix, field);
     if (!row) continue;

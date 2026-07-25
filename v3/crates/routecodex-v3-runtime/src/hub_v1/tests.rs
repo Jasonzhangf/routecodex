@@ -103,6 +103,54 @@ fn openai_chat_provider_wire_does_not_forward_client_metadata() {
 }
 
 #[test]
+fn openai_responses_provider_wire_maps_chat_token_and_logprob_pairs() {
+    let provider = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "responses-model",
+        "messages": [{"role": "user", "content": "count tokens"}],
+        "max_completion_tokens": 77,
+        "max_tokens": 55,
+        "logprobs": true,
+        "top_logprobs": 4
+    }))
+    .unwrap();
+
+    assert_eq!(provider["max_output_tokens"], json!(77));
+    assert!(
+        provider.get("max_completion_tokens").is_none(),
+        "Responses provider wire must not emit Chat max_completion_tokens: {provider}"
+    );
+    assert!(
+        provider.get("max_tokens").is_none(),
+        "Responses provider wire must not emit non-spec max_tokens: {provider}"
+    );
+    assert_eq!(provider["top_logprobs"], json!(4));
+    assert!(
+        provider.get("logprobs").is_none(),
+        "Responses provider wire has top_logprobs count but no Chat logprobs boolean: {provider}"
+    );
+}
+
+#[test]
+fn openai_responses_provider_wire_drops_top_logprobs_when_logprobs_disabled() {
+    let provider = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "responses-model",
+        "messages": [{"role": "user", "content": "count tokens"}],
+        "logprobs": false,
+        "top_logprobs": 4
+    }))
+    .unwrap();
+
+    assert!(
+        provider.get("top_logprobs").is_none(),
+        "disabled Chat logprobs must not emit Responses top_logprobs: {provider}"
+    );
+    assert!(
+        provider.get("logprobs").is_none(),
+        "Chat logprobs boolean is not a Responses provider wire field: {provider}"
+    );
+}
+
+#[test]
 fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         json!({"messages":[{"role":"user","content":"x"}]}),

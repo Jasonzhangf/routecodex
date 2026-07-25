@@ -96,7 +96,7 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
             "model":"responses-wire-model",
             "input":[{"role":"user","content":[{"type":"input_text","text":"Lookup alpha"}]}],
             "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
-            "reasoning":{"effort":"medium","thinking":{"type":"enabled","budget_tokens":512}},
+            "reasoning":{"thinking":{"type":"enabled","budget_tokens":512}},
             "stream":false
         })
     );
@@ -194,7 +194,7 @@ async fn anthropic_responses_field_parity_request_matrix() {
     assert_eq!(body["input"][2]["type"], "function_call");
     assert_eq!(body["input"][2]["call_id"], "call_lookup");
     assert_eq!(body["input"][2]["name"], "lookup");
-    assert_eq!(body["input"][2]["arguments"], "{\"q\":\"alpha\"}");
+    assert_eq!(body["input"][2]["arguments"], r#"{"q":"alpha"}"#);
     assert_eq!(body["input"][3]["type"], "function_call_output");
     assert_eq!(body["input"][3]["call_id"], "call_lookup");
     assert_eq!(body["input"][3]["output"], "lookup result");
@@ -209,7 +209,10 @@ async fn anthropic_responses_field_parity_request_matrix() {
         body["tool_choice"],
         json!({"type":"function","name":"lookup"})
     );
-    assert_eq!(body["reasoning"]["effort"], "medium");
+    assert!(
+        body["reasoning"].get("effort").is_none(),
+        "Anthropic inbound thinking must not invent reasoning.effort: {body}"
+    );
     assert_eq!(
         body["reasoning"]["thinking"],
         json!({"type":"enabled","budget_tokens":1024})

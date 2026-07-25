@@ -144,7 +144,7 @@ tests exist and pass.
 | --- | --- | --- |
 | `reasoning.effort` / `reasoning.summary` | top-level `thinking` request config with deterministic `budget_tokens` | `responses_reasoning_request_config_projects_to_anthropic_thinking_wire` and runtime provider-wire matrix |
 | `reasoning.thinking` | exact top-level `thinking` object preserved for Anthropic-compatible local projection | `responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape` |
-| original Responses request surface after Req04 governance | preserved through `ProviderReqCompat06ProviderCompat` before Anthropic wire codec for both `input[]` and string `input` request forms | `responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking` and `responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking` |
+| original Responses request surface after Req04 governance | preserved through `ProviderReqCompat06ProviderCompat` before Anthropic wire codec for both `input[]` and string `input` request forms | `responses_relay_reasoning_request_config_projects_anthropic_system_marker` and `responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker` |
 | Anthropic provider `thinking` JSON response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` |
 
 ### Anthropic request -> Responses provider semantic

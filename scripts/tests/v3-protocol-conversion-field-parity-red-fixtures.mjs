@@ -14,6 +14,7 @@ const files = [
   'docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html',
   'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
@@ -35,6 +36,47 @@ const files = [
 ];
 
 const cases = [
+
+
+
+  {
+    name: 'Responses target token/logprob normalizer stops mapping Chat max_completion_tokens',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: 'let max_completion = row.remove("max_completion_tokens");',
+    to: 'let max_completion = None;',
+    diagnostic: /max_completion_tokens|openai_responses_provider_wire_maps_chat_token/u,
+  },
+  {
+    name: 'Responses target token/logprob normalizer emits Chat logprobs boolean',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: 'let logprobs_enabled = row\n        .remove("logprobs")',
+    to: 'let logprobs_enabled = row\n        .get("logprobs")',
+    diagnostic: /logprobs|top_logprobs/u,
+  },
+  {
+    name: 'Responses target max token Rust test removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
+    from: 'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
+    to: 'openai_responses_provider_wire_maps_chat_token_removed',
+    all: true,
+    diagnostic: /openai_responses_provider_wire_maps_chat_token_and_logprob_pairs/u,
+  },
+
+  {
+    name: 'Canonical extension registry omits an extension field',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '  - field: request.reasoning_summary_policy\n    semantic_id: request.reasoning_summary_policy\n',
+    to: '  - field: request.reasoning_summary_policy_removed\n    semantic_id: request.reasoning_summary_policy_removed\n',
+    diagnostic: /canonical_extension_registry|request\.reasoning_summary_policy/u,
+  },
+  {
+    name: 'Canonical extension uses provider-shaped hierarchy',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '    - extended_openai_chat_field: request.reasoning_summary_policy\n      semantic_id: request.reasoning_summary_policy\n',
+    to: '    - extended_openai_chat_field: request.reasoning.summary_policy\n      semantic_id: request.reasoning.summary_policy\n',
+    diagnostic: /provider-shaped invented canonical extension hierarchy|request\.reasoning\.summary_policy/u,
+  },
+
   {
     name: 'Extended Chat renames native OpenAI Chat field',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
@@ -204,9 +246,9 @@ const cases = [
   {
     name: 'Gemini thinkingConfig budget extension row removed',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    - extended_openai_chat_field: request.reasoning.budget_tokens\n      semantic_id: request.reasoning.budget_tokens\n',
-    to: '    - extended_openai_chat_field: request.reasoning.budget_removed\n      semantic_id: request.reasoning.budget_removed\n',
-    diagnostic: /request\.reasoning\.budget_tokens|thinkingBudget/u,
+    from: '    - extended_openai_chat_field: request.reasoning_budget_tokens\n      semantic_id: request.reasoning_budget_tokens\n',
+    to: '    - extended_openai_chat_field: request.reasoning_budget_removed\n      semantic_id: request.reasoning_budget_removed\n',
+    diagnostic: /request\.reasoning_budget_tokens|thinkingBudget/u,
   },
   {
     name: 'Gemini includeThoughts collapses into native reasoning_effort',
@@ -270,8 +312,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 221\n',
-    to: '    extension_declared: 220\n',
+    from: '    extension_declared: 220\n',
+    to: '    extension_declared: 219\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -287,6 +329,13 @@ const cases = [
     from: '## Canonical textual truth for the field-matrix audit\n',
     to: '## Removed field-matrix truth\n',
     diagnostic: /Canonical textual truth for the field-matrix audit|v3-protocol-semantic-matrix-review/u,
+  },
+  {
+    name: 'Textual truth audited extension count drifts from matrix',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
+    from: '| `extension_declared` | 220 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    to: '| `extension_declared` | 221 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    diagnostic: /`extension_declared` \| 220|v3-protocol-semantic-matrix-review/u,
   },
   {
     name: 'Gap audit drops runtime extension closeout row',
@@ -362,8 +411,8 @@ const cases = [
   {
     name: 'Semantic correspondence drops Gemini thinking budget mapping',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '  reasoning.request_budget_tokens:\n    canonical_path: chat.reasoning.budget_tokens\n    chat_extension: request.reasoning.budget_tokens\n    current_impl: partial\n',
-    to: '  reasoning.request_budget_tokens_removed:\n    canonical_path: chat.reasoning.budget_tokens\n    chat_extension: request.reasoning.budget_tokens\n    current_impl: partial\n',
+    from: '  reasoning.request_budget_tokens:\n    canonical_path: chat.reasoning_budget_tokens\n    chat_extension: request.reasoning_budget_tokens\n    current_impl: partial\n',
+    to: '  reasoning.request_budget_tokens_removed:\n    canonical_path: chat.reasoning_budget_tokens\n    chat_extension: request.reasoning_budget_tokens\n    current_impl: partial\n',
     diagnostic: /semantic_correspondence|thinkingConfig\.thinkingBudget|reasoning\.request_budget_tokens/u,
   },
   {
@@ -426,16 +475,16 @@ const cases = [
   {
     name: 'Anthropic thinking data-plane state compressed away',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
-    from: 'json!({"effort":"medium","thinking":thinking})',
-    to: 'json!({"effort":"medium"})',
-    diagnostic: /thinking/,
+    from: 'json!({"thinking":thinking})',
+    to: 'json!({"effort":"medium","thinking":thinking})',
+    diagnostic: /missing json|effort.*thinking|invent/u,
   },
   {
     name: 'Responses reasoning request config no longer maps to Anthropic thinking',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
-    from: 'responses_reasoning_request_config_as_anthropic_thinking(object)',
-    to: 'object.get("reasoning").and_then(|reasoning| reasoning.get("thinking")).cloned()',
-    diagnostic: /responses_reasoning_request_config_as_anthropic_thinking|thinking/,
+    from: 'responses_reasoning_policy_as_anthropic_system_marker(object)',
+    to: 'None',
+    diagnostic: /responses_reasoning_policy_as_anthropic_system_marker|routecodex_reasoning_request|summary_policy/,
   },
   {
     name: 'Anthropic provider compat drops original Responses reasoning surface',
@@ -454,33 +503,33 @@ const cases = [
   {
     name: 'Responses to Anthropic provider-wire reasoning runtime test removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
-    from: 'responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking',
+    from: 'responses_relay_reasoning_request_config_projects_anthropic_system_marker',
     to: 'responses_relay_reasoning_request_config_removed',
     all: true,
-    diagnostic: /responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking/u,
+    diagnostic: /responses_relay_reasoning_request_config_projects_anthropic_system_marker/u,
   },
   {
     name: 'Responses string input to Anthropic provider-wire reasoning runtime test removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
-    from: 'responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking',
+    from: 'responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker',
     to: 'responses_relay_string_input_reasoning_request_config_removed',
     all: true,
-    diagnostic: /responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking/u,
+    diagnostic: /responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker/u,
   },
   {
-    name: 'Responses request reasoning no longer maps to OpenAI Chat reasoning_effort',
+    name: 'Responses summary/context must not synthesize OpenAI Chat reasoning_effort',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
-    from: 'responses_reasoning_request_config_as_openai_chat_reasoning_effort',
-    to: 'responses_reasoning_request_config_as_openai_chat_removed',
+    from: 'responses_reasoning_policy_as_target_valid_system_marker',
+    to: 'responses_reasoning_policy_as_target_valid_system_marker_removed',
     all: true,
-    diagnostic: /responses_reasoning_request_config_as_openai_chat_reasoning_effort|reasoning_effort/u,
+    diagnostic: /responses_reasoning_policy_as_target_valid_system_marker|routecodex_reasoning_request/u,
   },
   {
-    name: 'OpenAI Chat provider-wire reasoning_effort runtime assertion removed',
+    name: 'OpenAI Chat provider-wire reasoning policy marker assertion removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    from: 'OpenAI Chat provider wire must project Responses reasoning to reasoning_effort',
-    to: 'OpenAI Chat provider wire reasoning assertion removed',
-    diagnostic: /reasoning_effort/u,
+    from: '<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>',
+    to: '<reasoning-marker-removed>',
+    diagnostic: /routecodex_reasoning_request|summary_policy/u,
   },
   {
     name: 'Malformed function arguments fail-fast parser removed',

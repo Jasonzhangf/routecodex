@@ -139,7 +139,7 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
 }
 
 #[tokio::test]
-async fn responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking() {
+async fn responses_relay_reasoning_request_config_projects_anthropic_system_marker() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -148,7 +148,7 @@ async fn responses_relay_reasoning_request_config_reaches_anthropic_provider_as_
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
-            request_id: "req-responses-reasoning-to-anthropic-thinking".into(),
+            request_id: "req-responses-reasoning-to-anthropic-marker".into(),
             payload: json!({
                 "model":"MiniMax-M3",
                 "input":[{"role":"user","content":[{"type":"input_text","text":"Use reasoning before answer"}]}],
@@ -163,19 +163,22 @@ async fn responses_relay_reasoning_request_config_reaches_anthropic_provider_as_
 
     assert_eq!(output.status, 200);
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
-    assert_eq!(
-        captured["thinking"],
-        json!({"type":"enabled","budget_tokens":4096})
+    assert!(
+        captured.get("thinking").is_none(),
+        "Anthropic provider request must not synthesize thinking budget from Responses effort/summary: {captured}"
     );
     assert!(
         captured.get("reasoning").is_none(),
-        "Anthropic provider request must receive thinking, not Responses reasoning: {captured}"
+        "Anthropic provider request must not leak Responses reasoning object: {captured}"
+    );
+    assert!(
+        captured["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
+        "Anthropic compatible projection must preserve summary policy as target-valid system marker: {captured}"
     );
 }
 
 #[tokio::test]
-async fn responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking(
-) {
+async fn responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -184,7 +187,7 @@ async fn responses_relay_string_input_reasoning_request_config_reaches_anthropic
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
-            request_id: "req-responses-string-reasoning-to-anthropic-thinking".into(),
+            request_id: "req-responses-string-reasoning-to-anthropic-marker".into(),
             payload: json!({
                 "model":"MiniMax-M3",
                 "input":"Use reasoning before answering this string-input request",
@@ -199,13 +202,17 @@ async fn responses_relay_string_input_reasoning_request_config_reaches_anthropic
 
     assert_eq!(output.status, 200);
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
-    assert_eq!(
-        captured["thinking"],
-        json!({"type":"enabled","budget_tokens":4096})
+    assert!(
+        captured.get("thinking").is_none(),
+        "Anthropic provider request must not synthesize thinking budget from Responses effort/summary for string input: {captured}"
     );
     assert!(
         captured.get("reasoning").is_none(),
-        "Anthropic provider request must receive thinking for string input without leaking Responses reasoning: {captured}"
+        "Anthropic provider request must not leak Responses reasoning for string input: {captured}"
+    );
+    assert!(
+        captured["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
+        "Anthropic compatible projection must preserve string-input summary policy as target-valid system marker: {captured}"
     );
 }
 

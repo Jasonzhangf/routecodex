@@ -1844,8 +1844,8 @@ features:
       - project_v3_responses_json_as_anthropic_message
       - responses_openai_chat_field_parity_request_matrix
       - responses_openai_chat_field_parity_response_matrix
-      - responses_relay_reasoning_request_config_reaches_anthropic_provider_as_thinking
-      - responses_relay_string_input_reasoning_request_config_reaches_anthropic_provider_as_thinking
+      - responses_relay_reasoning_request_config_projects_anthropic_system_marker
+      - responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker
       - responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning
       - anthropic_responses_field_parity_request_matrix
       - anthropic_responses_field_parity_response_matrix
