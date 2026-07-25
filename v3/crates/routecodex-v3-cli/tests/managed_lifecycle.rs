@@ -732,6 +732,45 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         String::from_utf8_lossy(&restart.stderr)
     );
     assert_eq!(last_json(&restart)["instance_id"], started["instance_id"]);
+    let restart_stdout = String::from_utf8_lossy(&restart.stdout);
+    assert!(
+        restart_stdout.contains("[RouteCodexV3] rccv3 restart version=")
+            && restart_stdout.contains(" crate=")
+            && restart_stdout.contains(" binary=")
+            && restart_stdout.contains(" config="),
+        "top-level restart must print the initiating lifecycle command with version/binary/config evidence, got:\n{restart_stdout}"
+    );
+    assert!(
+        restart_stdout.contains("[RouteCodexV3] Restart target resolved instance=")
+            && restart_stdout.contains(" control_instance=")
+            && restart_stdout.contains(" listeners=")
+            && restart_stdout.contains(&format!("127.0.0.1:{}", ports[0]))
+            && restart_stdout.contains(&format!("127.0.0.1:{}", ports[1])),
+        "top-level restart must print the resolved managed target and listener lifecycle before requesting restart, got:\n{restart_stdout}"
+    );
+    assert!(
+        restart_stdout.contains("[RouteCodexV3] Restart control accepted state=starting")
+            && restart_stdout.contains(" message=identity verified"),
+        "top-level restart must print the lifecycle control acceptance state, got:\n{restart_stdout}"
+    );
+    assert!(
+        restart_stdout.contains("[RouteCodexV3] Restart status state=starting")
+            && restart_stdout.contains("[RouteCodexV3] Restart status state=running"),
+        "top-level restart must print observed lifecycle status transitions, got:\n{restart_stdout}"
+    );
+    assert!(
+        restart_stdout.contains("[RouteCodexV3] Restart completed state=running")
+            && restart_stdout.contains(" instance="),
+        "top-level restart must print the accepted/completed lifecycle state before the status JSON, got:\n{restart_stdout}"
+    );
+    assert!(
+        restart_stdout.contains("[RouteCodexV3] Server started version=")
+            && restart_stdout.contains(" crate=")
+            && restart_stdout.contains(" binary=")
+            && restart_stdout.contains(&format!("127.0.0.1:{}", ports[0]))
+            && restart_stdout.contains(&format!("127.0.0.1:{}", ports[1])),
+        "top-level restart must make the restarted server lifecycle visible in the invoking console, got:\n{restart_stdout}"
+    );
     for port in ports {
         wait_port(port, true);
     }

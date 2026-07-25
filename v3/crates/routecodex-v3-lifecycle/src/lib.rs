@@ -92,6 +92,23 @@ pub struct V3ManagedStatusRecord {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3ManagedLifecycleObservation {
+    RestartTargetResolved {
+        instance_id: String,
+        control_instance_id: String,
+        listeners: Vec<V3ManagedListenerDeclaration>,
+    },
+    RestartControlAccepted {
+        instance_id: String,
+        state: V3ManagedRunState,
+        message: String,
+    },
+    RestartStatusObserved {
+        status: V3ManagedStatusRecord,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ManagedControlRecord {
@@ -474,6 +491,19 @@ impl V3ManagedLifecycle {
         executable_path: impl AsRef<Path> + Clone,
         timeout: Duration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
+        self.restart_with_observer(executable_path, timeout, |_| {})
+            .await
+    }
+
+    pub async fn restart_with_observer<F>(
+        &self,
+        executable_path: impl AsRef<Path> + Clone,
+        timeout: Duration,
+        mut observe: F,
+    ) -> Result<V3ManagedStatusRecord, V3LifecycleError>
+    where
+        F: FnMut(V3ManagedLifecycleObservation),
+    {
         let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
@@ -498,6 +528,12 @@ impl V3ManagedLifecycle {
                 )
             };
         control_declaration.executable_path = declaration.executable_path.clone();
+        observe(V3ManagedLifecycleObservation::RestartTargetResolved {
+            instance_id: declaration.instance_id.clone(),
+            control_instance_id: control_declaration.instance_id.clone(),
+            listeners: declaration.listeners.clone(),
+        });
+        let previous_start_nonce = read_pid_cache_start_nonce(&control_instance_dir)?;
         let response = match send_restart_control(
             &control_instance_dir,
             &control_declaration,
@@ -521,6 +557,15 @@ impl V3ManagedLifecycle {
                     V3ManagedRunState::Starting,
                     Some("restart recovered stale owned runtime".to_string()),
                 )?;
+                observe(V3ManagedLifecycleObservation::RestartStatusObserved {
+                    status: V3ManagedStatusRecord {
+                        schema_version: SCHEMA_VERSION,
+                        instance_id: declaration.instance_id.clone(),
+                        state: V3ManagedRunState::Starting,
+                        updated_at_epoch_ms: epoch_ms(),
+                        detail: Some("restart recovered stale owned runtime".to_string()),
+                    },
+                });
                 return self
                     .spawn_managed_child_after_state_published(
                         executable_path.as_ref(),
@@ -534,20 +579,52 @@ impl V3ManagedLifecycle {
         if !response.accepted {
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
+        observe(V3ManagedLifecycleObservation::RestartControlAccepted {
+            instance_id: response.instance_id.clone(),
+            state: response.state.clone(),
+            message: response.message.clone(),
+        });
+        let mut last_observed_status = None;
+        observe_status_if_changed(
+            &mut observe,
+            &mut last_observed_status,
+            &V3ManagedStatusRecord {
+                schema_version: SCHEMA_VERSION,
+                instance_id: response.instance_id.clone(),
+                state: response.state,
+                updated_at_epoch_ms: epoch_ms(),
+                detail: Some("control accepted".to_string()),
+            },
+        );
         let deadline = tokio::time::Instant::now() + timeout;
+        let mut restart_transition_observed = false;
         loop {
-            if let Ok(status) = self.query_live(&declaration).await {
-                if status.state == V3ManagedRunState::Running {
-                    return Ok(status);
-                }
-            }
             let status_path = instance_dir.join("status.json");
             if status_path.exists() {
                 let status: V3ManagedStatusRecord = read_json(&status_path)?;
+                if status.state != V3ManagedRunState::Running {
+                    restart_transition_observed = true;
+                    observe_status_if_changed(&mut observe, &mut last_observed_status, &status);
+                }
                 if status.state == V3ManagedRunState::Failed {
                     return Err(V3LifecycleError::Validation(status.detail.unwrap_or_else(
                         || "managed child failed during restart".to_string(),
                     )));
+                }
+            }
+            if let Ok(status) = self.query_live(&declaration).await {
+                if status.state == V3ManagedRunState::Running {
+                    let nonce_changed = pid_cache_start_nonce_changed(
+                        &instance_dir,
+                        previous_start_nonce.as_deref(),
+                    )?;
+                    if restart_transition_observed || nonce_changed {
+                        observe_status_if_changed(&mut observe, &mut last_observed_status, &status);
+                        return Ok(status);
+                    }
+                } else {
+                    restart_transition_observed = true;
+                    observe_status_if_changed(&mut observe, &mut last_observed_status, &status);
                 }
             }
             if tokio::time::Instant::now() >= deadline {
@@ -842,6 +919,23 @@ impl V3ManagedLifecycle {
     }
 }
 
+fn observe_status_if_changed<F>(
+    observe: &mut F,
+    last_observed_status: &mut Option<(V3ManagedRunState, Option<String>)>,
+    status: &V3ManagedStatusRecord,
+) where
+    F: FnMut(V3ManagedLifecycleObservation),
+{
+    let current = (status.state.clone(), status.detail.clone());
+    if last_observed_status.as_ref() == Some(&current) {
+        return;
+    }
+    *last_observed_status = Some(current);
+    observe(V3ManagedLifecycleObservation::RestartStatusObserved {
+        status: status.clone(),
+    });
+}
+
 async fn shutdown_managed_runtime(
     instance_dir: &Path,
     instance_id: &str,
@@ -1020,6 +1114,25 @@ fn instance_has_control_truth(instance_dir: &Path) -> bool {
     instance_dir.join("instance.json").exists()
         && instance_dir.join("pid.cache").exists()
         && instance_dir.join("control.json").exists()
+}
+
+fn read_pid_cache_start_nonce(instance_dir: &Path) -> Result<Option<String>, V3LifecycleError> {
+    let pid_path = instance_dir.join("pid.cache");
+    if !pid_path.exists() {
+        return Ok(None);
+    }
+    let pid: V3ManagedPidCache = read_json(&pid_path)?;
+    Ok(Some(pid.start_nonce))
+}
+
+fn pid_cache_start_nonce_changed(
+    instance_dir: &Path,
+    previous: Option<&str>,
+) -> Result<bool, V3LifecycleError> {
+    let Some(current) = read_pid_cache_start_nonce(instance_dir)? else {
+        return Ok(false);
+    };
+    Ok(previous.is_none_or(|previous| previous != current))
 }
 
 fn find_live_previous_owner_for_restart(

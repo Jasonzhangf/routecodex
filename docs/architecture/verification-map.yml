@@ -4045,6 +4045,7 @@ verification:
       - tests/cli/restart-command.probe-host.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
       - tests/utils/managed-server-pids.spec.ts
+      - v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs
     integration:
       - tests/utils/managed-server-pids.spec.ts
     smoke:
@@ -4058,6 +4059,7 @@ verification:
       - "Restart command must request restart from the existing process/session via /daemon/restart-process or SIGUSR2; it must not spawn start --restart as a takeover path when live version differs."
       - "Positive gate: configured/discovered member ports sharing one PID identity produce exactly one restart request and all member health probes pass."
       - "Negative gate: different non-empty PID identities fail before any restart IO; per-port broadcast loops are forbidden."
+      - "Console gate: top-level V3 restart must print command/version/config, target/control instance and listeners, control acceptance, observed status transitions, completed state, restarted server version/binary/address, and retain status JSON as the final parseable line."
 
   - feature_id: runtime.lifecycle.start_command
     change_risk: medium

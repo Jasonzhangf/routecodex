@@ -54,7 +54,7 @@ stale pid files or broad process kill commands.
 | Whitebox | `npm run verify:runtime-lifecycle-pid-rebase`; focused Jest for touched owner: `tests/utils/server-runtime-pid.spec.ts`, `tests/utils/daemon-stop-intent.spec.ts`, `tests/utils/runtime-instance-registry.spec.ts`, `tests/cli/start-command.spec.ts`, `tests/cli/stop-command.spec.ts`, `tests/cli/restart-command.spec.ts`. |
 | Blackbox | Managed `rcc start --snap`, `rcc stop --port <port>`, or `rcc restart --port <port>` only with explicit human approval; then `/health`, expected port-group behavior, and process lifecycle log evidence. Explicit `rcc start --restart --port <port>` is a guard/fail-fast test when a runtime already exists, not a stop/restart blackbox. |
 | Quality | No `pkill`, `killall`, `kill $(...)`, `xargs kill`, broad checkout/reset, stale pid truth, root `server-*.pid`, root `daemon-stop-*.json`, or top-level host reuse for explicit multi-port targets. |
-| Evidence | run log must include command, target port(s), expected and observed port group, health result, relevant `~/.rcc/logs/process-lifecycle.jsonl` summary, and whether pids were only hints. |
+| Evidence | run log must include command, target port(s), expected and observed port group, health result, relevant `~/.rcc/logs/process-lifecycle.jsonl` summary, whether pids were only hints, and restart console lifecycle lines when restart is the action: command/version/config, target/control instance, listeners, control acceptance, status transitions, completed state, server version/binary/address, final status JSON. |
 | Escalate | Any focused lifecycle Jest failure, port conflict, unmanaged listener, group expansion ambiguity, host/probe mismatch, or no checker. |
 
 ### `verification_gate_mapping`

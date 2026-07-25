@@ -3,7 +3,10 @@ use routecodex_v3_config::{
     default_v3_config_path, resolve_routecodex_package_version_from_executable,
     V3Config05ManifestPublished, V3ConfigStore,
 };
-use routecodex_v3_lifecycle::V3ManagedLifecycle;
+use routecodex_v3_lifecycle::{
+    V3ManagedLifecycle, V3ManagedLifecycleObservation, V3ManagedListenerDeclaration,
+    V3ManagedStatusRecord,
+};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -211,12 +214,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     snap,
                     snap_stages,
                 },
-        }
-        | Command::Restart {
-            config,
-            timeout_ms,
-            snap,
-            snap_stages,
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
@@ -225,6 +222,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_snapshot_stages(snap_stages)
                 .restart(&executable, Duration::from_millis(timeout_ms))
                 .await?;
+            println!("{}", serde_json::to_string(&status)?);
+        }
+        Command::Restart {
+            config,
+            timeout_ms,
+            snap,
+            snap_stages,
+        } => {
+            let config = resolve_config_path(config)?;
+            let executable = std::env::current_exe()?;
+            emit_v3_cli_start_console_line(
+                "restart",
+                &config,
+                &executable,
+                snap,
+                snap_stages.as_deref(),
+            );
+            let manifest = load_manifest(&config)?;
+            let status = V3ManagedLifecycle::new(config)?
+                .with_snapshots_enabled(snap)
+                .with_snapshot_stages(snap_stages)
+                .restart_with_observer(
+                    &executable,
+                    Duration::from_millis(timeout_ms),
+                    emit_v3_cli_lifecycle_observation,
+                )
+                .await?;
+            emit_v3_cli_restart_completed_console_line(&status);
+            emit_v3_cli_server_started_console_line(&manifest, &executable);
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Server {
@@ -303,5 +329,89 @@ fn emit_v3_cli_start_console_line(
         config.display(),
         snap,
         snap_stages.unwrap_or("")
+    );
+}
+
+fn emit_v3_cli_restart_completed_console_line(status: &V3ManagedStatusRecord) {
+    println!(
+        "[RouteCodexV3] Restart completed state={} instance={}",
+        format!("{:?}", status.state).to_ascii_lowercase(),
+        status.instance_id
+    );
+}
+
+fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation) {
+    match observation {
+        V3ManagedLifecycleObservation::RestartTargetResolved {
+            instance_id,
+            control_instance_id,
+            listeners,
+        } => {
+            println!(
+                "[RouteCodexV3] Restart target resolved instance={} control_instance={} listeners={}",
+                instance_id,
+                control_instance_id,
+                format_v3_managed_listener_declarations(&listeners)
+            );
+        }
+        V3ManagedLifecycleObservation::RestartControlAccepted {
+            instance_id,
+            state,
+            message,
+        } => {
+            println!(
+                "[RouteCodexV3] Restart control accepted state={} instance={} message={}",
+                format!("{:?}", state).to_ascii_lowercase(),
+                instance_id,
+                message
+            );
+        }
+        V3ManagedLifecycleObservation::RestartStatusObserved { status } => {
+            let detail = status
+                .detail
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!(" detail={value}"))
+                .unwrap_or_default();
+            println!(
+                "[RouteCodexV3] Restart status state={} instance={}{}",
+                format!("{:?}", status.state).to_ascii_lowercase(),
+                status.instance_id,
+                detail
+            );
+        }
+    }
+}
+
+fn format_v3_managed_listener_declarations(listeners: &[V3ManagedListenerDeclaration]) -> String {
+    listeners
+        .iter()
+        .map(|listener| {
+            format!(
+                "{}:{}({})",
+                listener.bind, listener.port, listener.server_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn emit_v3_cli_server_started_console_line(
+    manifest: &V3Config05ManifestPublished,
+    executable: &Path,
+) {
+    let addresses = manifest
+        .servers
+        .values()
+        .filter(|server| server.enabled)
+        .map(|server| format!("{}:{}", server.bind, server.port))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!(
+        "[RouteCodexV3] Server started version={} crate={} binary={} on {addresses}",
+        resolve_routecodex_package_version_from_executable(executable)
+            .unwrap_or_else(|| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION"),
+        executable.display()
     );
 }

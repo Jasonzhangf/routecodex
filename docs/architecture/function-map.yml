@@ -6341,6 +6341,8 @@ owners:
       - src/cli/commands/port-group-resolver.ts
       - src/cli/commands/restart.ts
       - src/cli/register/restart-command.ts
+      - v3/crates/routecodex-v3-cli/src/main.rs
+      - v3/crates/routecodex-v3-lifecycle/src/lib.rs
       - src/utils/managed-server-pids.ts
       - src/cli.ts
       - src/server/runtime/http-server/daemon-admin/restart-handler.ts
@@ -6359,6 +6361,7 @@ owners:
       - tests/cli/restart-command.spec.ts
       - tests/cli/restart-command.probe-host.spec.ts
       - tests/scripts/install-release-dependencies.spec.ts
+      - v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs
     required_gates:
       - npm run verify:runtime-lifecycle-pid-rebase
       - npm run verify:function-map-compile-gate
@@ -6369,6 +6372,7 @@ owners:
       - "Different non-empty listener PID sets must fail as multiple instances. Looping restart once per member port is forbidden."
       - "When a managed start parent exists, the child exits with restart code 75 and the original parent supervisor re-resolves current install entry and restarts the child in the same session."
       - "Default start and explicit `start --restart` must not be used as restart-command bypasses. If an existing listener is present, start.ts refuses before stop-intent or port shutdown and points callers to `rcc restart`; only explicit `--exclusive` remains a destructive takeover path."
+      - "Top-level V3 restart must make the full restart lifecycle observable in the invoking console: command/version/config, target/control instance and listeners, control acceptance, observed status transitions, completed state, restarted server version/binary/address, then machine-readable status JSON as the last line."
   - feature_id: runtime.lifecycle.start_command
     status: active
     summary: "CLI start owns server process launch and port takeover intent; occupied target ports are released before bind unless --no-restart forbids takeover"
