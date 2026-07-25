@@ -12,7 +12,7 @@ The required review phrase is endpoint binding complete only when the binding re
 
 ## Main Rule
 
-Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol, execution mode, implementation status, and Runtime owner. Responses Relay and Gemini relay implemented mean the registry points to their separately owned runtime features; this does not mean live/global/prod compatibility.
+Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol, execution mode, implementation status, and Runtime owner. Responses Direct and Gemini relay implemented mean the registry points to their separately owned runtime features; explicit Responses Relay remains separately test-bound and does not mean default/live/global/prod cutover.
 
 Binding resources are side-channel governance truth. They may not enter provider body, client body, metadata payload, debug payload, provider runtime state, or request payload. live/global/prod not claimed by this source slice.
 
@@ -49,7 +49,7 @@ flowchart TD
 - Every exposed `/v1/*` or `/v1beta/*` business endpoint has exactly one binding.
 - Config allowed protocols, manifest declarations, and Server endpoint exposure are equal.
 - Server has no `endpoint_protocol()` duplicate registry and no raw path runtime bypass.
-- Responses Relay source binding is explicit and bound to `v3.hub_relay_runtime_closeout`; manual Direct remains a separately declared config possibility, not the V2 default projection.
+- Responses Direct is the V2/default `/v1/responses` projection and is bound to `v3.responses_direct_mvp_architecture`; Responses Relay remains an explicit controlled binding for `v3.hub_relay_runtime_closeout`, not the default projection.
 - Gemini relay implemented is explicit and bound to `v3.gemini_relay_runtime_integration`.
 - No unbound endpoint can fall through to generic foundation pending.
 - Binding resources are forbidden from provider/client body.
@@ -59,7 +59,7 @@ flowchart TD
 
 Config publishes the closed four-protocol registry. Server consumes
 `entry_protocol_binding_for_endpoint` before dispatch. Responses now enters the separately owned
-Responses Relay source runtime by default for V2 projection, Gemini enters its separately owned
+Responses Direct source runtime by default for V2 projection, Gemini enters its separately owned
 controlled Relay Runtime, and the entry-binding verifier/red fixtures lock the source integration.
 
 This surface does not prove a real Responses/Gemini provider, credentials, install, restart, release,

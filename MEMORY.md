@@ -4643,3 +4643,10 @@ Tags: #routecodex #5520 #10000 #gpt56-routing-removed #encrypted-reasoning
 - Owner: Rust planner plan_primary_exhausted_to_default_pool; host only passes route tiers + routing-group default route tiers and consumes plan.
 - Forbidden: handler/SSE/Error06/http-error-mapper as provider-switch owner; no fallback.
 - Live baseline after 0.90.3982: 5520 aggregate health ok; probe /v1/responses returns 200; provider-switch path active.
+
+
+## 2026-07-25 - V3 /v1/responses Direct default + console provider.model observability
+- Default V3/V2-compat entry binding for `/v1/responses` is Direct (`execute_v3_responses_direct_runtime_kernel...`). Explicit Relay remains controlled, not default.
+- Console started/route/terminal/error lines for Responses must use Runtime observability selected `provider.model` and route after target selection; pre-route request-model/`pending` started lines are forbidden for Direct/Relay Responses.
+- Relay provider SSE codec must map known Responses events including `response.reasoning_summary_part.*` and `response.reasoning_summary_text.*`; unknown events fail-fast without silent discard. Codec false-failure must not be treated as provider failure that switch/cooldown.
+- Live proof on 0.90.3982 4444: Direct smoke and exact old-sample replay both show `execution_mode=direct`, selected `cc.gpt-5.5`, completed, and no unsupported/switch/cooldown from reasoning_summary codec.

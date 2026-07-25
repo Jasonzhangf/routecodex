@@ -809,14 +809,21 @@ async fn pending_endpoint(
     } else {
         None
     };
-    emit_v3_request_start_console_line(
-        &state,
-        &entry_protocol,
-        &path,
-        &request_id,
-        &request_headers,
-        &payload,
-    );
+    if !(entry_protocol == "responses"
+        && matches!(
+            execution_mode,
+            V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay
+        ))
+    {
+        emit_v3_request_start_console_line(
+            &state,
+            &entry_protocol,
+            &path,
+            &request_id,
+            &request_headers,
+            &payload,
+        );
+    }
     let request_console_project_path = resolve_v3_console_project_path(&request_headers, &payload);
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
@@ -2946,6 +2953,29 @@ fn format_v3_provider_switch_console_content(
     )
 }
 
+fn emit_v3_request_start_console_line_for_observability(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+) {
+    if !context.state.console_enabled {
+        return;
+    }
+    let stream = context.payload.get("stream").and_then(Value::as_bool) == Some(true);
+    let accepts_sse = request_accepts_sse(&context.headers) || stream;
+    let raw_input_items = response_input_item_count(context.payload.get("input"));
+    let identity = resolve_v3_console_log_identity(context);
+    let content = format_v3_console_timed_content(
+        &format!("▶ [{}]", context.endpoint),
+        &format!(
+            "req={} event=started stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none",
+            context.request_id, stream, accepts_sse, raw_input_items, raw_input_items
+        ),
+    );
+    let line =
+        format_v3_console_line_for_observability(context, &identity, observability, &content);
+    emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
+}
+
 fn emit_v3_request_route_console_line(
     context: &V3ConsoleEmissionContext,
     observability: &V3RuntimeObservability,
@@ -3110,6 +3140,7 @@ fn emit_v3_observability_console_lines(
     started_at: Instant,
     include_usage: bool,
 ) {
+    emit_v3_request_start_console_line_for_observability(context, observability);
     emit_v3_provider_observability_console_lines(context, observability);
     emit_v3_request_route_console_line(context, observability);
     if include_usage {
@@ -6799,13 +6830,17 @@ mod tests {
 
         let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
         assert!(
-            log.contains("❌ [provider-error]")
+            log.contains("▶ [/v1/responses]")
+                && log.contains("[second.gpt-5.5")
+                && !log.contains("[gpt-5.5")
+                && !log.contains("[pending")
+                && log.contains("❌ [provider-error]")
                 && log.contains("[provider-switch]")
                 && log.contains("[virtual-router-hit]")
                 && log.contains("event=completed")
                 && log.contains("[usage]")
                 && log.contains("req=req-direct-console-json"),
-            "direct JSON console must expose provider failure/switch, route hit, terminal completion and usage: {log}"
+            "direct JSON console must emit start/route/terminal lines from pipeline observability provider.model, not request model or pre-route pending scope: {log}"
         );
         let _ = std::fs::remove_file(&log_file);
     }
@@ -6905,7 +6940,12 @@ mod tests {
         let response = responses_direct_output_response_with_console(frame, finalizer);
         assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
 
-        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        let raw_log = std::fs::read_to_string(&log_file).unwrap();
+        let log = strip_test_ansi(&raw_log);
+        assert!(
+            raw_log.contains(ANSI_ERROR_RED) && log.contains("event=failed"),
+            "direct SSE transport error must be visibly red in raw console log: {raw_log:?}"
+        );
         assert!(
             log.contains("event=failed")
                 && log.contains("sessionID:direct-console-test")

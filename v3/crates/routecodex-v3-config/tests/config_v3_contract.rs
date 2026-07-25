@@ -250,6 +250,16 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
         V3HubFixedNode::ALL.len() * V3HubHookPhase::ALL.len()
     );
     assert_eq!(hub_v1.entry_protocol_bindings.len(), 4);
+    let responses = hub_v1
+        .entry_protocol_bindings
+        .iter()
+        .find(|binding| binding.entry_protocol == "responses")
+        .expect("responses binding");
+    assert_eq!(responses.execution_mode.as_str(), "direct");
+    assert_eq!(
+        responses.runtime_owner_symbol.as_deref(),
+        Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")
+    );
 
     let execution = manifest.servers["primary"]
         .execution
@@ -1072,9 +1082,9 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/responses")
         .is_some_and(|binding| binding.entry_protocol == "responses"
-            && binding.execution_mode.as_str() == "relay"
+            && binding.execution_mode.as_str() == "direct"
             && binding.runtime_owner_symbol.as_deref()
-                == Some("execute_v3_responses_relay_runtime_with_default_transport")));
+                == Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")));
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/chat/completions")
         .is_some_and(|binding| binding.entry_protocol == "openai_chat"));
@@ -1240,7 +1250,9 @@ fn v2_compat_keeps_responses_endpoint_for_minimax_only_5555() {
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/responses")
         .is_some_and(|binding| binding.entry_protocol == "responses"
-            && binding.execution_mode.as_str() == "relay"));
+            && binding.execution_mode.as_str() == "direct"
+            && binding.runtime_owner_symbol.as_deref()
+                == Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")));
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/messages")
         .is_some_and(|binding| binding.entry_protocol == "anthropic"));
@@ -1360,16 +1372,14 @@ fn v2_compat_projects_gpt_responses_remote_capabilities_without_websocket() {
         provider.responses.as_ref().unwrap().transport.as_str(),
         "http"
     );
-    assert_eq!(
-        provider.models["gpt-5.6-sol"].capabilities,
-        [
-            "reasoning",
-            "text",
-            "tools",
-            "remote_continuation",
-            "tool_outputs"
-        ]
-    );
+    let capabilities = &provider.models["gpt-5.6-sol"].capabilities;
+    assert_eq!(capabilities, &["reasoning", "text", "tools"]);
+    assert!(!capabilities
+        .iter()
+        .any(|capability| capability == "remote_continuation"));
+    assert!(!capabilities
+        .iter()
+        .any(|capability| capability == "tool_outputs"));
 
     fs::remove_dir_all(root).unwrap();
 }

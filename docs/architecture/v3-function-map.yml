@@ -2054,7 +2054,7 @@ features:
       - global install
       - restart
     required_contract:
-      - responses binds only /v1/responses and may use an explicitly declared direct or relay implemented runtime owner; V2 default projection now points at Responses Relay
+      - responses binds only /v1/responses and V2/default projection points at Responses Direct; explicit Relay remains a controlled runtime binding, not the default
       - anthropic binds only /v1/messages to relay implemented runtime owner
       - openai_chat binds only /v1/chat/completions to relay implemented runtime owner
       - gemini binds /v1beta/models/:model/generateContent to relay implemented Gemini runtime owner
@@ -2156,6 +2156,8 @@ features:
       - responses_relay_local_continuation_integration::wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
       - responses_relay_runtime::anthropic_provider_sse_message_stop_closes_open_thinking_block_without_502
       - responses_relay_runtime::anthropic_provider_sse_message_stop_does_not_close_open_tool_block
+      - responses_relay_runtime::responses_provider_sse_reasoning_summary_events_materialize_without_provider_failure
+      - responses_relay_runtime::responses_provider_sse_unknown_response_event_fails_instead_of_discarding
       - verify-v3-hub-relay-runtime-closeout
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs

@@ -33,7 +33,6 @@ flowchart TD
   module_scripts -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|12 edges / 4 paths| module_v3_config
-  module_v3_config -->|1 edges / 1 paths| module_v3_runtime__hub_v1
   module_v3_lifecycle -->|6 edges / 1 paths| module_v3_lifecycle
   module_v3_lifecycle -->|1 edges / 1 paths| module_v3_server
   module_v3_provider_responses -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -52,7 +51,7 @@ flowchart TD
   module_v3_server -->|1 edges / 1 paths| module_v3_debug
   module_v3_server -->|2 edges / 1 paths| module_v3_error
   module_v3_server -->|2 edges / 2 paths| module_v3_runtime
-  module_v3_server -->|4 edges / 4 paths| module_v3_runtime__hub_v1
+  module_v3_server -->|5 edges / 4 paths| module_v3_runtime__hub_v1
   module_v3_server -->|13 edges / 8 paths| module_v3_server
 ```
 
@@ -63,7 +62,6 @@ flowchart TD
 | scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 12 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline` |
-| v3-config | v3-runtime::hub_v1 | 1 | `v3.responses_relay.source_server_entry` |
 | v3-lifecycle | v3-lifecycle | 6 | `v3.server.managed_lifecycle` |
 | v3-lifecycle | v3-server | 1 | `v3.server.managed_lifecycle` |
 | v3-provider-responses | routecodex-v3-sse | 1 | `v3.sse.transport_boundary` |
@@ -82,7 +80,7 @@ flowchart TD
 | v3-server | v3-debug | 1 | `v3.server.startup` |
 | v3-server | v3-error | 2 | `v3.server.startup` |
 | v3-server | v3-runtime | 2 | `v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
-| v3-server | v3-runtime::hub_v1 | 4 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
+| v3-server | v3-runtime::hub_v1 | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-server | v3-server | 13 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 
 ## Auto audit /补救清单
@@ -1286,15 +1284,12 @@ flowchart TD
 
 ## v3.responses_relay.source_server_entry
 
-Source-only Responses /v1/responses Relay cutover binding: V2 default config projects Relay owner, Server dispatch enters Responses Relay runtime before Direct/P6, and controlled JSON/SSE/dry-run tests prove one fixed Hub Relay lifecycle without live cutover.
+Source-only explicit Responses /v1/responses Relay binding: controlled manifests may bind Relay, while V2/default projection remains Direct; Server dispatch enters the declared Relay runtime only for that explicit binding, and controlled JSON/SSE/dry-run tests prove one fixed Hub Relay lifecycle without default cutover.
 
 Owner feature: `v3.hub_relay_runtime_closeout`
 
 ```mermaid
 flowchart TD
-  subgraph c_29_v3_responses_relay_source_server_entry_m_v3_config["v3-config"]
-    c_29_v3_responses_relay_source_server_entry_0["v3-config<br/>default_hub_v1_authoring<br/><small>routecodex-v3-config/src/defaults.rs</small>"]
-  end
   subgraph c_29_v3_responses_relay_source_server_entry_m_v3_provider_responses["v3-provider-responses"]
     c_29_v3_responses_relay_source_server_entry_6["v3-provider-responses<br/>V3Transport13ResponsesRequest::redacted_provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
   end
@@ -1304,6 +1299,7 @@ flowchart TD
     c_29_v3_responses_relay_source_server_entry_5["v3-runtime::hub_v1<br/>execute_v3_responses_relay_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
   end
   subgraph c_29_v3_responses_relay_source_server_entry_m_v3_server["v3-server"]
+    c_29_v3_responses_relay_source_server_entry_0["v3-server<br/>responses_relay_manifest<br/><small>routecodex-v3-server/tests/multi_listener_server.rs</small>"]
     c_29_v3_responses_relay_source_server_entry_2["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_29_v3_responses_relay_source_server_entry_4["v3-server<br/>responses_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
@@ -1315,7 +1311,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-relay-server-01` | `V3Config05ManifestPublished` → `V3EntryBind04ExecutionBindingProjected` | anchored | default_hub_v1_authoring<br/><small>routecodex-v3-config/src/defaults.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
+| `v3-responses-relay-server-01` | `V3Config05ManifestPublished` → `V3EntryBind04ExecutionBindingProjected` | anchored | responses_relay_manifest<br/><small>routecodex-v3-server/tests/multi_listener_server.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-02` | `V3EntryBind04ExecutionBindingProjected` → `V3HubReqInbound01ClientRaw` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-03` | `V3HubReqInbound01ClientRaw` → `V3ServerRespOutbound06ClientFrame` | anchored | execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | responses_relay_output_response<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.hub_relay_runtime_closeout` |
 | `v3-responses-relay-server-04` | `V3ProviderReqOutbound09TransportRequest` → `V3DryRunNoNetworkTerminalEffect` | anchored | execute_v3_responses_relay_dry_run_runtime<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | V3Transport13ResponsesRequest::redacted_provider_request_projection<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.hub_relay_runtime_closeout` |

@@ -33232,3 +33232,15 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Installed live: 0.90.3982 on 5520/10000.
 - Live after fix: same-entry /v1/responses 200 with ROUTECODEX_V2_429_DEFAULT_POOL_OK; traffic shows provider-switch and reselect to asxs-grok.composer-2.5 after cc failures (not no-switch 429).
 - Remaining risk: no forced exact concurrency-busy 429 after install; natural no-switch 429 not observed post-3982. Also same-route multi-tier without backup=true still depends on VR selection (status shows free unavailable / paid available, and live hits paid).
+
+
+## 2026-07-25T19:52+0800 V3 responses Direct + console provider.model closeout
+- Jason correction: `/v1/responses` same-protocol must go Direct, not Relay; known Responses events including `response.reasoning_summary_*` must map correctly instead of unsupported; console provider.model must come from pipeline observability, not request payload/pending or SSE transport; terminal errors must be red; codec false-failure must not switch/cooldown.
+- Root owners fixed:
+  1. `v3/crates/routecodex-v3-config/src/defaults.rs` + V2 compat keep responses binding Direct.
+  2. `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs` maps reasoning_summary/content_part/reasoning_text events for explicit Relay only.
+  3. `v3/crates/routecodex-v3-server/src/lib.rs` emits Responses started/error/route/complete/usage after target selection from observability `provider.model`.
+- Live install/restart: isolated worktree install produced global `0.90.3982`; `routecodex restart --port 4444` restarted aggregate 4444/5555; health ok.
+- Live Direct smoke: sample `openai-responses-router-gpt-5.5-20260725T194405097-629503-10389` log proves `execution_mode=direct`, nodes `V3ResponsesDirect11Policy`/`V3DirectResp*`, started line `[cc.gpt-5.5][default]`, completed, no unsupported/provider-switch/cooldown; client returned `DIRECT_OK` + `response.completed`.
+- Exact old-sample replay: original request body from `...181045335-627694-8580` replayed as sample `...194601634-629504-10390`; log proves Direct + `[cc.gpt-5.5][coding]` started, completed, no unsupported/provider-error/switch/cooldown; client got `response.completed` and function_call stream.
+- Residual: Direct path intentionally does not re-materialize provider SSE through Relay codec; reasoning_summary mapping remains Relay safety net. Unrelated dirty worktree files preserved.
