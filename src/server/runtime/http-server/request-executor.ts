@@ -900,11 +900,18 @@ export class HubRequestExecutor implements RequestExecutor {
             const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
               ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, primaryExhaustedRoute) ?? []
               : [];
+            const primaryExhaustedDefaultRouteTiers = primaryExhaustedRoute && typeof metadataForAttempt.routecodexRoutingPolicyGroup === 'string'
+              ? this.deps.getRoutingTiers?.(metadataForAttempt.routecodexRoutingPolicyGroup, 'default') ?? []
+              : [];
             const plan = resolvePrimaryExhaustedPlan({
               route: primaryExhaustedRoute ?? '',
               tiers: primaryExhaustedTiers,
+              defaultRouteTiers: primaryExhaustedDefaultRouteTiers,
               exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
-              knownTargets: collectPrimaryExhaustedKnownTargets(primaryExhaustedTiers)
+              knownTargets: collectPrimaryExhaustedKnownTargets(
+                primaryExhaustedTiers,
+                primaryExhaustedDefaultRouteTiers,
+              )
             });
             logStage('provider.primary_exhausted_to_default_pool.evaluated', providerRequestId, {
               planStatus: plan.status,
@@ -912,7 +919,8 @@ export class HubRequestExecutor implements RequestExecutor {
               defaultPoolTargets: plan.defaultPoolTargets,
               fromTierId: plan.fromTierId ?? null,
               exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
-              excludedProviderKeys: Array.from(excludedProviderKeys)
+              excludedProviderKeys: Array.from(excludedProviderKeys),
+              defaultRouteTierCount: primaryExhaustedDefaultRouteTiers.length
             });
             if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
               excludedProviderKeys.clear();

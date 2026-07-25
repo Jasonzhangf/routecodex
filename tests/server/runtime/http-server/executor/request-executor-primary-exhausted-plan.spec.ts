@@ -89,8 +89,37 @@ describe('request-executor primary exhausted plan bridge', () => {
       knownTargets: [searchProvider, defaultProvider],
       tiers: [
         { id: 'search-primary', targets: [searchProvider], priority: 200 },
-        { id: 'default-primary', targets: [defaultProvider], priority: 100, backup: true },
       ],
+      defaultRouteTiers: [
+        { id: 'default-primary', targets: [defaultProvider], priority: 100 },
+      ],
+    });
+
+    expect(plan).toEqual({
+      status: 'default_pool',
+      defaultPoolTargets: [defaultProvider],
+      fromTierId: 'default-primary',
+      fromTierPriority: 100,
+    });
+  });
+
+  it('[forward] route without backup tier still resolves routing-group default route targets', () => {
+    const primaryProvider = 'thinking.key1.gpt-5.5';
+    const defaultProvider = 'default.key1.gpt-5.5';
+
+    const plan = coreUtilsModule.resolvePrimaryExhaustedPlan({
+      route: 'thinking',
+      tiers: [
+        { id: 'thinking-primary', targets: [primaryProvider], priority: 200 },
+      ],
+      defaultRouteTiers: [
+        { id: 'default-primary', targets: [defaultProvider], priority: 100 },
+      ],
+      exhaustedTargets: [primaryProvider],
+      knownTargets: coreUtilsModule.collectPrimaryExhaustedKnownTargets(
+        [{ targets: [primaryProvider] }],
+        [{ targets: [defaultProvider] }],
+      ),
     });
 
     expect(plan).toEqual({
@@ -122,13 +151,19 @@ describe('request-executor primary exhausted plan bridge', () => {
   });
 
   it('[forward] known target collection preserves raw route target ids and dedupes in-order', () => {
-    expect(coreUtilsModule.collectPrimaryExhaustedKnownTargets([
-      { targets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'] },
-      { targets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3'] },
-    ])).toEqual([
+    expect(coreUtilsModule.collectPrimaryExhaustedKnownTargets(
+      [
+        { targets: ['fwd.gpt.gpt-5.5', 'halphen.glm-5.2'] },
+        { targets: ['fwd.gpt.gpt-5.5', 'fwd.minimax.MiniMax-M3'] },
+      ],
+      [
+        { targets: ['fwd.default.gpt-5.5', 'fwd.minimax.MiniMax-M3'] },
+      ],
+    )).toEqual([
       'fwd.gpt.gpt-5.5',
       'halphen.glm-5.2',
       'fwd.minimax.MiniMax-M3',
+      'fwd.default.gpt-5.5',
     ]);
   });
 

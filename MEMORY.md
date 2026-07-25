@@ -1,3 +1,10 @@
+
+## 2026-07-25 - V3 Responses Relay accepts known reasoning summary SSE events
+- Verified root cause: Responses Relay provider SSE codec rejected `response.reasoning_summary_part.added` / related known OpenAI Responses reasoning events as unsupported, which entered provider failure policy and triggered switch/cooldown.
+- Durable rule: known Responses reasoning summary/content/content_part events must materialize into terminal output items at `responses_relay_runtime` provider event codec; unknown `response.*` events still fail-fast. Do not convert known reasoning summary events into provider failure or silent discard.
+- Evidence: red/green unit `responses_provider_sse_reasoning_summary_events_materialize_without_provider_failure`; reverse `responses_provider_sse_unknown_response_event_fails_instead_of_discarding`.
+- Remaining: global install/restart/live sample replay not claimed in this source fix.
+
 # 2026-07-18: direct provider.model runtimes bypass scope during init; V3 compat profile loads via provider-compat-core
 
 - In `src/server/runtime/http-server/http-server-runtime-providers.ts`, `targetRuntime` direct candidates must bypass `routingProviderScope` when initializing provider runtimes. Only base `runtime` remains scope-filtered. This prevents direct routes from failing with `Provider runtime <runtimeKey> not found`.
@@ -4604,3 +4611,35 @@ Tags: #v3-architecture #review-surface #request-response-split #error-resources
 - Live V3 config now places the glmrelay fake-success matcher under `providers.glmrelay_openai.semantic_error_policy[]` in both `/Volumes/extension/.rcc/config.v3.toml` and `/Users/fanzhang/.rcc/config.v3.toml`; the shared `error.client_error_projection_policy` stays global by `reason_code`.
 - Verified current installed `rccv3 config check -c` accepts the provider-local syntax for both files, and 4444/5555 health stayed OK after `routecodex restart --port 5555`.
 - Live replay after restart proved provider failures still enter retry/reselect; the exact 200 zero-usage diagnostic branch did not recur during this run, so its post-change live proof remains opportunistic while source/config gates are closed.
+
+## 2026-07-25 — 5520 paid asxs-grok group
+- Live V2 config now has provider `asxs-grok` at `https://api.asxs.top/v1` with auth `${CC_TT_KEY}`, default model `composer-2.5`, and models `composer-2.5` / `grok-4.5`. The provider config lives at `/Volumes/extension/.rcc/provider/asxs-grok/config.v2.toml`; `/Users/fanzhang/.rcc/provider/asxs-grok/config.v2.toml` resolves to the same live file.
+- `gateway_priority_5520` paid tier order is `fwd.paid.composer-2.5` -> `fwd.paid.grok-4.5` -> `fwd.paid.gpt-5.5` across coding/thinking/longcontext/tools/search/web_search/multimodal/default. Free tiers and the multi-port `[5520,10000]` V2 semantics were preserved.
+- Verified closeout: upstream `CC_TT_KEY` probes passed for both models; `routecodex config validate`, provider doctor for both models, aggregate `routecodex restart --port 5520`, health on 5520/10000, `routecodex port status 5520`, and live `/v1/responses` direct model probes all passed. Direct model probes should use provider-qualified names (`asxs-grok.composer-2.5`, `asxs-grok.grok-4.5`); bare `composer-2.5` / `grok-4.5` still go through normal route policy rather than forcing that provider.
+
+## 2026-07-25 — asxs-grok grok-4.5 context truth
+- Real upstream `/v1/responses` probes with `CC_TT_KEY` proved `asxs-grok` `grok-4.5` is 500k-class, not 256k: `260198`, `400198`, `450198`, `490198`, and `499198` input-token requests all returned HTTP 200 completed; the 499k retry returned `total_tokens=499279`.
+- `/v1/models` for the provider exposes model IDs but no context metadata, so context truth must come from live usage/probe evidence. One first 499k attempt hit an `IncompleteRead` transport glitch, but same-size retry succeeded.
+
+## 2026-07-25 5520/10000 GPT-5.6 routing removal
+- Production baseline: active V2 config `/Volumes/extension/.rcc/config.toml` (same inode as `/Users/fanzhang/.rcc/config.toml`) no longer routes to GPT-5.6 models. Removed `fwd.free.gpt-5.6-sol`, `fwd.paid.gpt-5.6-luna`, `fwd.paid.gpt-5.6-terra` forwarders and removed `cc-sol.gpt-5.6-sol` / `fwd.free.gpt-5.6-sol` from 5520 and 10000 routing groups. Reason: GPT-5.6 encrypted reasoning content must not be mixed into GPT-5.5 routing; fix is config route removal, not runtime fallback/compensation.
+- Verified after `routecodex restart --port 5520`: 5520/10000 health OK on `0.90.3979`; `routecodex port status 5520 --json` and `routecodex port status 10000 --json` contain no `gpt-5.6`, `cc-sol`, or `asxs-cc`; 5520 `/v1/models` exposes no `gpt-5.6`.
+Tags: #routecodex #5520 #10000 #gpt56-routing-removed #encrypted-reasoning
+## 2026-07-25 — V3 direct must follow V2 HTTP parity
+- V3 direct `cc.gpt-5.5` must not invent a `remote_continuation` / WebSocket prerequisite for HTTP-only JSON or SSE `function_call` continuation. If V2 direct HTTP already handles the turn, V3 direct should use the same exact-pin continuation behavior and fail only on real provider/runtime errors.
+- Provider HTTP submit flow for V3 Responses must rewrite `response_id` + `tool_outputs` to `/v1/responses/{id}/submit_tool_outputs`; leaving those fields on plain `/v1/responses` is a protocol mismatch.
+- Verification closeout for this slice: focused V3 runtime `http_only_*` tests passed, provider submit endpoint test passed, and config contract tests passed for the direct/default hub binding and GPT-5.6 capability projection.
+
+# 2026-07-25: V3 4444 GPT-5.6 / invalid API-key route removal
+- Root cause: V3 live `config.v3.toml` still carried stale generated 4444 routing/provider declarations after V2 5520 had removed GPT-5.6. The active 4444 group `gateway_priority_5520` still expanded `cc-sol.gpt-5.6-sol`, `asxs-cc.gpt-5.6-luna/terra`, and `asxs.gpt-5.5`; these produced GPT-5.6 mixing and 401 `API Key 无效` during `gpt-5.5` routing. Fix belongs to live V3 config authoring/manifest route surface, not runtime fallback, provider sanitizer, or error projection.
+- Verified fix: `/Volumes/extension/.rcc/config.v3.toml` and `~/.rcc/config.v3.toml` are the same inode; removed active V3 `cc-sol`/`asxs-cc` GPT-5.6 providers/forwarders and the invalid-key `asxs` target, leaving 4444 pools ordered `fwd.free.gpt-5.5 -> fwd.paid.composer-2.5 -> fwd.paid.grok-4.5 -> fwd.paid.gpt-5.5`. Backup: `/Volumes/extension/.rcc/config.v3.toml.bak-20260725T095233Z-remove-gpt56-invalid-route`.
+- Live evidence: `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` PASS; `routecodex restart --port 4444` restarted aggregate `4444,5555`; both `/health` endpoints OK; `/v1/models` and `routecodex port status 4444/5555 --json` contain no `gpt-5.6`, `cc-sol`, `asxs-cc`, or `asxs.gpt-5.5`.
+- Old sample replay: original request `openai-responses-router-gpt-5.5-20260725T172735018-627343-8229` replayed on 4444 returned HTTP 200 SSE with `response.completed`/`response.done`, selected only `cc[key1].gpt-5.5`, and log/body had no `API Key 无效` or `authentication_error`. Fresh marker smoke `ROUTECODEX_NO_GPT56_OK` also returned HTTP 200/completed with no forbidden provider strings.
+- Reusable rule: after removing a model family from V2 live routing, inspect V3 native `config.v3.toml` and the installed runtime status separately; generated V3 blocks do not automatically inherit V2 cleanup. Remove bad active route candidates from config authoring, keep provider directories/secrets unless authorized, then validate, aggregate-restart with `routecodex restart --port <locator>`, check all member ports, `/v1/models`, `port status`, and exact old-sample replay.
+
+## 2026-07-25 V2 route-selection HTTP_429 must continue to default pool
+- feature_id: virtual_router.primary_exhausted_to_default_pool
+- Rule: any provider/route-selection 429/auth/quota/unavailable is switchable until current/optional pool + default pool are both empty.
+- Owner: Rust planner plan_primary_exhausted_to_default_pool; host only passes route tiers + routing-group default route tiers and consumes plan.
+- Forbidden: handler/SSE/Error06/http-error-mapper as provider-switch owner; no fallback.
+- Live baseline after 0.90.3982: 5520 aggregate health ok; probe /v1/responses returns 200; provider-switch path active.

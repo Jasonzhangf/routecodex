@@ -416,6 +416,7 @@ Required gates:
 Notes:
 - Host must consume Rust plan only; no local synthesis of default-pool chain.
 - Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership.
+- When the current route has no backup tier, host must also pass routing-group default route tiers (`defaultRouteTiers`) so Rust can plan primary_exhausted -> group default pool.
 - Unknown target and empty default-pool are explicit contract states, never fallback.
 - Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list.
 - Ordinary route-pool removal must not project terminal no-provider while default pool still retains its last provider; this guard is part of the Rust-owned plan/consumer contract, not a handler/executor-local reinterpretation.

@@ -82,13 +82,6 @@ function readPlanRemainingRouteCandidateCount(plan: DirectRetryPlanLike): number
   )).length;
 }
 
-function isExplicitDirectRoute(plan: DirectRetryPlanLike, routeName?: string): boolean {
-  const effectiveRouteName = typeof routeName === 'string' && routeName.trim()
-    ? routeName.trim()
-    : (typeof plan.routeName === 'string' ? plan.routeName.trim() : '');
-  return effectiveRouteName === 'direct';
-}
-
 function rethrowDecision(error: unknown, excluded: ReadonlySet<string>): DirectRetryDecision {
   return {
     action: 'rethrow',
@@ -156,9 +149,6 @@ export function decideDirectRouterRetry(args: DecideDirectRouterRetryArgs): Dire
     return rethrowDecision(error, excludedProviderKeys);
   }
   if (remainingCandidates <= 0) {
-    if (isExplicitDirectRoute(retryExecutionPlan, routeName)) {
-      return rethrowDecision(error, excludedProviderKeys);
-    }
     if (
       retryExecutionPlan.defaultPoolAvailable === true
       && retryExecutionPlan.mayProject !== true

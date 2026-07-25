@@ -1042,6 +1042,7 @@ verification:
       - "Primary exhausted -> default pool contract must stay Rust-owned; host only consumes plan."
       - "Host verification must prove real route-tier extraction stays ordered, route-scoped, and unflattened before calling Rust."
       - "Forward and reverse candidate-exhaustion cases both required; no local fallback chain synthesis."
+      - "Route without backup tier must still select routing-group default route targets before projecting provider/route 429."
       - "When ordinary route candidates are excluded, verification must prove terminal no-provider is blocked while default pool still has a last provider."
 
       - "daemon-admin and control plane must reuse module-owned control surface and must not grow a second adapter or mutator entrypoint."

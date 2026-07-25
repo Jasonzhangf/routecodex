@@ -1,3 +1,12 @@
+
+# 2026-07-25T18:35+08:00 V3 Responses Relay reasoning summary SSE codec fix
+
+- Live 4444 failed on `response.reasoning_summary_part.added is unsupported`, then VR switched providers and cooled 55ai.
+- Root cause: `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs` provider event codec only allowed output_item/output_text/function_call events; known OpenAI Responses reasoning summary events were treated as unsupported and became provider_error.
+- Fix: materialize known reasoning summary/content/content_part events into terminal output items; keep unknown `response.*` fail-fast.
+- Verification: red test first failed on unsupported event; green after fix; reverse unknown-event test still fails closed.
+- Remaining: no global install/restart/live replay yet; live closeout still needed before claiming production fixed.
+
 # 2026-07-18T13:02+08:00 V3 direct targetRuntime init / compat profile loading
 
 - Direct `provider.model` runtime missing came from `initializeProviderRuntimes` filtering `targetRuntime` candidates through `routingProviderScope`. That left direct model routes with no initialized handle and produced `Provider runtime 1token.key1 not found`.
@@ -33168,3 +33177,58 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Live blackbox replay against 5555 using an existing request body returned 200 completed after provider failures were rerouted through the provider failure path; this run hit 500 new_api_panic failures, not the specific HTTP 200 zero-usage diagnostic branch.
 - Existing pre-change samples/logs prove the policy matcher maps HTTP 200 diagnostic zero-usage provider bodies to `provider_semantic_error` and `switch_provider`; post-change source/config checks prove the same policy now comes from provider-local authoring.
 - Remaining risk: no post-change live provider response happened to reproduce the exact 200 zero-usage diagnostic branch; next natural live occurrence should confirm the same log line under provider-local config.
+
+## 2026-07-25T15:55+08:00 5520 asxs-grok paid group config closeout
+- Scope: V2 live config only. No repo runtime/source changes, no V3 config changes, no `/Users/fanzhang/github/rules` mutation, no broad kill/start fallback.
+- Diagnosis owner: `config.user_config_materialization.mainline`; first divergence was live authoring surface missing an asxs Grok/Composer provider profile and 5520 paid forwarder/tier bindings.
+- Upstream evidence with `CC_TT_KEY`: direct `https://api.asxs.top/v1/responses` returned HTTP 200/completed/OK for `composer-2.5` and `grok-4.5`; streaming tool probes for both returned `response.completed` and valid `lookup_weather` function calls with final SSE delimiter.
+- Config change: added `/Volumes/extension/.rcc/provider/asxs-grok/config.v2.toml` (`providerId=asxs-grok`, auth `${CC_TT_KEY}`, default `composer-2.5`, models `composer-2.5` and `grok-4.5`) and added forwarders `fwd.paid.composer-2.5` / `fwd.paid.grok-4.5` to `/Volumes/extension/.rcc/config.toml`; `/Users/fanzhang/.rcc` resolves to the same live files.
+- 5520 paid order is now identical for coding/thinking/longcontext/tools/search/web_search/multimodal/default: `fwd.paid.composer-2.5` -> `fwd.paid.grok-4.5` -> `fwd.paid.gpt-5.5`. Free tiers and port list `[5520,10000]` preserved.
+- Verification: `routecodex config validate -c /Volumes/extension/.rcc/config.toml` PASS; `routecodex provider doctor asxs-grok --model composer-2.5` PASS; `routecodex provider doctor asxs-grok --model grok-4.5` PASS; `routecodex restart --port 5520` restarted aggregate 5520/10000; health OK on both ports version 0.90.3979; `routecodex port status 5520 --json` shows `asxs-grok.cc-tt.composer-2.5` and `asxs-grok.cc-tt.grok-4.5` healthy and paid pool resolved order before `asxs/55ai.gpt-5.5`.
+- Live RouteCodex evidence: `/v1/responses` with direct model `asxs-grok.composer-2.5` returned HTTP 200/completed `ROUTECODEX_COMPOSER_LIVE_OK` and log hit `direct -> asxs-grok[cc-tt].composer-2.5`; `asxs-grok.grok-4.5` returned HTTP 200/completed `ROUTECODEX_GROK_LIVE_OK` and log hit `direct -> asxs-grok[cc-tt].grok-4.5`. A real longcontext paid hit also selected `asxs-grok[cc-tt].composer-2.5` after restart.
+- Boundary/risk: bare client model names `composer-2.5` / `grok-4.5` still route through the normal default/free policy unless using provider-qualified direct model names or a paid-tier trigger; that is existing VR model selection behavior and was not changed in this config-only task.
+
+## 2026-07-25T16:05+08:00 asxs-grok grok-4.5 context probe
+- Scope: read-only upstream probe for `asxs-grok` / `grok-4.5` using `CC_TT_KEY`; no config/source/restart changes.
+- `/v1/models` only listed `grok-4.5` and `composer-2.5` without context metadata, so context was tested by real `/v1/responses` probes.
+- Calibration showed repeated `x ` gives approximately `repeat + 198` input tokens in upstream usage.
+- Results: 260000 repeat => HTTP 200 completed, `input_tokens=260198`, `total_tokens=260313`; 400000 => HTTP 200 completed, `input_tokens=400198`; 450000 => HTTP 200 completed, `input_tokens=450198`; 490000 => HTTP 200 completed, `input_tokens=490198`; 499000 retry => HTTP 200 completed, `input_tokens=499198`, `total_tokens=499279`.
+- One first 499000 attempt ended with `IncompleteRead(1 bytes read)` transport glitch, but the immediate retry at the same size succeeded. Conclusion for the user choice: `grok-4.5` is 500k-class, not 256k. Current live provider config still advertises `maxContext/maxContextTokens=200000` until separately changed.
+
+## 2026-07-25T16:36+08:00 5520 GPT-5.6 routing removal after encrypted-content mismatch
+- Scope: live V2 routing config only; no provider directory deletion and no source/runtime code edit.
+- User correction/design: GPT-5.6 encrypted reasoning content should not be mixed into GPT-5.5 routing; remove GPT-5.6 from active routing instead of adding runtime compensation.
+- Config change: `/Volumes/extension/.rcc/config.toml` and `/Users/fanzhang/.rcc/config.toml` are the same inode. Removed `fwd.free.gpt-5.6-sol`, `fwd.paid.gpt-5.6-luna`, `fwd.paid.gpt-5.6-terra` forwarder blocks and removed `cc-sol.gpt-5.6-sol` / `fwd.free.gpt-5.6-sol` from 5520 and 10000 routing targets. Backup: `/Volumes/extension/.rcc/config.toml.bak-20260725T083258Z-remove-gpt56-routing`.
+- Verification: `tomllib` PASS; `routecodex config validate -c /Volumes/extension/.rcc/config.toml` PASS; `routecodex restart --port 5520` restarted aggregate members `5520,10000`; `/health` on 5520 and 10000 returned version `0.90.3979`; `routecodex port status 5520 --json` and `routecodex port status 10000 --json` contain no `gpt-5.6`, `cc-sol`, or `asxs-cc`; `/v1/models` on 5520 lists `composer-2.5`, `gpt-5.5`, `grok-4.5` and no `gpt-5.6`.
+- Live log after restart shows new 5520 hits selecting `cc[key1].gpt-5.5` for thinking/tools/longcontext and paid reroute to `asxs-grok` only after 413/transport failures; a historical rollup line still contains old `asxs.crsa.gpt-5.6-luna` usage from before restart and is not active route truth.
+## 2026-07-25 V3 direct parity against V2 HTTP direct
+- User correction: V3 direct must align to V2 existing behavior; do not invent a new remote_continuation/WebSocket prerequisite for `cc.gpt-5.5`.
+- Code change: removed the V3 runtime capability gate that rejected HTTP-only JSON/SSE `function_call` continuation without `remote_continuation`; provider HTTP submit flow now rewrites `response_id` + `tool_outputs` to `/v1/responses/{id}/submit_tool_outputs`.
+- Verification PASS: `routecodex-v3-runtime` focused `http_only_*` integration tests passed for JSON and SSE direct continuation without remote capability; `routecodex-v3-provider-responses` submit endpoint test passed; `routecodex-v3-config` contract tests passed for the direct/default hub binding and the v2 compat GPT-5.6 capability projection update.
+- Live truth: `/v1/models` on 5520 and 5555 currently lists `gpt-5.5` and does not list `gpt-5.6`; no live restart/config mutation was performed in this run.
+
+## 2026-07-25T18:05+08:00 V3 4444 GPT-5.6 / invalid API-key route removal
+- Trigger: live 4444 `/v1/responses model=gpt-5.5` logs for `openai-responses-router-gpt-5.5-20260725T172735018-627343-8229` switched from `cc.gpt-5.5` into `cc-sol.gpt-5.6-sol`, `asxs-cc.gpt-5.6-luna/terra`, then `asxs.gpt-5.5`, producing 401 `API Key 无效，请检查后重试` before final 502 projection.
+- Diagnosis owner: live V3 `config.v3.toml` authoring/manifest route surface, not provider runtime or error projection. `/Volumes/extension/.rcc/config.v3.toml` and `~/.rcc/config.v3.toml` are the same inode. V2 `config.toml` was already clean after the earlier 5520 GPT-5.6 removal; V3 generated 4444 block still had stale `cc-sol`, `asxs-cc`, `asxs`, and GPT-5.6 forwarders.
+- Config change: removed active V3 `cc-sol` / `asxs-cc` GPT-5.6 providers and forwarders, removed `asxs` invalid-key GPT-5.5 provider target, and rebuilt `gateway_priority_5520` pools for 4444 to `fwd.free.gpt-5.5 -> fwd.paid.composer-2.5 -> fwd.paid.grok-4.5 -> fwd.paid.gpt-5.5`. Provider directories/secrets were not deleted. Backup: `/Volumes/extension/.rcc/config.v3.toml.bak-20260725T095233Z-remove-gpt56-invalid-route`.
+- Verification: `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` PASS; `routecodex restart --port 4444` restarted aggregate listeners `4444,5555`; `/health` OK on 4444 and 5555; `/v1/models` on 4444 and 5555 lists `gpt-5.5`, `composer-2.5`, `grok-4.5`, `deepseek-v4-pro`, `glm-5.2`, `MiniMax-M3` and no `gpt-5.6`; `routecodex port status 4444/5555 --json` contains no `gpt-5.6`, `cc-sol`, `asxs-cc`, or `asxs.gpt-5.5`.
+- Exact old-sample live replay: POSTed original `~/.rcc/codex-samples/openai-responses/ports/4444/openai-responses-router-gpt-5.5-20260725T172735018-627343-8229/request.json` to 4444; returned HTTP 200 SSE with `response.completed`/`response.done`, hit only `cc[key1].gpt-5.5`, and log/body contained no `gpt-5.6`, `cc-sol`, `asxs-cc`, `API Key 无效`, or `authentication_error`.
+- Control smoke: fresh 4444 JSON request with marker `ROUTECODEX_NO_GPT56_OK` returned HTTP 200/completed, hit `cc[key1].gpt-5.5`, and log/body contained no forbidden GPT-5.6 or invalid-key strings.
+- Evidence files: `.agent-collab/runs/20260725T093421Z-Macstudio.local-80877-cb4ecb/`.
+
+## 2026-07-25 18:10 CST — V2 5520 `/v1/responses` HTTP_429 direct client projection diagnosis
+- Symptom sample: `openai-responses-router-gpt-5.5-20260725T175234512-627621-8507` in `~/.rcc/logs/server-5520.log:734295-734296` has only request start then terminal `Rate limited by upstream provider (status=429 code=HTTP_429)`. Exact `rg` found no `virtual-router-hit`, no `provider-switch`, no `router-direct.send.*`, and no `~/.rcc` sample/diag file for that request.
+- Source chain verified: `sharedmodule/.../virtual_router_engine/engine/selection.rs` emits `VIRTUAL_ROUTER_ERROR:HTTP_429` when route candidates are temporarily busy/unavailable before provider target selection; `src/modules/llmswitch/bridge/routing-integrations.ts` enriches it to `status/statusCode=429`; `src/server/runtime/http-server/index.ts` handles it in router-direct route-selection/pool-exhausted path before `onProviderError`; `src/server/utils/http-error-mapper.ts` projects status 429 as `Rate limited by upstream provider`.
+- Current diagnosis: this log shape is not a provider-send 429. It is pre-provider Virtual Router route-selection/pool-exhausted HTTP_429, so the provider failure/reselect callback never ran. Existing 429 snapshot/error meta suppression prevents reconstructing exact historical unavailableProviders for 8507 from files.
+- Live status at inspection: `127.0.0.1:5520/health` ok, version `0.90.3979`; current VR status for `gateway_priority_5520` shows available default/free/paid targets, so the 17:52 condition was transient or already cleared.
+- Focused guard check run: `npm run jest:run -- --runTestsByPath tests/server/handlers/responses-handler.routing-empty-pool.spec.ts --runInBand -t "keeps default route non-empty under busy marks"` failed (`expected 502`, got `500 Provider runtime secondary.key1 not found`). Treat as current guard drift; no runtime fix made in this diagnosis slice.
+
+## 2026-07-25T19:38+0800 V2 5520 HTTP_429 direct client projection closeout
+- Sample: openai-responses-router-gpt-5.5-20260725T175234512-627621-8507
+- Shape: start -> client 429 in same second; no virtual-router-hit / router-direct.send / provider-switch.
+- Root owner: virtual_router.primary_exhausted_to_default_pool + router-direct/request-executor ErrorErr05 consumer.
+- Cause: host/planner only saw current-route tiers; if no backup tier and default route still had targets, plan returned empty and original HTTP_429 was projected.
+- Fix: planner consumes defaultRouteTiers for non-default routes; host extracts current + default route tiers and passes both.
+- Installed live: 0.90.3982 on 5520/10000.
+- Live after fix: same-entry /v1/responses 200 with ROUTECODEX_V2_429_DEFAULT_POOL_OK; traffic shows provider-switch and reselect to asxs-grok.composer-2.5 after cc failures (not no-switch 429).
+- Remaining risk: no forced exact concurrency-busy 429 after install; natural no-switch 429 not observed post-3982. Also same-route multi-tier without backup=true still depends on VR selection (status shows free unavailable / paid available, and live hits paid).

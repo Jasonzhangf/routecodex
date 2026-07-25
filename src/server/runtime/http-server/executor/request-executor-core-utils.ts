@@ -81,6 +81,7 @@ export interface ResolvePrimaryExhaustedPlanInput {
   exhaustedTargets: string[];
   knownTargets: string[];
   tiers: Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
+  defaultRouteTiers?: Array<{ id: string; targets: string[]; priority: number; backup?: boolean }>;
 }
 
 export interface RouteAvailabilityDecisionNativeArgs {
@@ -212,18 +213,23 @@ export function resolvePrimaryExhaustedRoutingContextFromError(
 }
 
 export function collectPrimaryExhaustedKnownTargets(
-  tiers: Array<{ targets: string[] }>,
+  ...tierGroups: Array<Array<{ targets: string[] }>>
 ): string[] {
   const knownTargets: string[] = [];
-  for (const tier of tiers) {
-    if (!Array.isArray(tier.targets)) {
+  for (const tiers of tierGroups) {
+    if (!Array.isArray(tiers)) {
       continue;
     }
-    for (const target of tier.targets) {
-      if (typeof target !== 'string' || !target.trim() || knownTargets.includes(target)) {
+    for (const tier of tiers) {
+      if (!Array.isArray(tier.targets)) {
         continue;
       }
-      knownTargets.push(target);
+      for (const target of tier.targets) {
+        if (typeof target !== 'string' || !target.trim() || knownTargets.includes(target)) {
+          continue;
+        }
+        knownTargets.push(target);
+      }
     }
   }
   return knownTargets;
@@ -286,6 +292,7 @@ export function resolvePrimaryExhaustedPlan(
   return planPrimaryExhaustedToDefaultPoolNative({
     route: input.route,
     tiers: input.tiers,
+    defaultRouteTiers: input.defaultRouteTiers ?? [],
     exhaustedTargets: input.exhaustedTargets,
     knownTargets: input.knownTargets
   });

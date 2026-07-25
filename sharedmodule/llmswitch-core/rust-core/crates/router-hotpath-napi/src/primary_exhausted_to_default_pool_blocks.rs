@@ -22,6 +22,7 @@ use napi_derive::napi;
 /// `camelCase` keys:
 ///   - `route: string`
 ///   - `tiers: Array<{ id: string, targets: string[], priority: number, backup?: boolean }>`
+///   - `defaultRouteTiers?: Array<{ id: string, targets: string[], priority: number, backup?: boolean }>`
 ///   - `exhaustedTargets: string[]`
 ///   - `knownTargets: string[]`
 ///

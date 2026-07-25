@@ -108,8 +108,8 @@ describe('router-direct.candidate-exhaustion', () => {
     expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
   });
 
-  it('[reverse] explicit direct provider.model exhausted → rethrow original provider error, do not enter default route', () => {
-    const error = { code: 'HTTP_403', statusCode: 403, message: 'Insufficient account balance' };
+  it('[forward] explicit direct route with defaultPoolAvailable=true → still request reroute into VR default planner', () => {
+    const error = { code: 'HTTP_429', statusCode: 429, message: 'rate limited' };
     const decision = decideDirectRouterRetry({
       retryExecutionPlan: plan({
         routePoolRemainingAfterExclusion: [],
@@ -124,11 +124,11 @@ describe('router-direct.candidate-exhaustion', () => {
       routeName: 'direct',
       error,
     });
-    expect(decision.action).toBe('rethrow');
-    expect(decision.shouldRecurse).toBe(false);
-    expect(decision.shouldRethrow).toBe(true);
+    expect(decision.action).toBe('request_reroute');
+    expect(decision.shouldRecurse).toBe(true);
+    expect(decision.shouldRethrow).toBe(false);
     expect(decision.error).toBe(error);
-    expect(decision.mutatedExcluded).toEqual(new Set());
+    expect(decision.mutatedExcluded).toEqual(new Set(['1token.key1.gpt-5.5']));
   });
 
   it('[reverse] client_disconnect → caller receives original error, NO excluded mutation, NO retry request', () => {

@@ -1693,17 +1693,31 @@ export class RouteCodexHttpServer {
         // targets locally.
         const primaryExhaustedContext = resolvePrimaryExhaustedRoutingContextFromError(error);
         const primaryExhaustedRoute = primaryExhaustedContext?.route;
-        const primaryExhaustedTiers = primaryExhaustedRoute && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+        const primaryExhaustedRuntimeConfig =
+          primaryExhaustedRoute && typeof metadataForHub.routecodexRoutingPolicyGroup === 'string'
+            ? this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(metadataForHub.routecodexRoutingPolicyGroup)
+            : undefined;
+        const primaryExhaustedTiers = primaryExhaustedRuntimeConfig
           ? extractRoutingTiersForPipelineRuntimeConfigRoute(
-              this.resolvePipelineRuntimeConfigForRoutingPolicyGroup(metadataForHub.routecodexRoutingPolicyGroup),
-              primaryExhaustedRoute,
+              primaryExhaustedRuntimeConfig,
+              primaryExhaustedRoute ?? '',
+            )
+          : [];
+        const primaryExhaustedDefaultRouteTiers = primaryExhaustedRuntimeConfig
+          ? extractRoutingTiersForPipelineRuntimeConfigRoute(
+              primaryExhaustedRuntimeConfig,
+              'default',
             )
           : [];
         const plan = resolvePrimaryExhaustedPlan({
           route: primaryExhaustedRoute ?? '',
           tiers: primaryExhaustedTiers,
+          defaultRouteTiers: primaryExhaustedDefaultRouteTiers,
           exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
-          knownTargets: collectPrimaryExhaustedKnownTargets(primaryExhaustedTiers)
+          knownTargets: collectPrimaryExhaustedKnownTargets(
+            primaryExhaustedTiers,
+            primaryExhaustedDefaultRouteTiers,
+          )
         });
         this.logStage('router-direct.primary_exhausted_to_default_pool.evaluated', input.requestId, {
           planStatus: plan.status,
@@ -1714,6 +1728,7 @@ export class RouteCodexHttpServer {
           exhaustedTargets: primaryExhaustedContext?.exhaustedTargets ?? [],
           excludedProviderKeys: Array.from(retryState.excludedProviderKeys),
           allowedProviders: Array.isArray(metadataForHub.allowedProviders) ? metadataForHub.allowedProviders : undefined,
+          defaultRouteTierCount: primaryExhaustedDefaultRouteTiers.length,
           routecodexRoutingPolicyGroup: metadataForHub.routecodexRoutingPolicyGroup
         });
         if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
@@ -2293,8 +2308,9 @@ export class RouteCodexHttpServer {
           const plan = resolvePrimaryExhaustedPlan({
             route: routingDecisionRouteName,
             tiers: routingDecisionTiers,
+            defaultRouteTiers,
             exhaustedTargets: routingDecisionProviderPool,
-            knownTargets: collectPrimaryExhaustedKnownTargets(routingDecisionTiers),
+            knownTargets: collectPrimaryExhaustedKnownTargets(routingDecisionTiers, defaultRouteTiers),
           });
           this.logStage('router-direct.primary_exhausted_to_default_pool.evaluated', input.requestId, {
             planStatus: plan.status,
@@ -2306,6 +2322,7 @@ export class RouteCodexHttpServer {
             excludedProviderKeys: Array.from(retryState.excludedProviderKeys),
             allowedProviders: Array.isArray(metadataForHub.allowedProviders) ? metadataForHub.allowedProviders : undefined,
             routecodexRoutingPolicyGroup: metadataForHub.routecodexRoutingPolicyGroup,
+            defaultRouteTierCount: defaultRouteTiers.length,
           });
           if (plan.status === 'default_pool' && plan.defaultPoolTargets.length > 0) {
             retryState.excludedProviderKeys.clear();

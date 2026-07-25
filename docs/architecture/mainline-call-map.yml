@@ -1255,7 +1255,7 @@ chains:
         callee_symbol: planPrimaryExhaustedToDefaultPoolNative
         callee_file: src/modules/llmswitch/bridge/route-availability-host.ts
         owner_feature_id: virtual_router.primary_exhausted_to_default_pool
-        semantic_input: "primary exhausted route name, exhausted targets, route-scoped tiers, and known targets"
+        semantic_input: "primary exhausted route name, exhausted targets, current-route tiers, routing-group default route tiers, and known targets"
         semantic_output: "Rust-owned declarative default-pool plan only; no host-synthesized fallback chain"
         resource_flow:
           consumes: [route.selection, provider_runtime.observation]

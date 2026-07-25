@@ -2,7 +2,7 @@
 //! Contract for `primary_exhausted -> default_pool` selection.
 //!
 //! This module is the unique owner of the explicit
-//! "primary tier exhausted -> next tier (default pool)" decision. Host-side
+//! "primary tier exhausted -> next/default tier (default pool)" decision. Host-side
 //! `request-executor` / `http-server` / `RequestExecutor` must NOT locally
 //! synthesize a default pool chain; they must consume the JSON returned by
 //! `plan_primary_exhausted_to_default_pool` and bind the resulting target list
@@ -10,18 +10,21 @@
 //!
 //! The plan is purely declarative: given the current route name, the
 //! configured `RoutePoolTier` list for that route (already sorted by
+//! priority desc), the routing-group `default` route tiers (also sorted by
 //! priority desc), and the set of targets that have already been tried or
-//! excluded in this request, return the next tier to attempt as the
-//! "default pool".
+//! excluded in this request, return the next tier to attempt as the "default
+//! pool".
 //!
 //! Rules (locked at 2026-06-14, P4 option A):
 //! 1. The first tier (`primary`) is defined as the highest-priority tier
 //!    with `backup != true`. If the primary tier still has an
 //!    available target, the plan is `NoDefaultPoolNeeded`.
 //! 2. Once every target of the primary tier is in `exhaustedTargets`, the
-//!    plan is the first subsequent tier whose `backup == true` (or, if
-//!    none, an empty default pool list, meaning the host must fail fast
-//!    and never silently pick a non-declared target).
+//!    plan is the first subsequent tier whose `backup == true`. If the current
+//!    route has no available backup tier and the current route is not
+//!    `default`, the planner tries the routing-group `default` route tiers.
+//!    If none remain, return an empty default pool list, meaning the host must
+//!    fail fast and never silently pick a non-declared target.
 //! 3. A `target` referenced by the selected tier but missing from
 //!    `knownTargets` is a configuration error; the plan must surface
 //!    `UnknownTarget` instead of guessing.
@@ -59,6 +62,8 @@ pub struct PrimaryExhaustedToDefaultPoolPlan {
 pub struct PrimaryExhaustedPlanInput {
     pub route: String,
     pub tiers: Vec<RoutePoolTierInput>,
+    #[serde(default)]
+    pub default_route_tiers: Vec<RoutePoolTierInput>,
     pub exhausted_targets: Vec<String>,
     pub known_targets: Vec<String>,
 }
@@ -71,6 +76,36 @@ pub struct RoutePoolTierInput {
     pub priority: i64,
     #[serde(default)]
     pub backup: Option<bool>,
+}
+
+fn plan_from_selected_tier(
+    tier: &RoutePoolTierInput,
+    known: &HashSet<&str>,
+    exhausted: &HashSet<&str>,
+) -> Result<Option<PrimaryExhaustedToDefaultPoolPlan>, PrimaryExhaustedToDefaultPoolPlan> {
+    let mut valid: Vec<String> = Vec::new();
+    for target in &tier.targets {
+        if !known.contains(target.as_str()) {
+            return Err(PrimaryExhaustedToDefaultPoolPlan {
+                status: PrimaryExhaustedPlanStatus::UnknownTarget,
+                default_pool_targets: Vec::new(),
+                from_tier_id: Some(tier.id.clone()),
+                from_tier_priority: Some(tier.priority),
+            });
+        }
+        if !exhausted.contains(target.as_str()) {
+            valid.push(target.clone());
+        }
+    }
+    if valid.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(PrimaryExhaustedToDefaultPoolPlan {
+        status: PrimaryExhaustedPlanStatus::DefaultPool,
+        default_pool_targets: valid,
+        from_tier_id: Some(tier.id.clone()),
+        from_tier_priority: Some(tier.priority),
+    }))
 }
 
 /// Pure plan function. Tiers MUST already be sorted by priority desc by the
@@ -118,32 +153,20 @@ pub fn plan_primary_exhausted_to_default_pool(
         if !tier.backup.unwrap_or(false) {
             continue;
         }
-        let mut valid: Vec<String> = Vec::new();
-        let mut unknown = false;
-        for target in &tier.targets {
-            if !known.contains(target.as_str()) {
-                unknown = true;
-                break;
-            }
-            if !exhausted.contains(target.as_str()) {
-                valid.push(target.clone());
-            }
+        match plan_from_selected_tier(tier, &known, &exhausted) {
+            Ok(Some(plan)) => return plan,
+            Ok(None) => {}
+            Err(plan) => return plan,
         }
-        if unknown {
-            return PrimaryExhaustedToDefaultPoolPlan {
-                status: PrimaryExhaustedPlanStatus::UnknownTarget,
-                default_pool_targets: Vec::new(),
-                from_tier_id: Some(tier.id.clone()),
-                from_tier_priority: Some(tier.priority),
-            };
-        }
-        if !valid.is_empty() {
-            return PrimaryExhaustedToDefaultPoolPlan {
-                status: PrimaryExhaustedPlanStatus::DefaultPool,
-                default_pool_targets: valid,
-                from_tier_id: Some(tier.id.clone()),
-                from_tier_priority: Some(tier.priority),
-            };
+    }
+
+    if input.route.trim() != "default" {
+        for tier in &input.default_route_tiers {
+            match plan_from_selected_tier(tier, &known, &exhausted) {
+                Ok(Some(plan)) => return plan,
+                Ok(None) => {}
+                Err(plan) => return plan,
+            }
         }
     }
 
@@ -158,6 +181,7 @@ pub fn plan_primary_exhausted_to_default_pool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn tier(
         id: &str,
@@ -181,6 +205,7 @@ mod tests {
                 tier("primary", 200, vec!["fwd.a", "fwd.b"], None),
                 tier("backup", 100, vec!["fwd.c"], Some(true)),
             ],
+            default_route_tiers: vec![],
             exhausted_targets: vec!["fwd.b".to_string()],
             known_targets: vec![
                 "fwd.a".to_string(),
@@ -202,6 +227,7 @@ mod tests {
                 tier("primary", 200, vec!["fwd.a", "fwd.b"], None),
                 tier("backup", 100, vec!["fwd.c"], Some(true)),
             ],
+            default_route_tiers: vec![],
             exhausted_targets: vec!["fwd.a".to_string(), "fwd.b".to_string()],
             known_targets: vec![
                 "fwd.a".to_string(),
@@ -223,6 +249,7 @@ mod tests {
                 tier("primary", 200, vec!["fwd.a"], None),
                 tier("backup", 100, vec!["fwd.b", "fwd.missing"], Some(true)),
             ],
+            default_route_tiers: vec![],
             exhausted_targets: vec!["fwd.a".to_string()],
             known_targets: vec!["fwd.a".to_string(), "fwd.b".to_string()],
         };
@@ -236,9 +263,94 @@ mod tests {
         let input = PrimaryExhaustedPlanInput {
             route: "default".to_string(),
             tiers: vec![tier("primary", 200, vec!["fwd.a"], None)],
+            default_route_tiers: vec![],
             exhausted_targets: vec!["fwd.a".to_string()],
             known_targets: vec!["fwd.a".to_string()],
         };
+        let plan = plan_primary_exhausted_to_default_pool(&input);
+        assert_eq!(plan.status, PrimaryExhaustedPlanStatus::DefaultPool);
+        assert!(plan.default_pool_targets.is_empty());
+        assert_eq!(plan.from_tier_id, None);
+    }
+
+    #[test]
+    fn primary_exhausted_without_route_backup_uses_routing_group_default_route_tiers() {
+        let input: PrimaryExhaustedPlanInput = serde_json::from_value(json!({
+            "route": "thinking",
+            "tiers": [
+                { "id": "thinking-primary", "priority": 200, "targets": ["fwd.primary"] }
+            ],
+            "defaultRouteTiers": [
+                { "id": "default-primary", "priority": 100, "targets": ["fwd.default"] }
+            ],
+            "exhaustedTargets": ["fwd.primary"],
+            "knownTargets": ["fwd.primary", "fwd.default"]
+        }))
+        .expect("json input should deserialize");
+
+        let plan = plan_primary_exhausted_to_default_pool(&input);
+        assert_eq!(plan.status, PrimaryExhaustedPlanStatus::DefaultPool);
+        assert_eq!(plan.default_pool_targets, vec!["fwd.default".to_string()]);
+        assert_eq!(plan.from_tier_id.as_deref(), Some("default-primary"));
+    }
+
+    #[test]
+    fn primary_with_remaining_target_does_not_jump_to_routing_group_default_route() {
+        let input: PrimaryExhaustedPlanInput = serde_json::from_value(json!({
+            "route": "thinking",
+            "tiers": [
+                { "id": "thinking-primary", "priority": 200, "targets": ["fwd.primary", "fwd.primary.2"] }
+            ],
+            "defaultRouteTiers": [
+                { "id": "default-primary", "priority": 100, "targets": ["fwd.default"] }
+            ],
+            "exhaustedTargets": ["fwd.primary"],
+            "knownTargets": ["fwd.primary", "fwd.primary.2", "fwd.default"]
+        }))
+        .expect("json input should deserialize");
+
+        let plan = plan_primary_exhausted_to_default_pool(&input);
+        assert_eq!(plan.status, PrimaryExhaustedPlanStatus::NoDefaultPoolNeeded);
+        assert!(plan.default_pool_targets.is_empty());
+        assert_eq!(plan.from_tier_id.as_deref(), Some("thinking-primary"));
+    }
+
+    #[test]
+    fn unknown_target_in_routing_group_default_route_returns_unknown_target_status() {
+        let input: PrimaryExhaustedPlanInput = serde_json::from_value(json!({
+            "route": "thinking",
+            "tiers": [
+                { "id": "thinking-primary", "priority": 200, "targets": ["fwd.primary"] }
+            ],
+            "defaultRouteTiers": [
+                { "id": "default-primary", "priority": 100, "targets": ["fwd.default", "fwd.missing"] }
+            ],
+            "exhaustedTargets": ["fwd.primary"],
+            "knownTargets": ["fwd.primary", "fwd.default"]
+        }))
+        .expect("json input should deserialize");
+
+        let plan = plan_primary_exhausted_to_default_pool(&input);
+        assert_eq!(plan.status, PrimaryExhaustedPlanStatus::UnknownTarget);
+        assert!(plan.default_pool_targets.is_empty());
+        assert_eq!(plan.from_tier_id.as_deref(), Some("default-primary"));
+    }
+
+    #[test]
+    fn exhausted_routing_group_default_route_returns_empty_default_pool_status() {
+        let input: PrimaryExhaustedPlanInput = serde_json::from_value(json!({
+            "route": "thinking",
+            "tiers": [
+                { "id": "thinking-primary", "priority": 200, "targets": ["fwd.primary"] }
+            ],
+            "defaultRouteTiers": [
+                { "id": "default-primary", "priority": 100, "targets": ["fwd.default"] }
+            ],
+            "exhaustedTargets": ["fwd.primary", "fwd.default"],
+            "knownTargets": ["fwd.primary", "fwd.default"]
+        }))
+        .expect("json input should deserialize");
+
         let plan = plan_primary_exhausted_to_default_pool(&input);
         assert_eq!(plan.status, PrimaryExhaustedPlanStatus::DefaultPool);
         assert!(plan.default_pool_targets.is_empty());
@@ -250,6 +362,7 @@ mod tests {
         let input = PrimaryExhaustedPlanInput {
             route: "absent".to_string(),
             tiers: vec![],
+            default_route_tiers: vec![],
             exhausted_targets: vec![],
             known_targets: vec![],
         };

@@ -1228,6 +1228,12 @@ export function planPrimaryExhaustedToDefaultPoolNative(input: {
     priority: number;
     backup?: boolean;
   }>;
+  defaultRouteTiers?: Array<{
+    id: string;
+    targets: string[];
+    priority: number;
+    backup?: boolean;
+  }>;
   exhaustedTargets: string[];
   knownTargets: string[];
 }): {
@@ -1240,6 +1246,7 @@ export function planPrimaryExhaustedToDefaultPoolNative(input: {
     {
       route: String(input.route || ''),
       tiers: Array.isArray(input.tiers) ? input.tiers : [],
+      defaultRouteTiers: Array.isArray(input.defaultRouteTiers) ? input.defaultRouteTiers : [],
       exhaustedTargets: Array.isArray(input.exhaustedTargets) ? input.exhaustedTargets : [],
       knownTargets: Array.isArray(input.knownTargets) ? input.knownTargets : [],
     }
