@@ -94,7 +94,7 @@
         <span class="stat-card"><strong>5</strong><span>source documents</span></span>
         <span class="stat-card"><strong>414</strong><span>source field paths</span></span>
         <span class="stat-card"><strong>413</strong><span>classified fields</span></span>
-        <span class="stat-card"><strong>69</strong><span>manual semantic groups</span></span>
+        <span class="stat-card"><strong>70</strong><span>manual semantic groups</span></span>
         <span class="stat-card"><strong>44</strong><span>semantic rows</span></span>
         <span class="stat-card"><strong>5</strong><span>implementation gaps</span></span>
       </div>
@@ -245,7 +245,7 @@
     <thead><tr><th>status</th><th>count</th><th>meaning</th></tr></thead>
     <tbody><tr>
     <td><span class="badge covered">covered</span></td>
-    <td><code>161</code></td>
+    <td><code>160</code></td>
     <td>Runtime/test owner currently implements the audited semantic for the named path.</td>
   </tr>
 <tr>
@@ -255,12 +255,12 @@
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>104</code></td>
+    <td><code>108</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>220</code></td>
+    <td><code>217</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -302,7 +302,7 @@
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>220</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>217</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -316,7 +316,7 @@
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>104</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>108</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -1828,7 +1828,7 @@
       <details><summary>Chat shape / value rule</summary><div>Added Chat extension because OpenAI Chat native has top_p but no top_k field.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">extension only; target support varies</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts topK as the request.top_k extension; target-valid outbound/live closeout is still pending.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
@@ -1854,6 +1854,48 @@
     <span class="muted">— no response field</span>
     <h4>transform</h4>
     <div>Gemini topK maps to top_k extension.</div>
+
+  </div></td>
+  </tr>
+<tr>
+    <td class="standard-cell">
+      <code>request.stop</code>
+      <div class="muted">group <code>sampling.stop_sequences</code></div>
+      <div><ul class="field-list"><li><code>request.stop</code></li></ul></div>
+      <span class="muted">— native Chat field only</span>
+    </td>
+    <td class="standard-cell">
+      <strong>Standard Chat semantic meaning</strong>
+      <div>Ordered stop strings that terminate generation when a target protocol supports client-defined stop sequences.</div>
+      <details><summary>Chat shape / value rule</summary><div>OpenAI Chat native request.stop is the canonical list semantic; it must not become a response finish reason.</div></details>
+
+    </td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts stopSequences as Chat request.stop; target-valid outbound/live closeout is still pending.</span></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Responses current source inventory has no exact request stop-sequence field.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.stop_sequences</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Anthropic stop_sequences maps directly to Chat request.stop.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.generationConfig.stopSequences</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Gemini generationConfig.stopSequences maps directly to Chat request.stop and never to candidate finishReason.</div>
 
   </div></td>
   </tr>
@@ -3294,8 +3336,8 @@
       <p>这一张是主审计表：每行以 OpenAI Chat 字段为主键。若是 OpenAI Chat 原生字段，主键必须和 OpenAI Chat source inventory 完全同名；若 OpenAI Chat 没有该语义，主键才是新增 extension 字段。表中逐字段列出 semantic id、request/response direction、Responses / OpenAI Chat / Anthropic / Gemini 等价字段，以及 owner、current_impl、gap。没有等价语义会明确显示 <code>—</code>，方便审计是否还有超集外语义。</p>
       <div class="grid">
     <article class="card"><h3>Contract</h3><div class="source-meta"><div>Chat Process protocol is OpenAI Chat plus extension fields. The canonical semantic id is the same string as fields[].extended_openai_chat_field. OpenAI Chat native request/response fields keep their exact OpenAI Chat field paths, including [] item notation; only semantics absent from OpenAI Chat receive protocol-neutral top-level request./response./edge. extension fields. Every source protocol field is mapped exactly once or explicitly classified as edge_only / unsupported_blocked. Runtime does not read this audit artifact.</div><div>base protocol: <code>openai_chat</code></div></div></article>
-    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>260</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>175</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
-    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>175</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
+    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>259</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>174</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
+    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>174</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
   </div><div class="table-wrap"><table>
     <thead><tr><th>OpenAI Chat field (native or extension)</th><th>canonical semantic id</th><th>direction / status</th><th>Responses equivalent fields</th><th>OpenAI Chat native / extended fields</th><th>Anthropic equivalent fields</th><th>Gemini equivalent fields</th><th>owner / current_impl / gap</th></tr></thead>
     <tbody><tr>
@@ -3855,8 +3897,8 @@
     <td><span class="muted">— no Responses equivalent</span></td>
     <td><ul class="field-list"><li><code>request.stop</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.stop_sequences</code></li></ul></td>
-    <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
+    <td><ul class="field-list"><li><code>request.generationConfig.stopSequences</code></li></ul></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini stopSequences source codec extracts Chat request.stop; cross-protocol/live closeout pending</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.store</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3872,10 +3914,10 @@
     <td class="standard-cell"><code>request.temperature</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.temperature</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><ul class="field-list"><li><code>request.temperature</code></li><li><code>request.top_p</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.temperature</code></li></ul></td>
-    <td><ul class="field-list"><li><code>request.temperature</code></li><li><code>request.top_p</code></li></ul></td>
-    <td><ul class="field-list"><li><code>request.generationConfig.temperature</code></li><li><code>request.generationConfig.topP</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.temperature</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.temperature</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.generationConfig.temperature</code></li></ul></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
   </tr>
 <tr>
@@ -3922,10 +3964,10 @@
     <td class="standard-cell"><code>request.top_p</code><br><span class="muted">native exact OpenAI Chat field</span></td>
     <td class="standard-cell"><code>request.top_p</code></td>
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
-    <td><span class="muted">— no Responses equivalent</span></td>
     <td><ul class="field-list"><li><code>request.top_p</code></li></ul></td>
-    <td><span class="muted">— no Anthropic equivalent</span></td>
-    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><ul class="field-list"><li><code>request.top_p</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.top_p</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.generationConfig.topP</code></li></ul></td>
     <td><code>chat.canonical_semantics</code><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
   </tr>
 <tr>
@@ -4077,16 +4119,6 @@
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.responseFormat.text</code></li></ul></td>
     <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
-  </tr>
-<tr>
-    <td class="standard-cell"><code>request.stop_sequences</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.stop_sequences</code></td>
-    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
-    <td><span class="muted">— no Responses equivalent</span></td>
-    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
-    <td><span class="muted">— no Anthropic equivalent</span></td>
-    <td><ul class="field-list"><li><code>request.generationConfig.stopSequences</code></li></ul></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.include</code><br><span class="muted">added Chat extension field</span></td>
@@ -5896,7 +5928,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><ul class="field-list"><li><code>request.top_k</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.generationConfig.topK</code></li></ul></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini topK source codec extracts request.top_k; target-valid outbound/live closeout pending</span></td>
   </tr></tbody>
   </table></div>
     </section>

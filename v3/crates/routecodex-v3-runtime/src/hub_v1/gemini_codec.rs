@@ -68,11 +68,18 @@ pub struct V3GeminiRequestToolConfigSemantic {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3GeminiChatGenerationConfigScalarSemantic {
+    ChatTemperature,
+    ChatTopP,
+    ChatTopK,
+    ChatMaxCompletionTokens,
+    ChatStop,
     ChatFrequencyPenalty,
     ChatPresencePenalty,
     ChatLogprobs,
     ChatTopLogprobs,
     ChatSeed,
+    ChatReasoningBudgetTokens,
+    ChatFinishReason,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +87,7 @@ pub enum V3GeminiGenerationConfigScalarSemanticValue {
     Number(f64),
     Boolean(bool),
     Integer(u64),
+    StringList(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,6 +193,8 @@ pub enum V3GeminiCodecError {
     GenerationConfigScalarNotBoolean { field: &'static str },
     #[error("Gemini generationConfig scalar must be a non-negative integer: {field}")]
     GenerationConfigScalarNotInteger { field: &'static str },
+    #[error("Gemini generationConfig.stopSequences must contain non-empty strings")]
+    GenerationConfigStopSequenceNotString { index: usize },
     #[error("Gemini response candidates must be an array")]
     CandidatesNotArray,
     #[error("Gemini provider error requires error.message")]
@@ -362,6 +372,41 @@ pub fn collect_v3_gemini_request_generation_config_scalar_semantics(
         .ok_or(V3GeminiCodecError::GenerationConfigNotObject)?;
 
     let mut semantics = Vec::new();
+    push_optional_generation_number(
+        &mut semantics,
+        generation_config,
+        "temperature",
+        "request.generationConfig.temperature",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatTemperature,
+    )?;
+    push_optional_generation_number(
+        &mut semantics,
+        generation_config,
+        "topP",
+        "request.generationConfig.topP",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatTopP,
+    )?;
+    push_optional_generation_integer(
+        &mut semantics,
+        generation_config,
+        "topK",
+        "request.generationConfig.topK",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatTopK,
+    )?;
+    push_optional_generation_integer(
+        &mut semantics,
+        generation_config,
+        "maxOutputTokens",
+        "request.generationConfig.maxOutputTokens",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatMaxCompletionTokens,
+    )?;
+    push_optional_generation_string_list(
+        &mut semantics,
+        generation_config,
+        "stopSequences",
+        "request.generationConfig.stopSequences",
+        V3GeminiChatGenerationConfigScalarSemantic::ChatStop,
+    )?;
     push_optional_generation_number(
         &mut semantics,
         generation_config,
@@ -630,6 +675,37 @@ fn push_optional_generation_integer(
         source_field,
         chat_semantic,
         value: V3GeminiGenerationConfigScalarSemanticValue::Integer(value),
+    });
+    Ok(())
+}
+
+fn push_optional_generation_string_list(
+    semantics: &mut Vec<V3GeminiRequestGenerationConfigScalarSemantic>,
+    generation_config: &Map<String, Value>,
+    provider_field: &'static str,
+    source_field: &'static str,
+    chat_semantic: V3GeminiChatGenerationConfigScalarSemantic,
+) -> Result<(), V3GeminiCodecError> {
+    let Some(raw) = generation_config.get(provider_field) else {
+        return Ok(());
+    };
+    let items = raw
+        .as_array()
+        .ok_or(V3GeminiCodecError::GenerationConfigStopSequenceNotString { index: 0 })?;
+    let mut values = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let Some(text) = item.as_str().filter(|text| !text.is_empty()) else {
+            return Err(V3GeminiCodecError::GenerationConfigStopSequenceNotString { index });
+        };
+        values.push(text.to_owned());
+    }
+    if values.is_empty() {
+        return Ok(());
+    }
+    semantics.push(V3GeminiRequestGenerationConfigScalarSemantic {
+        source_field,
+        chat_semantic,
+        value: V3GeminiGenerationConfigScalarSemanticValue::StringList(values),
     });
     Ok(())
 }

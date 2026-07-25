@@ -456,6 +456,11 @@ fn gemini_generation_config_scalar_request() -> serde_json::Value {
     json!({
         "contents": [{"role": "user", "parts": [{"text": "sample"}]}],
         "generationConfig": {
+            "maxOutputTokens": 4096,
+            "temperature": 0.2,
+            "topP": 0.8,
+            "topK": 40,
+            "stopSequences": ["END", "STOP"],
             "frequencyPenalty": 0.4,
             "presencePenalty": 0.7,
             "responseLogprobs": true,
@@ -463,6 +468,81 @@ fn gemini_generation_config_scalar_request() -> serde_json::Value {
             "seed": 12345
         }
     })
+}
+
+#[test]
+fn gemini_generation_config_temperature_maps_to_chat_temperature() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatTemperature
+        && semantic.source_field == "request.generationConfig.temperature"
+        && matches!(semantic.value, V3GeminiGenerationConfigScalarSemanticValue::Number(value) if (value - 0.2).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn gemini_generation_config_top_p_maps_to_chat_top_p() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatTopP
+        && semantic.source_field == "request.generationConfig.topP"
+        && matches!(semantic.value, V3GeminiGenerationConfigScalarSemanticValue::Number(value) if (value - 0.8).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn gemini_generation_config_top_k_maps_to_chat_top_k_extension() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatTopK
+        && semantic.source_field == "request.generationConfig.topK"
+        && matches!(
+            semantic.value,
+            V3GeminiGenerationConfigScalarSemanticValue::Integer(40)
+        )));
+}
+
+#[test]
+fn gemini_generation_config_max_output_tokens_maps_to_chat_max_completion_tokens() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatMaxCompletionTokens
+        && semantic.source_field == "request.generationConfig.maxOutputTokens"
+        && matches!(
+            semantic.value,
+            V3GeminiGenerationConfigScalarSemanticValue::Integer(4096)
+        )));
+}
+
+#[test]
+fn gemini_generation_config_stop_sequences_maps_to_chat_stop() {
+    let semantics = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &gemini_generation_config_scalar_request(),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap();
+    assert!(semantics.iter().any(|semantic| semantic.chat_semantic
+        == V3GeminiChatGenerationConfigScalarSemantic::ChatStop
+        && semantic.source_field == "request.generationConfig.stopSequences"
+        && matches!(
+            &semantic.value,
+            V3GeminiGenerationConfigScalarSemanticValue::StringList(values)
+                if values == &vec!["END".to_string(), "STOP".to_string()]
+        )));
 }
 
 #[test]
@@ -551,6 +631,19 @@ fn gemini_generation_config_penalties_logprobs_and_seed_do_not_collapse() {
         && semantic.chat_semantic
             != V3GeminiChatGenerationConfigScalarSemantic::ChatFrequencyPenalty));
     assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.topP"
+        && semantic.chat_semantic == V3GeminiChatGenerationConfigScalarSemantic::ChatTopK));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.topK"
+        && semantic.chat_semantic == V3GeminiChatGenerationConfigScalarSemantic::ChatTopP));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.maxOutputTokens"
+        && semantic.chat_semantic
+            == V3GeminiChatGenerationConfigScalarSemantic::ChatReasoningBudgetTokens));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
+        == "request.generationConfig.stopSequences"
+        && semantic.chat_semantic == V3GeminiChatGenerationConfigScalarSemantic::ChatFinishReason));
+    assert!(!semantics.iter().any(|semantic| semantic.source_field
         == "request.generationConfig.responseLogprobs"
         && semantic.chat_semantic == V3GeminiChatGenerationConfigScalarSemantic::ChatTopLogprobs));
     assert!(!semantics.iter().any(|semantic| semantic.source_field
@@ -574,6 +667,19 @@ fn gemini_generation_config_scalar_malformed_fields_fail_closed() {
     assert!(matches!(
         err,
         V3GeminiCodecError::GenerationConfigScalarNotInteger { .. }
+    ));
+
+    let err = collect_v3_gemini_request_generation_config_scalar_semantics(
+        &json!({
+            "contents": [{"role": "user", "parts": [{"text": "sample"}]}],
+            "generationConfig": {"stopSequences": ["END", 7]}
+        }),
+        V3HubEntryProtocol::Gemini,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        V3GeminiCodecError::GenerationConfigStopSequenceNotString { .. }
     ));
 }
 

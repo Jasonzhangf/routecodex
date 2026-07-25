@@ -54,9 +54,9 @@ Out of scope:
 
 | Gap id | Count | Closeout requirement |
 | --- | ---: | --- |
-| `gap.runtime_extension_declared` | 214 | Implement declared extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
+| `gap.runtime_extension_declared` | 217 | Implement declared extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
 | `gap.semantic_declared_runtime_closeout` | 50 | Implement manually declared native/extension semantics in adjacent codec owners or mark explicit unsupported/lossy with fail-fast tests. |
-| `gap.partial_cross_protocol_semantics` | 103 | Complete both request and response transforms for the affected semantic family. |
+| `gap.partial_cross_protocol_semantics` | 108 | Complete both request and response transforms for the affected semantic family. |
 | `gap.source_inventory_only` | 0 | Keep this at zero; new source fields must receive manual semantic owner/classification before runtime edits. |
 | `gap.shape_branch_transform` | 18 | `shape_branch_cases` are now documented/gated for the content/media/file rows; next closeout must add the named Rust positive/negative tests and adjacent codec implementation before changing any status. |
 | `gap.gemini_codec_shape_only` | 14 | Expand Gemini deep semantics or mark unsupported/lossy explicitly. |
@@ -74,24 +74,29 @@ Progress evidence:
   `mode` maps to Chat tool-choice policy, `allowedFunctionNames` maps to the protocol-neutral
   `request.tool_choice.allowed_function_names` extension, and neither collapses into tool
   declarations or `parallel_tool_calls`. Remaining Gemini deep semantics stay open.
-- Gemini `generationConfig` scalar source verification is closed for sampling/logprob/seed semantics in the Gemini codec characterization owner:
+- Gemini `generationConfig` scalar source verification is closed for V2-backed sampling/max-token/stop/logprob/seed semantics in the Gemini codec characterization owner:
   `collect_v3_gemini_request_generation_config_scalar_semantics` plus focused Rust tests prove
-  `frequencyPenalty` maps to `request.frequency_penalty`, `presencePenalty` maps to `request.presence_penalty`,
-  `responseLogprobs` maps to `request.logprobs`, `logprobs` maps to `request.top_logprobs`, and `seed` maps to
-  `request.seed`, without collapsing penalties, logprob flag/count, or seed. Remaining Gemini deep semantics stay open.
+  `temperature` maps to `request.temperature`, `topP` maps to `request.top_p`, `topK` maps to the
+  `request.top_k` extension, `maxOutputTokens` maps to `request.max_completion_tokens`,
+  `stopSequences` maps to native `request.stop`, `frequencyPenalty` maps to `request.frequency_penalty`,
+  `presencePenalty` maps to `request.presence_penalty`, `responseLogprobs` maps to `request.logprobs`,
+  `logprobs` maps to `request.top_logprobs`, and `seed` maps to `request.seed`, without collapsing
+  top_p/top_k, max tokens/reasoning budget, stop/finish reason, penalties, logprob flag/count, or seed.
+  Remaining Gemini deep semantics stay open.
 
 ## 2026-07-25 long-tail meaningfulness re-audit
 
-After the multi-protocol semantic mapping was realigned around OpenAI Chat native
-fields plus registered protocol-neutral extensions, the remaining long-tail is no
-longer a useful single blanket implementation objective.
+After Jason's correction, V2 long-tail behavior is a required baseline for V3
+inbound/outbound audits. After the multi-protocol semantic mapping was realigned
+around OpenAI Chat native fields plus registered protocol-neutral extensions,
+the remaining long-tail is still not a useful single blanket implementation
+objective.
 
 Decision:
 - Keep the long-tail matrix as an audit / backlog truth surface.
 - Do not run a broad "close every long-tail field" goal.
-- Only promote a long-tail row to runtime work when it belongs to a named field
-  family with real client/provider value, an adjacent Rust codec owner, and a
-  red/green test plan.
+- Promote V2-supported or current-client long-tail field families when they have
+  compatibility value, an adjacent Rust codec owner, and a red/green test plan.
 - `edge_only` transport state remains edge-only; it is not business runtime
   work.
 - Unsupported or target-incompatible semantics may remain explicit
@@ -104,7 +109,7 @@ Meaningful next slices are field-family slices, not whole-protocol sweeps:
   collapsed incorrectly;
 - tool-choice / parallelism / allowed-name semantics where provider policy can
   invert or split;
-- token, logprob, sampling, seed, and max-token pairs that directly change
+- token, logprob, sampling, seed, stop, and max-token pairs that directly change
   provider request behavior;
 - reasoning/thinking request policy versus response-visible reasoning content;
 - prompt cache / storage / continuation knobs only when a current client or live

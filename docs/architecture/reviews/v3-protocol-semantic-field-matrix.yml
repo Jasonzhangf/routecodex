@@ -28,10 +28,10 @@ audit_truth_contract:
     semantic_declared: The OpenAI Chat native field or protocol-neutral extension has a manual semantic owner and transform
       rule, but runtime conversion closeout is not claimed.
   audited_status_counts:
-    covered: 161
+    covered: 160
     covered_but_target_dependent: 1
-    partial: 104
-    extension_declared: 220
+    partial: 108
+    extension_declared: 217
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -53,7 +53,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 220
+      affected_count: 217
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -75,7 +75,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 104
+      affected_count: 108
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -1737,8 +1737,33 @@ chat_semantic_translation_groups:
         transform: Gemini topK maps to top_k extension.
     chat_extension_fields:
       - request.top_k
-    current_impl: extension_declared
-    gap: extension only; target support varies
+    current_impl: partial
+    gap: Gemini source codec extracts topK as the request.top_k extension; target-valid outbound/live closeout is still pending.
+  - group_id: sampling.stop_sequences
+    standard_chat_field: request.stop
+    chat_fields:
+      - request.stop
+    direction: request
+    standard_semantic_meaning: Ordered stop strings that terminate generation when a target protocol supports client-defined stop sequences.
+    chat_shape_rule: OpenAI Chat native request.stop is the canonical list semantic; it must not become a response finish reason.
+    protocol_mappings:
+      responses:
+        request_fields: []
+        response_fields: []
+        transform: Responses current source inventory has no exact request stop-sequence field.
+      anthropic:
+        request_fields:
+          - request.stop_sequences
+        response_fields: []
+        transform: Anthropic stop_sequences maps directly to Chat request.stop.
+      gemini:
+        request_fields:
+          - request.generationConfig.stopSequences
+        response_fields: []
+        transform: Gemini generationConfig.stopSequences maps directly to Chat request.stop and never to candidate finishReason.
+    chat_extension_fields: []
+    current_impl: partial
+    gap: Gemini source codec extracts stopSequences as Chat request.stop; target-valid outbound/live closeout is still pending.
   - group_id: sampling.max_output_tokens
     standard_chat_field: request.max_completion_tokens
     chat_fields:
@@ -4612,7 +4637,7 @@ extended_openai_chat_semantic_superset:
     - extension_added
     - edge_only
     - unsupported_blocked
-  field_count: 256
+  field_count: 259
   source_field_counts:
     responses: 122
     openai_chat: 84
@@ -5569,15 +5594,16 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
-      current_impl: covered
-      gap: none
+      current_impl: partial
+      gap: Gemini stopSequences source codec extracts Chat request.stop; cross-protocol/live closeout pending
       equivalent_fields:
         responses: []
         openai_chat:
           - request.stop
         anthropic:
           - request.stop_sequences
-        gemini: []
+        gemini:
+          - request.generationConfig.stopSequences
       source_classification: canonical_chat_fields
       chat_extension_association: []
     - extended_openai_chat_field: request.store
@@ -5610,15 +5636,12 @@ extended_openai_chat_semantic_superset:
       equivalent_fields:
         responses:
           - request.temperature
-          - request.top_p
         openai_chat:
           - request.temperature
         anthropic:
           - request.temperature
-          - request.top_p
         gemini:
           - request.generationConfig.temperature
-          - request.generationConfig.topP
       source_classification: canonical_chat_fields
       chat_extension_association: []
     - extended_openai_chat_field: request.tool_choice
@@ -5714,11 +5737,14 @@ extended_openai_chat_semantic_superset:
       current_impl: covered
       gap: none
       equivalent_fields:
-        responses: []
+        responses:
+          - request.top_p
         openai_chat:
           - request.top_p
-        anthropic: []
-        gemini: []
+        anthropic:
+          - request.top_p
+        gemini:
+          - request.generationConfig.topP
       source_classification: canonical_chat_fields
       chat_extension_association: []
     - extended_openai_chat_field: request.user
@@ -5971,21 +5997,6 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: extension_declared
-    - extended_openai_chat_field: request.stop_sequences
-      semantic_id: request.stop_sequences
-      direction: request
-      mapping_status: extension_added
-      semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
-      gap: runtime mapping partial or extension-only gap
-      equivalent_fields: &a18
-        responses: []
-        openai_chat: []
-        anthropic: []
-        gemini:
-          - request.generationConfig.stopSequences
-      source_classification: protocol_specific_chat_extension_fields
-      chat_extension_association: []
     - extended_openai_chat_field: request.include
       semantic_id: request.include
       direction: request
@@ -8789,8 +8800,8 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
-      gap: runtime mapping partial or extension-only gap
+      current_impl: partial
+      gap: Gemini topK source codec extracts request.top_k; target-valid outbound/live closeout pending
       equivalent_fields: &a175
         responses: []
         openai_chat: []
@@ -8973,14 +8984,6 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: extension_declared
     source_fields: *a17
-    projection_rule: runtime mapping partial or extension-only gap
-  - field: request.stop_sequences
-    semantic_id: request.stop_sequences
-    direction: request
-    stratum: request_payload
-    owner: chat.extension_semantics
-    current_impl: extension_declared
-    source_fields: *a18
     projection_rule: runtime mapping partial or extension-only gap
   - field: request.include
     semantic_id: request.include
@@ -10235,6 +10238,6 @@ canonical_extension_registry:
     direction: request
     stratum: request_payload
     owner: chat.extension_semantics
-    current_impl: extension_declared
+    current_impl: partial
     source_fields: *a175
-    projection_rule: runtime mapping partial or extension-only gap
+    projection_rule: Gemini topK source codec extracts request.top_k; target-valid outbound/live closeout pending

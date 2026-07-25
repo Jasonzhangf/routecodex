@@ -68,17 +68,28 @@ requireAll(source, sourcePath, [
   'collect_v3_gemini_request_generation_config_scalar_semantics',
   'V3GeminiChatGenerationConfigScalarSemantic',
   'V3GeminiGenerationConfigScalarSemanticValue',
+  'request.generationConfig.temperature',
+  'request.generationConfig.topP',
+  'request.generationConfig.topK',
+  'request.generationConfig.maxOutputTokens',
+  'request.generationConfig.stopSequences',
   'request.generationConfig.frequencyPenalty',
   'request.generationConfig.presencePenalty',
   'request.generationConfig.responseLogprobs',
   'request.generationConfig.logprobs',
   'request.generationConfig.seed',
+  'ChatTemperature',
+  'ChatTopP',
+  'ChatTopK',
+  'ChatMaxCompletionTokens',
+  'ChatStop',
   'ChatFrequencyPenalty',
   'ChatPresencePenalty',
   'ChatLogprobs',
   'ChatTopLogprobs',
   'ChatSeed',
   'GenerationConfigScalarNotInteger',
+  'GenerationConfigStopSequenceNotString',
   'collect_v3_gemini_request_thinking_config_semantics',
   'V3GeminiChatThinkingConfigSemantic',
   'V3GeminiThinkingConfigSemanticValue',
@@ -108,6 +119,15 @@ requireNear(source, sourcePath, '"request.generationConfig.thinkingConfig.thinki
 forbidNear(source, sourcePath, '"request.generationConfig.thinkingConfig.thinkingBudget"', 'ChatMaxOutputTokens');
 forbidNear(source, sourcePath, '"request.generationConfig.thinkingConfig.includeThoughts"', 'ChatResponseReasoningContent');
 forbidNear(source, sourcePath, '"request.generationConfig.thinkingConfig.thinkingLevel"', 'ChatReasoningBudgetTokens');
+requireNear(source, sourcePath, '"request.generationConfig.temperature"', 'ChatTemperature');
+requireNear(source, sourcePath, '"request.generationConfig.topP"', 'ChatTopP');
+requireNear(source, sourcePath, '"request.generationConfig.topK"', 'ChatTopK');
+requireNear(source, sourcePath, '"request.generationConfig.maxOutputTokens"', 'ChatMaxCompletionTokens');
+requireNear(source, sourcePath, '"request.generationConfig.stopSequences"', 'ChatStop');
+forbidNear(source, sourcePath, '"request.generationConfig.topP"', 'ChatTopK');
+forbidNear(source, sourcePath, '"request.generationConfig.topK"', 'ChatTopP');
+forbidNear(source, sourcePath, '"request.generationConfig.maxOutputTokens"', 'ChatReasoningBudgetTokens');
+forbidNear(source, sourcePath, '"request.generationConfig.stopSequences"', 'ChatFinishReason');
 requireNear(source, sourcePath, '"request.generationConfig.frequencyPenalty"', 'ChatFrequencyPenalty');
 requireNear(source, sourcePath, '"request.generationConfig.presencePenalty"', 'ChatPresencePenalty');
 requireNear(source, sourcePath, '"request.generationConfig.responseLogprobs"', 'ChatLogprobs');
@@ -152,6 +172,11 @@ requireAll(tests, 'focused Gemini codec tests', [
   'gemini_thinking_level_does_not_collapse_to_numeric_budget',
   'gemini_thinking_config_malformed_fields_fail_closed',
   'gemini_thinking_config_semantics_do_not_mutate_provider_wire_payload',
+  'gemini_generation_config_temperature_maps_to_chat_temperature',
+  'gemini_generation_config_top_p_maps_to_chat_top_p',
+  'gemini_generation_config_top_k_maps_to_chat_top_k_extension',
+  'gemini_generation_config_max_output_tokens_maps_to_chat_max_completion_tokens',
+  'gemini_generation_config_stop_sequences_maps_to_chat_stop',
   'gemini_generation_config_frequency_penalty_maps_to_chat_frequency_penalty',
   'gemini_generation_config_presence_penalty_maps_to_chat_presence_penalty',
   'gemini_generation_config_response_logprobs_maps_to_chat_logprobs_request',

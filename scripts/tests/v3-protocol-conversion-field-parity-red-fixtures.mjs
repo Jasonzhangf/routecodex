@@ -281,6 +281,20 @@ const cases = [
     diagnostic: /responseLogprobs.*ChatLogprobs|responseLogprobs.*ChatTopLogprobs/u,
   },
   {
+    name: 'Gemini topP collapses into temperature superset row',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '    - extended_openai_chat_field: request.temperature\n      semantic_id: request.temperature\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.temperature\n        openai_chat:\n          - request.temperature\n        anthropic:\n          - request.temperature\n        gemini:\n          - request.generationConfig.temperature\n',
+    to: '    - extended_openai_chat_field: request.temperature\n      semantic_id: request.temperature\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.temperature\n        openai_chat:\n          - request.temperature\n        anthropic:\n          - request.temperature\n        gemini:\n          - request.generationConfig.temperature\n          - request.generationConfig.topP\n',
+    diagnostic: /request\.temperature.*topP|must not collapse Gemini request\.generationConfig\.topP|source field gemini\.request\.generationConfig\.topP mapped to superset/u,
+  },
+  {
+    name: 'Gemini stopSequences reintroduced as extension row',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '    - extended_openai_chat_field: request.stop\n      semantic_id: request.stop\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: partial\n      gap: Gemini stopSequences source codec extracts Chat request.stop; cross-protocol/live closeout pending\n      equivalent_fields:\n        responses: []\n        openai_chat:\n          - request.stop\n        anthropic:\n          - request.stop_sequences\n        gemini:\n          - request.generationConfig.stopSequences\n',
+    to: '    - extended_openai_chat_field: request.stop\n      semantic_id: request.stop\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: partial\n      gap: Gemini stopSequences source codec extracts Chat request.stop; cross-protocol/live closeout pending\n      equivalent_fields:\n        responses: []\n        openai_chat:\n          - request.stop\n        anthropic:\n          - request.stop_sequences\n        gemini: []\n    - extended_openai_chat_field: request.stop_sequences\n      semantic_id: request.stop_sequences\n      direction: request\n      mapping_status: extension_added\n      semantic_owner: chat.extension_semantics\n      current_impl: extension_declared\n      gap: runtime mapping partial or extension-only gap\n      equivalent_fields:\n        responses: []\n        openai_chat: []\n        anthropic: []\n        gemini:\n          - request.generationConfig.stopSequences\n',
+    diagnostic: /request\.stop.*stopSequences|source field gemini\.request\.generationConfig\.stopSequences mapped to superset/u,
+  },
+  {
     name: 'Gemini toolConfig helper removed from codec',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
     from: 'collect_v3_gemini_request_tool_config_semantics',
@@ -312,8 +326,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 220\n',
-    to: '    extension_declared: 219\n',
+    from: '    extension_declared: 217\n',
+    to: '    extension_declared: 216\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -333,9 +347,9 @@ const cases = [
   {
     name: 'Textual truth audited extension count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
-    from: '| `extension_declared` | 220 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    to: '| `extension_declared` | 221 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    diagnostic: /`extension_declared` \| 220|v3-protocol-semantic-matrix-review/u,
+    from: '| `extension_declared` | 217 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    to: '| `extension_declared` | 218 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    diagnostic: /`extension_declared` \| 217|v3-protocol-semantic-matrix-review/u,
   },
   {
     name: 'Gap audit drops runtime extension closeout row',

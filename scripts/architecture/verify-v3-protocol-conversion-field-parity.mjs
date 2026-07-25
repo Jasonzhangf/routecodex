@@ -325,12 +325,12 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 220',
+  '`extension_declared` | 217',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
-  '`partial` | 104',
+  '`partial` | 108',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
   'gap.semantic_declared_runtime_closeout',
@@ -1237,6 +1237,11 @@ function requireGeminiThinkingConfigSemanticContract(matrix) {
 
 function requireGeminiGenerationConfigScalarSemanticContract(matrix) {
   for (const [field, expected, forbidden, status] of [
+    ['request.temperature', ['request.generationConfig.temperature'], ['request.generationConfig.topP', 'request.generationConfig.topK'], 'covered'],
+    ['request.top_p', ['request.generationConfig.topP'], ['request.generationConfig.temperature', 'request.generationConfig.topK'], 'covered'],
+    ['request.top_k', ['request.generationConfig.topK'], ['request.generationConfig.topP'], 'partial'],
+    ['request.max_completion_tokens', ['request.generationConfig.maxOutputTokens'], ['request.generationConfig.thinkingConfig.thinkingBudget', 'response.usageMetadata.thoughtsTokenCount'], 'covered'],
+    ['request.stop', ['request.generationConfig.stopSequences'], ['response.candidates[].finishReason'], 'partial'],
     ['request.frequency_penalty', ['request.generationConfig.frequencyPenalty'], ['request.generationConfig.presencePenalty', 'request.generationConfig.logprobs', 'request.generationConfig.seed'], 'partial'],
     ['request.presence_penalty', ['request.generationConfig.presencePenalty'], ['request.generationConfig.frequencyPenalty', 'request.generationConfig.logprobs', 'request.generationConfig.seed'], 'partial'],
     ['request.logprobs', ['request.generationConfig.responseLogprobs'], ['request.generationConfig.logprobs'], 'partial'],
@@ -1258,27 +1263,52 @@ function requireGeminiGenerationConfigScalarSemanticContract(matrix) {
     'V3GeminiChatGenerationConfigScalarSemantic',
     'V3GeminiGenerationConfigScalarSemanticValue',
     'GenerationConfigScalarNotInteger',
+    'GenerationConfigStopSequenceNotString',
+    'request.generationConfig.temperature',
+    'request.generationConfig.topP',
+    'request.generationConfig.topK',
+    'request.generationConfig.maxOutputTokens',
+    'request.generationConfig.stopSequences',
     'request.generationConfig.frequencyPenalty',
     'request.generationConfig.presencePenalty',
     'request.generationConfig.responseLogprobs',
     'request.generationConfig.logprobs',
     'request.generationConfig.seed',
+    'ChatTemperature',
+    'ChatTopP',
+    'ChatTopK',
+    'ChatMaxCompletionTokens',
+    'ChatStop',
     'ChatFrequencyPenalty',
     'ChatPresencePenalty',
     'ChatLogprobs',
     'ChatTopLogprobs',
     'ChatSeed',
   ]) requireText(text.geminiCodec, paths.geminiCodec, phrase);
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.temperature"', 'ChatTemperature');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topP"', 'ChatTopP');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topK"', 'ChatTopK');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.maxOutputTokens"', 'ChatMaxCompletionTokens');
+  requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.stopSequences"', 'ChatStop');
   requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.frequencyPenalty"', 'ChatFrequencyPenalty');
   requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.presencePenalty"', 'ChatPresencePenalty');
   requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.responseLogprobs"', 'ChatLogprobs');
   requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.logprobs"', 'ChatTopLogprobs');
   requireNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.seed"', 'ChatSeed');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topP"', 'ChatTopK');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.topK"', 'ChatTopP');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.maxOutputTokens"', 'ChatReasoningBudgetTokens');
+  forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.stopSequences"', 'ChatFinishReason');
   forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.frequencyPenalty"', 'ChatPresencePenalty');
   forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.responseLogprobs"', 'ChatTopLogprobs');
   forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.logprobs"', 'ChatLogprobs');
   forbidNear(text.geminiCodec, paths.geminiCodec, '"request.generationConfig.seed"', 'ChatTopLogprobs');
   for (const testSymbol of [
+    'gemini_generation_config_temperature_maps_to_chat_temperature',
+    'gemini_generation_config_top_p_maps_to_chat_top_p',
+    'gemini_generation_config_top_k_maps_to_chat_top_k_extension',
+    'gemini_generation_config_max_output_tokens_maps_to_chat_max_completion_tokens',
+    'gemini_generation_config_stop_sequences_maps_to_chat_stop',
     'gemini_generation_config_frequency_penalty_maps_to_chat_frequency_penalty',
     'gemini_generation_config_presence_penalty_maps_to_chat_presence_penalty',
     'gemini_generation_config_response_logprobs_maps_to_chat_logprobs_request',

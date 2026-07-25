@@ -140,7 +140,7 @@ coarse buckets, including Responses `background` / `context_management` /
 - Responses -> OpenAI Chat request currently maps/copies only a supported subset into Chat wire: `tool_choice`, `parallel_tool_calls`, `user`, `temperature`, `top_p`, `logit_bias`, `seed`, `stream`, `response_format`, `max_tokens`, Responses `max_output_tokens` as OpenAI Chat `max_completion_tokens`, `metadata`, `client_metadata` before final strip, and `stop`; source-inventory fields such as `background`, `context_management`, `conversation`, `prompt_cache_*`, `service_tier`, `text.*`, `top_logprobs`, and `truncation` are not yet fully represented as Chat Process canonical/extension contracts.
 - OpenAI Chat same-protocol characterization preserves the main Chat payload, but the matrix now requires explicit extension ownership for `audio`, `modalities`, `reasoning_effort`, `web_search_options`, `prediction`, `store`, `prompt_cache_*`, and response `system_fingerprint/service_tier/moderation/logprobs` before those fields can be relied on in cross-protocol conversion.
 - Anthropic -> Responses currently maps `system`, `messages`, `tools`, `tool_choice`, `thinking`, `metadata`, `temperature`, `top_p`, `top_k`, `parallel_tool_calls`, `max_tokens/max_output_tokens`, `stop_sequences`, and `stream`; source-inventory fields such as `container`, `output_config`, `service_tier`, `cache_control`, server-tool result blocks, and `user_profile_id` need protocol-specific Chat Process extension ownership.
-- Gemini V3 codec now semantically extracts `toolConfig.functionCallingConfig.mode`, `allowedFunctionNames`, `generationConfig.thinkingConfig` (`includeThoughts`, `thinkingBudget`, `thinkingLevel`), and generation scalar fields (`frequencyPenalty`, `presencePenalty`, `responseLogprobs`, `logprobs`, `seed`) into distinct Chat reasoning/tool/sampling/logprob/seed semantics, while remaining `generationConfig`, `safetySettings`, `thoughtSignature`, candidate grounding/citation, and `usageMetadata` subtrees are still not fully expanded. These are locked as extension/gap rows rather than being treated as generic raw payload metadata.
+- Gemini V3 codec now semantically extracts `toolConfig.functionCallingConfig.mode`, `allowedFunctionNames`, `generationConfig.thinkingConfig` (`includeThoughts`, `thinkingBudget`, `thinkingLevel`), and generation scalar fields (`temperature`, `topP`, `topK`, `maxOutputTokens`, `stopSequences`, `frequencyPenalty`, `presencePenalty`, `responseLogprobs`, `logprobs`, `seed`) into distinct Chat reasoning/tool/sampling/logprob/seed/stop semantics, while remaining `generationConfig` response-format/media/audio branches, `safetySettings`, `thoughtSignature`, candidate grounding/citation, and `usageMetadata` subtrees are still not fully expanded. These are locked as extension/gap rows rather than being treated as generic raw payload metadata.
 
 ## Main gaps
 
@@ -166,14 +166,14 @@ It now tracks:
 
 ## 2026-07-25 long-tail re-audit conclusion
 
-After the matrix was realigned to OpenAI Chat native fields plus registered
-protocol-neutral extensions, the remaining long-tail still matters as a
-machine-readable audit surface, but it is not a meaningful single runtime
-closeout target.
+After Jason's correction, V2 long-tail behavior is a required baseline for V3
+inbound/outbound audits. The remaining long-tail still matters as a
+machine-readable audit surface, but it is not a meaningful single blanket
+runtime closeout target.
 
 The correct use is field-family triage:
-- promote rows only when a real client/provider sample or compatibility
-  requirement proves runtime value;
+- promote V2-supported or current-client field families when compatibility
+  evidence proves runtime value;
 - implement one semantic family at a time in the adjacent Rust codec/runtime
   owner;
 - keep positive and negative tests for target-valid projection, unsupported
@@ -182,10 +182,10 @@ The correct use is field-family triage:
   explicit non-runtime / unsupported rows until a real target slot exists.
 
 High-value remaining families are media/file shape branches, tool-choice and
-parallelism policy, token/logprob/sampling pairs, reasoning request policy versus
-response reasoning content, and prompt-cache/storage/continuation knobs that
-current clients actually use. Broadly closing every declared field would add
-surface area without proven V3 parity value.
+parallelism policy, token/logprob/sampling/max-token/stop pairs, reasoning
+request policy versus response reasoning content, and prompt-cache/storage /
+continuation knobs that V2 or current clients actually use. Broadly closing
+every declared field would add surface area without proven V3 parity value.
 
 ## Extended OpenAI Chat semantic superset
 
@@ -270,10 +270,10 @@ must not use `pending_audit`.
 
 | Status | Count | Meaning |
 | --- | ---: | --- |
-| `covered` | 161 | Runtime/test owner currently implements the audited semantic for the named path. |
+| `covered` | 160 | Runtime/test owner currently implements the audited semantic for the named path. |
 | `covered_but_target_dependent` | 1 | Runtime implements the field only where the target protocol legally supports it; target-incompatible projection must be stripped or rejected by provider-wire owner. |
-| `partial` | 104 | Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete. |
-| `extension_declared` | 220 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |
+| `partial` | 108 | Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete. |
+| `extension_declared` | 217 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |
 | `semantic_declared` | 50 | The OpenAI Chat native field or protocol-neutral extension has a manual semantic owner and transform rule, but runtime conversion closeout is not claimed. |
 | `source_inventory_only` | 0 | The source field is inventoried and searchable, but no runtime semantic mapping is claimed; this status must stay at zero after source-owner closeout. |
 | `shape_branch_gap` | 18 | Mapping requires branch-specific transform logic by source type/value shape before runtime closeout. |
@@ -289,12 +289,12 @@ runtime-closeout work.
 | Gap id | Category | Affected status/count | Evidence | Closeout owner/rule |
 | --- | --- | --- | --- | --- |
 | `gap.client_metadata.target_dependent` | fixed doc gate | `covered_but_target_dependent` / 1 | OpenAI Chat provider wire preserves standard `metadata` but strips non-standard `client_metadata`; old docs implied unconditional preservation. | Keep target-dependent provider-wire behavior explicit; no MetadataCenter/fallback preservation of unsupported `client_metadata`. |
-| `gap.runtime_extension_declared` | runtime closeout | `extension_declared` / 220 | Protocol-neutral OpenAI Chat extension fields and owners exist, but runtime conversion completion is not claimed. | Pick the adjacent protocol codec owner per field family, add red fixture first, then implement and prove source/blackbox/live evidence before marking covered. |
+| `gap.runtime_extension_declared` | runtime closeout | `extension_declared` / 217 | Protocol-neutral OpenAI Chat extension fields and owners exist, but runtime conversion completion is not claimed. | Pick the adjacent protocol codec owner per field family, add red fixture first, then implement and prove source/blackbox/live evidence before marking covered. |
 | `gap.semantic_declared_runtime_closeout` | runtime closeout | `semantic_declared` / 50 | These fields now have manual semantic owners and transform rules, but no runtime conversion completion evidence yet. | Add field-family red tests and implement adjacent Rust codec owner before changing `semantic_declared` to covered, partial, or unsupported_blocked. |
-| `gap.partial_cross_protocol_semantics` | runtime closeout | `partial` / 104 | Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini. | Close request and response directions together in `hub_v1` protocol codec owners; no server/SSE/provider-transport repair. |
+| `gap.partial_cross_protocol_semantics` | runtime closeout | `partial` / 108 | Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini. | Close request and response directions together in `hub_v1` protocol codec owners; no server/SSE/provider-transport repair. |
 | `gap.source_inventory_only` | semantic owner closeout | `source_inventory_only` / 0 | All previously `source_inventory_only` fields now have manual semantic owner groups, explicit transform rules, and non-runtime completion status. | Keep `source_inventory_only` at zero; new source fields must be classified before runtime edits. |
 | `gap.shape_branch_transform` | transform closeout | `shape_branch_gap` / 18 | Media/tool/content fields now have gated `shape_branch_cases` for URL vs file id vs inline bytes vs MIME vs file URI. Gemini inlineData/fileData request branches now have source tests in `hub_gemini_codec_characterization.rs`, but the rows stay open until every protocol branch has equivalent owner evidence. | Test every shape branch positively and negatively in the adjacent codec owner; never collapse distinct semantics into nearby fields. |
-| `gap.gemini_codec_shape_only` | runtime closeout | `codec_shape_only` / 14 | Gemini codec now extracts `toolConfig.functionCallingConfig` mode/allowed-name and generationConfig thinking/scalar semantics; remaining `generationConfig` / safety / citation / grounding / usage semantics are not fully expanded. | Implement Gemini semantic mapping as protocol extensions or explicit unsupported rows; do not treat subtree as raw payload truth. |
+| `gap.gemini_codec_shape_only` | runtime closeout | `codec_shape_only` / 14 | Gemini codec now extracts `toolConfig.functionCallingConfig` mode/allowed-name and V2-backed `generationConfig` sampling/max-token/stop/logprob/seed semantics; remaining `generationConfig` response-format/media/audio, safety, citation, grounding, and usage semantics are not fully expanded. | Implement Gemini semantic mapping as protocol extensions or explicit unsupported rows; do not treat subtree as raw payload truth. |
 | `gap.edge_only_transport_state` | no business runtime closeout | `edge_only` / 3 | Edge rows describe stream/event transport state. | Keep edge fields out of provider/client normal payload; do not reclassify as Chat semantic fields. |
 
 Follow-up implementation plan for closing the non-covered gaps:
@@ -315,6 +315,11 @@ Follow-up implementation plan for closing the non-covered gaps:
 
 ### Gemini generationConfig scalar source split
 
+- `request.generationConfig.temperature` maps to native `request.temperature`; it must not become `request.top_p` or `request.top_k`.
+- `request.generationConfig.topP` maps to native `request.top_p`; it must not become temperature or `request.top_k`.
+- `request.generationConfig.topK` maps to extension `request.top_k`; it must not become `request.top_p`.
+- `request.generationConfig.maxOutputTokens` maps to native `request.max_completion_tokens`; it must not become reasoning budget or response usage.
+- `request.generationConfig.stopSequences` maps to native `request.stop`; it must not become candidate finish reason or a Gemini-only stop extension row.
 - `request.generationConfig.frequencyPenalty` maps to native `request.frequency_penalty`; it must not become presence penalty, logprobs, or seed.
 - `request.generationConfig.presencePenalty` maps to native `request.presence_penalty`; it must not become frequency penalty, logprobs, or seed.
 - `request.generationConfig.responseLogprobs` maps to native `request.logprobs`; it must not become `request.top_logprobs`.
