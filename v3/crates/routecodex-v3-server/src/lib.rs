@@ -2772,6 +2772,12 @@ fn emit_v3_request_start_console_line(
     let accepts_sse = request_accepts_sse(headers) || stream;
     let raw_input_items = response_input_item_count(payload.get("input"));
     let project_path = resolve_v3_console_project_path(headers, payload);
+    let mut identity = resolve_v3_console_log_identity_from_parts(headers, payload, request_id);
+    identity.project_path = project_path;
+    let request_model = identity
+        .request_model
+        .clone()
+        .unwrap_or_else(|| "-".to_string());
     let content = format!(
         "▶ [{}] {} request {} started (stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none)",
         endpoint,
@@ -2782,14 +2788,16 @@ fn emit_v3_request_start_console_line(
         raw_input_items,
         raw_input_items
     );
-    let line = format_v3_console_monitor_line(
+    let line = format_v3_console_scoped_line(
         &state.server.port.to_string(),
         entry_protocol,
-        project_path.as_deref(),
+        &identity.session_id,
+        identity.project_path.as_deref(),
+        &request_model,
+        "pending",
         &content,
     );
-    let color_key = resolve_v3_log_session_color_key(headers, payload, request_id);
-    emit_v3_colorized_request_console_line(state, &line, color_key.as_deref());
+    emit_v3_colorized_request_console_line(state, &line, identity.color_key.as_deref());
 }
 
 #[derive(Clone)]
@@ -2829,17 +2837,25 @@ fn emit_v3_provider_observability_console_lines(
     }
     let identity = resolve_v3_console_log_identity(context);
     for event in &observability.provider_failure_events {
-        let error_content =
-            format_v3_provider_failure_console_content(&context.request_id, &identity, event);
-        let error_line = format_v3_console_line_for_identity(context, &identity, &error_content);
+        let error_content = format_v3_provider_failure_console_content(&context.request_id, event);
+        let error_line = format_v3_console_line_for_observability(
+            context,
+            &identity,
+            observability,
+            &error_content,
+        );
         let colorized_error = colorize_v3_error_console_line(&error_line);
         append_v3_human_console_line(&context.state, &colorized_error);
         eprintln!("{colorized_error}");
         if event.action == "switch_provider" {
             let switch_content =
-                format_v3_provider_switch_console_content(&context.request_id, &identity, event);
-            let switch_line =
-                format_v3_console_line_for_identity(context, &identity, &switch_content);
+                format_v3_provider_switch_console_content(&context.request_id, event);
+            let switch_line = format_v3_console_line_for_observability(
+                context,
+                &identity,
+                observability,
+                &switch_content,
+            );
             emit_v3_colorized_request_console_line(
                 &context.state,
                 &switch_line,
@@ -2852,14 +2868,14 @@ fn emit_v3_provider_observability_console_lines(
     {
         let selected = format_v3_console_provider_target(observability);
         let content = format!(
-            "[provider-unavailable] {} req={} sid={} unavailable={} selected={} reason=availability",
+            "[provider-unavailable] {} req={} unavailable={} selected={} reason=availability",
             console_timestamp_hhmmss(),
             context.request_id,
-            identity.session_id,
             observability.unavailable_candidates.join(","),
             selected
         );
-        let line = format_v3_console_line_for_identity(context, &identity, &content);
+        let line =
+            format_v3_console_line_for_observability(context, &identity, observability, &content);
         emit_v3_colorized_request_console_line(
             &context.state,
             &line,
@@ -2870,14 +2886,12 @@ fn emit_v3_provider_observability_console_lines(
 
 fn format_v3_provider_failure_console_content(
     request_id: &str,
-    identity: &V3ConsoleLogIdentity,
     event: &V3RuntimeProviderFailureObservation,
 ) -> String {
     let mut content = format!(
-        "❌ [provider-error] {} req={} sid={} provider={} status={} failures={} health={} action={}",
+        "❌ [provider-error] {} req={} provider={} status={} failures={} health={} action={}",
         console_timestamp_hhmmss(),
         request_id,
-        identity.session_id,
         format_v3_console_provider_key_label(&event.provider_key),
         event.status,
         event.failure_count,
@@ -2908,7 +2922,6 @@ fn format_v3_provider_failure_console_content(
 
 fn format_v3_provider_switch_console_content(
     request_id: &str,
-    identity: &V3ConsoleLogIdentity,
     event: &V3RuntimeProviderFailureObservation,
 ) -> String {
     let next = event
@@ -2917,10 +2930,9 @@ fn format_v3_provider_switch_console_content(
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
     format!(
-        "[provider-switch] {} req={} sid={} {} -> {} action={} reason=provider_failure",
+        "[provider-switch] {} req={} {} -> {} action={} reason=provider_failure",
         console_timestamp_hhmmss(),
         request_id,
-        identity.session_id,
         format_v3_console_provider_key_label(&event.provider_key),
         next,
         event.action
@@ -2939,15 +2951,15 @@ fn emit_v3_request_route_console_line(
     let provider_target = format_v3_console_provider_target(observability);
     let reason = format_v3_console_hit_reason(&context.state, observability);
     let content = format!(
-        "[virtual-router-hit] {} req={} sid={} {} -> {} reason={}",
+        "[virtual-router-hit] {} req={} {} -> {} reason={}",
         console_timestamp_hhmmss(),
         context.request_id,
-        identity.session_id,
         route_label,
         provider_target,
         reason
     );
-    let line = format_v3_console_line_for_identity(context, &identity, &content);
+    let line =
+        format_v3_console_line_for_observability(context, &identity, observability, &content);
     emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
@@ -2984,7 +2996,8 @@ fn emit_v3_request_complete_console_line(
         node_trace.len(),
         observability.transport
     );
-    let line = format_v3_console_line_for_identity(context, &identity, &content);
+    let line =
+        format_v3_console_line_for_observability(context, &identity, observability, &content);
     emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
 
@@ -2998,8 +3011,6 @@ fn emit_v3_usage_console_line(
         return;
     }
     let identity = resolve_v3_console_log_identity(context);
-    let route = format_v3_console_usage_route_label(&context.state, observability);
-    let model = format_v3_console_usage_model_pair(&identity, observability);
     let usage = format_v3_console_usage_summary(observability.usage.as_ref());
     let finish_reason = observability
         .finish_reason
@@ -3009,18 +3020,16 @@ fn emit_v3_usage_console_line(
     let internal_ms = elapsed_ms;
     let external_ms = 0.0;
     let content = format!(
-        "[usage] req={} project={} route={} model={} usage={} time=i:{:.0}ms e:{:.0}ms t:{:.1}ms finish_reason={}",
+        "[usage] req={} usage={} time=i:{:.0}ms e:{:.0}ms t:{:.1}ms finish_reason={}",
         format_v3_usage_request_id(&context.request_id),
-        format_v3_console_project_port(identity.project_path.as_deref(), context.state.server.port),
-        route,
-        model,
         usage,
         internal_ms,
         external_ms,
         elapsed_ms,
         finish_reason
     );
-    let line = format_v3_console_line_for_identity(context, &identity, &content);
+    let line =
+        format_v3_console_line_for_observability(context, &identity, observability, &content);
     let _ = node_trace;
     emit_v3_colorized_request_console_line(&context.state, &line, identity.color_key.as_deref());
 }
@@ -3044,7 +3053,8 @@ fn emit_v3_stopless_console_line(
         finish_reason,
         observability.transport
     );
-    let line = format_v3_console_line_for_identity(context, &identity, &content);
+    let line =
+        format_v3_console_line_for_observability(context, &identity, observability, &content);
     let colorized = colorize_v3_stopless_console_line(&line);
     append_v3_human_console_line(&context.state, &colorized);
     println!("{colorized}");
@@ -3212,18 +3222,6 @@ impl V3SseConsoleFinalizer {
     }
 }
 
-fn format_v3_console_model_pair(observability: &V3RuntimeObservability) -> String {
-    match (
-        observability.model_id.as_deref(),
-        observability.wire_model.as_deref(),
-    ) {
-        (Some(model), Some(wire)) if model != wire => format!("{model}->{wire}"),
-        (Some(model), _) => model.to_string(),
-        (_, Some(wire)) => wire.to_string(),
-        _ => "-".to_string(),
-    }
-}
-
 #[derive(Debug, Clone)]
 struct V3ConsoleLogIdentity {
     color_key: Option<String>,
@@ -3233,9 +3231,21 @@ struct V3ConsoleLogIdentity {
 }
 
 fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3ConsoleLogIdentity {
-    let turn_metadata = parse_codex_turn_metadata(&context.headers).ok().flatten();
-    let session_id = first_header_text(
+    resolve_v3_console_log_identity_from_parts(
         &context.headers,
+        &context.payload,
+        &context.request_id,
+    )
+}
+
+fn resolve_v3_console_log_identity_from_parts(
+    headers: &HeaderMap,
+    payload: &Value,
+    request_id: &str,
+) -> V3ConsoleLogIdentity {
+    let turn_metadata = parse_codex_turn_metadata(headers).ok().flatten();
+    let session_id = first_header_text(
+        headers,
         &[
             "session-id",
             "session_id",
@@ -3247,9 +3257,9 @@ fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3Cons
     .ok()
     .flatten()
     .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
-    .or_else(|| read_first_scope_value(Some(&context.payload), BODY_SESSION_PATHS));
+    .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS));
     let conversation_id = first_header_text(
-        &context.headers,
+        headers,
         &[
             "thread-id",
             "thread_id",
@@ -3262,29 +3272,19 @@ fn resolve_v3_console_log_identity(context: &V3ConsoleEmissionContext) -> V3Cons
     .ok()
     .flatten()
     .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
-    .or_else(|| read_first_scope_value(Some(&context.payload), BODY_CONVERSATION_PATHS));
-    let project_path = resolve_v3_console_project_path_with_metadata(
-        &context.headers,
-        &context.payload,
-        turn_metadata.as_ref(),
-    );
-    let color_key =
-        resolve_v3_log_session_color_key(&context.headers, &context.payload, &context.request_id);
+    .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
+    let project_path =
+        resolve_v3_console_project_path_with_metadata(headers, payload, turn_metadata.as_ref());
+    let color_key = resolve_v3_log_session_color_key(headers, payload, request_id);
     let session_display = session_id
         .or(conversation_id)
         .or_else(|| color_key.clone())
-        .unwrap_or_else(|| {
-            format!(
-                "request:{}",
-                format_v3_usage_request_id(&context.request_id)
-            )
-        });
+        .unwrap_or_else(|| format!("request:{}", format_v3_usage_request_id(request_id)));
     V3ConsoleLogIdentity {
         color_key,
         session_id: format_v3_console_safe_label(&session_display),
         project_path,
-        request_model: context
-            .payload
+        request_model: payload
             .get("model")
             .and_then(Value::as_str)
             .map(str::trim)
@@ -3345,15 +3345,19 @@ fn read_v3_environment_context_cwd_from_text(text: &str) -> Option<String> {
     }
 }
 
-fn format_v3_console_line_for_identity(
+fn format_v3_console_line_for_observability(
     context: &V3ConsoleEmissionContext,
     identity: &V3ConsoleLogIdentity,
+    observability: &V3RuntimeObservability,
     content: &str,
 ) -> String {
-    format_v3_console_monitor_line(
+    format_v3_console_scoped_line(
         &context.state.server.port.to_string(),
         &context.entry_protocol,
+        &identity.session_id,
         identity.project_path.as_deref(),
+        &format_v3_console_provider_target_compact(observability),
+        &format_v3_console_route_hit_label(&context.state, observability),
         content,
     )
 }
@@ -3376,11 +3380,48 @@ fn format_v3_console_monitor_prefix(
     entry_protocol: &str,
     project_path: Option<&str>,
 ) -> String {
+    format_v3_console_scoped_prefix(port_label, entry_protocol, "-", project_path, "-", "-")
+}
+
+fn format_v3_console_scoped_line(
+    port_label: &str,
+    entry_protocol: &str,
+    session_id: &str,
+    project_path: Option<&str>,
+    model_scope: &str,
+    route_scope: &str,
+    content: &str,
+) -> String {
     format!(
-        "[{}] [{}] cwd={}",
+        "{} {}",
+        format_v3_console_scoped_prefix(
+            port_label,
+            entry_protocol,
+            session_id,
+            project_path,
+            model_scope,
+            route_scope,
+        ),
+        content
+    )
+}
+
+fn format_v3_console_scoped_prefix(
+    port_label: &str,
+    entry_protocol: &str,
+    session_id: &str,
+    project_path: Option<&str>,
+    model_scope: &str,
+    route_scope: &str,
+) -> String {
+    format!(
+        "[{}:{}:sessionID:{}][{}][{}][{}]",
         format_v3_console_safe_label(port_label),
         format_v3_console_entry_protocol_label(entry_protocol),
-        format_v3_console_cwd(project_path)
+        format_v3_console_safe_label(session_id),
+        format_v3_console_project_name(project_path),
+        format_v3_console_safe_label(model_scope),
+        format_v3_console_safe_label(route_scope)
     )
 }
 
@@ -3436,21 +3477,6 @@ fn format_v3_console_route_hit_label(
         .to_string()
 }
 
-fn format_v3_console_usage_route_label(
-    state: &V3ListenerState,
-    observability: &V3RuntimeObservability,
-) -> String {
-    let prefix = match observability.execution_mode.trim() {
-        "direct" => "router-direct",
-        "relay" => "router-relay",
-        _ => "router",
-    };
-    format!(
-        "{prefix}:{}",
-        format_v3_console_route_hit_label(state, observability)
-    )
-}
-
 fn format_v3_console_hit_reason(
     _state: &V3ListenerState,
     observability: &V3RuntimeObservability,
@@ -3478,6 +3504,29 @@ fn format_v3_console_hit_reason(
         .filter(|value| !value.is_empty())
         .map(|value| format!("route:{value}"))
         .unwrap_or_else(|| "route:selected".to_string())
+}
+
+fn format_v3_console_provider_target_compact(observability: &V3RuntimeObservability) -> String {
+    let (provider_from_key, _, model_from_key) =
+        parse_v3_console_provider_key(observability.provider_key.as_deref());
+    let provider = observability
+        .provider_id
+        .as_deref()
+        .or(provider_from_key.as_deref())
+        .unwrap_or("-");
+    let model = observability
+        .wire_model
+        .as_deref()
+        .or(model_from_key.as_deref())
+        .or(observability.model_id.as_deref())
+        .unwrap_or("-");
+    if provider == "-" && model == "-" {
+        "-".to_string()
+    } else if model == "-" || model.trim().is_empty() {
+        provider.to_string()
+    } else {
+        format!("{provider}.{model}")
+    }
 }
 
 fn format_v3_console_provider_target(observability: &V3RuntimeObservability) -> String {
@@ -3565,27 +3614,6 @@ fn parse_v3_console_provider_key(
     }
 }
 
-fn format_v3_console_usage_model_pair(
-    identity: &V3ConsoleLogIdentity,
-    observability: &V3RuntimeObservability,
-) -> String {
-    let request_model = identity
-        .request_model
-        .as_deref()
-        .or(observability.model_id.as_deref())
-        .unwrap_or("-");
-    let hit_model = observability
-        .wire_model
-        .as_deref()
-        .or(observability.model_id.as_deref())
-        .unwrap_or("-");
-    if request_model == "-" && hit_model == "-" {
-        format_v3_console_model_pair(observability)
-    } else {
-        format!("{request_model}->{hit_model}")
-    }
-}
-
 fn format_v3_usage_request_id(request_id: &str) -> String {
     let normalized = request_id.trim();
     let normalized = if normalized.is_empty() {
@@ -3645,34 +3673,32 @@ fn short_v3_request_tail(value: &str, max_chars: usize) -> String {
 }
 
 fn format_v3_console_cwd(project_path: Option<&str>) -> String {
-    let project = project_path
+    format_v3_console_project_name(project_path)
+}
+
+fn format_v3_console_project_name(project_path: Option<&str>) -> String {
+    let Some(project) = project_path
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| "-".to_string());
-    trim_v3_path_for_log(&project, 80)
-}
-
-fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
-    format!("{}:{port}", format_v3_console_cwd(project_path))
-}
-
-fn trim_v3_path_for_log(value: &str, max_len: usize) -> String {
-    let char_count = value.chars().count();
-    if char_count <= max_len {
-        return value.to_string();
+    else {
+        return "-".to_string();
+    };
+    let trimmed = project.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return "-".to_string();
     }
-    let keep = std::cmp::max(8, max_len.saturating_sub(1) / 2);
-    let prefix = value.chars().take(keep).collect::<String>();
-    let suffix = value
-        .chars()
-        .rev()
-        .take(keep)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    format!("{prefix}…{suffix}")
+    std::path::Path::new(trimmed)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(format_v3_console_safe_label)
+        .filter(|value| value != "-")
+        .unwrap_or_else(|| {
+            trimmed
+                .rsplit(['/', '\\'])
+                .find(|value| !value.trim().is_empty())
+                .map(format_v3_console_safe_label)
+                .unwrap_or_else(|| "-".to_string())
+        })
 }
 
 fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> String {
@@ -4071,12 +4097,9 @@ fn colorize_v3_request_console_line(line: &str, color_key: Option<&str>) -> Stri
     let color = color_key
         .and_then(resolve_v3_session_color)
         .unwrap_or_else(|| "\x1b[36m".to_string());
-    format!(
-        "{}{}{}",
-        color,
-        highlight_v3_console_key_values(line, &color),
-        ANSI_RESET
-    )
+    let highlighted = highlight_v3_console_key_values(line, &color);
+    let highlighted = highlight_v3_console_digits_preserving_ansi(&highlighted, &color);
+    format!("{}{}{}", color, highlighted, ANSI_RESET)
 }
 
 fn colorize_v3_error_console_line(line: &str) -> String {
@@ -4101,6 +4124,39 @@ fn colorize_v3_stopless_console_line(line: &str) -> String {
         highlight_v3_console_key_values(line, ANSI_STOPLESS_PURPLE),
         ANSI_RESET
     )
+}
+
+fn highlight_v3_console_digits_preserving_ansi(line: &str, base_color: &str) -> String {
+    let mut output = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\x1b' {
+            output.push(character);
+            for next in chars.by_ref() {
+                output.push(next);
+                if next == 'm' {
+                    break;
+                }
+            }
+            continue;
+        }
+        if character.is_ascii_digit() {
+            output.push_str(ANSI_WHITE);
+            output.push(character);
+            while let Some(next) = chars.peek().copied() {
+                if !next.is_ascii_digit() {
+                    break;
+                }
+                output.push(next);
+                chars.next();
+            }
+            output.push_str(ANSI_RESET);
+            output.push_str(base_color);
+            continue;
+        }
+        output.push(character);
+    }
+    output
 }
 
 fn highlight_v3_console_key_values(line: &str, base_color: &str) -> String {
@@ -5810,7 +5866,7 @@ mod tests {
                 "/v1/responses",
                 resolve_v3_console_project_path(&headers, &payload).as_deref()
             ),
-            "[5555] [responses] cwd=/Volumes/extension/code/OneStop"
+            "[5555:responses:sessionID:-][OneStop][-][-]"
         );
     }
 
@@ -5836,8 +5892,42 @@ mod tests {
                 Some("/Users/fanzhang/Documents/github/routecodex"),
                 5555
             ),
-            "/Users/fanzhang/Documents/github/routecodex:5555"
+            "routecodex:5555"
         );
+    }
+
+    #[test]
+    fn console_scoped_prefix_is_compact_project_model_route_shape() {
+        assert_eq!(
+            format_v3_console_scoped_prefix(
+                "5520",
+                "responses",
+                "xxxx",
+                Some("/Users/fanzhang/Documents/github/rules"),
+                "cc.gpt-5.5",
+                "thinking",
+            ),
+            "[5520:responses:sessionID:xxxx][rules][cc.gpt-5.5][thinking]"
+        );
+    }
+
+    #[test]
+    fn request_console_color_keeps_numbers_white_and_scope_text_session_colored() {
+        let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
+        std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
+        let colored = colorize_v3_request_console_line(
+            "[5520:responses:sessionID:xxxx][rules][cc.gpt-5.5][thinking] [usage] req=622580-3466",
+            Some("xxxx"),
+        );
+        if let Some(previous) = previous {
+            std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", previous);
+        } else {
+            std::env::remove_var("ROUTECODEX_FORCE_LOG_COLOR");
+        }
+        assert!(colored.contains(&format!("{ANSI_WHITE}5520{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}5{ANSI_RESET}")));
+        assert!(colored.contains("responses"));
+        assert!(colored.contains("rules"));
     }
 
     #[test]
@@ -5873,8 +5963,8 @@ mod tests {
             None,
         );
         assert!(
-            line.starts_with("[5555] [responses] cwd=- "),
-            "console prefix must be port, protocol entry, cwd, then content: {line}"
+            line.starts_with("[5555:responses:sessionID:-][-][-][-] "),
+            "console prefix must be scoped port/protocol/session/project/model/route before content: {line}"
         );
         assert!(line.contains("❌ [responses]"));
         assert!(line.contains("request req-prefix failed"));
@@ -5903,8 +5993,8 @@ mod tests {
         );
 
         assert!(
-            line.starts_with("[5555] [responses] cwd=/Volumes/extension/code/OneStop "),
-            "malformed request line must preserve header project cwd: {line}"
+            line.starts_with("[5555:responses:sessionID:-][OneStop][-][-] "),
+            "malformed request line must preserve compact header project scope: {line}"
         );
     }
 
@@ -5925,8 +6015,8 @@ mod tests {
             Some("/Volumes/extension/code/OneStop"),
         );
         assert!(
-            line.starts_with("[5555] [responses] cwd=/Volumes/extension/code/OneStop "),
-            "failed request line must preserve request project cwd: {line}"
+            line.starts_with("[5555:responses:sessionID:-][OneStop][-][-] "),
+            "failed request line must preserve compact request project scope: {line}"
         );
         assert!(line.contains("request req-project-cwd failed"));
     }
@@ -5963,22 +6053,15 @@ mod tests {
             next_provider_key: Some("minimax:key1:MiniMax-M3".to_string()),
             wait_ms: None,
         };
-        let identity = V3ConsoleLogIdentity {
-            session_id: "sid-test".to_string(),
-            color_key: Some("sid-test".to_string()),
-            project_path: Some("/tmp/project".to_string()),
-            request_model: Some("gpt-5.5".to_string()),
-        };
-
         let error_content =
-            format_v3_provider_failure_console_content("req-provider-switch", &identity, &event);
+            format_v3_provider_failure_console_content("req-provider-switch", &event);
         assert!(error_content.contains("❌ [provider-error]"));
         assert!(error_content.contains("provider=limited[key1].gpt-5.5"));
         assert!(error_content.contains("failures=3"));
         assert!(error_content.contains("health=cooldown"));
         assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
         let switch_content =
-            format_v3_provider_switch_console_content("req-provider-switch", &identity, &event);
+            format_v3_provider_switch_console_content("req-provider-switch", &event);
         assert!(switch_content.contains("[provider-switch]"));
         assert!(switch_content.contains("limited[key1].gpt-5.5 -> minimax[key1].MiniMax-M3"));
 
