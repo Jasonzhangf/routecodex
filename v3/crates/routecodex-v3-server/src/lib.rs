@@ -2778,15 +2778,12 @@ fn emit_v3_request_start_console_line(
         .request_model
         .clone()
         .unwrap_or_else(|| "-".to_string());
-    let content = format!(
-        "▶ [{}] {} request {} started (stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none)",
-        endpoint,
-        console_timestamp_hhmmss(),
-        request_id,
-        stream,
-        accepts_sse,
-        raw_input_items,
-        raw_input_items
+    let content = format_v3_console_timed_content(
+        &format!("▶ [{endpoint}]"),
+        &format!(
+            "req={} event=started stream={} acceptsSse={} rawInputItems={} preparedInputItems={} plannedEntryMode=none",
+            request_id, stream, accepts_sse, raw_input_items, raw_input_items
+        ),
     );
     let line = format_v3_console_scoped_line(
         &state.server.port.to_string(),
@@ -2867,12 +2864,14 @@ fn emit_v3_provider_observability_console_lines(
         && !observability.unavailable_candidates.is_empty()
     {
         let selected = format_v3_console_provider_target(observability);
-        let content = format!(
-            "[provider-unavailable] {} req={} unavailable={} selected={} reason=availability",
-            console_timestamp_hhmmss(),
-            context.request_id,
-            observability.unavailable_candidates.join(","),
-            selected
+        let content = format_v3_console_timed_content(
+            "[provider-unavailable]",
+            &format!(
+                "req={} unavailable={} selected={} reason=availability",
+                context.request_id,
+                observability.unavailable_candidates.join(","),
+                selected
+            ),
         );
         let line =
             format_v3_console_line_for_observability(context, &identity, observability, &content);
@@ -2888,9 +2887,8 @@ fn format_v3_provider_failure_console_content(
     request_id: &str,
     event: &V3RuntimeProviderFailureObservation,
 ) -> String {
-    let mut content = format!(
-        "❌ [provider-error] {} req={} provider={} status={} failures={} health={} action={}",
-        console_timestamp_hhmmss(),
+    let mut fields = format!(
+        "req={} provider={} status={} failures={} health={} action={}",
         request_id,
         format_v3_console_provider_key_label(&event.provider_key),
         event.status,
@@ -2899,25 +2897,25 @@ fn format_v3_provider_failure_console_content(
         event.action
     );
     if let Some(cooldown_until_ms) = event.cooldown_until_ms {
-        content.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
+        fields.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
     }
     if let Some(wait_ms) = event.wait_ms {
-        content.push_str(&format!(" waitMs={wait_ms}"));
+        fields.push_str(&format!(" waitMs={wait_ms}"));
     }
     if let Some(next) = event.next_provider_key.as_deref() {
-        content.push_str(&format!(
+        fields.push_str(&format!(
             " next={}",
             format_v3_console_provider_key_label(next)
         ));
     }
     if let Some(error_type) = event.error_type.as_deref() {
-        content.push_str(&format!(" type={error_type}"));
+        fields.push_str(&format!(" type={error_type}"));
     }
-    content.push_str(&format!(
+    fields.push_str(&format!(
         " message={}",
         format_v3_console_single_line_message(&event.message)
     ));
-    content
+    format_v3_console_timed_content("❌ [provider-error]", &fields)
 }
 
 fn format_v3_provider_switch_console_content(
@@ -2929,13 +2927,15 @@ fn format_v3_provider_switch_console_content(
         .as_deref()
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
-    format!(
-        "[provider-switch] {} req={} {} -> {} action={} reason=provider_failure",
-        console_timestamp_hhmmss(),
-        request_id,
-        format_v3_console_provider_key_label(&event.provider_key),
-        next,
-        event.action
+    format_v3_console_timed_content(
+        "[provider-switch]",
+        &format!(
+            "req={} from={} to={} action={} reason=provider_failure",
+            request_id,
+            format_v3_console_provider_key_label(&event.provider_key),
+            next,
+            event.action
+        ),
     )
 }
 
@@ -2950,13 +2950,12 @@ fn emit_v3_request_route_console_line(
     let route_label = format_v3_console_route_hit_label(&context.state, observability);
     let provider_target = format_v3_console_provider_target(observability);
     let reason = format_v3_console_hit_reason(&context.state, observability);
-    let content = format!(
-        "[virtual-router-hit] {} req={} {} -> {} reason={}",
-        console_timestamp_hhmmss(),
-        context.request_id,
-        route_label,
-        provider_target,
-        reason
+    let content = format_v3_console_timed_content(
+        "[virtual-router-hit]",
+        &format!(
+            "req={} route={} target={} reason={}",
+            context.request_id, route_label, provider_target, reason
+        ),
     );
     let line =
         format_v3_console_line_for_observability(context, &identity, observability, &content);
@@ -2983,18 +2982,19 @@ fn emit_v3_request_complete_console_line(
         .unwrap_or("unreported");
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let identity = resolve_v3_console_log_identity(context);
-    let content = format!(
-        "✅ [{}] {} request {} completed (status={}{} responseStatus={} finish_reason={} elapsedMs={:.1} nodes={} transport={})",
-        context.endpoint,
-        console_timestamp_hhmmss(),
-        context.request_id,
-        status,
-        format_v3_console_upstream_status_suffix(status, observability.provider_status),
-        response_status,
-        finish_reason,
-        elapsed_ms,
-        node_trace.len(),
-        observability.transport
+    let content = format_v3_console_timed_content(
+        &format!("✅ [{}]", context.endpoint),
+        &format!(
+            "req={} event=completed status={}{} responseStatus={} finish_reason={} elapsedMs={:.1} nodes={} transport={}",
+            context.request_id,
+            status,
+            format_v3_console_upstream_status_suffix(status, observability.provider_status),
+            response_status,
+            finish_reason,
+            elapsed_ms,
+            node_trace.len(),
+            observability.transport
+        ),
     );
     let line =
         format_v3_console_line_for_observability(context, &identity, observability, &content);
@@ -3019,14 +3019,17 @@ fn emit_v3_usage_console_line(
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
     let internal_ms = elapsed_ms;
     let external_ms = 0.0;
-    let content = format!(
-        "[usage] req={} usage={} time=i:{:.0}ms e:{:.0}ms t:{:.1}ms finish_reason={}",
-        format_v3_usage_request_id(&context.request_id),
-        usage,
-        internal_ms,
-        external_ms,
-        elapsed_ms,
-        finish_reason
+    let content = format_v3_console_timed_content(
+        "[usage]",
+        &format!(
+            "req={} {} time_i={:.0}ms time_e={:.0}ms time_t={:.1}ms finish_reason={}",
+            format_v3_usage_request_id(&context.request_id),
+            usage,
+            internal_ms,
+            external_ms,
+            elapsed_ms,
+            finish_reason
+        ),
     );
     let line =
         format_v3_console_line_for_observability(context, &identity, observability, &content);
@@ -3046,12 +3049,12 @@ fn emit_v3_stopless_console_line(
         .as_deref()
         .unwrap_or("unreported");
     let identity = resolve_v3_console_log_identity(context);
-    let content = format!(
-        "🧭 [stopless] {} request {} activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason={} transport={})",
-        console_timestamp_hhmmss(),
-        context.request_id,
-        finish_reason,
-        observability.transport
+    let content = format_v3_console_timed_content(
+        "🧭 [stopless]",
+        &format!(
+            "req={} event=activated hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason={} transport={}",
+            context.request_id, finish_reason, observability.transport
+        ),
     );
     let line =
         format_v3_console_line_for_observability(context, &identity, observability, &content);
@@ -3419,9 +3422,35 @@ fn format_v3_console_scoped_prefix(
         format_v3_console_safe_label(port_label),
         format_v3_console_entry_protocol_label(entry_protocol),
         format_v3_console_safe_label(session_id),
-        format_v3_console_project_name(project_path),
-        format_v3_console_safe_label(model_scope),
-        format_v3_console_safe_label(route_scope)
+        format_v3_console_aligned_scope_value(
+            &format_v3_console_project_name(project_path),
+            V3_CONSOLE_PROJECT_SCOPE_WIDTH,
+        ),
+        format_v3_console_aligned_scope_value(
+            &format_v3_console_safe_label(model_scope),
+            V3_CONSOLE_MODEL_SCOPE_WIDTH,
+        ),
+        format_v3_console_aligned_scope_value(
+            &format_v3_console_safe_label(route_scope),
+            V3_CONSOLE_ROUTE_SCOPE_WIDTH,
+        )
+    )
+}
+
+const V3_CONSOLE_PROJECT_SCOPE_WIDTH: usize = 12;
+const V3_CONSOLE_MODEL_SCOPE_WIDTH: usize = 28;
+const V3_CONSOLE_ROUTE_SCOPE_WIDTH: usize = 13;
+const V3_CONSOLE_CONTENT_TAG_WIDTH: usize = 24;
+
+fn format_v3_console_aligned_scope_value(value: &str, width: usize) -> String {
+    format!("{value:<width$}")
+}
+
+fn format_v3_console_timed_content(tag: &str, fields: &str) -> String {
+    format!(
+        "{tag:<width$} {} {fields}",
+        console_timestamp_hhmmss(),
+        width = V3_CONSOLE_CONTENT_TAG_WIDTH
     )
 }
 
@@ -3672,10 +3701,6 @@ fn short_v3_request_tail(value: &str, max_chars: usize) -> String {
     chars[chars.len() - max_chars..].iter().collect()
 }
 
-fn format_v3_console_cwd(project_path: Option<&str>) -> String {
-    format_v3_console_project_name(project_path)
-}
-
 fn format_v3_console_project_name(project_path: Option<&str>) -> String {
     let Some(project) = project_path
         .map(str::trim)
@@ -3703,7 +3728,7 @@ fn format_v3_console_project_name(project_path: Option<&str>) -> String {
 
 fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> String {
     let Some(usage) = usage else {
-        return "unreported".to_string();
+        return "usage=unreported".to_string();
     };
     let input_tokens = usage.input_tokens;
     let input = input_tokens
@@ -3727,7 +3752,7 @@ fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> Str
         (Some(cached), _) => cached.to_string(),
         (None, _) => "0".to_string(),
     };
-    format!("in:{input} out:{output} cache={cache} total={total}")
+    format!("usage_in={input} usage_out={output} usage_cache={cache} usage_total={total}")
 }
 
 fn build_v3_foundation_console_observability(
@@ -4012,16 +4037,17 @@ fn format_v3_error_console_line_with_port(
         .copied()
         .unwrap_or("V3Error06ClientProjected");
     let error_number = compact_v3_error_number(error_chain);
-    let content = format!(
-        "❌ [{}] {} request {} failed (status={} error={} subcode={} node={}) {}",
-        endpoint,
-        console_timestamp_hhmmss(),
-        request_id,
-        status,
-        error_number,
-        error_code,
-        error_node,
-        message
+    let content = format_v3_console_timed_content(
+        &format!("❌ [{endpoint}]"),
+        &format!(
+            "req={} event=failed status={} error={} subcode={} node={} message={}",
+            request_id,
+            status,
+            error_number,
+            error_code,
+            error_node,
+            format_v3_console_single_line_message(message)
+        ),
     );
     format_v3_console_monitor_line(port_label, endpoint, project_path, &content)
 }
@@ -4097,8 +4123,7 @@ fn colorize_v3_request_console_line(line: &str, color_key: Option<&str>) -> Stri
     let color = color_key
         .and_then(resolve_v3_session_color)
         .unwrap_or_else(|| "\x1b[36m".to_string());
-    let highlighted = highlight_v3_console_key_values(line, &color);
-    let highlighted = highlight_v3_console_digits_preserving_ansi(&highlighted, &color);
+    let highlighted = highlight_v3_console_data_values(line, &color);
     format!("{}{}{}", color, highlighted, ANSI_RESET)
 }
 
@@ -4109,7 +4134,7 @@ fn colorize_v3_error_console_line(line: &str) -> String {
     format!(
         "{}{}{}",
         ANSI_ERROR_RED,
-        highlight_v3_console_key_values(line, ANSI_ERROR_RED),
+        highlight_v3_console_data_values(line, ANSI_ERROR_RED),
         ANSI_RESET
     )
 }
@@ -4121,12 +4146,74 @@ fn colorize_v3_stopless_console_line(line: &str) -> String {
     format!(
         "{}{}{}",
         ANSI_STOPLESS_PURPLE,
-        highlight_v3_console_key_values(line, ANSI_STOPLESS_PURPLE),
+        highlight_v3_console_data_values(line, ANSI_STOPLESS_PURPLE),
         ANSI_RESET
     )
 }
 
-fn highlight_v3_console_digits_preserving_ansi(line: &str, base_color: &str) -> String {
+fn highlight_v3_console_data_values(line: &str, base_color: &str) -> String {
+    let prefix_end = leading_v3_console_scope_prefix_end(line);
+    let mut output = String::with_capacity(line.len());
+    if prefix_end > 0 {
+        output.push_str(&highlight_v3_console_scope_prefix_values(
+            &line[..prefix_end],
+            base_color,
+        ));
+        output.push_str(&highlight_v3_console_non_kv_data_values(
+            &line[prefix_end..],
+            base_color,
+        ));
+    } else {
+        output.push_str(&highlight_v3_console_non_kv_data_values(line, base_color));
+    }
+    highlight_v3_console_key_values(&output, base_color)
+}
+
+fn leading_v3_console_scope_prefix_end(line: &str) -> usize {
+    let mut index = 0;
+    let bytes = line.as_bytes();
+    while index < line.len() && bytes.get(index) == Some(&b'[') {
+        let Some(close_relative) = line[index..].find(']') else {
+            break;
+        };
+        let close = index + close_relative;
+        index = close + 1;
+    }
+    index
+}
+
+fn highlight_v3_console_scope_prefix_values(prefix: &str, base_color: &str) -> String {
+    let mut output = String::with_capacity(prefix.len());
+    let mut remaining = prefix;
+    while let Some(rest) = remaining.strip_prefix('[') {
+        let Some(close) = rest.find(']') else {
+            output.push_str(remaining);
+            break;
+        };
+        let scope = &rest[..close];
+        output.push('[');
+        if let Some((left, session_id)) = scope.split_once(":sessionID:") {
+            let mut parts = left.splitn(2, ':');
+            let port = parts.next().unwrap_or(left);
+            let protocol = parts.next();
+            push_v3_console_data_value(&mut output, port, base_color);
+            if let Some(protocol) = protocol {
+                output.push(':');
+                output.push_str(protocol);
+            }
+            output.push_str(":sessionID:");
+            push_v3_console_data_value(&mut output, session_id, base_color);
+        } else {
+            push_v3_console_data_value(&mut output, scope, base_color);
+        }
+        output.push(']');
+        remaining = &rest[close + 1..];
+    }
+    output.push_str(remaining);
+    output
+}
+
+fn highlight_v3_console_non_kv_data_values(line: &str, base_color: &str) -> String {
     let mut output = String::with_capacity(line.len());
     let mut chars = line.chars().peekable();
     while let Some(character) = chars.next() {
@@ -4140,15 +4227,34 @@ fn highlight_v3_console_digits_preserving_ansi(line: &str, base_color: &str) -> 
             }
             continue;
         }
-        if character.is_ascii_digit() {
-            output.push_str(ANSI_WHITE);
-            output.push(character);
+        if character == '[' {
+            let mut bracket_value = String::new();
             while let Some(next) = chars.peek().copied() {
-                if !next.is_ascii_digit() {
+                chars.next();
+                if next == ']' {
                     break;
                 }
+                bracket_value.push(next);
+            }
+            if bracket_value.starts_with('/') {
+                output.push('[');
+                push_v3_console_data_value(&mut output, &bracket_value, base_color);
+                output.push(']');
+            } else {
+                output.push('[');
+                output.push_str(&bracket_value);
+                output.push(']');
+            }
+            continue;
+        }
+        if character.is_ascii_digit() && looks_like_v3_console_time(&chars) {
+            output.push_str(ANSI_WHITE);
+            output.push(character);
+            for _ in 0..7 {
+                let Some(next) = chars.next() else {
+                    break;
+                };
                 output.push(next);
-                chars.next();
             }
             output.push_str(ANSI_RESET);
             output.push_str(base_color);
@@ -4157,6 +4263,19 @@ fn highlight_v3_console_digits_preserving_ansi(line: &str, base_color: &str) -> 
         output.push(character);
     }
     output
+}
+
+fn looks_like_v3_console_time(chars: &std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    let lookahead = chars.clone().take(7).collect::<String>();
+    let bytes = lookahead.as_bytes();
+    bytes.len() == 7
+        && bytes[0].is_ascii_digit()
+        && bytes[1] == b':'
+        && bytes[2].is_ascii_digit()
+        && bytes[3].is_ascii_digit()
+        && bytes[4] == b':'
+        && bytes[5].is_ascii_digit()
+        && bytes[6].is_ascii_digit()
 }
 
 fn highlight_v3_console_key_values(line: &str, base_color: &str) -> String {
@@ -4177,24 +4296,33 @@ fn highlight_v3_console_key_values(line: &str, base_color: &str) -> String {
             continue;
         }
         let value = &after_equal[1..];
-        let value_end = value.find([' ', ',', ')', ']']).unwrap_or(value.len());
+        let value_end = if key == "message" {
+            value.len()
+        } else {
+            value.find([' ', ',']).unwrap_or(value.len())
+        };
         output.push_str(&before_equal[..key_start]);
-        output.push_str(ANSI_WHITE);
         output.push_str(key);
         output.push('=');
-        output.push_str(&value[..value_end]);
-        output.push_str(ANSI_RESET);
-        output.push_str(base_color);
+        push_v3_console_data_value(&mut output, &value[..value_end], base_color);
         remaining = &value[value_end..];
     }
     output.push_str(remaining);
     output
 }
 
+fn push_v3_console_data_value(output: &mut String, value: &str, base_color: &str) {
+    output.push_str(ANSI_WHITE);
+    output.push_str(value);
+    output.push_str(ANSI_RESET);
+    output.push_str(base_color);
+}
+
 fn is_v3_console_highlight_key(key: &str) -> bool {
     matches!(
         key,
         "stream"
+            | "event"
             | "acceptsSse"
             | "timeoutMs"
             | "rawInputItems"
@@ -4232,6 +4360,8 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "next"
             | "message"
             | "selected"
+            | "from"
+            | "to"
             | "elapsedMs"
             | "nodes"
             | "endpoint"
@@ -4241,7 +4371,14 @@ fn is_v3_console_highlight_key(key: &str) -> bool {
             | "sid"
             | "reason"
             | "usage"
+            | "usage_in"
+            | "usage_out"
+            | "usage_cache"
+            | "usage_total"
             | "time"
+            | "time_i"
+            | "time_e"
+            | "time_t"
             | "pipeline"
             | "target"
             | "upstreamStatus"
@@ -5799,6 +5936,23 @@ mod tests {
         }
     }
 
+    fn strip_test_ansi(input: &str) -> String {
+        let mut output = String::new();
+        let mut chars = input.chars();
+        while let Some(character) = chars.next() {
+            if character == '\x1b' {
+                for next in chars.by_ref() {
+                    if next == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                output.push(character);
+            }
+        }
+        output
+    }
+
     #[test]
     fn usage_summary_prints_cache_hit_rate() {
         let summary = V3RuntimeUsageSummary {
@@ -5809,7 +5963,7 @@ mod tests {
         };
         assert_eq!(
             format_v3_console_usage_summary(Some(&summary)),
-            "in:59842 out:822 cache=41984/59842(70.2%) total=60664"
+            "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
         );
     }
 
@@ -5830,12 +5984,12 @@ mod tests {
         assert_eq!(summary.cached_tokens, Some(41_984));
         assert_eq!(
             format_v3_console_usage_summary(Some(&summary)),
-            "in:59842 out:822 cache=41984/59842(70.2%) total=60664"
+            "usage_in=59842 usage_out=822 usage_cache=41984/59842(70.2%) usage_total=60664"
         );
     }
 
     fn format_v3_console_project_port(project_path: Option<&str>, port: u16) -> String {
-        format!("{}:{port}", format_v3_console_cwd(project_path))
+        format!("{}:{port}", format_v3_console_project_name(project_path))
     }
 
     #[test]
@@ -5866,7 +6020,10 @@ mod tests {
                 "/v1/responses",
                 resolve_v3_console_project_path(&headers, &payload).as_deref()
             ),
-            "[5555:responses:sessionID:-][OneStop][-][-]"
+            format!(
+                "[5555:responses:sessionID:-][{:<12}][{:<28}][{:<13}]",
+                "OneStop", "-", "-"
+            )
         );
     }
 
@@ -5907,16 +6064,46 @@ mod tests {
                 "cc.gpt-5.5",
                 "thinking",
             ),
-            "[5520:responses:sessionID:xxxx][rules][cc.gpt-5.5][thinking]"
+            format!(
+                "[5520:responses:sessionID:xxxx][{:<12}][{:<28}][{:<13}]",
+                "rules", "cc.gpt-5.5", "thinking"
+            )
         );
     }
 
     #[test]
-    fn request_console_color_keeps_numbers_white_and_scope_text_session_colored() {
+    fn console_scoped_line_aligns_project_model_route_and_content_columns() {
+        let short = format_v3_console_scoped_line(
+            "5520",
+            "responses",
+            "xxxx",
+            Some("/Users/fanzhang/Documents/github/rules"),
+            "cc.gpt-5.5",
+            "thinking",
+            "▶ [/v1/responses] req=a",
+        );
+        let long = format_v3_console_scoped_line(
+            "5520",
+            "responses",
+            "xxxx",
+            Some("/Volumes/extension/code/OneStop"),
+            "glmrelay_openai.glm-5.2",
+            "longcontext",
+            "▶ [/v1/responses] req=b",
+        );
+        assert_eq!(
+            short.find(" ▶ [/v1/responses]"),
+            long.find(" ▶ [/v1/responses]"),
+            "content column must stay aligned for normal project/model/route data: short={short:?} long={long:?}"
+        );
+    }
+
+    #[test]
+    fn request_console_color_marks_scope_and_finish_reason_values_white() {
         let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
         std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
         let colored = colorize_v3_request_console_line(
-            "[5520:responses:sessionID:xxxx][rules][cc.gpt-5.5][thinking] [usage] req=622580-3466",
+            "[5520:responses:sessionID:xxxx][rules][cc.gpt-5.5][thinking] [usage] req=622580-3466 finish_reason=tool_calls",
             Some("xxxx"),
         );
         if let Some(previous) = previous {
@@ -5925,9 +6112,14 @@ mod tests {
             std::env::remove_var("ROUTECODEX_FORCE_LOG_COLOR");
         }
         assert!(colored.contains(&format!("{ANSI_WHITE}5520{ANSI_RESET}")));
-        assert!(colored.contains(&format!("{ANSI_WHITE}5{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}xxxx{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}rules{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}cc.gpt-5.5{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}thinking{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}622580-3466{ANSI_RESET}")));
+        assert!(colored.contains(&format!("{ANSI_WHITE}tool_calls{ANSI_RESET}")));
         assert!(colored.contains("responses"));
-        assert!(colored.contains("rules"));
+        assert!(colored.contains("finish_reason="));
     }
 
     #[test]
@@ -5963,11 +6155,14 @@ mod tests {
             None,
         );
         assert!(
-            line.starts_with("[5555:responses:sessionID:-][-][-][-] "),
+            line.starts_with(&format!(
+                "[5555:responses:sessionID:-][{:<12}][{:<28}][{:<13}] ",
+                "-", "-", "-"
+            )),
             "console prefix must be scoped port/protocol/session/project/model/route before content: {line}"
         );
         assert!(line.contains("❌ [responses]"));
-        assert!(line.contains("request req-prefix failed"));
+        assert!(line.contains("req=req-prefix event=failed"));
     }
 
     #[test]
@@ -5993,7 +6188,10 @@ mod tests {
         );
 
         assert!(
-            line.starts_with("[5555:responses:sessionID:-][OneStop][-][-] "),
+            line.starts_with(&format!(
+                "[5555:responses:sessionID:-][{:<12}][{:<28}][{:<13}] ",
+                "OneStop", "-", "-"
+            )),
             "malformed request line must preserve compact header project scope: {line}"
         );
     }
@@ -6015,10 +6213,13 @@ mod tests {
             Some("/Volumes/extension/code/OneStop"),
         );
         assert!(
-            line.starts_with("[5555:responses:sessionID:-][OneStop][-][-] "),
+            line.starts_with(&format!(
+                "[5555:responses:sessionID:-][{:<12}][{:<28}][{:<13}] ",
+                "OneStop", "-", "-"
+            )),
             "failed request line must preserve compact request project scope: {line}"
         );
-        assert!(line.contains("request req-project-cwd failed"));
+        assert!(line.contains("req=req-project-cwd event=failed"));
     }
 
     #[test]
@@ -6063,7 +6264,7 @@ mod tests {
         let switch_content =
             format_v3_provider_switch_console_content("req-provider-switch", &event);
         assert!(switch_content.contains("[provider-switch]"));
-        assert!(switch_content.contains("limited[key1].gpt-5.5 -> minimax[key1].MiniMax-M3"));
+        assert!(switch_content.contains("from=limited[key1].gpt-5.5 to=minimax[key1].MiniMax-M3"));
 
         let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
         std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
@@ -6187,10 +6388,11 @@ mod tests {
 
         assert!(response.is_none());
         let log = std::fs::read_to_string(&log_file).unwrap();
+        let plain_log = strip_test_ansi(&log);
         assert!(
-            log.contains("❌ [/v1/responses]")
-                && log.contains("request req-error-console failed")
-                && log.contains("controlled error"),
+            plain_log.contains("❌ [/v1/responses]")
+                && plain_log.contains("req=req-error-console event=failed")
+                && plain_log.contains("message=controlled error"),
             "human console log must include the visible failed line, not only JSON debug events: {log}"
         );
         let _ = std::fs::remove_file(&log_file);
@@ -6217,7 +6419,7 @@ mod tests {
         let previous = std::env::var_os("ROUTECODEX_FORCE_LOG_COLOR");
         std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", "1");
         let colored = colorize_v3_stopless_console_line(
-            "[5555] 🧭 [stopless] 00:00:00 request req activated (hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason=stop transport=sse)",
+            "[5555:responses:sessionID:xxxx][rules][glmrelay_openai.glm-5.2][tools] 🧭 [stopless] 00:00:00 req=req event=activated hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason=stop transport=sse",
         );
         if let Some(previous) = previous {
             std::env::set_var("ROUTECODEX_FORCE_LOG_COLOR", previous);
@@ -6228,8 +6430,10 @@ mod tests {
             colored.starts_with(ANSI_STOPLESS_PURPLE),
             "stopless console line must use fixed purple color: {colored:?}"
         );
-        assert!(colored.contains("hook=reasoningStop"));
-        assert!(colored.contains("callId=call_stopless_reasoning"));
+        assert!(colored.contains("hook="));
+        assert!(colored.contains("reasoningStop"));
+        assert!(colored.contains("callId="));
+        assert!(colored.contains("call_stopless_reasoning"));
     }
 
     #[tokio::test]
