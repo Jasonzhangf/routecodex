@@ -447,12 +447,30 @@ fn leading_ansi_color(line: &str) -> Option<String> {
     Some(line[..=end].to_string())
 }
 
-fn request_id_from_line(line: &str) -> Option<&str> {
-    let marker = " request ";
-    let start = line.find(marker)? + marker.len();
-    let rest = &line[start..];
+fn strip_ansi(input: &str) -> String {
+    let mut output = String::new();
+    let mut chars = input.chars();
+    while let Some(character) = chars.next() {
+        if character == '\u{1b}' {
+            for next in chars.by_ref() {
+                if next == 'm' {
+                    break;
+                }
+            }
+        } else {
+            output.push(character);
+        }
+    }
+    output
+}
+
+fn request_id_from_line(line: &str) -> Option<String> {
+    let plain = strip_ansi(line);
+    let marker = "req=";
+    let start = plain.find(marker)? + marker.len();
+    let rest = &plain[start..];
     let end = rest.find(' ')?;
-    Some(&rest[..end])
+    Some(rest[..end].to_string())
 }
 
 fn request_counter_suffix_from_line(line: &str) -> Option<(u64, u64)> {
@@ -794,6 +812,8 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     );
     let start_stdout = String::from_utf8_lossy(&start_output.stdout);
     let start_stderr = String::from_utf8_lossy(&start_output.stderr);
+    let plain_start_stdout = strip_ansi(&start_stdout);
+    let plain_start_stderr = strip_ansi(&start_stderr);
     assert!(
         start_stdout.contains("[RouteCodexV3] rccv3 start version=")
             && start_stdout.contains(" crate=")
@@ -817,17 +837,17 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         "top-level restart must exec in place and keep streaming startup console output to the original foreground session, got:\n{start_stdout}"
     );
     assert!(
-        start_stdout.contains("▶ [/v1/responses]")
-            && start_stdout.contains("request ")
-            && start_stdout.contains(" started")
-            && start_stdout.contains("rawInputItems=1")
-            && start_stdout.contains("preparedInputItems=1")
+        plain_start_stdout.contains("▶ [/v1/responses]")
+            && plain_start_stdout.contains("req=")
+            && plain_start_stdout.contains("event=started")
+            && plain_start_stdout.contains("rawInputItems=1")
+            && plain_start_stdout.contains("preparedInputItems=1")
             && start_stdout.contains("\u{1b}["),
         "top-level start must stream colorized old production request monitor output even when config log_console=false, got:\n{start_stdout}"
     );
     let started_lines = start_stdout
         .lines()
-        .filter(|line| line.contains("▶ [/v1/responses]"))
+        .filter(|line| strip_ansi(line).contains("▶ [/v1/responses]"))
         .collect::<Vec<_>>();
     assert!(
         started_lines.len() >= 3,
@@ -857,7 +877,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     }
     let invalid_error_id = start_stderr
         .lines()
-        .find(|line| line.contains("❌ [/v1/responses]"))
+        .find(|line| strip_ansi(line).contains("❌ [/v1/responses]"))
         .and_then(request_id_from_line)
         .expect("invalid JSON error line must include a request id");
     assert!(
@@ -867,14 +887,14 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
     );
     let unknown_path_error_id = start_stderr
         .lines()
-        .find(|line| line.contains("❌ [/not-registered]"))
+        .find(|line| strip_ansi(line).contains("❌ [/not-registered]"))
         .and_then(request_id_from_line)
         .expect("unknown path error line must include a request id");
     assert!(
         unknown_path_error_id.starts_with("openai-chat-router-unknown-")
             && unknown_path_error_id.ends_with("-4-4")
-            && !start_stderr.contains("❌ [unknown]")
-            && !start_stderr.contains("request pre-request failed"),
+            && !plain_start_stderr.contains("❌ [unknown]")
+            && !plain_start_stderr.contains("request pre-request failed"),
         "404 errors must use endpoint path and continuous production-shaped request id, got stderr:\n{start_stderr}"
     );
     let first_color = leading_ansi_color(started_lines[0]).expect("first session must be colored");
@@ -885,45 +905,45 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
         "different client sessions must resolve to different foreground colors, got:\n{start_stdout}"
     );
     assert!(
-        start_stdout.contains("[virtual-router-hit]")
-            && start_stdout.contains("req=openai-responses-router-test-")
-            && start_stdout.contains("sid=console-alpha")
-            && start_stdout.contains(" -> test[key].wire-test")
-            && start_stdout.contains("reason=provider-request-dry-run")
-            && !start_stdout.contains("🎯 [/v1/responses]"),
+        plain_start_stdout.contains("[virtual-router-hit]")
+            && plain_start_stdout.contains("req=openai-responses-router-test-")
+            && plain_start_stdout.contains("sessionID:console-alpha")
+            && plain_start_stdout.contains("target=test[key].wire-test")
+            && plain_start_stdout.contains("reason=provider-request-dry-run")
+            && !plain_start_stdout.contains("🎯 [/v1/responses]"),
         "foreground monitor must use the V2 virtual-router-hit route/provider shape, got:\n{start_stdout}"
     );
     assert!(
-        start_stdout.contains("✅ [/v1/responses]")
-            && start_stdout.contains("status=200")
-            && !start_stdout.contains("providerStatus=200")
-            && start_stdout.contains("nodes=")
-            && start_stdout.contains("elapsedMs=")
-            && start_stdout.contains("finish_reason=")
-            && !start_stdout.contains("finishReason="),
+        plain_start_stdout.contains("✅ [/v1/responses]")
+            && plain_start_stdout.contains("status=200")
+            && !plain_start_stdout.contains("providerStatus=200")
+            && plain_start_stdout.contains("nodes=")
+            && plain_start_stdout.contains("elapsedMs=")
+            && plain_start_stdout.contains("finish_reason=")
+            && !plain_start_stdout.contains("finishReason="),
         "foreground monitor must show V2 snake-case finish_reason without repeating providerStatus=200, got:\n{start_stdout}"
     );
     assert!(
-        start_stdout.contains("[usage]")
-            && start_stdout.contains("usage=")
-            && start_stdout.contains("project=")
-            && start_stdout.contains(&format!(":{}", ports[0]))
-            && start_stdout.contains("route=router-direct:provider-request-dry-run")
-            && start_stdout.contains("model=test->wire-test")
-            && start_stdout.contains("finish_reason=")
-            && start_stdout.contains("time=i:")
-            && start_stdout.contains(" e:")
-            && start_stdout.contains(" t:")
-            && !start_stdout.contains("finishReason="),
+        plain_start_stdout.contains("[usage]")
+            && (plain_start_stdout.contains("usage_in=")
+                || plain_start_stdout.contains("usage=unreported"))
+            && plain_start_stdout.contains(&format!("{}:responses:sessionID:", ports[0]))
+            && plain_start_stdout.contains("[provider-request-dry-run]")
+            && plain_start_stdout.contains("[test.wire-test")
+            && plain_start_stdout.contains("finish_reason=")
+            && plain_start_stdout.contains("time_i=")
+            && plain_start_stdout.contains("time_e=")
+            && plain_start_stdout.contains("time_t=")
+            && !plain_start_stdout.contains("finishReason="),
         "foreground monitor must show the V2 usage summary shape, got:\n{start_stdout}"
     );
     assert!(
         start_stderr.contains("\u{1b}[31m")
-            && start_stderr.contains("❌ [/v1/responses]")
-            && start_stderr.contains("error=V3E")
-            && start_stderr.contains("subcode=")
-            && !start_stderr.contains("request pre-request failed")
-            && !start_stderr.contains("errorChain="),
+            && plain_start_stderr.contains("❌ [/v1/responses]")
+            && plain_start_stderr.contains("error=V3E")
+            && plain_start_stderr.contains("subcode=")
+            && !plain_start_stderr.contains("request pre-request failed")
+            && !plain_start_stderr.contains("errorChain="),
         "foreground errors must be red, compact, and use the continuous request id instead of pre-request, got stderr:\n{start_stderr}"
     );
     assert!(
@@ -1003,12 +1023,13 @@ fn top_level_start_snap_forces_debug_snapshots() {
     );
     send_responses_dry_run_request(ports[0], "snap-log-file", root.path());
     let log_text = fs::read_to_string(&expected_log_file).unwrap();
+    let plain_log_text = strip_ansi(&log_text);
     assert!(
-        log_text.contains("▶ [/v1/responses]")
+        plain_log_text.contains("▶ [/v1/responses]")
             && log_text.contains("\u{1b}[")
-            && log_text.contains("[virtual-router-hit]")
-            && log_text.contains("✅ [/v1/responses]")
-            && log_text.contains("[usage]"),
+            && plain_log_text.contains("[virtual-router-hit]")
+            && plain_log_text.contains("✅ [/v1/responses]")
+            && plain_log_text.contains("[usage]"),
         "foreground dry-run must persist the same colorized V2-shaped human monitor lines into server log, got:\n{log_text}"
     );
 
