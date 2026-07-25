@@ -248,7 +248,8 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
     }
 
-    fn record_event(&self, event: &Value) -> Result<(), String> {
+    pub fn record_provider_event_json(&self, event: &Value) -> Result<(), String> {
+        let event_type = event.get("type").and_then(Value::as_str).map(str::trim);
         let semantic = event.get("response").unwrap_or(event);
         let response_status = semantic
             .get("status")
@@ -261,11 +262,18 @@ impl V3RuntimeStreamObservation {
                     .and_then(Value::as_str)
                     .filter(|status| !status.trim().is_empty())
                     .map(str::to_string)
-            });
+            })
+            .or_else(|| infer_v3_runtime_response_status_from_provider_event_type(event_type));
         let usage = extract_v3_runtime_usage_summary(semantic)
             .or_else(|| extract_v3_runtime_usage_summary(event));
         let finish_reason = read_v3_runtime_finish_reason(semantic)
-            .or_else(|| read_v3_runtime_finish_reason(event));
+            .or_else(|| read_v3_runtime_finish_reason(event))
+            .or_else(|| {
+                infer_v3_runtime_finish_reason_from_provider_event_json(
+                    event_type,
+                    response_status.as_deref(),
+                )
+            });
         if response_status.is_none() && finish_reason.is_none() && usage.is_none() {
             return Ok(());
         }
@@ -1938,7 +1946,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         error.to_string()
                     )));
                 stream_observation
-                    .record_event(&json!({
+                    .record_provider_event_json(&json!({
                         "type":"response.completed",
                         "response": finalized_provider_value.clone()
                     }))
@@ -3616,6 +3624,38 @@ fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_runtime_string_path(value, &["candidates", "0", "finishReason"]))
 }
 
+fn infer_v3_runtime_response_status_from_provider_event_type(
+    event_type: Option<&str>,
+) -> Option<String> {
+    match event_type {
+        Some("response.completed" | "response.done") => Some("completed".to_string()),
+        Some("response.requires_action") => Some("requires_action".to_string()),
+        Some("response.failed") => Some("failed".to_string()),
+        Some("response.incomplete") => Some("incomplete".to_string()),
+        Some("response.cancelled" | "response.canceled") => Some("cancelled".to_string()),
+        Some("response.error") => Some("error".to_string()),
+        _ => None,
+    }
+}
+
+fn infer_v3_runtime_finish_reason_from_provider_event_json(
+    event_type: Option<&str>,
+    response_status: Option<&str>,
+) -> Option<String> {
+    match response_status.map(str::trim) {
+        Some(status) if status.eq_ignore_ascii_case("requires_action") => {
+            Some("tool_calls".to_string())
+        }
+        Some(status)
+            if status.eq_ignore_ascii_case("completed")
+                && matches!(event_type, Some("response.completed" | "response.done")) =>
+        {
+            Some("stop".to_string())
+        }
+        _ => None,
+    }
+}
+
 fn infer_v3_runtime_finish_reason(
     action: V3HubContinuationCommit,
     response_status: Option<&str>,
@@ -3875,7 +3915,7 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         |error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()),
     )?;
     observation
-        .record_event(&response)
+        .record_provider_event_json(&response)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     Ok(response)
 }
@@ -4375,7 +4415,7 @@ async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
             })?;
             observation
-                .record_event(&event)
+                .record_provider_event_json(&event)
                 .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
             collect_openai_chat_stream_event(
                 event,
@@ -4644,7 +4684,7 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
             ));
         }
         observation
-            .record_event(&event)
+            .record_provider_event_json(&event)
             .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
         collect_v3_runtime_responses_event_payload_evidence(
             event_type.as_deref(),
@@ -4681,7 +4721,13 @@ fn observe_v3_runtime_responses_sse_transport_chunk(
                 )?;
                 terminal_response = Some(response);
             }
-            Some("response.failed" | "response.incomplete" | "response.error") => {
+            Some(
+                "response.failed"
+                | "response.incomplete"
+                | "response.cancelled"
+                | "response.canceled"
+                | "response.error",
+            ) => {
                 let message = event
                     .pointer("/response/error/message")
                     .or_else(|| event.pointer("/error/message"))

@@ -10,6 +10,7 @@ use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw,
     execute_v3_responses_direct_runtime_kernel_with_continuation, register_responses_direct_hooks,
     V3ClientBody, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3RuntimeUsageSummary,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -60,6 +61,16 @@ struct TwoTurnSseTransport {
 
 #[derive(Default)]
 struct TerminalSseWithoutRemoteContinuationTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
+#[derive(Default)]
+struct ObservedTerminalSseTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
+#[derive(Default)]
+struct ObservedFailedTerminalOnlySseTransport {
     requests: Mutex<Vec<Value>>,
 }
 
@@ -263,6 +274,88 @@ impl ResponsesTransport for TerminalSseWithoutRemoteContinuationTransport {
                     concat!(
                         "event: response.completed\n",
                         "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_http_sse_terminal\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n",
+                        "data: [DONE]\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                ]
+                .into_iter()
+                .map(Ok),
+            )),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for ObservedTerminalSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.requests.lock().unwrap().push(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(
+                vec![
+                    concat!(
+                        "event: response.created\n",
+                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_observed_terminal\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                    concat!(
+                        "event: response.in_progress\n",
+                        "data: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"resp_observed_terminal\",\"status\":\"in_progress\"}}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                    concat!(
+                        "event: response.completed\n",
+                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_observed_terminal\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}],\"usage\":{\"input_tokens\":17,\"input_tokens_details\":{\"cached_tokens\":5},\"output_tokens\":3,\"total_tokens\":20}}}\n\n",
+                        "data: [DONE]\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                ]
+                .into_iter()
+                .map(Ok),
+            )),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for ObservedFailedTerminalOnlySseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.requests.lock().unwrap().push(request.body().clone());
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(
+                vec![
+                    concat!(
+                        "event: response.created\n",
+                        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_observed_failed\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                    concat!(
+                        "event: response.failed\n",
+                        "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_observed_failed\",\"status\":\"failed\",\"error\":{\"message\":\"upstream failed terminal\"}}}\n\n",
                         "data: [DONE]\n\n",
                     )
                     .as_bytes()
@@ -541,6 +634,122 @@ async fn http_only_sse_terminal_response_streams_without_remote_continuation_com
     let requests = transport.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_control_truth_isolated(&requests[0]);
+}
+
+#[tokio::test]
+async fn direct_provider_event_json_observation_records_usage_and_completed_terminal() {
+    let manifest = http_only_manifest_without_remote_continuation();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = ObservedTerminalSseTransport::default();
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-sse-terminal-observed",
+            json!({"model":"client","stream":true,"input":"say done"}),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let observation = output
+        .stream_observation
+        .clone()
+        .expect("Direct output must expose runtime provider-event JSON observation state");
+    let body = collect_sse_body_text(output.client_payload.body).await;
+    assert!(body.contains("response.in_progress"));
+    assert!(body.contains("response.completed"));
+    assert!(body.contains("[DONE]"));
+
+    let snapshot = observation.snapshot().unwrap();
+    assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(
+        snapshot.usage,
+        Some(V3RuntimeUsageSummary {
+            input_tokens: Some(17),
+            output_tokens: Some(3),
+            total_tokens: Some(20),
+            cached_tokens: Some(5),
+        })
+    );
+    assert_eq!(state.len().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream() {
+    let manifest = http_only_manifest_without_remote_continuation();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = ObservedFailedTerminalOnlySseTransport::default();
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-sse-terminal-observed-failed",
+            json!({"model":"client","stream":true,"input":"fail"}),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+
+    assert_error_chain(&output);
+    let V3ClientBody::Json(body) = &output.client_payload.body else {
+        panic!("provider terminal failed event must project JSON Error06 before client SSE starts")
+    };
+    assert_eq!(body["error"]["code"], "response.failed");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("upstream failed terminal"));
+    assert!(output.stream_observation.is_none());
+    assert_eq!(state.len().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn direct_provider_event_json_observation_infers_terminal_status_from_event_type_without_payload_status(
+) {
+    let manifest = http_only_manifest_without_remote_continuation();
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = ObservedTerminalSseTransport::default();
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-http-sse-terminal-inferred",
+            json!({"model":"client","stream":true,"input":"turn"}),
+        ),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let observation = output
+        .stream_observation
+        .clone()
+        .expect("Direct output must expose runtime provider-event JSON observation state");
+    let body = collect_sse_body_text(output.client_payload.body).await;
+    assert!(body.contains("response.completed"));
+    assert!(body.contains("response.in_progress"));
+    assert!(body.contains("[DONE]"));
+
+    let snapshot = observation.snapshot().unwrap();
+    assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
+    assert_eq!(snapshot.finish_reason.as_deref(), Some("stop"));
+    assert_eq!(
+        snapshot.usage.as_ref().map(|usage| usage.total_tokens),
+        Some(Some(20))
+    );
+    assert_eq!(state.len().unwrap(), 0);
 }
 
 #[tokio::test]
@@ -972,20 +1181,19 @@ async fn sse_stream_error_after_restore_preserves_previous_locator_truth() {
         2_000,
     )
     .await;
-    assert_eq!(output.client_payload.status, 200);
+    assert_error_chain(&output);
     assert_eq!(state.len().unwrap(), 1);
-    let V3ClientBody::Sse(mut stream) = output.client_payload.body else {
-        panic!("SSE provider body failure must remain a stream error")
+    let V3ClientBody::Json(body) = &output.client_payload.body else {
+        panic!("provider body stream failure before client bytes must project Error06 JSON")
     };
-    let error = stream
-        .next()
-        .await
-        .expect("controlled stream error must be yielded")
-        .expect_err("stream must fail explicitly");
-    assert_eq!(error.code, "provider_response_body_error");
-    assert!(error
-        .message
+    assert_eq!(body["error"]["code"], "provider_response_body_error");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
         .contains("controlled stream failure after restore"));
+    assert!(!output
+        .node_trace
+        .contains(&"V3HubRespContinuation04Committed"));
     assert_eq!(state.len().unwrap(), 1);
 }
 

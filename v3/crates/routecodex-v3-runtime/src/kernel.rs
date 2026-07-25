@@ -1,5 +1,7 @@
 use crate::hooks::V3HookRegistry;
-use crate::hub_v1::{V3RuntimeObservability, V3RuntimeProviderFailureObservation};
+use crate::hub_v1::{
+    V3RuntimeObservability, V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation,
+};
 use crate::nodes::*;
 use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS,
@@ -30,6 +32,9 @@ use crate::remote_continuation::{
     V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
 };
 use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
+use routecodex_v3_sse::{
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+};
 
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 
@@ -145,6 +150,7 @@ pub struct V3ResponsesDirectRuntimeOutput {
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport(
@@ -964,17 +970,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         ) {
                             return error_output(health_error, trace, &hook_registry);
                         }
-                        if let Err(error) = release_terminal_failure_locator(
-                            continuation_state,
-                            previous_response_id.as_deref(),
-                        ) {
-                            return error_output(
-                                runtime_source("V3HubRespContinuation04Committed", error),
-                                trace,
-                                &hook_registry,
-                            );
+                        if should_release_direct_locator_for_provider_failure(&source) {
+                            if let Err(error) = release_terminal_failure_locator(
+                                continuation_state,
+                                previous_response_id.as_deref(),
+                            ) {
+                                return error_output(
+                                    runtime_source("V3HubRespContinuation04Committed", error),
+                                    trace,
+                                    &hook_registry,
+                                );
+                            }
+                            trace.push("V3HubRespContinuation04Committed");
                         }
-                        trace.push("V3HubRespContinuation04Committed");
                         return error_output(source, trace, &hook_registry);
                     }
                     let policy_result = match run_v3_direct_provider_failure_policy(
@@ -1027,6 +1035,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
+            let stream_observation = V3RuntimeStreamObservation::default();
+            let body = std::mem::replace(
+                &mut response_projection.client_payload.body,
+                V3ClientBody::Bytes(Vec::new()),
+            );
+            response_projection.client_payload.body = match body {
+                V3ClientBody::Sse(stream) => {
+                    V3ClientBody::Sse(wrap_direct_sse_provider_event_json_observation_stream(
+                        stream,
+                        stream_observation.clone(),
+                    ))
+                }
+                other => other,
+            };
             if let (Some(continuation_state), Some(scope)) =
                 (continuation_state, continuation_scope.as_ref())
             {
@@ -1070,6 +1092,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     "streaming",
                     provider_failure_events.clone(),
                 )),
+                stream_observation: Some(stream_observation),
                 client_payload: response_projection.client_payload,
                 node_trace: trace,
                 error_chain: None,
@@ -1163,6 +1186,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 "completed",
                 provider_failure_events.clone(),
             )),
+            stream_observation: None,
             client_payload: response_projection.client_payload,
             node_trace: trace,
             error_chain: None,
@@ -1419,6 +1443,24 @@ fn release_terminal_failure_locator(
     Ok(())
 }
 
+fn should_release_direct_locator_for_provider_failure(source: &V3Error01SourceRaised) -> bool {
+    matches!(
+        source.code.as_str(),
+        "provider_http_400"
+            | "provider_http_404"
+            | "provider_http_500"
+            | "provider_http_502"
+            | "provider_http_503"
+            | "provider_http_504"
+            | "provider_response_sse_event_invalid"
+            | "response.failed"
+            | "response.incomplete"
+            | "response.cancelled"
+            | "response.canceled"
+            | "response.error"
+    )
+}
+
 struct V3DirectSseRemoteContinuationPolicy {
     state: V3ResponsesDirectContinuationState,
     scope_key: V3RemoteContinuationScopeKey,
@@ -1477,6 +1519,114 @@ fn wrap_direct_sse_remote_continuation_stream(
             }
         },
     ))
+}
+
+fn wrap_direct_sse_provider_event_json_observation_stream(
+    source: V3ClientSseStream,
+    stream_observation: V3RuntimeStreamObservation,
+) -> V3ClientSseStream {
+    struct StreamState {
+        source: V3ClientSseStream,
+        decoder: SseIncrementalDecoder,
+        stream_observation: V3RuntimeStreamObservation,
+        done: bool,
+    }
+
+    Box::pin(stream::unfold(
+        StreamState {
+            source,
+            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+            stream_observation,
+            done: false,
+        },
+        |mut state| async move {
+            if state.done {
+                return None;
+            }
+            match state.source.next().await {
+                Some(Ok(chunk)) => {
+                    let result = record_direct_sse_provider_event_json_chunk(
+                        &chunk,
+                        &mut state.decoder,
+                        &state.stream_observation,
+                    )
+                    .map(|()| chunk);
+                    if result.is_err() {
+                        state.done = true;
+                    }
+                    Some((result, state))
+                }
+                Some(Err(error)) => {
+                    state.done = true;
+                    Some((Err(error), state))
+                }
+                None => {
+                    let decoder = std::mem::replace(
+                        &mut state.decoder,
+                        SseIncrementalDecoder::new(SseTransportLimits::default()),
+                    );
+                    match decoder
+                        .finish()
+                        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
+                    {
+                        Ok(()) => None,
+                        Err(error) => {
+                            state.done = true;
+                            Some((Err(error), state))
+                        }
+                    }
+                }
+            }
+        },
+    ))
+}
+
+fn record_direct_sse_provider_event_json_chunk(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    stream_observation: &V3RuntimeStreamObservation,
+) -> Result<(), V3Error01SourceRaised> {
+    let frames = decoder
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
+    for frame in frames {
+        record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
+    }
+    Ok(())
+}
+
+fn record_direct_sse_provider_event_json_frame(
+    fields: &[SseField],
+    stream_observation: &V3RuntimeStreamObservation,
+) -> Result<(), V3Error01SourceRaised> {
+    let mut data = String::new();
+    for field in fields {
+        let SseField::Named { name, value } = field else {
+            continue;
+        };
+        if name != "data" {
+            continue;
+        }
+        if !data.is_empty() {
+            data.push('\n');
+        }
+        data.push_str(value);
+    }
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return Ok(());
+    }
+    let event: Value = serde_json::from_str(data).map_err(|error| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_event_invalid",
+            error.to_string(),
+        )
+    })?;
+    stream_observation
+        .record_provider_event_json(&event)
+        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
 }
 
 impl V3DirectSseRemoteContinuationPolicy {
@@ -1606,6 +1756,7 @@ fn projected_error_output_with_observability(
 ) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability,
+        stream_observation: None,
         client_payload: V3Resp15ClientPayload {
             status: projected.status,
             headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
@@ -2076,6 +2227,94 @@ mod tests {
             1
         );
         assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    }
+
+    #[tokio::test]
+    async fn provider_sse_failure_event_reselects_before_client_stream() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FirstSseFailureSecondSucceeds {
+            sends: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ResponsesTransport for FirstSseFailureSecondSucceeds {
+            async fn send(
+                &self,
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+                    assert_eq!(request.provider_id(), "first");
+                    return Ok(V3ProviderResp14Raw::from_sse(
+                        request.request_id().to_string(),
+                        request.provider_id().to_string(),
+                        200,
+                        vec![V3ProviderResponseHeader {
+                            name: "content-type".to_string(),
+                            value: b"text/event-stream".to_vec(),
+                        }],
+                        Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(
+                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
+                        )])),
+                    ));
+                }
+                assert_eq!(request.provider_id(), "second");
+                assert_eq!(request.body()["model"], "wire-second");
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(),
+                    request.provider_id(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+                ))
+            }
+        }
+
+        let transport = FirstSseFailureSecondSucceeds {
+            sends: AtomicUsize::new(0),
+        };
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &reselection_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({"model":"client-model","input":"hello","stream":true}),
+            },
+            crate::register_responses_direct_hooks(),
+            &transport,
+        )
+        .await;
+
+        assert_eq!(output.client_payload.status, 200, "{output:?}");
+        assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+        match output.client_payload.body {
+            V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
+            V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+                panic!("provider SSE failure must be reselected before client stream starts")
+            }
+        }
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+        let observability = output
+            .observability
+            .as_ref()
+            .expect("provider SSE failure switch must be observable");
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        assert_eq!(
+            observability.provider_failure_events[0].message,
+            "first quota exhausted"
+        );
+        assert_eq!(
+            observability.provider_failure_events[0]
+                .next_provider_key
+                .as_deref(),
+            Some("second:key:test")
+        );
     }
 
     #[tokio::test]

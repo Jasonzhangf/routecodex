@@ -353,8 +353,10 @@ pub struct V3Server16HttpFrame {
     pub debug_node: &'static str,
     pub error_node: &'static str,
     pub error_chain: Vec<&'static str>,
+    pub error_body: Option<Value>,
     pub node_trace: Vec<&'static str>,
     pub observability: Option<V3RuntimeObservability>,
+    pub stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
 pub enum V3Server16Body {
@@ -753,6 +755,11 @@ async fn pending_endpoint(
             ) {
                 return response;
             }
+            let frame = if entry_protocol == "responses" {
+                project_v3_responses_error_frame_for_request_if_sse(frame, &request_headers, None)
+            } else {
+                frame
+            };
             return responses_direct_output_response(frame);
         }
     };
@@ -900,11 +907,13 @@ async fn pending_endpoint(
         ) {
             Ok(scope) => scope,
             Err(message) => {
-                return error_output_response_for_server_with_project_path(
+                return error_output_response_for_responses_request_with_project_path(
                     &state.server,
                     &path,
                     &request_id,
                     project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    &request_headers,
+                    Some(&payload),
                     request_console_project_path.as_deref(),
                 );
             }
@@ -1135,11 +1144,13 @@ async fn pending_endpoint(
         ) {
             Ok(scope) => scope,
             Err(message) => {
-                return error_output_response_for_server_with_project_path(
+                return error_output_response_for_responses_request_with_project_path(
                     &state.server,
                     &path,
                     &request_id,
                     project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    &request_headers,
+                    Some(&payload),
                     request_console_project_path.as_deref(),
                 );
             }
@@ -2032,6 +2043,7 @@ async fn execute_responses_direct_server_frame(
     execution_id: String,
     payload: serde_json::Value,
 ) -> V3Server16HttpFrame {
+    let requested_stream = v3_responses_request_wants_sse(request_headers, &payload);
     let continuation_scope = match build_responses_direct_continuation_scope(
         request_headers,
         &request_id,
@@ -2041,22 +2053,29 @@ async fn execute_responses_direct_server_frame(
     ) {
         Ok(scope) => scope,
         Err(message) => {
-            return build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
+            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
                 V3HttpBoundaryErrorKind::MalformedJson,
                 message,
             ));
+            return project_v3_responses_direct_stream_error_frame_if_requested(
+                frame,
+                requested_stream,
+            );
         }
     };
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
         Err(error) => {
-            return build_v3_server_16_http_frame_from_v3_foundation_output(
-                project_v3_debug_failure(
+            let frame =
+                build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
                     "V3HubReqContinuation03Classified",
                     V3DebugError::MalformedFixture(format!(
                         "system time precedes Unix epoch: {error}"
                     )),
-                ),
+                ));
+            return project_v3_responses_direct_stream_error_frame_if_requested(
+                frame,
+                requested_stream,
             );
         }
     };
@@ -2087,8 +2106,12 @@ async fn execute_responses_direct_server_frame(
     {
         Ok(scope) => scope,
         Err(error) => {
-            return build_v3_server_16_http_frame_from_v3_foundation_output(
+            let frame = build_v3_server_16_http_frame_from_v3_foundation_output(
                 project_v3_debug_failure("V3Debug01TraceContextStarted", error),
+            );
+            return project_v3_responses_direct_stream_error_frame_if_requested(
+                frame,
+                requested_stream,
             );
         }
     };
@@ -2109,7 +2132,8 @@ async fn execute_responses_direct_server_frame(
         output.error_chain,
     );
     frame.observability = output.observability;
-    frame
+    frame.stream_observation = output.stream_observation;
+    project_v3_responses_direct_stream_error_frame_if_requested(frame, requested_stream)
 }
 
 fn pending_binding_output_response(
@@ -3193,6 +3217,7 @@ fn emit_v3_direct_frame_console_lines(
         status: frame.status,
         node_trace: frame.node_trace.clone(),
         observability,
+        stream_observation: frame.stream_observation.clone(),
         started_at,
     })
 }
@@ -3261,6 +3286,7 @@ struct V3DirectSseConsoleFinalizer {
     status: u16,
     node_trace: Vec<&'static str>,
     observability: V3RuntimeObservability,
+    stream_observation: Option<V3RuntimeStreamObservation>,
     started_at: Instant,
 }
 
@@ -3275,39 +3301,58 @@ enum V3SseConsoleStreamTerminal {
 
 impl V3SseConsoleFinalizer {
     fn complete(mut self) {
-        match self.stream_observation.snapshot() {
-            Ok(snapshot) => {
-                if snapshot.response_status.is_some() {
-                    self.observability.response_status = snapshot.response_status;
-                }
-                if snapshot.finish_reason.is_some() {
-                    self.observability.finish_reason = snapshot.finish_reason;
-                }
-                if snapshot.usage.is_some() {
-                    self.observability.usage = snapshot.usage;
-                }
-                let elapsed = self.started_at.elapsed();
-                emit_v3_stopless_console_line(&self.context, &self.observability);
-                emit_v3_request_complete_console_line(
-                    &self.context,
-                    self.status,
-                    &self.node_trace,
-                    &self.observability,
-                    elapsed,
-                );
-                emit_v3_usage_console_line(
-                    &self.context,
-                    &self.node_trace,
-                    &self.observability,
-                    elapsed,
-                );
-            }
-            Err(error) => self.provider_stream_failed(&error),
+        if let Err(error) = merge_v3_runtime_stream_observation(
+            &mut self.observability,
+            Some(&self.stream_observation),
+        ) {
+            self.provider_stream_failed(&error);
+            return;
         }
+        if let Some(status) = self.observability.response_status.clone() {
+            if is_v3_sse_terminal_success_status(&status) {
+                self.emit_complete_lines();
+                return;
+            }
+            if is_v3_sse_terminal_failure_status(&status) {
+                self.provider_stream_terminal_failed(&status);
+                return;
+            }
+        }
+        self.provider_stream_missing_terminal();
+    }
+
+    fn emit_complete_lines(self) {
+        let elapsed = self.started_at.elapsed();
+        emit_v3_stopless_console_line(&self.context, &self.observability);
+        emit_v3_request_complete_console_line(
+            &self.context,
+            self.status,
+            &self.node_trace,
+            &self.observability,
+            elapsed,
+        );
+        emit_v3_usage_console_line(
+            &self.context,
+            &self.node_trace,
+            &self.observability,
+            elapsed,
+        );
     }
 
     fn provider_stream_failed(self, error: &str) {
         self.fail(502, "provider_response_sse_stream", error);
+    }
+
+    fn provider_stream_missing_terminal(self) {
+        self.provider_stream_failed("provider response SSE stream ended before terminal event");
+    }
+
+    fn provider_stream_terminal_failed(self, status: &str) {
+        self.fail(
+            502,
+            "provider_response_sse_terminal_failure",
+            &format!("response SSE stream ended with terminal status {status}"),
+        );
     }
 
     fn client_disconnected(self) {
@@ -3332,7 +3377,25 @@ impl V3SseConsoleFinalizer {
 }
 
 impl V3DirectSseConsoleFinalizer {
-    fn complete(self) {
+    fn complete(mut self) {
+        if let Err(error) = self.merge_stream_observation() {
+            self.provider_stream_failed(&error);
+            return;
+        }
+        if let Some(status) = self.observability.response_status.clone() {
+            if is_v3_sse_terminal_success_status(&status) {
+                self.emit_complete_lines();
+                return;
+            }
+            if is_v3_sse_terminal_failure_status(&status) {
+                self.provider_stream_terminal_failed(&status);
+                return;
+            }
+        }
+        self.provider_stream_missing_terminal();
+    }
+
+    fn emit_complete_lines(self) {
         let elapsed = self.started_at.elapsed();
         emit_v3_stopless_console_line(&self.context, &self.observability);
         if should_emit_v3_request_complete_console_line(self.status, &self.observability) {
@@ -3356,8 +3419,41 @@ impl V3DirectSseConsoleFinalizer {
         self.fail(502, "provider_response_sse_stream", error);
     }
 
-    fn client_disconnected(self) {
+    fn provider_stream_missing_terminal(self) {
+        self.provider_stream_failed("provider response SSE stream ended before terminal event");
+    }
+
+    fn provider_stream_terminal_failed(self, status: &str) {
+        self.fail(
+            502,
+            "provider_response_sse_terminal_failure",
+            &format!("response SSE stream ended with terminal status {status}"),
+        );
+    }
+
+    fn client_disconnected(mut self) {
+        if let Err(error) = self.merge_stream_observation() {
+            self.provider_stream_failed(&error);
+            return;
+        }
+        if let Some(status) = self.observability.response_status.clone() {
+            if is_v3_sse_terminal_success_status(&status) {
+                self.complete();
+                return;
+            }
+            if is_v3_sse_terminal_failure_status(&status) {
+                self.provider_stream_terminal_failed(&status);
+                return;
+            }
+        }
         self.fail(499, "client_disconnect", V3_SSE_CLIENT_DISCONNECTED_MESSAGE);
+    }
+
+    fn merge_stream_observation(&mut self) -> Result<(), String> {
+        merge_v3_runtime_stream_observation(
+            &mut self.observability,
+            self.stream_observation.as_ref(),
+        )
     }
 
     fn fail(self, status: u16, code: &str, message: &str) {
@@ -3375,6 +3471,36 @@ impl V3DirectSseConsoleFinalizer {
             Some(&body),
         );
     }
+}
+
+fn merge_v3_runtime_stream_observation(
+    observability: &mut V3RuntimeObservability,
+    observation: Option<&V3RuntimeStreamObservation>,
+) -> Result<(), String> {
+    if let Some(observation) = observation {
+        let snapshot = observation.snapshot()?;
+        if snapshot.response_status.is_some() {
+            observability.response_status = snapshot.response_status;
+        }
+        if snapshot.finish_reason.is_some() {
+            observability.finish_reason = snapshot.finish_reason;
+        }
+        if snapshot.usage.is_some() {
+            observability.usage = snapshot.usage;
+        }
+    }
+    Ok(())
+}
+
+fn is_v3_sse_terminal_success_status(status: &str) -> bool {
+    matches!(status.trim(), "completed" | "requires_action" | "done")
+}
+
+fn is_v3_sse_terminal_failure_status(status: &str) -> bool {
+    matches!(
+        status.trim(),
+        "failed" | "incomplete" | "cancelled" | "canceled" | "error"
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -4147,10 +4273,7 @@ fn emit_v3_frame_error_console_line(
         request_id,
         frame.status,
         &frame.error_chain,
-        match &frame.body {
-            V3Server16Body::Json(value) => Some(value),
-            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
-        },
+        v3_server_frame_error_body_for_console(frame),
         project_path,
     );
 }
@@ -4171,10 +4294,7 @@ fn emit_v3_frame_error_console_line_for_state(
         request_id,
         frame.status,
         &frame.error_chain,
-        match &frame.body {
-            V3Server16Body::Json(value) => Some(value),
-            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
-        },
+        v3_server_frame_error_body_for_console(frame),
         project_path,
     );
 }
@@ -4192,11 +4312,15 @@ fn emit_v3_frame_error_console_line_for_context(
         observability,
         frame.status,
         &frame.error_chain,
-        match &frame.body {
-            V3Server16Body::Json(value) => Some(value),
-            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
-        },
+        v3_server_frame_error_body_for_console(frame),
     );
+}
+
+fn v3_server_frame_error_body_for_console(frame: &V3Server16HttpFrame) -> Option<&Value> {
+    frame.error_body.as_ref().or_else(|| match &frame.body {
+        V3Server16Body::Json(value) => Some(value),
+        V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+    })
 }
 
 fn emit_v3_error_console_line_for_context(
@@ -4872,6 +4996,10 @@ fn request_accepts_sse(headers: &HeaderMap) -> bool {
         })
 }
 
+fn v3_responses_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool {
+    payload.get("stream").and_then(Value::as_bool) == Some(true) || request_accepts_sse(headers)
+}
+
 fn response_input_item_count(value: Option<&Value>) -> usize {
     match value {
         Some(Value::Array(items)) => items.len(),
@@ -5281,7 +5409,7 @@ fn responses_relay_output_response(
         builder = builder.header("x-routecodex-v3-error-chain", error_chain.join(","));
     }
     let body = match output.client_body {
-        V3ResponsesRelayClientBody::Sse(client_stream) => Body::from_stream(
+        V3ResponsesRelayClientBody::Sse(client_stream) => v3_relay_client_sse_body(
             wrap_v3_relay_sse_console_stream(client_stream, stream_console_finalizer),
         ),
         V3ResponsesRelayClientBody::Json(client_response) => Body::from(
@@ -5682,6 +5810,64 @@ fn responses_direct_output_response(frame: V3Server16HttpFrame) -> Response<Body
     responses_direct_output_response_with_console(frame, None)
 }
 
+fn project_v3_responses_direct_stream_error_frame_if_requested(
+    mut frame: V3Server16HttpFrame,
+    requested_stream: bool,
+) -> V3Server16HttpFrame {
+    if !requested_stream || frame.error_chain.is_empty() || frame.content_type != "application/json"
+    {
+        return frame;
+    }
+    let body = match frame.body {
+        V3Server16Body::Json(value) => value,
+        other => {
+            frame.body = other;
+            return frame;
+        }
+    };
+    let (code, message) = v3_error_body_code_message(&body);
+    if frame.error_body.is_none() {
+        frame.error_body = Some(body);
+    }
+    frame.content_type = "text/event-stream".to_string();
+    frame.body = V3Server16Body::Sse(Box::pin(stream::iter(vec![Ok::<
+        Vec<u8>,
+        routecodex_v3_error::V3Error01SourceRaised,
+    >(
+        v3_sse_error_event_chunk(frame.status, &code, &message),
+    )])));
+    frame
+}
+
+fn v3_error_body_code_message(body: &Value) -> (String, String) {
+    let error = body.get("error").unwrap_or(body);
+    let code = error
+        .get("code")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("runtime_error")
+        .to_string();
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("V3 Responses runtime error")
+        .to_string();
+    (code, message)
+}
+
+fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
+    let event = json!({
+        "type": "error",
+        "status": status,
+        "error": {
+            "code": code,
+            "message": message
+        }
+    });
+    format!("event: error\ndata: {event}\n\n").into_bytes()
+}
+
 fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
@@ -5729,10 +5915,46 @@ fn wrap_v3_direct_sse_console_stream(
     }
 }
 
+fn v3_relay_client_sse_body(stream: V3ResponsesRelayClientStream) -> Body {
+    Body::from_stream(stream::unfold(
+        (stream, false),
+        |(mut stream, done)| async move {
+            if done {
+                return None;
+            }
+            match stream.next().await {
+                Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
+                Some(Err(error)) => Some((
+                    Ok(v3_sse_error_event_chunk(
+                        502,
+                        "provider_response_sse_stream",
+                        &error,
+                    )),
+                    (stream, true),
+                )),
+                None => None,
+            }
+        },
+    ))
+}
+
 fn v3_client_sse_body(stream: V3ClientSseStream) -> Body {
-    Body::from_stream(stream.map(|result| {
-        result.map_err(|error| io::Error::other(format!("{}: {}", error.code, error.message)))
-    }))
+    Body::from_stream(stream::unfold(
+        (stream, false),
+        |(mut stream, done)| async move {
+            if done {
+                return None;
+            }
+            match stream.next().await {
+                Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
+                Some(Err(error)) => Some((
+                    Ok(v3_sse_error_event_chunk(502, &error.code, &error.message)),
+                    (stream, true),
+                )),
+                None => None,
+            }
+        },
+    ))
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_resp_15(
@@ -5747,6 +5969,10 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
         .expect("V3Resp15ClientPayload owns a validated content-type")
         .clone();
     let error_chain = error_chain.unwrap_or_default();
+    let error_body = match &payload.body {
+        V3ClientBody::Json(value) if !error_chain.is_empty() => Some(value.clone()),
+        V3ClientBody::Json(_) | V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => None,
+    };
     V3Server16HttpFrame {
         status: payload.status,
         content_type,
@@ -5762,8 +5988,10 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
             "V3Error06ClientProjected"
         },
         error_chain,
+        error_body,
         node_trace,
         observability: None,
+        stream_observation: None,
     }
 }
 
@@ -6088,21 +6316,29 @@ fn build_v3_codex_model_metadata(
 pub fn build_v3_server_16_http_frame_from_v3_error_06(
     projected: routecodex_v3_error::V3Error06ClientProjected,
 ) -> V3Server16HttpFrame {
+    let body = projected.body;
     V3Server16HttpFrame {
         status: projected.status,
         content_type: "application/json".to_string(),
-        body: V3Server16Body::Json(projected.body),
+        body: V3Server16Body::Json(body.clone()),
         debug_node: "V3Debug01NodeEventRegistered",
         error_node: projected.chain[5],
         error_chain: projected.chain.to_vec(),
+        error_body: Some(body),
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
+        stream_observation: None,
     }
 }
 
 pub fn build_v3_server_16_http_frame_from_v3_foundation_output(
     output: V3FoundationRuntimeOutput,
 ) -> V3Server16HttpFrame {
+    let error_body = if output.error_chain.is_empty() {
+        None
+    } else {
+        Some(output.body.clone())
+    };
     V3Server16HttpFrame {
         status: output.status,
         content_type: "application/json".to_string(),
@@ -6110,8 +6346,10 @@ pub fn build_v3_server_16_http_frame_from_v3_foundation_output(
         debug_node: output.debug_node,
         error_node: output.error_node,
         error_chain: output.error_chain,
+        error_body,
         node_trace: output.node_trace,
         observability: None,
+        stream_observation: None,
     }
 }
 
@@ -6250,6 +6488,37 @@ fn error_output_response_for_server_with_project_path(
     let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(frame)
+}
+
+fn error_output_response_for_responses_request_with_project_path(
+    server: &V3ServerManifest,
+    endpoint: &str,
+    request_id: &str,
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+    request_headers: &HeaderMap,
+    payload: Option<&Value>,
+    project_path: Option<&str>,
+) -> Response<Body> {
+    let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+    emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
+    responses_direct_output_response(project_v3_responses_error_frame_for_request_if_sse(
+        frame,
+        request_headers,
+        payload,
+    ))
+}
+
+fn project_v3_responses_error_frame_for_request_if_sse(
+    frame: V3Server16HttpFrame,
+    request_headers: &HeaderMap,
+    payload: Option<&Value>,
+) -> V3Server16HttpFrame {
+    let requested_stream = payload
+        .and_then(|payload| payload.get("stream"))
+        .and_then(Value::as_bool)
+        == Some(true)
+        || request_accepts_sse(request_headers);
+    project_v3_responses_direct_stream_error_frame_if_requested(frame, requested_stream)
 }
 
 fn json_response(status: u16, body: serde_json::Value) -> Response<Body> {
@@ -6425,6 +6694,16 @@ mod tests {
                 cached_tokens: Some(5),
             }),
         }
+    }
+
+    fn test_runtime_stream_observation_from_provider_event_json(
+        event: Value,
+    ) -> V3RuntimeStreamObservation {
+        let observation = V3RuntimeStreamObservation::default();
+        observation
+            .record_provider_event_json(&event)
+            .expect("test provider event JSON observation must record");
+        observation
     }
 
     #[test]
@@ -6822,8 +7101,10 @@ mod tests {
             debug_node: "V3Debug01NodeEventRegistered",
             error_node: "none",
             error_chain: Vec::new(),
+            error_body: None,
             node_trace: vec!["V3Resp15ClientPayload"],
             observability: Some(test_direct_observability(vec![provider_failure])),
+            stream_observation: None,
         };
 
         assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
@@ -6846,7 +7127,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_console_closeout_emits_completion_without_semantic_parsing() {
+    async fn direct_sse_console_closeout_fails_when_terminal_success_missing() {
         let log_file = test_v3_console_log_file("direct-console-sse-complete");
         let _ = std::fs::remove_file(&log_file);
         let state = test_v3_listener_state(&log_file, 4444);
@@ -6872,6 +7153,7 @@ mod tests {
             debug_node: "V3Debug01NodeEventRegistered",
             error_node: "none",
             error_chain: Vec::new(),
+            error_body: None,
             node_trace: vec!["V3Resp15ClientPayload"],
             observability: Some(V3RuntimeObservability {
                 transport: "sse".to_string(),
@@ -6880,6 +7162,7 @@ mod tests {
                 usage: None,
                 ..test_direct_observability(Vec::new())
             }),
+            stream_observation: None,
         };
         let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
         let response = responses_direct_output_response_with_console(frame, finalizer);
@@ -6891,11 +7174,287 @@ mod tests {
         let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
         assert!(
             log.contains("[virtual-router-hit]")
-                && log.contains("event=completed")
-                && log.contains("[usage]")
-                && !log.contains("event=failed"),
-            "direct SSE closeout must treat SSE payload as transport bytes and wait for EOF, not parse response.failed as business failure: {log}"
+                && log.contains("event=failed")
+                && log.contains("status=502")
+                && log.contains("subcode=provider_response_sse_stream")
+                && log.contains("provider response SSE stream ended before terminal event")
+                && !log.contains("event=completed"),
+            "direct SSE closeout must not synthesize success when runtime observation has no terminal success: {log}"
         );
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish() {
+        let log_file = test_v3_console_log_file("direct-console-sse-observed-usage");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-sse-observed",
+            &headers,
+            &json!({"model":"gpt-5.5","stream":true}),
+        );
+        let stream: V3ClientSseStream = Box::pin(stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":17,\"input_tokens_details\":{\"cached_tokens\":5},\"output_tokens\":3,\"total_tokens\":20}}}\n\ndata: [DONE]\n\n".to_vec(),
+        )]));
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Sse(stream),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                transport: "sse".to_string(),
+                response_status: Some("streaming".to_string()),
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+                json!({
+                    "type":"response.completed",
+                    "response":{
+                        "status":"completed",
+                        "usage":{
+                            "input_tokens":17,
+                            "input_tokens_details":{"cached_tokens":5},
+                            "output_tokens":3,
+                            "total_tokens":20
+                        }
+                    }
+                }),
+            )),
+        };
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let response = responses_direct_output_response_with_console(frame, finalizer);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(std::str::from_utf8(&bytes)
+            .unwrap()
+            .contains("response.completed"));
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(log.contains("event=completed"), "{log}");
+        assert!(log.contains("responseStatus=completed"), "{log}");
+        assert!(log.contains("finish_reason=stop"), "{log}");
+        assert!(log.contains("usage_in=17 usage_out=3"), "{log}");
+        assert!(log.contains("usage_cache=5/17(29.4%)"), "{log}");
+        assert!(log.contains("usage_total=20"), "{log}");
+        assert!(!log.contains("usage=unreported"), "{log}");
+        assert!(!log.contains("finish_reason=unreported"), "{log}");
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_console_closeout_treats_drop_after_observed_completed_as_complete() {
+        let log_file = test_v3_console_log_file("direct-console-sse-drop-after-completed");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-sse-drop-completed",
+            &headers,
+            &json!({"model":"gpt-5.5","stream":true}),
+        );
+        let provider = stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_vec(),
+        )])
+        .chain(stream::pending::<Result<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >>());
+        let frame = V3Server16HttpFrame {
+            status: 201,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Sse(Box::pin(provider)),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                transport: "sse".to_string(),
+                response_status: Some("streaming".to_string()),
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+                json!({"type":"response.completed","response":{"status":"completed"}}),
+            )),
+        };
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let mut stream = wrap_v3_direct_sse_console_stream(
+            match frame.body {
+                V3Server16Body::Sse(stream) => stream,
+                _ => unreachable!("test frame owns SSE body"),
+            },
+            finalizer,
+        );
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert!(std::str::from_utf8(&chunk)
+            .unwrap()
+            .contains("response.completed"));
+        drop(stream);
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(log.contains("event=completed"), "{log}");
+        assert!(log.contains("status=201"), "{log}");
+        assert!(log.contains("responseStatus=completed"), "{log}");
+        assert!(log.contains("finish_reason=stop"), "{log}");
+        assert!(!log.contains("event=failed"), "{log}");
+        assert!(!log.contains("client_disconnect"), "{log}");
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_console_closeout_keeps_499_when_drop_before_terminal_observation() {
+        let log_file = test_v3_console_log_file("direct-console-sse-drop-before-terminal");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-sse-drop-before-terminal",
+            &headers,
+            &json!({"model":"gpt-5.5","stream":true}),
+        );
+        let provider = stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+        )])
+        .chain(stream::pending::<Result<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >>());
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Sse(Box::pin(provider)),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                transport: "sse".to_string(),
+                response_status: Some("streaming".to_string()),
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: Some(V3RuntimeStreamObservation::default()),
+        };
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let mut stream = wrap_v3_direct_sse_console_stream(
+            match frame.body {
+                V3Server16Body::Sse(stream) => stream,
+                _ => unreachable!("test frame owns SSE body"),
+            },
+            finalizer,
+        );
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert!(std::str::from_utf8(&chunk)
+            .unwrap()
+            .contains("response.output_text.delta"));
+        drop(stream);
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(log.contains("event=failed"), "{log}");
+        assert!(log.contains("status=499"), "{log}");
+        assert!(log.contains("subcode=client_disconnect"), "{log}");
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_console_closeout_projects_observed_failed_terminal_as_provider_failure() {
+        let log_file = test_v3_console_log_file("direct-console-sse-drop-after-failed");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-sse-drop-failed",
+            &headers,
+            &json!({"model":"gpt-5.5","stream":true}),
+        );
+        let provider = stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"upstream terminal failure\"}}}\n\n".to_vec(),
+        )])
+        .chain(stream::pending::<Result<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >>());
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Sse(Box::pin(provider)),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                transport: "sse".to_string(),
+                response_status: Some("streaming".to_string()),
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: Some(test_runtime_stream_observation_from_provider_event_json(
+                json!({"type":"response.failed","response":{"status":"failed"}}),
+            )),
+        };
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let mut stream = wrap_v3_direct_sse_console_stream(
+            match frame.body {
+                V3Server16Body::Sse(stream) => stream,
+                _ => unreachable!("test frame owns SSE body"),
+            },
+            finalizer,
+        );
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert!(std::str::from_utf8(&chunk)
+            .unwrap()
+            .contains("response.failed"));
+        drop(stream);
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(log.contains("event=failed"), "{log}");
+        assert!(log.contains("status=502"), "{log}");
+        assert!(
+            log.contains("subcode=provider_response_sse_terminal_failure"),
+            "{log}"
+        );
+        assert!(
+            log.contains("response SSE stream ended with terminal status failed"),
+            "{log}"
+        );
+        assert!(!log.contains("client_disconnect"), "{log}");
         let _ = std::fs::remove_file(&log_file);
     }
 
@@ -6927,6 +7486,7 @@ mod tests {
             debug_node: "V3Debug01NodeEventRegistered",
             error_node: "none",
             error_chain: Vec::new(),
+            error_body: None,
             node_trace: vec!["V3Resp15ClientPayload"],
             observability: Some(V3RuntimeObservability {
                 transport: "sse".to_string(),
@@ -6935,10 +7495,15 @@ mod tests {
                 usage: None,
                 ..test_direct_observability(Vec::new())
             }),
+            stream_observation: None,
         };
         let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
         let response = responses_direct_output_response_with_console(frame, finalizer);
-        assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains("event: error"), "{text}");
+        assert!(text.contains("provider_stream_error"), "{text}");
+        assert!(text.contains("provider stream broke"), "{text}");
 
         let raw_log = std::fs::read_to_string(&log_file).unwrap();
         let log = strip_test_ansi(&raw_log);
@@ -6979,6 +7544,131 @@ mod tests {
             200,
             &observability
         ));
+    }
+
+    #[tokio::test]
+    async fn direct_stream_request_error06_projects_sse_error_not_json() {
+        let frame = V3Server16HttpFrame {
+            status: 429,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(json!({
+                "error": {
+                    "code": "HTTP_429",
+                    "message": "Rate limited by upstream provider"
+                }
+            })),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "V3Error06ClientProjected",
+            error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+            error_body: None,
+            node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+
+        let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+        assert_eq!(projected.status, 429);
+        assert_eq!(projected.content_type, "text/event-stream");
+        match projected.body {
+            V3Server16Body::Sse(mut stream) => {
+                let first = stream.next().await.unwrap().unwrap();
+                let text = std::str::from_utf8(&first).unwrap();
+                assert!(text.contains("event: error"), "{text}");
+                assert!(text.contains("HTTP_429"), "{text}");
+                assert!(text.contains("Rate limited by upstream provider"), "{text}");
+                assert!(stream.next().await.is_none());
+            }
+            other => panic!("stream request Error06 must project SSE body, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_json() {
+        let log_file = test_v3_console_log_file("direct-continuation-scope-sse-error");
+        let state = test_v3_listener_state(&log_file, 5555);
+        let mut headers = HeaderMap::new();
+        headers.insert("accept", HeaderValue::from_static("text/event-stream"));
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        let frame = execute_responses_direct_server_frame(
+            state.as_ref(),
+            &headers,
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            "req-direct-sse-scope-error".to_string(),
+            "exec-direct-sse-scope-error".to_string(),
+            json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "previous_response_id":"never_committed",
+                "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
+            }),
+        )
+        .await;
+        assert_eq!(frame.status, 400);
+        assert_eq!(frame.content_type, "text/event-stream");
+        assert_eq!(
+            v3_server_frame_error_body_for_console(&frame)
+                .and_then(|body| body.pointer("/error/code"))
+                .and_then(Value::as_str),
+            Some("malformed_json")
+        );
+        assert!(format_v3_error_console_content(
+            "/v1/responses",
+            "req-direct-sse-scope-error",
+            frame.status,
+            &frame.error_chain,
+            v3_server_frame_error_body_for_console(&frame),
+        )
+        .contains("Responses continuation requires"));
+        match frame.body {
+            V3Server16Body::Sse(mut stream) => {
+                let first = stream.next().await.unwrap().unwrap();
+                let text = std::str::from_utf8(&first).unwrap();
+                assert!(text.contains("event: error"), "{text}");
+                assert!(text.contains("malformed_json"), "{text}");
+                assert!(text.contains("Responses continuation requires"), "{text}");
+                assert!(stream.next().await.is_none());
+            }
+            other => panic!("stream continuation scope error must project SSE body, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[tokio::test]
+    async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
+        let mut headers = HeaderMap::new();
+        headers.insert("accept", HeaderValue::from_static("text/event-stream"));
+        let frame = V3Server16HttpFrame {
+            status: 400,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(json!({
+                "error": {
+                    "code": "malformed_json",
+                    "message": "malformed JSON request body"
+                }
+            })),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "V3Error06ClientProjected",
+            error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+            error_body: None,
+            node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+
+        let projected = project_v3_responses_error_frame_for_request_if_sse(frame, &headers, None);
+        assert_eq!(projected.content_type, "text/event-stream");
+        match projected.body {
+            V3Server16Body::Sse(mut stream) => {
+                let first = stream.next().await.unwrap().unwrap();
+                let text = std::str::from_utf8(&first).unwrap();
+                assert!(text.contains("event: error"), "{text}");
+                assert!(text.contains("malformed_json"), "{text}");
+                assert!(text.contains("malformed JSON request body"), "{text}");
+                assert!(stream.next().await.is_none());
+            }
+            other => panic!("Accept SSE Error06 must project SSE body, got {other:?}"),
+        }
     }
 
     #[test]
@@ -7210,6 +7900,30 @@ mod tests {
             *events.lock().unwrap(),
             vec![V3SseConsoleStreamTerminal::Completed]
         );
+    }
+
+    #[tokio::test]
+    async fn relay_sse_body_projects_stream_error_event_instead_of_abrupt_close() {
+        let output = V3ResponsesRelayRuntimeOutput {
+            status: 200,
+            client_body: V3ResponsesRelayClientBody::Sse(Box::pin(futures_util::stream::iter(
+                vec![Err("provider relay boom".to_string())],
+            ))),
+            node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
+            error_chain: None,
+            observability: None,
+            stream_observation: None,
+            finalized_response: None,
+            provider_snapshots: None,
+        };
+
+        let response = responses_relay_output_response(output, None);
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        assert!(text.contains("event: error"), "{text}");
+        assert!(text.contains("provider_response_sse_stream"), "{text}");
+        assert!(text.contains("provider relay boom"), "{text}");
     }
 
     #[tokio::test]
