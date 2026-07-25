@@ -3443,15 +3443,60 @@ const V3_CONSOLE_ROUTE_SCOPE_WIDTH: usize = 13;
 const V3_CONSOLE_CONTENT_TAG_WIDTH: usize = 24;
 
 fn format_v3_console_aligned_scope_value(value: &str, width: usize) -> String {
-    format!("{value:<width$}")
+    align_v3_console_display_width(value, width)
 }
 
 fn format_v3_console_timed_content(tag: &str, fields: &str) -> String {
-    format!(
-        "{tag:<width$} {} {fields}",
-        console_timestamp_hhmmss(),
-        width = V3_CONSOLE_CONTENT_TAG_WIDTH
-    )
+    let tag = align_v3_console_display_width(tag, V3_CONSOLE_CONTENT_TAG_WIDTH);
+    let timestamp = console_timestamp_hhmmss();
+    format!("{tag} {timestamp} {fields}")
+}
+
+fn align_v3_console_display_width(value: &str, width: usize) -> String {
+    let display_width = v3_console_display_width(value);
+    if display_width >= width {
+        return value.to_string();
+    }
+    format!("{value}{}", " ".repeat(width - display_width))
+}
+
+fn v3_console_display_width(value: &str) -> usize {
+    value.chars().map(v3_console_char_display_width).sum()
+}
+
+fn v3_console_char_display_width(character: char) -> usize {
+    let codepoint = character as u32;
+    if character.is_control()
+        || matches!(
+            codepoint,
+            0x0300..=0x036F
+                | 0x1AB0..=0x1AFF
+                | 0x1DC0..=0x1DFF
+                | 0x20D0..=0x20FF
+                | 0xFE00..=0xFE0F
+        )
+    {
+        0
+    } else if matches!(
+        codepoint,
+        0x1100..=0x115F
+            | 0x2329..=0x232A
+            | 0x2E80..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE10..=0xFE19
+            | 0xFE30..=0xFE6F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x2705
+            | 0x274C
+            | 0x1F000..=0x1FAFF
+            | 0x20000..=0x3FFFD
+    ) {
+        2
+    } else {
+        1
+    }
 }
 
 fn format_v3_console_entry_protocol_label(entry_protocol_or_endpoint: &str) -> String {
@@ -6095,6 +6140,29 @@ mod tests {
             short.find(" ▶ [/v1/responses]"),
             long.find(" ▶ [/v1/responses]"),
             "content column must stay aligned for normal project/model/route data: short={short:?} long={long:?}"
+        );
+    }
+
+    #[test]
+    fn console_timed_content_aligns_tags_by_terminal_display_width() {
+        assert_eq!(v3_console_char_display_width('▶'), 1);
+        assert_eq!(v3_console_char_display_width('✅'), 2);
+        assert_eq!(v3_console_char_display_width('❌'), 2);
+        assert_eq!(v3_console_char_display_width('🧭'), 2);
+
+        let started = format_v3_console_timed_content("▶ [/v1/responses]", "req=a");
+        let completed = format_v3_console_timed_content("✅ [/v1/responses]", "req=b");
+        let failed = format_v3_console_timed_content("❌ [provider-error]", "req=e");
+        let stopless = format_v3_console_timed_content("🧭 [stopless]", "req=c");
+        let usage = format_v3_console_timed_content("[usage]", "req=d");
+
+        let data_columns = [&started, &completed, &failed, &stopless, &usage].map(|line| {
+            let boundary = line.find(" req=").expect("timed content must contain req");
+            v3_console_display_width(&line[..boundary])
+        });
+        assert!(
+            data_columns.windows(2).all(|pair| pair[0] == pair[1]),
+            "timed content data columns must align by terminal display width: {data_columns:?}"
         );
     }
 
