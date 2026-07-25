@@ -33043,7 +33043,6 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Change: updated only test expectations in `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs` and `v3/crates/routecodex-v3-runtime/src/kernel.rs`; no runtime behavior changed.
 - Verification: focused tests PASS for `non_target_runtime_failure_remains_runtime_error` and `runtime_executes_adjacent_responses_direct_chain`; `CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib -- --nocapture` PASS 80/80; scoped `git diff --check` PASS.
 
-
 ## 2026-07-24T22:31:00Z — V3 hub relay runtime closeout stale fixtures
 - Scope: continued broader V3 gate cleanup after baseline test closeout; fixed `hub_relay_runtime_closeout` test drift only.
 - Root cause 1: `responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes` used `response.reasoning_summary_text.delta`, which is Anthropic Relay SSE projection input, not a supported provider Responses Relay event. Responses Relay event codec correctly fails unsupported `response.*` events.
@@ -33053,3 +33052,11 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Verification PASS: `hub_relay_runtime_closeout` 22/22, `routecodex-v3-runtime --lib` 80/80, `verify:v3-module-boundaries`, `verify:v3-rust-only`, `verify:function-map-compile-gate`, `verify:v3-architecture-docs` after rendering caller flow, and `git diff --check`.
 - Follow-up: `cargo fmt --manifest-path v3/Cargo.toml --all -- --check` now PASS after the unrelated Anthropic formatting blocker cleared; broader V3 gates remain PASS.
 - Build continuation: first `npm run build:min` failed at `build:webui` because local `node_modules` was missing Rollup optional native package `@rollup/rollup-darwin-arm64`; repaired the local dependency surface, verified Rollup require works, reran `npm run build:min` successfully. `src/build-info.ts` timestamp noise was restored to avoid committing generated build-time drift.
+
+
+## 2026-07-25T00:00:00Z — V3 Anthropic media shape branch semantic source closeout
+- Scope: `feature_id:v3.protocol_shape_branch_anthropic_media_semantics`; source/codec/gate only, no config/live/global install/restart and no node topology expansion.
+- Root cause: Anthropic media shape branches (`image.source.url`, base64 `data`, `media_type`, document base64 `data`) were inventoried but not source-bound to unique OpenAI Chat-native / protocol-neutral extension semantics, so field parity could not distinguish URL, inline data, MIME, and file data without name-copy shortcuts.
+- Change: added `collect_v3_anthropic_request_shape_branch_semantics` in the Anthropic codec owner, mapping URL -> `ChatImageUrlUrl`, base64 image data -> `ChatInlineMediaData`, media type -> `ChatMediaMimeType`, and document data -> `ChatFileFileData`; provider wire remains unchanged.
+- Gates: focused Anthropic codec tests/red fixtures, protocol field parity verifier/red fixtures/tests, rendered protocol matrix/mainline flow, architecture docs, module boundaries, rust-only, resource map, function-map compile gate, cargo fmt check, and git diff check all PASS; logs under `.agent-collab/runs/20260724T222004Z-Macstudio.local-54163-anthropic-shape-branch/verify-full-after-fmt.log`.
+- Known gap: overall protocol semantic field closeout is not complete; this only closes the Anthropic media shape branch source-binding slice.

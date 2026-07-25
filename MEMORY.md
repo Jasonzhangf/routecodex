@@ -4552,8 +4552,13 @@ Tags: #v3-architecture #review-surface #request-response-split #error-resources
 - Red-locked distinction: `allowedFunctionNames` must not become tool declarations, and `mode` must not become `parallel_tool_calls` without a separate explicit boolean value contract. Malformed `toolConfig`, `functionCallingConfig`, non-string `mode`, non-array or non-string/empty `allowedFunctionNames` fail closed in the Gemini codec owner.
 - Matrix state after this slice: `request.tool_choice` maps Gemini `mode` only; `request.tool_choice.allowed_function_names` owns Gemini `allowedFunctionNames`; Gemini top-level `toolConfig` is `partial`; counts are partial=84, codec_shape_only=14, extension_declared=214, source_inventory_only=0. This is source/codec evidence only; no global install/restart/live replay yet.
 
-
 ## 2026-07-25 - V3 Responses Relay closeout fixture boundaries
 - Responses Relay provider SSE fixtures must use supported Responses events only. `response.reasoning_summary_text.delta` belongs to the Anthropic Relay projection surface; the Responses Relay event codec should fail-fast unsupported `response.*` events instead of treating them as transport or silently passing them through.
 - For simple `/v1/responses` Relay payloads with string `input` and no governed stopless/tool condition, provider wire may preserve `input` as a string and must not be expected to inject `当前轮推进准则`. Provider-standard system input with Stopless guidance belongs to governed tool/stopless cases, not every relay request.
 - Error closeout tests should assert current Error06 fields (`error.code`, `class`, `stage`, `decision`, `error_node`) instead of legacy protocol wrapper fields such as Anthropic top-level `type:"error"`.
+
+
+## 2026-07-25 - V3 Anthropic media shape branch semantics
+- Anthropic `image.source.url` is source-bound in `anthropic_codec.rs::collect_v3_anthropic_request_shape_branch_semantics` to Chat-native `image_url.url` semantics (`ChatImageUrlUrl`); it must not collapse to inline media data.
+- Anthropic base64 image `source.data` maps to protocol-neutral `request.messages[].content[].inline_media.data` semantics (`ChatInlineMediaData`), while `source.media_type` maps separately to `request.messages[].content[].media.mime_type` (`ChatMediaMimeType`); data and MIME are red-locked against collapse.
+- Anthropic base64 document `source.data` maps to file data semantics (`ChatFileFileData`). The collector is characterization/source-binding only and must not mutate provider wire payload.
