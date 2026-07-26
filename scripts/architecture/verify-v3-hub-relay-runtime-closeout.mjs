@@ -166,7 +166,6 @@ forbid(tests, testPath, [
 
 for (const phrase of [
   'execute_v3_responses_relay_runtime_with_default_transport',
-  'execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation',
   'execute_v3_responses_relay_runtime_with_local_continuation',
   'V3ResponsesRelayLocalContinuationState',
   'V3ResponsesRelayLocalContinuationScope',

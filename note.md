@@ -33495,3 +33495,9 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - 基线 blocker（已单独提交 `9dd7dd4fa fix(v3): preserve direct preplanned targets`）：干净 HEAD 44fda7e43 的 `h2_p6_controlled_replay` 与 direct provider failover 会因 Server 预选 plan 只传 selected target、不传 Target09 candidate set/trace 而红；修复后 focused H2 与 `multi_listener_server` 40/40 通过。
 - Phase 0 验证：隔离 staged snapshot 全绿：`npm run verify:v3-file-size`、`npm run test:v3-file-size-red-fixtures`、`cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check`、`npm run verify:v3-mainline-caller-flow`、`npm run verify:v3-resource-map`、`npm run verify:v3-module-boundaries`、`npm run verify:v3-rust-only`、`npm run verify:v3-architecture-docs`、`RUSTUP_TOOLCHAIN=stable npm run test:v3-compile-fail`、scoped `git diff --check`、`npm run test:v3-workspace` PASS。共享 worktree 直接跑 `verify:v3-module-boundaries` 会被既有 dirty `v3-provider-responses/src/transport.rs` 阻塞（HTTP listener/fallback wording），非 Phase0 gate 引入。
 - 下一步：提交 Phase0；随后进入 Phase1 死 wrapper 删除，继续逐 Phase 验证/提交。
+
+## 2026-07-26T22:15+0800 V3 拆解 Phase 1 死 wrapper 物理删除
+- Phase 1 目标：只删除 `responses_relay_runtime.rs` 中经全仓 caller 图确认无真实代码调用者的 dead wrapper，不改 relay/direct/runtime 语义；kernel 侧本轮未发现可纯删除的真实零调用入口，保留给 Phase 2 ExecutionEnv 收敛。
+- 删除：`execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation`、`execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation`、`execute_v3_responses_relay_runtime_with_transport_health_and_local_continuation`；同步移除 function map/script 中对已删 dead wrapper 的 stale anchor，并把 file-size ratchet snapshot 从 7338 下调到当前收缩行数。
+- 验证：见 `.agent-collab/runs/20260726T132430Z-Macstudio-78577-vhzwot/evidence.jsonl` Phase 1 gate 记录。
+- 下一步：Phase 2 收敛剩余组合 wrapper 到 ExecutionEnv 唯一入口。
