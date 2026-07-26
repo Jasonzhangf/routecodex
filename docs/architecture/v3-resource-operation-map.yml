@@ -440,6 +440,20 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.debug.human_console_projection
+    resource_kind: diagnostic_projection
+    lifecycle: v3.server.console_observability
+    owner_feature_id: v3.module_decomposition
+    owner_crate: routecodex-v3-server
+    owner_node: V3ServerHumanConsoleProjection
+    identity: [serverId, localPort, requestId, eventKind]
+    allowed_writers: [routecodex-v3-server::console]
+    allowed_readers: [human_operator, developer_diagnostics]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, request_payload_builder, response_projector, provider_transport]
+    forbidden_readers: [V3Provider12ResponsesWirePayload, V3Transport13ResponsesHttpRequest, V3ProviderResp14Raw, V3Resp15ClientPayload, retry_policy, provider_health_policy, continuation_store]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.hub.entry_protocol
     resource_kind: side_channel
     lifecycle: v3.hub_pipeline.v1

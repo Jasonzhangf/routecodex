@@ -1,8 +1,8 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
-Status: design SOP, execution not started.
+Status: active SOP, executing Phase 3 server crate module split.
 Plan truth: `docs/goals/v3-god-file-decomposition-plan.md`.
-Feature id: `v3.module_decomposition`（`docs/architecture/v3-function-map.yml`，status=design_pending）.
+Feature id: `v3.module_decomposition`（`docs/architecture/v3-function-map.yml`）.
 Review surface: `docs/architecture/wiki/html/v3-mainline-caller-flow.html`.
 Lock manifest: `docs/architecture/v3-architecture-audit-locks.yml`.
 
