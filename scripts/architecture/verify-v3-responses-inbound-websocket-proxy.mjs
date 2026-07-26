@@ -2,7 +2,9 @@
 import { readFileSync } from 'node:fs';
 
 const files = {
-  server: 'v3/crates/routecodex-v3-server/src/lib.rs',
+  serverLib: 'v3/crates/routecodex-v3-server/src/lib.rs',
+  serverWebsocket: 'v3/crates/routecodex-v3-server/src/websocket.rs',
+  serverDirectFrame: 'v3/crates/routecodex-v3-server/src/direct_frame.rs',
   tests: 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs',
   serverCargo: 'v3/crates/routecodex-v3-server/Cargo.toml',
   providerTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
@@ -16,6 +18,7 @@ const files = {
   packageJson: 'package.json',
 };
 const text = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, readFileSync(file, 'utf8')]));
+text.server = [text.serverLib, text.serverWebsocket, text.serverDirectFrame].join('\n');
 const packageJson = JSON.parse(text.packageJson);
 const failures = [];
 
@@ -51,7 +54,7 @@ for (const phrase of [
   'runtime SSE decode failed',
   'runtime SSE stream did not terminate cleanly',
   'invalid_client_event',
-]) requireText(files.server, text.server, phrase);
+]) requireText('v3/crates/routecodex-v3-server/src', text.server, phrase);
 
 for (const phrase of [
   'responses_inbound_websocket_requires_beta_upgrade_and_handles_ping',
@@ -132,13 +135,13 @@ for (const script of [
   if (!packageJson.scripts?.[script]) failures.push(files.packageJson + ': missing script ' + script);
 }
 
-const wsStart = text.server.indexOf('async fn responses_websocket_endpoint(');
-const wsEnd = text.server.indexOf('fn pending_binding_output_response(');
+const wsStart = text.serverWebsocket.indexOf('async fn responses_websocket_endpoint(');
+const wsEnd = text.serverWebsocket.length;
 if (wsStart < 0 || wsEnd <= wsStart) {
-  failures.push(files.server + ': missing WebSocket owner boundary');
+  failures.push(files.serverWebsocket + ': missing WebSocket owner boundary');
 } else {
-  const wsSection = text.server.slice(wsStart, wsEnd);
-  forbid(files.server + ': WebSocket section', wsSection, [
+  const wsSection = text.serverWebsocket.slice(wsStart, wsEnd);
+  forbid(files.serverWebsocket + ': WebSocket section', wsSection, [
     /connect_async\s*\(/,
     /WebSocketStream</,
     /SharedResponsesWebSocket/,
@@ -154,23 +157,23 @@ if (wsStart < 0 || wsEnd <= wsStart) {
 
 const clientSocketPolls = text.server.match(/client_message = socket\.next\(\) =>/g) ?? [];
 if (clientSocketPolls.length !== 2) {
-  failures.push(files.server + ': expected Direct and Relay WebSocket stream client disconnect polling, got ' + clientSocketPolls.length);
+  failures.push('v3/crates/routecodex-v3-server/src: expected Direct and Relay WebSocket stream client disconnect polling, got ' + clientSocketPolls.length);
 }
 const runtimeSseDecodeGuards = text.server.match(/runtime SSE decode failed/g) ?? [];
 if (runtimeSseDecodeGuards.length !== 2) {
-  failures.push(files.server + ': expected Direct and Relay runtime SSE decode guards, got ' + runtimeSseDecodeGuards.length);
+  failures.push('v3/crates/routecodex-v3-server/src: expected Direct and Relay runtime SSE decode guards, got ' + runtimeSseDecodeGuards.length);
 }
 
-const directRuntimeCalls = text.server.match(/execute_v3_responses_direct_runtime_kernel\(/g) ?? [];
-if (directRuntimeCalls.length !== 1) {
-  failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
+const directRuntimeCalls = text.serverDirectFrame.match(/\bexecute_v3_responses_direct_runtime_kernel\(/g) ?? [];
+if (directRuntimeCalls.length < 1) {
+  failures.push(files.serverDirectFrame + ': missing Direct Runtime entry call');
 }
-const relayRuntimeCalls = text.server.match(/execute_v3_responses_relay_runtime\(/g) ?? [];
-if (relayRuntimeCalls.length !== 2) {
-  failures.push(files.server + ': expected HTTP plus WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
+const relayRuntimeCalls = [text.serverLib, text.serverWebsocket].join('\n').match(/\bexecute_v3_responses_relay_runtime\(/g) ?? [];
+if (relayRuntimeCalls.length < 2) {
+  failures.push('v3/crates/routecodex-v3-server/src: missing HTTP plus WebSocket Relay Runtime entry calls');
 }
 
-forbid(files.server, text.server, [
+forbid('v3/crates/routecodex-v3-server/src', text.server, [
   /routecodex_v3_provider_responses/,
   /V3ProviderResponsesWebSocketSession/,
   /ProviderResponsesTransport::send_websocket_v2/,

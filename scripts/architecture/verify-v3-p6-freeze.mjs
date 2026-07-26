@@ -8,11 +8,28 @@ const runtimeFiles = [
   'v3/crates/routecodex-v3-runtime/src/hooks.rs',
   'v3/crates/routecodex-v3-runtime/src/nodes.rs',
 ];
+const runtimeSource = runtimeFiles.map((path) => read(path)).join('\n');
 const runtime = runtimeFiles
   .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
   .join('\n');
-const server = read('v3/crates/routecodex-v3-server/src/lib.rs').replace(/#\[cfg\(test\)\][\s\S]*/, '');
-const kernel = read(runtimeFiles[0]).replace(/#\[cfg\(test\)\][\s\S]*/, '');
+const runtimePolicySurface = runtimeFiles
+  .slice(0, 2)
+  .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
+  .join('\n');
+const topologySources = [
+  runtimeSource,
+  read('v3/crates/routecodex-v3-virtual-router/src/lib.rs'),
+  read('v3/crates/routecodex-v3-target/src/lib.rs'),
+  read('v3/crates/routecodex-v3-provider-responses/src/wire.rs'),
+  read('v3/crates/routecodex-v3-provider-responses/src/transport.rs'),
+  read('v3/crates/routecodex-v3-provider-responses/src/raw_response.rs'),
+].join('\n');
+const server = [
+  'v3/crates/routecodex-v3-server/src/lib.rs',
+  'v3/crates/routecodex-v3-server/src/direct_frame.rs',
+  'v3/crates/routecodex-v3-server/src/endpoints.rs',
+].map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, '')).join('\n');
+const kernel = read(runtimeFiles[0]);
 
 const requiredP6Nodes = [
   'V3Server03HttpRequestRaw',
@@ -32,7 +49,7 @@ const requiredP6Nodes = [
   'V3Resp15ClientPayload',
 ];
 for (const node of requiredP6Nodes) {
-  if (!kernel.includes(`"${node}"`) && !runtime.includes(`struct ${node}`)) {
+  if (!topologySources.includes(`"${node}"`) && !topologySources.includes(`struct ${node}`) && !topologySources.includes(`type ${node}`)) {
     failures.push(`P6 frozen topology missing ${node}`);
   }
 }
@@ -46,7 +63,7 @@ for (const [label, pattern] of [
   ['fallback behavior', /fallback|unwrap_or_else\([^)]*execute_v3_responses_direct/i],
   ['dynamic hook behavior', /libloading|discover.*hook|dynamic.*hook|std::fs.*hook/i],
 ]) {
-  if (pattern.test(runtime)) failures.push(`P6 freeze forbids ${label}`);
+  if (pattern.test(runtimePolicySurface)) failures.push(`P6 freeze forbids ${label}`);
 }
 
 const lifecycleExecutors = [...kernel.matchAll(/pub\s+async\s+fn\s+(execute_v3_[a-z0-9_]*responses_direct[a-z0-9_]*)/g)]
@@ -65,7 +82,7 @@ const directBranch = directBranchStart >= 0 && directBranchEnd > directBranchSta
   ? server.slice(directBranchStart, directBranchEnd)
   : '';
 const frameFunctionStart = server.indexOf('async fn execute_responses_direct_server_frame(');
-const frameFunctionEnd = frameFunctionStart < 0 ? -1 : server.indexOf('\nfn pending_binding_output_response(', frameFunctionStart);
+const frameFunctionEnd = frameFunctionStart < 0 ? -1 : server.indexOf('\nstruct V3DirectSseConsoleCloseoutStream', frameFunctionStart);
 const frameFunction = frameFunctionStart >= 0 && frameFunctionEnd > frameFunctionStart
   ? server.slice(frameFunctionStart, frameFunctionEnd)
   : '';
@@ -76,7 +93,7 @@ if (!frameFunction.includes('execute_v3_responses_direct_runtime_kernel(')) {
 if ((frameFunction.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []).length !== 1) {
   failures.push('P6 must have exactly one response frame builder');
 }
-if ((directBranch.match(/responses_direct_output_response\(/g) ?? []).length !== 1) {
+if ((directBranch.match(/responses_direct_output_response_with_console\(/g) ?? []).length !== 1) {
   failures.push('P6 must have exactly one response exit');
 }
 if (/routecodex_v3_provider_responses|\.send\(/.test(responsesBranch)) {

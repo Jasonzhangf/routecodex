@@ -69,8 +69,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:2e360c5bd77146f83f913d208a78e019b3823ff303dced18b8f3ececa5d5d84b
-    last_manual_authorization_id: auth-20260727-v3-module-endpoints-source-rebind
+    fingerprint: sha256:90352cef4e875d8e8d2659db96c375ef5f47073024aaf53d82a3440d8fadba96
+    last_manual_authorization_id: auth-20260727-v3-module-direct-frame-source-rebind
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -115,6 +115,13 @@ locked_items:
     fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
 manual_authorizations:
 
+  - authorization_id: auth-20260727-v3-module-direct-frame-source-rebind
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-07-27T02:05:00+08:00'
+    reason: "Jason-authorized V3 module decomposition Phase 3.6 source rebind: execute_responses_direct_server_frame and build_v3_server_16_http_frame_from_v3_resp_15 moved from server/lib.rs to server/direct_frame.rs as a pure cut/move; V3Resp15ClientPayload -> V3Server16HttpFrame semantics remain unchanged."
+    fingerprint_before: sha256:2e360c5bd77146f83f913d208a78e019b3823ff303dced18b8f3ececa5d5d84b
+    fingerprint_after: sha256:90352cef4e875d8e8d2659db96c375ef5f47073024aaf53d82a3440d8fadba96
   - authorization_id: auth-20260727-v3-module-endpoints-source-rebind
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason
