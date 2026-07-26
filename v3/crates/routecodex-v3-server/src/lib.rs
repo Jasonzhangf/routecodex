@@ -35,13 +35,12 @@ use routecodex_v3_runtime::{
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
-    v3_responses_direct_binding_requires_provider_protocol_relay, V3AnthropicRelayRuntimeInput,
-    V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream, V3FoundationRuntimeInput,
-    V3FoundationRuntimeOutput, V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput,
-    V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
-    V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload, V3ResponsesDirectContinuationScope,
-    V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeSharedState,
-    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
+    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
+    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
+    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
@@ -697,7 +696,7 @@ async fn pending_endpoint(
         );
     };
     let entry_protocol = binding.entry_protocol.clone();
-    let mut execution_mode = binding.execution_mode;
+    let execution_mode = binding.execution_mode;
     let pending_owner_symbol = binding.pending_owner_symbol.clone();
     if !state
         .server
@@ -787,29 +786,6 @@ async fn pending_endpoint(
             ));
         }
     };
-    let request_console_project_path = resolve_v3_console_project_path(&request_headers, &payload);
-    if entry_protocol == "responses" {
-        execution_mode = match resolve_v3_responses_effective_execution_mode(
-            &state.manifest,
-            &state.server,
-            execution_mode,
-            &path,
-            &payload,
-        ) {
-            Ok(mode) => mode,
-            Err(message) => {
-                return error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::EndpointNotEnabled, message),
-                    &request_headers,
-                    Some(&payload),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
-    }
     if let Err(error) = state.debug.record_node_event(
         &trace_scope,
         "V3Server03HttpRequestRaw",
@@ -861,6 +837,7 @@ async fn pending_endpoint(
             &payload,
         );
     }
+    let request_console_project_path = resolve_v3_console_project_path(&request_headers, &payload);
     if is_provider_request_dry_run(&request_headers)
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Direct
@@ -1422,40 +1399,6 @@ fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
         .get("x-routecodex-dry-run")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
-}
-
-fn resolve_v3_responses_effective_execution_mode(
-    manifest: &V3Config05ManifestPublished,
-    server: &V3ServerManifest,
-    configured_mode: V3EntryProtocolExecutionMode,
-    endpoint_path: &str,
-    payload: &Value,
-) -> Result<V3EntryProtocolExecutionMode, String> {
-    if configured_mode != V3EntryProtocolExecutionMode::Direct {
-        return Ok(configured_mode);
-    }
-    if !v3_responses_direct_binding_requires_provider_protocol_relay(
-        manifest,
-        &server.id,
-        endpoint_path,
-        payload,
-        0,
-    )? {
-        return Ok(V3EntryProtocolExecutionMode::Direct);
-    }
-    let relay_allowed = server.execution.as_ref().is_some_and(|execution| {
-        execution
-            .allowed_modes
-            .iter()
-            .any(|mode| mode == V3EntryProtocolExecutionMode::Relay.as_str())
-    });
-    if !relay_allowed {
-        return Err(format!(
-            "responses route group {} can select non-responses provider protocols, but server {} execution.allowed_modes does not include relay",
-            server.routing_group, server.id
-        ));
-    }
-    Ok(V3EntryProtocolExecutionMode::Relay)
 }
 
 fn allocate_v3_console_request_id(
