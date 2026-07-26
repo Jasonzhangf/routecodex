@@ -33564,3 +33564,10 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - 验证：`cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check` PASS；`npm run verify:v3-file-size` PASS；`npm run verify:v3-resource-map` PASS；`npm run render:v3-mainline-caller-flow` PASS；`npm run verify:v3-mainline-caller-flow` PASS；`npm run verify:v3-module-boundaries` PASS；`npm run verify:v3-rust-only` PASS；`npm run verify:v3-architecture-docs` PASS；`npm run verify:v3-p6-freeze` PASS；`npm run verify:v3-responses-inbound-websocket-proxy` PASS；`RUSTUP_TOOLCHAIN=stable npm run test:v3-compile-fail` PASS；scoped `git diff --check` PASS；`cargo +stable test -p routecodex-v3-server --lib` PASS 38/38；focused websocket 9/9 与 models endpoint 2/2 PASS；`CARGO_TARGET_DIR=/tmp/routecodex-v3-module-decomp-target npm run test:v3-workspace` PASS。
 - 架构 review：零行为变化 cut/move；direct_frame 只拥有 Direct server frame 投影与 transport closeout observation，不拥有 provider wire、VR、retry/health、continuation、Error01-06 或 SSE semantic parsing。
 - 剩余：Phase 3.7 error_projection；Phase4 relay/kernel 主函数节点化；全部 Phase 完成后 install/restart/live/push。
+
+## 2026-07-27T03:07+0800 V3 module decomposition Phase 3.6 repair + Phase 3.7 error_projection
+- Phase 3.6 repair: removed cfg(test) import of wrap_v3_direct_sse_console_stream; tests call direct_frame::...; lib.rs back to 3450; amended commit 04b544879.
+- Phase 3.7: cut/moved Error06/foundation server-frame projection into v3/crates/routecodex-v3-server/src/error_projection.rs; lib.rs ratchet 3312.
+- Locked chain rebind: v3.server.startup fingerprint -> sha256:e761b202... with auth-20260727-v3-module-error-projection-source-rebind.
+- Gates: fmt, file-size, resource-map, mainline-caller-flow, module-boundaries, rust-only, architecture-docs, compile-fail, server lib 38/38, p6_models 2/2, test:v3-workspace PASS.
+- Remaining: Phase 3.8 lib.rs facade/orchestration shrink; Phase 4 relay/kernel stage split; final install/restart/live/push.

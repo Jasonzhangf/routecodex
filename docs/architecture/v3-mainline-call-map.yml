@@ -110,6 +110,11 @@ chains:
     edges:
       - { step_id: v3-direct-frame-01, from_node: V3Resp15ClientPayload, to_node: V3Server16HttpFrame, caller_symbol: execute_responses_direct_server_frame, caller_file: v3/crates/routecodex-v3-server/src/direct_frame.rs, callee_symbol: build_v3_server_16_http_frame_from_v3_resp_15, callee_file: v3/crates/routecodex-v3-server/src/direct_frame.rs, status: anchored, owner_feature_id: v3.module_decomposition, resource_flow: { consumes: [v3.response.client_payload], produces: [], side_channel_reads: [v3.error.chain], side_channel_writes: [] } }
 
+  - chain_id: v3.server.error_projection
+    owner_feature_id: v3.module_decomposition
+    summary: "Server-side Error06/foundation projection to Server16 frames and client error responses; no Error01-05 policy ownership."
+    edges:
+      - { step_id: v3-error-projection-01, from_node: V3Error06ClientProjected, to_node: V3Server16HttpFrame, caller_symbol: error_output_response_for_server, caller_file: v3/crates/routecodex-v3-server/src/error_projection.rs, callee_symbol: build_v3_server_16_http_frame_from_v3_error_06, callee_file: v3/crates/routecodex-v3-server/src/error_projection.rs, status: anchored, owner_feature_id: v3.module_decomposition, resource_flow: { consumes: [v3.error.client_projection], produces: [v3.response.client_payload], side_channel_reads: [v3.error.chain], side_channel_writes: [] } }
   - chain_id: v3.config.compact_hub_v1_defaults
     owner_feature_id: v3.config_interpreter_contract
     summary: "Compact user-facing Hub V1 authoring derives the closed fixed pipeline defaults inside routecodex-v3-config before Manifest publication."
@@ -407,9 +412,9 @@ chains:
         from_node: V3ServerStartup01ListenerSetPreflight
         to_node: V3Server03HttpRequestRaw
         caller_symbol: pending_endpoint
-        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        caller_file: v3/crates/routecodex-v3-server/src/endpoints.rs
         callee_symbol: build_v3_server_03_http_request_raw
-        callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
         owner_feature_id: v3.foundation_p0_p2
         resource_flow:
           consumes: [v3.server.listener_set, v3.server.validated_http_input]
@@ -435,7 +440,7 @@ chains:
         from_node: V3Server03HttpRequestRaw
         to_node: V3Debug01NodeEventRegistered
         caller_symbol: pending_endpoint
-        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        caller_file: v3/crates/routecodex-v3-server/src/endpoints.rs
         callee_symbol: register_v3_debug_01_pending_endpoint_event
         callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
         owner_feature_id: v3.foundation_p0_p2
@@ -449,7 +454,7 @@ chains:
         from_node: V3Debug01NodeEventRegistered
         to_node: V3Error06ClientProjected
         caller_symbol: pending_endpoint
-        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        caller_file: v3/crates/routecodex-v3-server/src/endpoints.rs
         callee_symbol: project_v3_pending_endpoint_error
         callee_file: v3/crates/routecodex-v3-error/src/lib.rs
         owner_feature_id: v3.foundation_p0_p2
@@ -463,9 +468,9 @@ chains:
         from_node: V3Error06ClientProjected
         to_node: V3Server16HttpFrame
         caller_symbol: pending_endpoint
-        caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+        caller_file: v3/crates/routecodex-v3-server/src/endpoints.rs
         callee_symbol: build_v3_server_16_http_frame_from_v3_error_06
-        callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+        callee_file: v3/crates/routecodex-v3-server/src/error_projection.rs
         owner_feature_id: v3.foundation_p0_p2
         resource_flow:
           consumes: [v3.error.chain]

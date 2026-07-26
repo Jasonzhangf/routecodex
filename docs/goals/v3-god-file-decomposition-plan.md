@@ -1,6 +1,6 @@
 # V3 巨型文件无痛拆解计划（新增模块 + 物理删除旧代码）
 
-status: executing_phase3_direct_frame_module_active
+status: executing_phase3_error_projection_module_active
 owner_feature_id: v3.module_decomposition
 sop: docs/architecture/wiki/v3-module-decomposition-sop.md
 function_map_entry: docs/architecture/v3-function-map.yml (feature_id v3.module_decomposition, status design_pending)

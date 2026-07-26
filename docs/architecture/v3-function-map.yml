@@ -182,6 +182,7 @@ features:
     owner_crates: [routecodex-v3-config, routecodex-v3-debug, routecodex-v3-error, routecodex-v3-server, routecodex-v3-cli]
     owner_files:
       - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/error_projection.rs
       - v3/crates/routecodex-v3-debug/src/lib.rs
       - v3/crates/routecodex-v3-error/src/lib.rs
       - v3/crates/routecodex-v3-config/src/lib.rs
@@ -368,6 +369,7 @@ features:
       - v3/crates/routecodex-v3-provider-responses/src
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
+      - v3/crates/routecodex-v3-server/src/error_projection.rs
     resource_bindings:
       - v3.request.protocol_context
       - v3.request.normal_payload
@@ -2489,6 +2491,7 @@ features:
     owner_files:
       - v3/crates/routecodex-v3-server/src/websocket.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
+      - v3/crates/routecodex-v3-server/src/error_projection.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
@@ -2518,6 +2521,7 @@ features:
       - v3/crates/routecodex-v3-server/Cargo.toml
       - v3/crates/routecodex-v3-server/src/websocket.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
+      - v3/crates/routecodex-v3-server/src/error_projection.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
@@ -2959,7 +2963,7 @@ features:
     runtime_status: source_controlled_no_live_cutover
 
   - feature_id: v3.module_decomposition
-    status: phase3_direct_frame_module_active
+    status: phase3_error_projection_module_active
     design_truth: docs/goals/v3-god-file-decomposition-plan.md
     sop: docs/architecture/wiki/v3-module-decomposition-sop.md
     owner_crates: [routecodex-v3-server, routecodex-v3-runtime]
@@ -2976,6 +2980,7 @@ features:
       - v3/crates/routecodex-v3-server/src/websocket.rs
       - v3/crates/routecodex-v3-server/src/endpoints.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
+      - v3/crates/routecodex-v3-server/src/error_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - scripts/architecture/verify-v3-file-size.mjs
@@ -2996,7 +3001,6 @@ features:
     pending_modules:
       # 目标态。代码搬入前这些路径不存在；每个 Phase 落地时将对应条目
       # 迁入 owner_files 并从这里删除（护栏 22b：目标态不冒充现状）。
-      - v3/crates/routecodex-v3-server/src/error_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_execution_env.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_exec
       - v3/crates/routecodex-v3-runtime/src/direct_exec

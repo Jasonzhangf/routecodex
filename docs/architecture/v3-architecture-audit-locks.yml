@@ -61,7 +61,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:f266fbe1eab21df845296ae90bccff940cb80b71875af9ccfa1086ac1aa46ac0
+    fingerprint: sha256:e761b20249d6ac98ca4a7cc4ddb16205e4321a477c2c0b64656354e4385accf0
+    last_manual_authorization_id: auth-20260727-v3-module-error-projection-source-rebind
   - item_id: chain:v3.responses_direct.required_mainline
     chain_id: v3.responses_direct.required_mainline
     status: audited_locked
@@ -115,6 +116,13 @@ locked_items:
     fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
 manual_authorizations:
 
+  - authorization_id: auth-20260727-v3-module-error-projection-source-rebind
+    item_id: chain:v3.server.startup
+    approved_by: Jason
+    approved_at: '2026-07-27T02:50:00+08:00'
+    reason: "Jason-authorized V3 module decomposition Phase 3.7 source rebind: pending_endpoint caller stays in server/endpoints.rs, build_v3_server_03_http_request_raw is bound to runtime nodes.rs, and build_v3_server_16_http_frame_from_v3_error_06 moved from server/lib.rs to server/error_projection.rs as pure source rebinds; Error06 -> Server16 projection semantics remain unchanged and Error01-05 policy ownership is untouched."
+    fingerprint_before: sha256:f266fbe1eab21df845296ae90bccff940cb80b71875af9ccfa1086ac1aa46ac0
+    fingerprint_after: sha256:e761b20249d6ac98ca4a7cc4ddb16205e4321a477c2c0b64656354e4385accf0
   - authorization_id: auth-20260727-v3-module-direct-frame-source-rebind
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason
