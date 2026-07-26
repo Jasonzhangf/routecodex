@@ -386,6 +386,9 @@ features:
       - multi_listener_server::responses_direct_shared_provider_health_cools_first_provider_after_three_failures
       - multi_listener_server::responses_direct_provider_request_dry_run_does_not_clear_shared_provider_cooldown
       - multi_listener_server::responses_direct_last_default_waits_twice_then_projects_on_third_failure
+      - direct_frame_console_infers_stop_finish_reason_from_completed_json_status
+      - direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish
+      - direct_stream_request_error06_projects_sse_error_not_json
     allowed_paths:
       - v3/crates/routecodex-v3-runtime
       - v3/crates/routecodex-v3-provider-responses
@@ -416,6 +419,7 @@ features:
       - npm run test:v3-provider-responses
       - npm run test:v3-responses-direct-unit
       - npm run test:v3-responses-direct-blackbox
+      - npm run test:v3-direct-response-observability
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
@@ -435,6 +439,7 @@ features:
       - v3.target.concrete_provider
       - v3.responses_direct.policy
       - v3.provider.responses_wire_payload
+      - v3.provider.responses_history_tool_image_placeholder
       - v3.provider.transport_request
       - v3.response.provider_raw
       - v3.secret.provider_auth_handle
@@ -446,9 +451,13 @@ features:
       - responses_direct_request_projection_hook
       - responses_direct_provider_transport_hook
       - build_v3_provider_12_responses_wire_payload
+      - replace_historical_responses_tool_output_data_images
+      - validate_current_responses_data_images
       - build_v3_transport_13_responses_http_request_from_v3_provider_12
       - ReqwestResponsesTransport::send
       - V3ProviderResp14Raw::from_json
+      - current_turn_invalid_png_data_image_is_rejected_before_provider_transport
+      - direct_runtime_rejects_invalid_current_data_image_before_provider_send
       - general_provider::sse_request_accepts_json_provider_response_as_json_raw_body
       - general_provider::json_request_rejects_sse_provider_response_without_switching_response_kind
     allowed_paths:
@@ -557,26 +566,32 @@ features:
       - "Request tool facts include top-level tools and Responses additional_tools; Codex coding tools set coding, tool_search sets search, and web_search/web_search_preview set web_search before pool matching."
       - "V3Router07OpaqueTargetHitOnce carries request capabilities to Target so a thinking/tool route cannot select a text-only provider for an image request."
       - "Target candidate dedupe preserves pool provenance, required capabilities, and default-pool membership; default's final compatible provider remains selectable under health cooldown."
+      - "For non-built-in requested model ids, explicit `match.models` pools declare inbound-model to target mapping and the provider-wire hook rewrites outbound `body.model` to the selected target wire model; only default/no-explicit-model paths are filtered by configured target model ids to prevent wrong-model default success, and provider aliases do not authorize runtime matching."
     runtime_status: owner_queryability_bound_to_existing_p5_source
 
   - feature_id: v3.models_capability_catalog
-    owner_crates: [routecodex-v3-server]
+    owner_crates: [routecodex-v3-server, routecodex-v3-config]
     owner_files:
+      - v3/crates/routecodex-v3-config/src/lib.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
     resource_bindings:
       - v3.config.published_manifest
+      - v3.config.route_pool_match_declarations
+      - v3.models.route_group_scoped_refs
       - v3.models.capability_catalog
     mainline_bindings:
       - v3-models-01
       - v3-models-02
+      - v3-models-03
     entry_symbols:
       - models_endpoint
       - build_v3_models_catalog
-      - build_v3_model_capability_index
+      - collect_v3_route_group_catalog_model_refs
       - build_v3_codex_model_metadata
       - build_v3_model_capability_projection
     allowed_paths:
+      - v3/crates/routecodex-v3-config/src/lib.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - docs/architecture/v3-resource-operation-map.yml
@@ -599,6 +614,7 @@ features:
       - sharedmodule
     required_gates:
       - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_models_endpoint -- --nocapture
+      - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config route_group_catalog_refs -- --nocapture
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-resource-map
       - npm run verify:v3-module-boundaries
@@ -608,6 +624,8 @@ features:
       - npm run test:v3-workspace
       - git diff --check
     required_contract:
+      - "/v1/models is scoped by the current listener routing group; enabled provider models outside that route group must not be exposed to Codex."
+      - "Route group and forwarder expansion belongs to the config Manifest helper; Server only calls the helper and projects JSON, and must not interpret route targets directly."
       - "input_modalities, supports_image_detail_original, supports_search_tool, and web_search_tool_type derive from manifest model capabilities when a provider declares the visible/canonical model id."
       - "gpt-5.6-* model ids and aliases must not be exposed through /v1/models until the gpt-5.6 client surface is explicitly enabled."
       - "gpt-5.5 must not publish tool_mode=code_mode_only or use_responses_lite=true; Codex treats those fields as request/tool-surface selectors."
@@ -1380,6 +1398,9 @@ features:
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
+    required_contract:
+      - "Non-built-in requested model ids are carried on V3Router07OpaqueTargetHitOnce; explicit model routes map inbound model to declared targets, while default/no-explicit-model paths are filtered by configured target model ids before provider send. Provider aliases are not runtime routing truth."
+      - "The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in selector and is not narrowed to one provider model."
     runtime_status: source_bound_cli_replay_verified
 
   - feature_id: v3.remote_continuation_contract_store

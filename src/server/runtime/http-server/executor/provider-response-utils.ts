@@ -49,6 +49,7 @@ export function extractResponseStatus(response: unknown): number | undefined {
 
 export function normalizeProviderResponse(response: unknown): PipelineExecutionResult {
   const status = extractResponseStatus(response);
+  const usageLogInfo = extractProviderResponseUsageLogInfo(response);
   const metadata =
     response && typeof response === 'object' && 'metadata' in (response as Record<string, unknown>)
       && (response as Record<string, unknown>).metadata
@@ -61,7 +62,7 @@ export function normalizeProviderResponse(response: unknown): PipelineExecutionR
   );
   const sseStream = extractProviderResponseSseStream(response);
   const body = normalizeProviderResponseBody(response);
-  return { status, headers, body, metadata, ...(sseStream !== undefined ? { sseStream } : {}) };
+  return { status, headers, body, metadata, ...(sseStream !== undefined ? { sseStream } : {}), ...(usageLogInfo ? { usageLogInfo } : {}) };
 }
 
 function normalizeProviderResponseBody(response: unknown): unknown {
@@ -84,10 +85,26 @@ function normalizeProviderResponseBody(response: unknown): unknown {
     return stripProviderResponseSideChannels(record.body);
   }
   if (Object.prototype.hasOwnProperty.call(record, 'sseStream')) {
-    const { sseStream: _sseStream, status: _status, statusText: _statusText, headers: _headers, metadata: _metadata, ...rest } = record;
+    const { sseStream: _sseStream, status: _status, statusText: _statusText, headers: _headers, metadata: _metadata, usageLogInfo: _usageLogInfo, ...rest } = record;
     return Object.keys(rest).length ? rest : undefined;
   }
   return response;
+}
+
+function extractProviderResponseUsageLogInfo(response: unknown): PipelineExecutionResult['usageLogInfo'] | undefined {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return undefined;
+  }
+  const record = response as Record<string, unknown>;
+  const usageLogInfo = record.usageLogInfo;
+  if (!usageLogInfo || typeof usageLogInfo !== 'object' || Array.isArray(usageLogInfo)) {
+    return undefined;
+  }
+  const raw = usageLogInfo as Record<string, unknown>;
+  if (typeof raw.requestStartedAtMs !== 'number' || !Number.isFinite(raw.requestStartedAtMs)) {
+    raw.requestStartedAtMs = Date.now();
+  }
+  return raw as PipelineExecutionResult['usageLogInfo'];
 }
 
 function extractProviderResponseSseStream(response: unknown): unknown {

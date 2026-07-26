@@ -93,6 +93,7 @@ description: RouteCodex 调试与架构路由入口
 - Jason 未明确要求时，不得覆盖或改写 `rcc` 的 release 安装、Homebrew/global shim、或正在工作的 release runtime。需要动 `rcc` release install 时，先确认这是本轮目标。
 - 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
 - V3 5555 live lifecycle 纠偏：Jason 要求用 restart 就只能用 restart。`start` / `server start` / 手工 `run-managed-child` 会留下错误 identity、stale socket/lock、foreground child 和不可用证据；如果 `restart` 失败，先查 lifecycle owner、instance declaration、exact PID/socket/lock，不准用 start 兜底恢复。
+- V3 native/rccv3 lifecycle 纠偏：当目标是 `config.v3.toml` 管理的 4444/5555 V3 实例时，交付级动作必须用 `RUSTUP_TOOLCHAIN=stable npm run install:v3` 编译安装，再用 `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` 和 `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` 重启该 V3 instance；不要用 V2/legacy `routecodex restart --port <port>` 当作 rccv3 live 证据。重启后验证 4444/5555 `/health`、installed rccv3 hash、provider-request dry-run 和真实样本 replay。
 - 版本真相必须三点一致：命令入口版本、`~/.rcc/install/current/package.json`、目标端口 `/health.version`。不一致时先修安装/入口，不继续判断业务功能。
 - 区分测试与生命周期动作：`npm run test:webui` 这类 Jest/UI 单测不得启动、停止、重启 live server；若测试前后 server 变化，必须用 `~/.rcc/logs/server-<port>.log` 的 `signal_received` / `self_termination` / `restart_signal_received` 追真正 stop owner，禁止把 install/restart/HTTP shutdown 误归因给 UI 单测。
 - 如果 Jason 说某次执行导致 live server 停止，并且已经手动恢复，立刻接受现场事实；停止争辩和重复复现。后续命令先按 side-effect 分级：禁止再跑 install/restart/start/stop/HTTP shutdown/foreground server/可能退出会话的 browser probe，除非 Jason 明确要求。

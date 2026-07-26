@@ -60,7 +60,7 @@ describe('sendPipelineResponse SSE usage logging', () => {
     jest.restoreAllMocks();
   });
 
-  it('extracts streaming Anthropic usage before final usage log', async () => {
+  it('logs runtime-provided streaming usage without extracting it from client SSE frames', async () => {
     const logUsageSummary = jest.fn();
     const { sendPipelineResponse } = await importHandlerWithUsageMock(logUsageSummary);
 
@@ -82,7 +82,13 @@ describe('sendPipelineResponse SSE usage logging', () => {
           requestStartedAtMs: Date.now(),
           providerKey: 'mimo.key2.mimo-v2.5',
           routeName: 'router-direct:tools',
-          sessionId: 'sess-sse-usage-log'
+          sessionId: 'sess-sse-usage-log',
+          usage: {
+            prompt_tokens: 88882,
+            completion_tokens: 1160,
+            total_tokens: 90042,
+            cache_read_input_tokens: 81024,
+          }
         }
       } as any,
       'req-sse-usage-log',

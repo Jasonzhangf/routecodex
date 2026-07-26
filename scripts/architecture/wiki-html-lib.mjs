@@ -683,6 +683,29 @@ function renderV3MainlineSkeletonSopHtml(root) {
     </section>
 
     <section class="panel">
+      <h2>Requested model / provider-switch SOP</h2>
+      <div class="note-grid">
+        <article class="note-card"><h3>Inbound model mapping</h3><p>Explicit <code>match.models</code> route pools declare inbound client model to allowed targets. Default/no-explicit-model paths must reject silent wrong-model success unless a configured target model id matches.</p></article>
+        <article class="note-card"><h3>Provider wire hook</h3><p>The provider-wire owner rewrites outbound <code>body.model</code> to the selected target <code>wire_model</code>. Provider aliases are catalog/display metadata and never authorize runtime matching.</p></article>
+        <article class="note-card"><h3>Provider error switching</h3><p>429/401/403/413/5xx/transport/codec failures enter Error01-06 and reselect while selected/default candidates remain. Client projection is allowed only after exhaustion.</p></article>
+        <article class="note-card"><h3>Evidence requirement</h3><p>Marker-only 200 is insufficient. Closeout needs provider-request dry-run selected provider/model plus live replay showing provider-switch chain or explicit exhausted error.</p></article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>rccv3 live closeout SOP</h2>
+      <table>
+        <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
+        <tbody>
+          <tr><td>Build/install</td><td><code>RUSTUP_TOOLCHAIN=stable npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
+          <tr><td>Config/restart</td><td><code>rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml</code>, then <code>rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml</code>. Legacy <code>routecodex restart --port</code> is not authoritative for this V3 instance.</td></tr>
+          <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for all member ports, including 4444 and 5555.</td></tr>
+          <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
       <h2>SSE Edge SOP</h2>
       <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, stopless/servertool, routing, retry, or error-policy semantics.</div>
     </section>

@@ -92,6 +92,10 @@ for (const forbiddenLocalDefinition of [
   'function updateResponsesContractProbeFromSseChunk(',
   'function buildResponsesSseErrorPayload(',
   'function buildResponsesStreamIncompleteErrorPayload(',
+  'function readSseFrameUsage(',
+  "from '../runtime/http-server/executor/usage-aggregator.js'",
+  'result.usageLogInfo.usage =',
+  'result.usageLogInfo.finishReason =',
   'deriveFinishReason(',
   'shouldProjectClientSseFrame(parsed.eventName)',
 ]) {

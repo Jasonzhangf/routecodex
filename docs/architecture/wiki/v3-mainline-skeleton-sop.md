@@ -34,6 +34,64 @@ The following big-skeleton chains are SOP and cannot change without a Jason manu
 - Error handling is a resource graph with Error01-06 plus provider health/availability; side-channel is carrier mechanism, not the resource owner.
 - Metadata/debug/snapshot/error carriers must not enter provider body or client normal payload.
 
+## Requested Model / Provider-Switch SOP
+
+Use this SOP when `/v1/responses` returns success on the wrong provider/model, a non-built-in model such as `MiniMax-M3` reports no candidate, or a provider error such as 429/403/413 appears to stop instead of switching.
+
+1. Lock evidence from the live entry first:
+   - `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/request.json`
+   - `~/.rcc/logs/server-v3-5555.log`
+   - provider-request dry-run with `x-routecodex-dry-run: provider-request`
+2. Confirm the selected chain:
+   - `V3Req04StandardizedResponses`
+   - `V3Router05RequestClassified`
+   - `V3Router06RoutePoolResolved`
+   - `V3Router07OpaqueTargetHitOnce`
+   - `V3Target08KindClassified`
+   - `V3Target09CandidateSetExpanded`
+   - `V3Target10ConcreteProviderSelected`
+   - `V3Provider12ResponsesWirePayload`
+3. Apply model mapping rules:
+   - explicit `match.models` route pools declare inbound client model -> allowed targets mapping.
+   - provider-wire hook rewrites outbound `body.model` to selected target `wire_model`.
+   - default/no-explicit-model paths must reject silent wrong-model success unless a configured target model id matches the requested model.
+   - provider `aliases` are catalog/display metadata only; they must not authorize runtime requested-model matching or provider-wire model rewriting.
+4. Apply provider-error rules:
+   - every provider/runtime error, including 429/401/403/413/5xx/transport/codec failures, enters `V3Error01SourceRaised -> ... -> V3Error06ClientProjected`.
+   - if a selected/explicit pool or default floor candidate remains, action must be provider reselect/switch, not client projection.
+   - client projection is allowed only after the selected route candidates and default floor are exhausted.
+5. Required proof:
+   - dry-run shows selected provider and provider request body `model`.
+   - live replay or exact old sample shows `[provider-error]` and `[provider-switch]` for failing candidates, then either final success or explicit exhausted error.
+   - marker-only 200 is not evidence unless logs/body prove selected provider/model.
+
+## rccv3 Live Closeout SOP
+
+Use this SOP for V3 native live surfaces served by `config.v3.toml`, including 4444/5555.
+
+1. Build and install the native V3 binary:
+   - `RUSTUP_TOOLCHAIN=stable npm run install:v3`
+2. Validate the active V3 config:
+   - `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml`
+3. Restart the V3 instance with rccv3:
+   - `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml`
+   - Do not use legacy `routecodex restart --port <port>` as the authoritative closeout for this rccv3 instance.
+4. Verify runtime identity:
+   - `rccv3 --version`
+   - hash `dist/bin/rccv3`, `/Users/fanzhang/.rcc/install/current/dist/bin/rccv3`, and `/Volumes/extension/.rcc/install/current/dist/bin/rccv3`
+   - `curl http://127.0.0.1:4444/health`
+   - `curl http://127.0.0.1:5555/health`
+5. Verify behavior on installed runtime:
+   - provider-request dry-run for the involved model and port.
+   - live JSON/SSE probe that proves client transport shape.
+   - exact old-sample replay when a saved failing sample exists.
+6. Closeout evidence must record:
+   - installed hash
+   - health for every member port
+   - selected provider/model
+   - provider-switch chain or explicit exhaustion
+   - usage/finish reason when the response completes
+
 ## SSE Edge SOP
 
 - SSE is an independent transport edge. It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only.

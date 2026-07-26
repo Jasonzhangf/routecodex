@@ -22,6 +22,12 @@ pub enum V3ProviderError {
     },
     #[error("Responses stream flag for request {request_id} must be boolean")]
     InvalidStreamIntent { request_id: String },
+    #[error("invalid data:{media_type} payload for request {request_id}: {reason}")]
+    InvalidDataImage {
+        request_id: String,
+        media_type: String,
+        reason: String,
+    },
     #[error("provider {provider_id} has an invalid Responses base URL for request {request_id}: {reason}")]
     InvalidBaseUrl {
         request_id: String,

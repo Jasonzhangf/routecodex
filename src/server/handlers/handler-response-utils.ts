@@ -18,6 +18,7 @@ import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 import { registerRequestLogContext } from '../utils/request-log-color.js';
+import { logRequestComplete, logRequestError } from './logging.js';
 // feature_id: server.responses_response_handler_bridge_surface
 import {
   buildResponsesPayloadFromChatNative,
@@ -352,6 +353,12 @@ export async function sendPipelineResponse(
     sseTotalTimeoutMs: options?.sseTotalTimeoutMs,
     responsesRequestContext: effectiveResponsesRequestContext,
     logResponseCompleted,
+    logRequestCompleted: (terminalStatus: number) => {
+      logRequestComplete(entryEndpoint ?? '/v1/responses', requestLabel, terminalStatus);
+    },
+    logRequestFailed: (error: unknown) => {
+      logRequestError(entryEndpoint ?? '/v1/responses', requestLabel, error);
+    },
   });
   if (sseResult instanceof Error) {
     throw sseResult;
@@ -378,6 +385,7 @@ export async function sendPipelineResponse(
     res.status(status).end();
     releaseMetadataCenterForHttpResponse(resultMetadata, 'json_empty_closeout');
     logPipelineStage('response.json.completed', requestLabel, { status });
+    logRequestComplete(entryEndpoint ?? '/v1/responses', requestLabel, status);
     logResponseCompleted({ status, mode: 'json', empty: true });
     return;
   }
@@ -412,6 +420,7 @@ export async function sendPipelineResponse(
   res.status(status).json(sanitized);
   releaseMetadataCenterForHttpResponse(resultMetadata, 'json_closeout');
   logPipelineStage('response.json.completed', requestLabel, { status });
+  logRequestComplete(entryEndpoint ?? '/v1/responses', requestLabel, status);
   logResponseCompleted({
     status,
     mode: 'json',

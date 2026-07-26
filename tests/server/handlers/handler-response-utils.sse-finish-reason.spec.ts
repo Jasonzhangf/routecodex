@@ -33,6 +33,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
   const originalStageVerbose = process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
   const originalStageTiming = process.env.ROUTECODEX_STAGE_TIMING;
   const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
   const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
   beforeEach(() => {
@@ -67,10 +68,11 @@ describe('sendPipelineResponse SSE completion logging', () => {
       process.env.ROUTECODEX_STAGE_TIMING = originalStageTiming;
     }
     logSpy.mockRestore();
+    errorSpy.mockRestore();
     warnSpy.mockRestore();
   });
 
-  it('derives usage finish_reason from responses SSE terminal frames instead of logging unknown', async () => {
+  it('uses runtime-provided SSE finish_reason and does not derive it from client frames', async () => {
     jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
       isSnapshotsEnabled: () => false,
       writeServerSnapshot: async () => undefined
@@ -82,7 +84,7 @@ describe('sendPipelineResponse SSE completion logging', () => {
       'event: response.output_item.done\n',
       'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}}\n\n',
       'event: response.completed\n',
-      'data: {"type":"response.completed","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed","output":[{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}}\n\n'
+      'data: {"type":"response.completed","response":{"id":"resp_usage_finish_reason","object":"response","status":"completed","finish_reason":"length","output":[{"id":"msg_usage_finish_reason","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}}\n\n'
     ]);
 
     const finished = new Promise<void>((resolve) => {
@@ -117,9 +119,121 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('req-stream-usage-finish-reason'));
-    expect(logOutput).not.toContain('req-stream-usage-finish-reason completed');
+    expect(logOutput).toContain('request req-stream-usage-finish-reason completed');
     expect(logOutput).not.toContain('finish_reason=\u001b[97munknown\u001b[0m');
     expect(usageLogInfo.finishReason).toBe('stop');
+    expect(logOutput).not.toContain('finish_reason=length');
+  });
+
+  it('logs request completion when a responses SSE stream ends normally', async () => {
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    const stream = Readable.from([
+      'event: response.completed\n',
+      'data: {"type":"response.completed","response":{"id":"resp_request_complete","object":"response","status":"completed","output":[]}}\n\n',
+      'data: [DONE]\n\n'
+    ]);
+
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 50));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: stream,
+      } as any,
+      'req-request-complete-sse',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    await finished;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    const errorOutput = warnSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(logOutput).toContain('request req-request-complete-sse completed');
+    expect(logOutput).not.toContain('request req-request-complete-sse failed');
+    expect(errorOutput).not.toContain('request req-request-complete-sse failed');
+  });
+
+  it('logs request failure when a responses SSE stream errors', async () => {
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    res.on('error', () => {});
+    const upstream = new PassThrough();
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 50));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: upstream,
+      } as any,
+      'req-request-failed-sse',
+      { forceSSE: true, entryEndpoint: '/v1/responses' }
+    );
+
+    upstream.destroy(new Error('boom'));
+
+    await finished;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const errorOutput = errorSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(errorOutput).toContain('request req-request-failed-sse failed: boom');
+    expect(logOutput).not.toContain('request req-request-failed-sse completed');
+  });
+
+  it('logs request failure when a responses SSE stream times out', async () => {
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
+    const res = new MockResponse();
+    res.on('error', () => {});
+    const upstream = new PassThrough();
+    const chunks: string[] = [];
+    res.on('data', (chunk) => chunks.push(String(chunk)));
+    const finished = new Promise<void>((resolve) => {
+      res.on('finish', () => setTimeout(resolve, 50));
+    });
+
+    sendPipelineResponse(
+      res as any,
+      {
+        status: 200,
+        sseStream: upstream,
+      } as any,
+      'req-request-timeout-sse',
+      { forceSSE: true, entryEndpoint: '/v1/responses', sseTotalTimeoutMs: 20 }
+    );
+
+    await finished;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const output = chunks.join('');
+    const errorOutput = errorSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(output).toContain('event: error');
+    expect(output).toContain('HTTP_SSE_TIMEOUT');
+    expect(errorOutput).toContain('request req-request-timeout-sse failed: SSE timeout after 20ms');
+    expect(logOutput).not.toContain('request req-request-timeout-sse completed');
   });
 
   it('destroys the original upstream SSE stream when client closes before terminal event', async () => {
@@ -508,6 +622,11 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).toContain('"status":502');
     expect(output).toContain('"code":"sse_bridge_error"');
     expect(output).toContain('"request_id":"req-startup-structured-error"');
+    const errorOutput = errorSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    const logOutput = logSpy.mock.calls.map((call) => String(call?.[0] ?? '')).join('\n');
+    expect(res.statusCode).toBe(502);
+    expect(errorOutput).toContain('request req-startup-structured-error failed: SSE stream missing from pipeline result');
+    expect(logOutput).not.toContain('request req-startup-structured-error completed');
   });
 
   it('does not close SSE before upstream emits trailing tail after response.completed', async () => {
@@ -1228,8 +1347,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
     expect(output).toContain('event: response.function_call_arguments.done');
     expect(output).toContain('event: response.output_item.done');
     expect(output).not.toContain('event: response.required_action');
-    expect(output).not.toContain('event: response.completed');
-    expect(output).not.toContain('event: response.done');
-    expect(output).not.toContain('data: [DONE]');
+    expect(output).toContain('event: response.completed');
+    expect(output).toContain('event: response.done');
+    expect(output).toContain('data: [DONE]');
   });
 });

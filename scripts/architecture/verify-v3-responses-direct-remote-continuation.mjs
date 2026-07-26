@@ -167,7 +167,7 @@ if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= obs
   for (const phrase of [
     'observe_sse_remote_continuation_chunk(',
     'build_v3_sse_transport_in_01_raw_chunk(chunk)',
-    'observe_sse_frame_remote_continuation(frame.frame().fields(), response_id_candidate)?',
+    '&state.observation_state',
     'observation_state.record_pending_response_id(&response_id)?',
   ]) {
     requireText(observedStream, `${responsePath}: observed_sse_client_stream`, phrase);

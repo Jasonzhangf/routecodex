@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 36 functional paths, 238 caller edges.
+Generated view: 36 functional paths, 239 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -47,7 +47,7 @@ flowchart TD
   module_v3_runtime -->|41 edges / 8 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
   module_v3_runtime -->|3 edges / 1 paths| module_v3_virtual_router
-  module_v3_server -->|1 edges / 1 paths| module_v3_config
+  module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|1 edges / 1 paths| module_v3_debug
   module_v3_server -->|2 edges / 1 paths| module_v3_error
   module_v3_server -->|2 edges / 2 paths| module_v3_runtime
@@ -76,7 +76,7 @@ flowchart TD
 | v3-runtime | v3-runtime::hub_v1 | 41 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 3 | `v3.responses_direct.required_mainline` |
-| v3-server | v3-config | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
+| v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 1 | `v3.server.startup` |
 | v3-server | v3-error | 2 | `v3.server.startup` |
 | v3-server | v3-runtime | 2 | `v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
@@ -212,25 +212,30 @@ flowchart TD
 
 ## v3.models.capability_catalog
 
-Server projects the compiled provider model registry plus stable built-in Codex ModelInfo metadata through the read-only /v1/models endpoint.
+Config expands the current listener route-group model refs; Server projects those refs plus stable built-in Codex ModelInfo metadata through the read-only /v1/models endpoint.
 
 Owner feature: `v3.models_capability_catalog`
 
 ```mermaid
 flowchart TD
-  subgraph c_3_v3_models_capability_catalog_m_v3_server["v3-server"]
-    c_3_v3_models_capability_catalog_0["v3-server<br/>models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_3_v3_models_capability_catalog_1["v3-server<br/>build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_3_v3_models_capability_catalog_2["v3-server<br/>json_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+  subgraph c_3_v3_models_capability_catalog_m_v3_config["v3-config"]
+    c_3_v3_models_capability_catalog_1["v3-config<br/>collect_v3_route_group_catalog_model_refs<br/><small>routecodex-v3-config/src/lib.rs</small>"]
   end
-  c_3_v3_models_capability_catalog_0 -->|v3-models-01<br/>V3Config05ManifestPublished → V3Models02CodexCapabilityProjected| c_3_v3_models_capability_catalog_1
-  c_3_v3_models_capability_catalog_0 -->|v3-models-02<br/>V3Models02CodexCapabilityProjected → V3Models03HttpResponse| c_3_v3_models_capability_catalog_2
+  subgraph c_3_v3_models_capability_catalog_m_v3_server["v3-server"]
+    c_3_v3_models_capability_catalog_0["v3-server<br/>build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_3_v3_models_capability_catalog_2["v3-server<br/>models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_3_v3_models_capability_catalog_3["v3-server<br/>json_response<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+  end
+  c_3_v3_models_capability_catalog_0 -->|v3-models-01<br/>V3Config05ManifestPublished → V3Models01RouteGroupScopedRefs| c_3_v3_models_capability_catalog_1
+  c_3_v3_models_capability_catalog_2 -->|v3-models-02<br/>V3Models01RouteGroupScopedRefs → V3Models02CodexCapabilityProjected| c_3_v3_models_capability_catalog_0
+  c_3_v3_models_capability_catalog_2 -->|v3-models-03<br/>V3Models02CodexCapabilityProjected → V3Models03HttpResponse| c_3_v3_models_capability_catalog_3
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-models-01` | `V3Config05ManifestPublished` → `V3Models02CodexCapabilityProjected` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.models_capability_catalog` |
-| `v3-models-02` | `V3Models02CodexCapabilityProjected` → `V3Models03HttpResponse` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | json_response<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.models_capability_catalog` |
+| `v3-models-01` | `V3Config05ManifestPublished` → `V3Models01RouteGroupScopedRefs` | anchored | build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small> | collect_v3_route_group_catalog_model_refs<br/><small>routecodex-v3-config/src/lib.rs</small> | `v3.models_capability_catalog` |
+| `v3-models-02` | `V3Models01RouteGroupScopedRefs` → `V3Models02CodexCapabilityProjected` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | build_v3_models_catalog<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.models_capability_catalog` |
+| `v3-models-03` | `V3Models02CodexCapabilityProjected` → `V3Models03HttpResponse` | anchored | models_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | json_response<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.models_capability_catalog` |
 
 ## v3.entry_protocol_endpoint_binding.mainline
 

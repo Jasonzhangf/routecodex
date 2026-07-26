@@ -48,6 +48,8 @@ MVP excludes:
 - `/v1/responses` POST parses into `V3Server03HttpRequestRaw`.
 - Server rejects wrong method/path without invoking runtime.
 - Server calls runtime and only frames returned runtime output.
+- Server preserves the requested client protocol: `stream=false` returns JSON, and `stream=true` / `Accept: text/event-stream` returns SSE for both success and Error06 projection.
+- Server console observability may infer `finish_reason=stop` / `tool_calls` from parsed JSON `status` for logs only; it must not mutate the JSON client body or parse SSE transport frames as semantic truth.
 
 ### Runtime
 
@@ -62,6 +64,7 @@ MVP excludes:
 - Provider behavior is invariant across arbitrary provider IDs; no deployment identity changes code path.
 - Provider resolves auth only at the transport boundary through env or token-file handles.
 - Provider returns typed raw JSON/SSE status/headers/body or typed source errors to runtime.
+- Provider accepts upstream JSON bodies for SSE-intent requests as provider raw JSON while preserving request-side stream intent, and rejects upstream SSE bodies for JSON-intent requests instead of silently switching response kind.
 
 ### End-to-end blackbox
 
@@ -121,6 +124,7 @@ Required package scripts:
 - `npm run test:v3-compile-fail`
 - `npm run test:v3-responses-direct-unit`
 - `npm run test:v3-responses-direct-blackbox`
+- `npm run test:v3-direct-response-observability`
 
 Expected checks:
 
@@ -145,10 +149,12 @@ Source-level completion requires:
 1. compile-fail tests proving forbidden imports/constructors fail
 2. unit tests for config/server/runtime/provider crates
 3. provider-facing blackbox proving final wire request
-4. client-facing blackbox proving no internal leak
-5. architecture gates for V3 map parse/sync
-6. `cargo test` for all V3 crates
-7. no TypeScript in V3 MVP source
+4. provider wire unit tests proving historical tool-output data-image placeholders before the latest user turn, plus negative coverage that current-turn images, text mentioning `data:image`, and non-data image URLs are not broadly replaced
+5. direct response observability gate proving JSON status-only finish_reason inference, provider JSON/SSE response-kind compatibility, and stream-request SSE Error06 projection
+6. client-facing blackbox proving no internal leak
+7. architecture gates for V3 map parse/sync
+8. `cargo test` for all V3 crates
+9. no TypeScript in V3 MVP source
 
 Runtime completion later requires:
 

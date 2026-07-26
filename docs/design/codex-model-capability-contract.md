@@ -9,10 +9,10 @@ Owner split:
 
 - V2 legacy owner: `src/server/runtime/http-server/routes.ts`
 - V2 feature id: `server.models_capability_contract`
-- V3 owner: `v3/crates/routecodex-v3-server/src/lib.rs`
+- V3 owner: `v3/crates/routecodex-v3-server/src/lib.rs` with route-scope helper in `v3/crates/routecodex-v3-config/src/lib.rs`
 - V3 feature id: `v3.models_capability_catalog`
 
-V3 `/v1/models` is a read-only client catalog projection from `V3Config05ManifestPublished` plus stable Codex built-in presets. It must not route, resolve auth, mutate provider state, recover continuation, or enter provider request bodies.
+V3 `/v1/models` is a read-only, listener-scoped client catalog projection from `V3Config05ManifestPublished`, the listener `routing_group`, and stable Codex built-in presets. It must not select a runtime target, resolve auth, mutate provider state, recover continuation, or enter provider request bodies.
 
 ## Codex source evidence
 
@@ -53,9 +53,19 @@ These fields change how Codex builds the next request and which tools are visibl
 
 Do not fix selector mistakes in Direct, Relay, Hub Pipeline, provider runtime, SSE, or continuation stores. Fix the `/v1/models` projection owner.
 
-### Provider-manifest capability fields
+### Route-group scoped capability fields
 
-V3 must derive these client capability fields from the compiled provider model capabilities when a provider manifest declares the visible or canonical model id:
+V3 must first scope the catalog to the current listener route group, matching V2's port-scoped `/v1/models` behavior:
+
+1. Start from the current listener's `routing_group`.
+2. Walk that route group's pool targets and forwarder targets.
+3. For forwarders, expose the forwarder model/aliases as the visible ids; do not leak child provider aliases as separate catalog ids.
+4. Expose only visible ids reachable from those targets.
+5. Never expose an enabled provider model merely because it exists elsewhere in the compiled manifest.
+
+`routecodex-v3-config::collect_v3_route_group_catalog_model_refs` owns this route-group/forwarder expansion. `routecodex-v3-server::build_v3_models_catalog` only consumes those scoped refs and projects the HTTP JSON shape.
+
+After the route-group scope is fixed, V3 derives these client capability fields from the reachable provider model capabilities:
 
 | Manifest capability | `/v1/models` projection | Codex effect |
 | --- | --- | --- |
@@ -69,22 +79,26 @@ V3 must derive these client capability fields from the compiled provider model c
 
 `experimental_supported_tools` must not be used to advertise `apply_patch`, `web_search`, or `tool_search`. Current Codex only consumes recognized experimental tool names such as `test_sync_tool`; V3 keeps this vector empty unless a future explicit Codex-recognized experimental tool is added to the manifest contract.
 
-## Built-in bare model rules for V3
+## Visible model rules for V3
 
-V3 lists only the bare Codex entry `gpt-5.5` for now. `gpt-5.6-*` entries are intentionally hidden from `/v1/models`, including configured provider model ids and aliases, until the gpt-5.6 client surface is explicitly enabled.
+V3 lists the visible model ids reachable from the current listener route group. Among Codex built-in ids, only `gpt-5.5` may be projected today. `gpt-5.6-*` entries are intentionally hidden from `/v1/models`, including configured provider model ids and aliases, until the gpt-5.6 client surface is explicitly enabled.
 
 Projection priority is explicit:
 
-1. If the compiled manifest declares the same canonical or alias id, derive capability fields from that provider model's `capabilities`.
-2. If no manifest model declares the id, use the stable built-in Codex preset for model discovery.
+1. If the current listener route group does not reference a visible or canonical model id, do not list it.
+2. If the route group references `gpt-5.5`, project the stable Codex `gpt-5.5` preset while deriving capability fields from the reachable provider model capabilities.
+3. For non-built-in route-group visible ids, project provider metadata from the reachable provider model and derive capability fields from its `capabilities`.
 
 This is not a fallback path during request execution; it is only catalog construction truth.
 
+Runtime selector boundary: `gpt-5.5` remains the stable Codex built-in client surface and can route by capability/priority to any configured provider target. For non-built-in requested model ids, an explicitly matched route pool (`match.models`) is the inbound-model to provider-target mapping declaration; Target expands the declared targets and the standard provider-wire hook rewrites outbound `body.model` to the selected target `wire_model`. When no explicit model route matched and execution falls through the captured default plan, Target must find a matching configured target model (`forwarder.model` or direct provider `model` id) or fail explicitly with no wrong-model default success. Provider model aliases are catalog/client-display metadata and must not make runtime model matching accept an otherwise unrelated provider target.
+
 Required V3 `gpt-5.5` selector contract:
 
+- Listed only when the current listener route group exposes `gpt-5.5` as a visible or canonical route target.
 - `tool_mode` absent.
 - `use_responses_lite` absent/false.
-- Search/image fields derive from manifest capabilities when manifest declares `gpt-5.5`; otherwise the built-in preset matches Codex bundled `gpt-5.5` (`web_search + multimodal`).
+- Search/image fields derive from route-group reachable provider capabilities when available; otherwise the built-in preset matches Codex bundled `gpt-5.5` (`web_search + multimodal`).
 
 Required V3 `gpt-5.6-*` selector contract:
 
@@ -94,7 +108,7 @@ Required V3 `gpt-5.6-*` selector contract:
 
 ## V2 legacy contract
 
-V2 `server.models_capability_contract` keeps its existing port-scoped behavior and tests in `tests/server/http-server/routes.invalid-json.spec.ts`, with the same temporary ceiling: `/v1/models` exposes Codex built-ins only through `gpt-5.5` and suppresses `gpt-5.6-*` provider model ids/aliases.
+V2 `server.models_capability_contract` keeps its existing port-scoped behavior and tests in `tests/server/http-server/routes.invalid-json.spec.ts`, with the same temporary ceiling: `/v1/models` exposes Codex built-ins only through route-visible `gpt-5.5` and suppresses `gpt-5.6-*` provider model ids/aliases.
 
 V2-specific stable fields and visibility rules remain owned by `src/server/runtime/http-server/routes.ts`; V3 changes must not be implemented in V2 TS unless that feature id is explicitly claimed.
 

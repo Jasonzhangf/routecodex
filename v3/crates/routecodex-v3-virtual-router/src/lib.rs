@@ -70,6 +70,7 @@ pub struct V3Router07OpaqueTargetHitOnce {
     pub target_kind: V3RouteTargetKind,
     pub target_id: Option<String>,
     pub target_plan: Vec<V3Router07OpaqueTargetPlanEntry>,
+    pub request_client_model: Option<String>,
     pub request_capabilities: BTreeSet<String>,
     pub hit_count: u8,
 }
@@ -282,6 +283,7 @@ impl V3VirtualRouter {
             target_kind: first.target_kind.clone(),
             target_id: first.target_id.clone(),
             target_plan,
+            request_client_model: plan.facts.client_model,
             request_capabilities: plan.facts.capabilities,
             hit_count: 1,
         })

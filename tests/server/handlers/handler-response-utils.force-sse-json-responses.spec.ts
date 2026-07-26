@@ -878,7 +878,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('event: error');
       expect(text).toContain('sse_bridge_error');
@@ -922,7 +922,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
       const response = await fetch(`http://127.0.0.1:${addr.port}/responses-sse-from-slow-json`, {
         headers: { accept: 'text/event-stream' }
       });
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       const reader = response.body?.getReader();
       expect(reader).toBeDefined();
       const first = await reader!.read();
@@ -980,7 +980,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       expect(text).toContain('event: error');
       expect(text).toContain('sse_bridge_error');
       expect(text).not.toContain('event: response.output_item.added');
@@ -1024,7 +1024,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       expect(text).toContain('event: error');
       expect(text).not.toContain('event: response.completed');
       expect(text).not.toContain('"type":"response.completed"');
@@ -1071,7 +1071,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('event: error');
       expect(text).toContain('sse_bridge_error');
@@ -1120,7 +1120,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('event: error');
       expect(text).toContain('sse_bridge_error');
@@ -1183,7 +1183,7 @@ describe('handler-response-utils forceSSE responses json bridge', () => {
         headers: { accept: 'text/event-stream' }
       });
       const text = await response.text();
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(502);
       expect(response.headers.get('content-type')).toContain('text/event-stream');
       expect(text).toContain('event: error');
       expect(text).toContain('sse_bridge_error');

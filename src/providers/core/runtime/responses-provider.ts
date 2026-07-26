@@ -51,6 +51,8 @@ import {
   buildResponsesSseProviderError,
   buildResponsesSseTerminatedError,
   inspectResponsesSseBlockForProviderFailure,
+  inspectResponsesSseBlockForUsageObservation,
+  isResponsesSseDoneSentinelBlock,
   isResponsesSseIncompleteBlock,
   isResponsesSseLifecyclePreambleBlock,
   isResponsesSseTerminalBlock
@@ -68,8 +70,14 @@ import {
   writeProviderRequestDryRunSnapshot
 } from '../../../debug/pipeline-dry-run.js';
 import type { PreparedHttpRequest } from './http-request-executor.js';
+import { normalizeUsage } from '../../../utils/usage-metrics.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'> & Partial<Pick<HttpClient, 'postStreamOrResponse'>>;
+type ResponsesDirectSseUsageLogInfo = {
+  usage?: Record<string, unknown>;
+  finishReason?: string;
+  requestStartedAtMs?: number;
+};
 
 const buildProviderSseStreamConfig = (context: ProviderContext): {
   idleTimeoutMs?: number;
@@ -354,6 +362,7 @@ async function prepareDirectResponsesSsePassthroughStream(
   options?: {
     noContentTimeoutMs?: number;
     contentIdleTimeoutMs?: number;
+    usageLogInfo?: ResponsesDirectSseUsageLogInfo;
   }
 ): Promise<NodeJS.ReadableStream> {
   const iterator = stream[Symbol.asyncIterator]();
@@ -363,11 +372,29 @@ async function prepareDirectResponsesSsePassthroughStream(
   let sawTerminalFrame = false;
   let lastSemanticActivityAt = Date.now();
 
+  const observeUsageFromBlock = (part: string): void => {
+    const usageLogInfo = options?.usageLogInfo;
+    if (!usageLogInfo) {
+      return;
+    }
+    const observation = inspectResponsesSseBlockForUsageObservation(part);
+    if (observation.usage) {
+      const normalized = normalizeUsage(observation.usage, { sourceProtocol: 'openai-responses' });
+      if (normalized) {
+        usageLogInfo.usage = normalized as unknown as Record<string, unknown>;
+      }
+    }
+    if (observation.finishReason) {
+      usageLogInfo.finishReason = observation.finishReason;
+    }
+  };
+
   const processBlock = async (part: string): Promise<boolean> => {
     const trimmed = part.trim();
     if (!trimmed || trimmed.startsWith(':')) {
       return false;
     }
+    observeUsageFromBlock(part);
     const providerFailurePayload = inspectResponsesSseBlockForProviderFailure(part);
     if (providerFailurePayload) {
       if (typeof iterator.return === 'function') {
@@ -383,6 +410,9 @@ async function prepareDirectResponsesSsePassthroughStream(
     }
     if (isResponsesSseTerminalBlock(part)) {
       sawTerminalFrame = true;
+    }
+    if (isResponsesSseDoneSentinelBlock(part)) {
+      return false;
     }
     if (isResponsesSseLifecyclePreambleBlock(part)) {
       return false;
@@ -889,8 +919,14 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
     const stream = upstreamResult.stream;
 
+    const usageLogInfo: ResponsesDirectSseUsageLogInfo = {
+      requestStartedAtMs: Date.now(),
+    };
     const preparedStream = this.attachDirectPassthroughStreamErrorReporter(
-      await prepareDirectResponsesSsePassthroughStream(stream, semanticTimeouts),
+      await prepareDirectResponsesSsePassthroughStream(stream, {
+        ...semanticTimeouts,
+        usageLogInfo,
+      }),
       context
     );
 
@@ -925,6 +961,7 @@ export class ResponsesProvider extends HttpTransportProvider {
       sseStream: streamForHost,
       status: 200,
       statusText: 'OK',
+      usageLogInfo,
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',

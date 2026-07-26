@@ -669,6 +669,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 target_kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
                 target_id: None,
                 target_plan: Vec::new(),
+                request_client_model: None,
                 request_capabilities: BTreeSet::new(),
                 hit_count: 1,
             },
@@ -2078,6 +2079,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send() {
+        struct NoSendTransport;
+        #[async_trait]
+        impl ResponsesTransport for NoSendTransport {
+            async fn send(
+                &self,
+                _request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                panic!("invalid current-turn image must fail before provider transport")
+            }
+        }
+
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &test_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req-invalid-image".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({
+                    "model":"client-model",
+                    "input":[{
+                        "type":"message",
+                        "role":"user",
+                        "content":[
+                            {"type":"input_text","text":"current turn"},
+                            {"type":"input_image","image_url":"data:image/png;base64,AAAA"}
+                        ]
+                    }]
+                }),
+            },
+            crate::register_responses_direct_hooks(),
+            &NoSendTransport,
+        )
+        .await;
+
+        assert_eq!(output.client_payload.status, 400);
+        assert!(!output
+            .node_trace
+            .contains(&"V3Transport13ResponsesHttpRequest"));
+        match output.client_payload.body {
+            V3ClientBody::Json(body) => {
+                assert_eq!(body["error"]["code"], "invalid_provider_request_payload");
+                assert!(body["error"]["message"]
+                    .as_str()
+                    .expect("error message")
+                    .contains("invalid data:image/png payload"));
+            }
+            V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => panic!("error response must be JSON"),
+        }
+    }
+
+    #[tokio::test]
     async fn provider_failure_reselects_without_router_reentry() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2408,10 +2463,16 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TES
 
 [providers.openai.models.gpt-test]
 supports_streaming = true
+capabilities = ["text", "vision"]
+
+[forwarders.responses]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
 
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
 "#,
         )
         .unwrap();
@@ -2445,7 +2506,7 @@ auth = { type = "api_key", entries = [{ alias = "key", env = "SECOND_KEY" }] }
 wire_name = "wire-second"
 
 [forwarders.responses]
-model = "test"
+model = "client-model"
 selection = { strategy = "priority" }
 targets = [
   { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 },

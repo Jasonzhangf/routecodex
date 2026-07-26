@@ -697,6 +697,7 @@ impl V3LiveSnapProviderSnapshotRecorder {
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
             V3ProviderError::InvalidWireBody { request_id }
             | V3ProviderError::InvalidStreamIntent { request_id }
+            | V3ProviderError::InvalidDataImage { request_id, .. }
             | V3ProviderError::ControlFieldInWireBody { request_id, .. } => {
                 self.record_transport_provider_error(attempt, request_id, "unknown", error)
             }
@@ -5376,21 +5377,130 @@ fn apply_responses_stream_protocol_events_to_terminal_response(
     object
         .entry("status".to_string())
         .or_insert_with(|| Value::String("completed".to_string()));
+    if !output_items.is_empty() {
+        merge_v3_runtime_responses_stream_output_items_into_terminal_response(object, output_items);
+    }
     let output_is_empty = object
         .get("output")
         .and_then(Value::as_array)
         .is_none_or(Vec::is_empty);
     if output_is_empty {
-        if !output_items.is_empty() {
-            object.insert("output".to_string(), Value::Array(output_items.to_vec()));
-        } else if !output_text.trim().is_empty() {
+        if !output_text.trim().is_empty() {
             object.insert(
                 "output".to_string(),
                 json!([{"type":"output_text","text":output_text}]),
             );
         }
+    } else if !output_text.trim().is_empty() {
+        append_v3_runtime_responses_output_text_if_missing(object, output_text);
     }
     Ok(())
+}
+
+fn merge_v3_runtime_responses_stream_output_items_into_terminal_response(
+    object: &mut Map<String, Value>,
+    output_items: &[Value],
+) {
+    let output = object
+        .entry("output".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !output.is_array() {
+        *output = Value::Array(Vec::new());
+    }
+    let Some(output) = output.as_array_mut() else {
+        return;
+    };
+    for (stream_index, stream_item) in output_items.iter().enumerate() {
+        if let Some(target_index) =
+            find_v3_runtime_responses_terminal_output_item_index(output, stream_item)
+        {
+            output[target_index] = merge_v3_runtime_responses_terminal_and_stream_output_item(
+                &output[target_index],
+                stream_item,
+            );
+            continue;
+        }
+        if output.get(stream_index) == Some(stream_item) {
+            continue;
+        }
+        if stream_index < output.len() {
+            output.insert(stream_index, stream_item.clone());
+        } else {
+            output.push(stream_item.clone());
+        }
+    }
+}
+
+fn find_v3_runtime_responses_terminal_output_item_index(
+    output: &[Value],
+    stream_item: &Value,
+) -> Option<usize> {
+    let identity = read_v3_runtime_responses_output_item_identity(stream_item)?;
+    output
+        .iter()
+        .position(|item| read_v3_runtime_responses_output_item_identity(item) == Some(identity))
+}
+
+fn read_v3_runtime_responses_output_item_identity(item: &Value) -> Option<&str> {
+    item.get("id")
+        .or_else(|| item.get("call_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn merge_v3_runtime_responses_terminal_and_stream_output_item(
+    terminal_item: &Value,
+    stream_item: &Value,
+) -> Value {
+    let (Some(terminal), Some(stream)) = (terminal_item.as_object(), stream_item.as_object())
+    else {
+        return stream_item.clone();
+    };
+    let mut merged = terminal.clone();
+    for (key, value) in stream {
+        merged.insert(key.clone(), value.clone());
+    }
+    Value::Object(merged)
+}
+
+fn append_v3_runtime_responses_output_text_if_missing(
+    object: &mut Map<String, Value>,
+    output_text: &str,
+) {
+    let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    if output
+        .iter()
+        .any(v3_runtime_responses_output_item_has_visible_text)
+    {
+        return;
+    }
+    output.push(json!({"type":"output_text","text":output_text}));
+}
+
+fn v3_runtime_responses_output_item_has_visible_text(item: &Value) -> bool {
+    if item.get("type").and_then(Value::as_str) == Some("output_text")
+        && item
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+    {
+        return true;
+    }
+    item.get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|content| {
+            content.iter().any(|part| {
+                matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("output_text" | "text")
+                ) && part
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.trim().is_empty())
+            })
+        })
 }
 
 fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
@@ -6952,6 +7062,63 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert_eq!(
             response["output"][0]["summary"][0],
             json!({"type":"summary_text","text":"Need inspect"})
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_provider_sse_merges_stream_output_items_into_terminal_output_without_silent_loss(
+    ) {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_tool_search_merge\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
+            Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Searching\"}]}}\n\n".to_vec()),
+            Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"tsc_1\",\"type\":\"tool_search_call\",\"call_id\":\"call_search\",\"execution\":\"client\",\"status\":\"completed\",\"arguments\":{\"query\":\"computer use control local Mac apps screenshot click type\",\"limit\":5}}}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool_search_merge\",\"status\":\"completed\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Searching\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":214,\"total_tokens\":216}}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["usage"]["output_tokens"], 214);
+        assert_eq!(response["output"].as_array().unwrap().len(), 2);
+        assert_eq!(response["output"][0]["type"], "reasoning");
+        assert_eq!(response["output"][1]["type"], "tool_search_call");
+        assert_eq!(response["output"][1]["call_id"], "call_search");
+        assert_eq!(
+            response["output"][1]["arguments"]["query"],
+            "computer use control local Mac apps screenshot click type"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_provider_sse_stream_output_without_identity_does_not_overwrite_terminal_output(
+    ) {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_no_identity_merge\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
+            Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"stream text\"}]}}\n\n".to_vec()),
+            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_identity_merge\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"terminal reasoning\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":4,\"total_tokens\":6}}}\n\n".to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"].as_array().unwrap().len(), 2);
+        assert_eq!(response["output"][0]["type"], "message");
+        assert_eq!(response["output"][1]["type"], "reasoning");
+        assert_eq!(
+            response["output"][1]["summary"][0]["text"],
+            "terminal reasoning"
         );
     }
 

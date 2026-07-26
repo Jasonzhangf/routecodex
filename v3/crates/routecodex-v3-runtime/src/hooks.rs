@@ -224,12 +224,23 @@ fn provider_error_source(
     stage: &'static str,
 ) -> impl FnOnce(V3ProviderError) -> V3Error01SourceRaised {
     move |error| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            stage,
-            "provider_responses_error",
-            error.to_string(),
-        )
+        let invalid_request = matches!(
+            error,
+            V3ProviderError::InvalidWireBody { .. }
+                | V3ProviderError::InvalidStreamIntent { .. }
+                | V3ProviderError::InvalidDataImage { .. }
+        );
+        let source_kind = if invalid_request {
+            V3ErrorSourceKind::InvalidRequest
+        } else {
+            V3ErrorSourceKind::ProviderFailure
+        };
+        let code = if invalid_request {
+            "invalid_provider_request_payload"
+        } else {
+            "provider_responses_error"
+        };
+        build_v3_error_01_source_raised(source_kind, stage, code, error.to_string())
     }
 }
 

@@ -130,6 +130,67 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
     });
   });
 
+  it('rejects direct passthrough upstream SSE that ends with only lifecycle preamble and DONE sentinel', async () => {
+    const provider = createProvider();
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.created\n'
+          + 'data: {"type":"response.created","response":{"id":"resp_done_only","status":"in_progress"}}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    };
+
+    await expect(provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true,
+    })).rejects.toMatchObject({
+      code: 'UPSTREAM_STREAM_INCOMPLETE',
+      statusCode: 502,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.responses',
+    });
+  });
+
+  it('rejects direct passthrough upstream SSE that emits content then DONE without Responses terminal event', async () => {
+    const provider = createProvider();
+    provider.httpClient = {
+      postStream: async () => Readable.from([
+        'event: response.created\n'
+          + 'data: {"type":"response.created","response":{"id":"resp_delta_done","status":"in_progress"}}\n\n',
+        'event: response.output_text.delta\n'
+          + 'data: {"type":"response.output_text.delta","delta":"partial"}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    };
+
+    const response = await provider.processIncomingDirect({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
+      stream: true,
+    });
+
+    await expect(readSseStreamText(response.sseStream)).rejects.toMatchObject({
+      code: 'UPSTREAM_STREAM_INCOMPLETE',
+      statusCode: 502,
+      retryable: true,
+      requestExecutorProviderErrorStage: 'provider.responses',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(mockProviderErrorEvents).toHaveLength(1);
+    expect(mockProviderErrorEvents[0]).toMatchObject({
+      code: 'UPSTREAM_STREAM_INCOMPLETE',
+      stage: 'provider.responses.stream',
+      status: 502,
+      recoverable: true,
+      affectsHealth: true,
+      details: {
+        streamPhase: 'direct_passthrough_after_provider_return',
+      },
+    });
+  });
+
   it('reports provider health when direct passthrough upstream SSE terminates after client streaming starts', async () => {
     const provider = createProvider();
     provider.httpClient = {
@@ -243,7 +304,7 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
         'event: response.created\n'
           + 'data: {"type":"response.created","response":{"id":"resp_ok","status":"in_progress"}}\n\n',
         'event: response.completed\n'
-          + 'data: {"type":"response.completed","response":{"id":"resp_ok","status":"completed"}}\n\n',
+          + 'data: {"type":"response.completed","response":{"id":"resp_ok","status":"completed","usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}}\n\n',
       ]),
     };
 
@@ -256,5 +317,13 @@ describe('ResponsesProvider direct SSE terminal validation', () => {
     expect(text).toContain('event: response.created');
     expect(text).toContain('event: response.completed');
     expect(text).not.toContain('data: [DONE]');
+    expect(response.usageLogInfo).toMatchObject({
+      finishReason: 'stop',
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 3,
+        total_tokens: 15,
+      },
+    });
   });
 });

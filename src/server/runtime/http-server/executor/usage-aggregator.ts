@@ -4,11 +4,11 @@
  * Handles token usage extraction, normalization, and merging.
  */
 
-import type { UsageMetrics } from '../stats-manager.js';
+import { normalizeUsage, type UsageMetrics } from '../../../../utils/usage-metrics.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 import { readRuntimeControlProjection } from '../metadata-center/request-truth-readers.js';
 
-export { type UsageMetrics };
+export { normalizeUsage, type UsageMetrics };
 
 const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const nonBlockingLogState = new Map<string, number>();
@@ -176,126 +176,6 @@ export function extractUsageFromResult(
   }
 
   return undefined;
-}
-
-/**
- * Normalize usage metrics from various provider formats
- */
-export function normalizeUsage(
-  value: unknown,
-  options?: { sourceProtocol?: string }
-): UsageMetrics | undefined {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-
-  const record = value as Record<string, unknown>;
-  const usageRecord =
-    record.usageMetadata && typeof record.usageMetadata === 'object'
-      ? (record.usageMetadata as Record<string, unknown>)
-      : record;
-
-  const readNumeric = (raw: unknown): number | undefined => {
-    if (typeof raw === 'number' && Number.isFinite(raw)) {
-      return raw;
-    }
-    if (typeof raw === 'string' && raw.trim()) {
-      const parsed = Number(raw);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-    return undefined;
-  };
-  // Detect source field to decide cache handling:
-  // - prompt_tokens (OpenAI chat): already includes cache_read_input_tokens
-  // - input_tokens (Anthropic): does NOT include cache_read_input_tokens
-  // - input_tokens (OpenAI responses): already includes cached tokens (when protocol hint is known)
-  const basePromptOpenAI = readNumeric(usageRecord.prompt_tokens);
-  const basePromptAnthropic =
-    readNumeric(usageRecord.input_tokens) ??
-    readNumeric(usageRecord.inputTokens) ??
-    readNumeric(usageRecord.request_tokens) ??
-    readNumeric(usageRecord.requestTokens);
-  const basePromptOther =
-    readNumeric(usageRecord.promptTokenCount) ??
-    readNumeric(usageRecord.promptTokens);
-
-  let cacheRead: number | undefined =
-    readNumeric(usageRecord.cache_read_input_tokens);
-
-  if (cacheRead === undefined && usageRecord.input_tokens_details && typeof usageRecord.input_tokens_details === 'object') {
-    const details = usageRecord.input_tokens_details as Record<string, unknown>;
-    const cached = readNumeric(details.cached_tokens);
-    if (cached !== undefined) {
-      cacheRead = cached;
-    }
-  }
-  if (cacheRead === undefined && usageRecord.prompt_tokens_details && typeof usageRecord.prompt_tokens_details === 'object') {
-    const details = usageRecord.prompt_tokens_details as Record<string, unknown>;
-    const cached = readNumeric(details.cached_tokens);
-    if (cached !== undefined) {
-      cacheRead = cached;
-    }
-  }
-  // DeepSeek-style cache hit field
-  if (cacheRead === undefined) {
-    const deepseekCacheHit = readNumeric(usageRecord.prompt_cache_hit_tokens);
-    if (deepseekCacheHit !== undefined) {
-      cacheRead = deepseekCacheHit;
-    }
-  }
-
-  const cacheCreation: number | undefined =
-    readNumeric(usageRecord.cache_creation_input_tokens);
-
-  const sourceProtocol = options?.sourceProtocol?.toLowerCase();
-  const isResponsesProtocol = sourceProtocol === 'openai-responses';
-  const isAnthropicProtocol = sourceProtocol === 'anthropic';
-
-  // prompt_tokens (OpenAI chat) already includes cache — do NOT add cacheRead again.
-  // input_tokens (OpenAI responses) already includes cache — do NOT add cacheRead again.
-  // input_tokens (Anthropic) does NOT include cache — add cacheRead.
-  const prompt = basePromptOpenAI !== undefined
-    ? basePromptOpenAI
-    : isResponsesProtocol
-      ? basePromptAnthropic
-      : isAnthropicProtocol && basePromptAnthropic !== undefined
-        ? basePromptAnthropic + (cacheRead ?? 0)
-        : basePromptAnthropic ?? basePromptOther;
-
-  const completion =
-    readNumeric(usageRecord.completion_tokens) ??
-    readNumeric(usageRecord.output_tokens) ??
-    readNumeric(usageRecord.candidatesTokenCount) ??
-    readNumeric(usageRecord.completionTokens) ??
-    readNumeric(usageRecord.outputTokens) ??
-    readNumeric(usageRecord.response_tokens) ??
-    readNumeric(usageRecord.responseTokens);
-
-  let total =
-    readNumeric(usageRecord.total_tokens) ??
-    readNumeric(usageRecord.totalTokenCount) ??
-    readNumeric(usageRecord.totalTokens);
-
-  if (prompt !== undefined && completion !== undefined) {
-    const expected = prompt + completion;
-    if (total === undefined || total < expected) {
-      total = expected;
-    }
-  }
-
-  if (prompt === undefined && completion === undefined && total === undefined) {
-    return undefined;
-  }
-
-  return {
-    prompt_tokens: prompt,
-    completion_tokens: completion,
-    total_tokens: total,
-    cache_read_input_tokens: cacheRead,
-    cache_creation_input_tokens: cacheCreation
-  };
 }
 
 /**

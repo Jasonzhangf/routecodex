@@ -1,5 +1,10 @@
 type UnknownRecord = Record<string, unknown>;
 
+export type ResponsesSseUsageObservation = {
+  usage?: UnknownRecord;
+  finishReason?: string;
+};
+
 function asRecord(value: unknown): UnknownRecord {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as UnknownRecord)
@@ -69,6 +74,59 @@ function readErrorPayload(data: UnknownRecord | undefined): { code?: string; mes
       ?? pickStatusCode(responseError.status)
       ?? pickStatusCode(responseError.statusCode)
       ?? pickStatusCode(responseError.http_status)
+  };
+}
+
+function readResponsesSseUsageCandidate(data: UnknownRecord | undefined): unknown {
+  if (!data) {
+    return undefined;
+  }
+  const response = asRecord(data.response);
+  const message = asRecord(data.message);
+  return response.usage ?? data.usage ?? message.usage;
+}
+
+function inferResponsesSseFinishReason(parsed: { eventName?: string; data?: UnknownRecord }): string | undefined {
+  const data = parsed.data;
+  const response = asRecord(data?.response);
+  const delta = asRecord(data?.delta);
+  const explicit = pickString(delta.stop_reason)
+    ?? pickString(data?.stop_reason)
+    ?? pickString(response.finish_reason)
+    ?? pickString(response.finishReason)
+    ?? pickString(data?.finish_reason)
+    ?? pickString(data?.finishReason);
+  if (explicit) {
+    return explicit;
+  }
+  const eventName = parsed.eventName;
+  const type = pickString(data?.type);
+  const responseStatus = pickString(response.status);
+  if (eventName === 'response.requires_action' || type === 'response.requires_action' || responseStatus === 'requires_action') {
+    return 'tool_calls';
+  }
+  if (
+    eventName === 'response.completed'
+    || eventName === 'response.done'
+    || type === 'response.completed'
+    || type === 'response.done'
+    || responseStatus === 'completed'
+  ) {
+    return 'stop';
+  }
+  return undefined;
+}
+
+export function inspectResponsesSseBlockForUsageObservation(block: string): ResponsesSseUsageObservation {
+  const parsed = parseResponsesSseFrame(block);
+  const usage = readResponsesSseUsageCandidate(parsed.data);
+  const usageRecord = usage && typeof usage === 'object' && !Array.isArray(usage)
+    ? usage as UnknownRecord
+    : undefined;
+  const finishReason = inferResponsesSseFinishReason(parsed);
+  return {
+    ...(usageRecord ? { usage: usageRecord } : {}),
+    ...(finishReason ? { finishReason } : {})
   };
 }
 
@@ -164,17 +222,18 @@ export function buildResponsesSseTerminatedError(message = 'stream terminated be
 export function isResponsesSseTerminalBlock(block: string): boolean {
   const parsed = parseResponsesSseFrame(block);
   const type = pickString(parsed.data?.type);
-  if (!parsed.data && parsed.eventName === undefined && block
-    .split(/\r?\n/)
-    .some((line) => line.trim() === 'data: [DONE]')) {
-    return true;
-  }
   return parsed.eventName === 'response.completed'
     || parsed.eventName === 'response.done'
     || parsed.eventName === 'response.requires_action'
     || type === 'response.completed'
     || type === 'response.done'
     || type === 'response.requires_action';
+}
+
+export function isResponsesSseDoneSentinelBlock(block: string): boolean {
+  return block
+    .split(/\r?\n/)
+    .some((line) => line.trim() === 'data: [DONE]');
 }
 
 export function isResponsesSseLifecyclePreambleBlock(block: string): boolean {

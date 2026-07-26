@@ -102,12 +102,25 @@ resources:
     owner_feature_id: v3.models_capability_catalog
     owner_crate: routecodex-v3-server
     owner_node: V3Models02CodexCapabilityProjected
-    identity: [visibleModelId]
+    identity: [routingGroup, visibleModelId]
     allowed_writers: [build_v3_models_catalog]
     allowed_readers: [models_endpoint, json_response]
     forbidden_writers: [routecodex-v3-config, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
     may_enter_provider_body: false
     may_enter_client_body: true
+    binding_status: anchored
+  - resource_id: v3.models.route_group_scoped_refs
+    resource_kind: client_catalog_source_refs
+    lifecycle: v3.models.capability_catalog
+    owner_feature_id: v3.models_capability_catalog
+    owner_crate: routecodex-v3-config
+    owner_node: V3Models01RouteGroupScopedRefs
+    identity: [routingGroup, visibleModelId, providerId, modelId]
+    allowed_writers: [collect_v3_route_group_catalog_model_refs]
+    allowed_readers: [build_v3_models_catalog]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.secret.provider_auth_handle
     resource_kind: secret_handle
@@ -238,6 +251,19 @@ resources:
     allowed_writers: [V3Provider12ResponsesWirePayload]
     allowed_readers: [V3Transport13ResponsesHttpRequest]
     forbidden_writers: [V3Resp15ClientPayload, V3Server16HttpFrame, V3DebugArtifact]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.provider.responses_history_tool_image_placeholder
+    resource_kind: normal_payload
+    lifecycle: v3.responses_direct.mainline
+    owner_feature_id: v3.responses_provider_runtime
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3Provider12ResponsesWirePayload
+    identity: [requestId, providerId, modelId, inputIndex, callId]
+    allowed_writers: [replace_historical_responses_tool_output_data_images, V3Provider12ResponsesWirePayload]
+    allowed_readers: [V3Provider12ResponsesWirePayload, V3Transport13ResponsesHttpRequest]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
     may_enter_provider_body: true
     may_enter_client_body: false
     binding_status: anchored

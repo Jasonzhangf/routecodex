@@ -453,6 +453,7 @@ for (const gate of [
   'npm run test:v3-source-gate-red-fixtures',
   'npm run test:v3-compile-fail',
   'npm run test:v3-provider-responses',
+  'npm run test:v3-direct-response-observability',
   'npm run test:v3-workspace',
 ]) if (!array(p6Feature?.required_gates).includes(gate)) fail(`verification map: P6 missing required gate ${gate}`);
 

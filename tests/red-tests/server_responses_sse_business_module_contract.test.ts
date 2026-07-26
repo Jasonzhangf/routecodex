@@ -37,6 +37,7 @@ describe('server responses SSE business module contract', () => {
       'function updateResponsesContractProbeFromSseChunk(',
       'function buildResponsesSseErrorPayload(',
       'function buildResponsesStreamIncompleteErrorPayload(',
+      'function readSseFrameUsage(',
     ]) {
       expect(handler).not.toContain(forbiddenLocalDefinition);
     }
@@ -72,6 +73,9 @@ describe('server responses SSE business module contract', () => {
     expect(handler).not.toContain('buildResponsesSseErrorPayloadForHttp');
     expect(handler).not.toContain('buildResponsesStructuredSseErrorPayloadForHttp');
     expect(handler).not.toContain('buildResponsesMissingSseBridgeErrorPayloadForHttp');
+    expect(handler).not.toContain("from '../runtime/http-server/executor/usage-aggregator.js'");
+    expect(handler).not.toContain('result.usageLogInfo.usage =');
+    expect(handler).not.toContain('result.usageLogInfo.finishReason =');
   });
 
   it('locks SSE owner docs and gate wiring to the dedicated business module', () => {

@@ -145,6 +145,275 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
     }
 
     #[test]
+    fn requested_forwarder_model_filters_default_pool_candidates() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.5"]
+capabilities = ["text"]
+[providers.grok]
+type = "responses"
+base_url = "http://grok.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GROK_KEY" }] }
+[providers.grok.models."MiniMax-M3"]
+capabilities = ["text"]
+[forwarders.fwd_gpt]
+model = "gpt-5.5"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+[forwarders.fwd_minimax]
+model = "MiniMax-M3"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "grok", model = "MiniMax-M3", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "forwarder", id = "fwd_gpt", priority = 1 },
+  { kind = "forwarder", id = "fwd_minimax", priority = 2 }
+]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("MiniMax-M3".into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        let selected = target
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::new(),
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(selected.candidate.provider_id, "grok");
+        assert_eq!(selected.candidate.model_id, "MiniMax-M3");
+    }
+
+    #[test]
+    fn requested_forwarder_model_without_matching_target_fails_explicitly() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.5"]
+capabilities = ["text"]
+[forwarders.fwd_gpt]
+model = "gpt-5.5"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd_gpt", priority = 1 }]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("MiniMax-M3".into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        let error = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            V3TargetError::RequestedModelUnavailable {
+                model_id: "MiniMax-M3".into()
+            }
+        );
+    }
+
+    #[test]
+    fn requested_model_filter_ignores_provider_aliases_for_runtime_matching() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.5"]
+aliases = ["MiniMax-M3"]
+capabilities = ["text"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("MiniMax-M3".into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        let error = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            V3TargetError::RequestedModelUnavailable {
+                model_id: "MiniMax-M3".into()
+            }
+        );
+    }
+
+    #[test]
+    fn requested_explicit_model_route_maps_to_declared_targets_without_alias_requirement() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.5"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.5"]
+capabilities = ["text"]
+[providers.minimax]
+type = "responses"
+base_url = "http://minimax.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key", env = "MINIMAX_KEY" }] }
+[providers.minimax.models."MiniMax-M3"]
+capabilities = ["text"]
+[forwarders.fwd_gpt]
+model = "gpt-5.5"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5", key = "key", priority = 1 }]
+[forwarders.fwd_minimax]
+model = "MiniMax-M3"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd_gpt", priority = 1 }]
+[route_groups.g.pools.minimax]
+selection = { strategy = "priority" }
+match = { precedence = 10, models = ["MiniMax-M3"] }
+targets = [
+  { kind = "forwarder", id = "fwd_gpt", priority = 1 },
+  { kind = "forwarder", id = "fwd_minimax", priority = 2 }
+]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("MiniMax-M3".into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        assert_eq!(hit.pool_id, "minimax");
+        assert_eq!(hit.request_client_model.as_deref(), Some("MiniMax-M3"));
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        assert_eq!(
+            expanded
+                .candidates
+                .iter()
+                .map(|candidate| candidate.provider_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["default_gpt", "minimax"]
+        );
+        let selected = target
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::new(),
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(selected.candidate.provider_id, "default_gpt");
+        assert_eq!(selected.candidate.model_id, "gpt-5.5");
+    }
+
+    #[test]
     fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
         let expanded = expanded();
         assert_eq!(expanded.route.hit_count, 1);
@@ -387,6 +656,7 @@ pub struct V3TargetCandidate {
     pub auth_alias: String,
     pub model_id: String,
     pub wire_model: String,
+    pub visible_model_ids: Vec<String>,
     pub model_capabilities: Vec<String>,
     pub base_url: String,
     pub responses_transport: V3ResponsesTransportKind,
@@ -446,6 +716,8 @@ pub enum V3TargetError {
         provider_id: String,
         auth_alias: String,
     },
+    #[error("requested model {model_id} has no candidate in the selected target plan")]
+    RequestedModelUnavailable { model_id: String },
     #[error("selected target has no concrete candidates")]
     CandidateSetEmpty,
 }
@@ -461,6 +733,8 @@ struct V3TargetExpansionScope {
     pool_ids: Vec<String>,
     default_pool_member: bool,
     required_capabilities: Vec<String>,
+    requested_model_filter: Option<String>,
+    visible_model_ids: Vec<String>,
 }
 
 impl V3TargetInterpreter {
@@ -481,6 +755,8 @@ impl V3TargetInterpreter {
                 pool_ids: vec!["continuation_exact_pin".to_string()],
                 default_pool_member: false,
                 required_capabilities: Vec::new(),
+                requested_model_filter: None,
+                visible_model_ids: Vec::new(),
             },
         )?
         .into_iter()
@@ -507,6 +783,8 @@ impl V3TargetInterpreter {
         let mut last_error = None;
         let route_required_capabilities =
             selected_route_required_capabilities(group, &classified.route);
+        let requested_model_filter =
+            selected_route_requested_model_filter(group, &classified.route);
         for (plan_index, entry) in classified.route.target_plan.iter().enumerate() {
             let pool = group
                 .pools
@@ -536,6 +814,8 @@ impl V3TargetInterpreter {
                     pool_ids: vec![entry.pool_id.clone()],
                     default_pool_member: entry.pool_id == "default",
                     required_capabilities,
+                    requested_model_filter: requested_model_filter.clone(),
+                    visible_model_ids: Vec::new(),
                 },
             ) {
                 Ok(expanded) => {
@@ -664,6 +944,18 @@ impl V3TargetInterpreter {
             .get(forwarder_id)
             .filter(|forwarder| forwarder.enabled)
             .ok_or_else(|| V3TargetError::ForwarderMissing(forwarder_id.to_string()))?;
+        if scope.visible_model_ids.is_empty() {
+            scope.visible_model_ids =
+                normalized_model_visible_ids(&forwarder.model, &forwarder.aliases, None);
+        }
+        if !requested_model_matches_visible_ids(
+            scope.requested_model_filter.as_deref(),
+            &scope.visible_model_ids,
+        ) {
+            return Err(requested_model_unavailable_error(
+                scope.requested_model_filter.as_deref(),
+            ));
+        }
         let order = self.policy_order(
             &forwarder.selection.strategy,
             &forwarder.targets,
@@ -728,6 +1020,19 @@ impl V3TargetInterpreter {
                 provider_id: provider_id.to_string(),
                 model_id: model_id.to_string(),
             })?;
+        let visible_model_ids = if scope.visible_model_ids.is_empty() {
+            normalized_model_visible_ids(&model.id, &model.aliases, Some(&model.wire_name))
+        } else {
+            scope.visible_model_ids.clone()
+        };
+        if !requested_model_matches_visible_ids(
+            scope.requested_model_filter.as_deref(),
+            &visible_model_ids,
+        ) {
+            return Err(requested_model_unavailable_error(
+                scope.requested_model_filter.as_deref(),
+            ));
+        }
         scope.path.push(format!("provider:{provider_id}"));
         let entries = if let Some(key) = key {
             vec![provider
@@ -750,6 +1055,7 @@ impl V3TargetInterpreter {
                 auth_alias: entry.alias.clone(),
                 model_id: model.id.clone(),
                 wire_model: model.wire_name.clone(),
+                visible_model_ids: visible_model_ids.clone(),
                 model_capabilities: model.capabilities.clone(),
                 base_url: provider.base_url.clone(),
                 responses_transport: provider
@@ -838,6 +1144,74 @@ fn selected_route_required_capabilities(
     capabilities.into_iter().collect()
 }
 
+fn selected_route_requested_model_filter(
+    group: &V3RouteGroupManifest,
+    route: &V3Router07OpaqueTargetHitOnce,
+) -> Option<String> {
+    let requested = route
+        .request_client_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if requested == "gpt-5.5" {
+        return None;
+    }
+    let route_model_is_explicitly_mapped = route.pool_id != "default"
+        && group
+            .pools
+            .get(&route.pool_id)
+            .and_then(|pool| pool.match_rule.as_ref())
+            .is_some_and(|rule| rule.models.iter().any(|model| model.trim() == requested));
+    if route_model_is_explicitly_mapped {
+        None
+    } else {
+        Some(requested.to_string())
+    }
+}
+
+fn normalized_model_visible_ids(
+    model_id: &str,
+    _aliases: &[String],
+    _wire_name: Option<&str>,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    push_unique_visible_model_id(&mut ids, model_id);
+    ids
+}
+
+fn push_unique_visible_model_id(ids: &mut Vec<String>, value: &str) {
+    let value = value.trim();
+    if value.is_empty() || ids.iter().any(|existing| existing == value) {
+        return;
+    }
+    ids.push(value.to_string());
+}
+
+fn requested_model_matches_visible_ids(
+    requested_model: Option<&str>,
+    visible_model_ids: &[String],
+) -> bool {
+    let Some(requested_model) = requested_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return true;
+    };
+    visible_model_ids
+        .iter()
+        .any(|visible_id| visible_id.trim() == requested_model)
+}
+
+fn requested_model_unavailable_error(requested_model: Option<&str>) -> V3TargetError {
+    V3TargetError::RequestedModelUnavailable {
+        model_id: requested_model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("<unknown>")
+            .to_string(),
+    }
+}
+
 fn merge_candidate_route_provenance(
     existing: &mut V3TargetCandidate,
     duplicate: &V3TargetCandidate,
@@ -854,6 +1228,15 @@ fn merge_candidate_route_provenance(
             .any(|existing| existing == capability)
         {
             existing.required_capabilities.push(capability.clone());
+        }
+    }
+    for visible_id in &duplicate.visible_model_ids {
+        if !existing
+            .visible_model_ids
+            .iter()
+            .any(|existing| existing == visible_id)
+        {
+            existing.visible_model_ids.push(visible_id.clone());
         }
     }
     existing.default_pool_member |= duplicate.default_pool_member;

@@ -266,11 +266,23 @@ supports_thinking = true
 thinking = "ultra"
 max_tokens = 64000
 max_context_tokens = 200000
+[providers.test.models.offroute]
+wire_name = "offroute-wire"
+aliases = ["offroute-test"]
+capabilities = ["text", "tools", "web_search"]
+supports_streaming = true
+supports_thinking = false
+max_tokens = 2048
+max_context_tokens = 64000
 [debug]
 log_console = false
 snapshots = true
 dry_run = true
 retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
@@ -323,6 +335,10 @@ log_console = false
 snapshots = true
 dry_run = true
 retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
@@ -373,6 +389,10 @@ log_console = false
 snapshots = true
 dry_run = true
 retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
@@ -422,6 +442,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{second_env}" }}
 wire_name = "wire-second"
 [forwarders.responses]
 model = "test"
+aliases = ["client-test"]
 selection = {{ strategy = "priority" }}
 targets = [
   {{ kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 }},
@@ -432,6 +453,10 @@ log_console = false
 snapshots = true
 dry_run = true
 retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
@@ -524,7 +549,7 @@ async fn controlled_responses_upstream(
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
             .body(Body::from(
-                "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\ndata: [DONE]\n\n",
+                "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\nevent: response.completed\ndata: {\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
             ))
             .unwrap()
     } else {
@@ -994,7 +1019,7 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
         );
         let body: serde_json::Value = invalid_gemini.json().await.unwrap();
-        assert_eq!(body["error"]["code"], "runtime_error");
+        assert_eq!(body["error"]["code"], "gemini_relay_runtime_error");
         assert_eq!(
             body["error"]["message"],
             "Gemini request contents must be an array"
@@ -1139,28 +1164,22 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
     assert_eq!(model["experimental_supported_tools"], json!([]));
     assert_eq!(model["context_window"], 128000);
     assert_eq!(model["max_context_window"], 128000);
-    let gpt55 = response["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|model| model["id"] == "gpt-5.5")
-        .expect("gpt-5.5 must expose the full Codex model metadata");
-    assert_eq!(gpt55["supports_reasoning_summaries"], true);
-    assert_eq!(gpt55["support_verbosity"], true);
-    assert_eq!(gpt55["supports_parallel_tool_calls"], true);
-    assert_eq!(gpt55["context_window"], 272000);
-    assert_eq!(gpt55["max_context_window"], 272000);
-    assert_eq!(gpt55["supports_search_tool"], true);
-    assert_eq!(gpt55["experimental_supported_tools"], json!([]));
     assert!(
-        gpt55.get("use_responses_lite").is_none(),
-        "gpt-5.5 must not enable Responses Lite; Codex uses this as a request/tool-surface selector"
+        response["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|model| model["id"] != "gpt-5.5"),
+        "gpt-5.5 must not be invented for a route group that does not expose a gpt-5.5 target"
     );
     assert!(
-        gpt55.get("tool_mode").is_none(),
-        "gpt-5.5 must not force code_mode_only; Codex hides first-class tools behind exec/wait when this is set"
+        response["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|model| model["id"] != "offroute-test"),
+        "models endpoint must stay scoped to the current listener route group like V2, not every enabled manifest provider model"
     );
-    assert_eq!(gpt55["input_modalities"], json!(["text", "image"]));
     for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
         assert!(
             response["data"]
@@ -1185,10 +1204,42 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
 async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    let mut gpt55_model = manifest.providers["test"].models["test"].clone();
+    gpt55_model.id = "gpt-5.5".to_string();
+    gpt55_model.wire_name = "gpt-5.5".to_string();
+    gpt55_model.aliases = Vec::new();
+    gpt55_model.capabilities = vec![
+        "text".to_string(),
+        "reasoning".to_string(),
+        "tools".to_string(),
+        "web_search".to_string(),
+        "multimodal".to_string(),
+    ];
+    manifest
+        .providers
+        .get_mut("test")
+        .unwrap()
+        .models
+        .insert("gpt-5.5".to_string(), gpt55_model);
+    manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets
+        .push(routecodex_v3_config::V3RoutePoolTargetManifest {
+            kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("test".to_string()),
+            model: Some("gpt-5.5".to_string()),
+            key: Some("key".to_string()),
+            priority: Some(2),
+            weight: None,
+        });
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let response: Value = client
         .get(format!("http://{}/v1/models", handle.listeners[0].addr))
@@ -1199,10 +1250,26 @@ async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
         .await
         .unwrap();
     let data = response["data"].as_array().unwrap();
+    let gpt55 = data
+        .iter()
+        .find(|model| model["id"] == "gpt-5.5")
+        .expect("gpt-5.5 must be listed when the current route group exposes a gpt-5.5 target");
+    assert_eq!(gpt55["supports_reasoning_summaries"], true);
+    assert_eq!(gpt55["support_verbosity"], true);
+    assert_eq!(gpt55["supports_parallel_tool_calls"], true);
+    assert_eq!(gpt55["context_window"], 272000);
+    assert_eq!(gpt55["max_context_window"], 272000);
+    assert_eq!(gpt55["supports_search_tool"], true);
+    assert_eq!(gpt55["experimental_supported_tools"], json!([]));
     assert!(
-        data.iter().any(|model| model["id"] == "gpt-5.5"),
-        "gpt-5.5 must be listed as the built-in Codex catalog entry"
+        gpt55.get("use_responses_lite").is_none(),
+        "gpt-5.5 must not enable Responses Lite; Codex uses this as a request/tool-surface selector"
     );
+    assert!(
+        gpt55.get("tool_mode").is_none(),
+        "gpt-5.5 must not force code_mode_only; Codex hides first-class tools behind exec/wait when this is set"
+    );
+    assert_eq!(gpt55["input_modalities"], json!(["text", "image"]));
     for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
         assert!(
             data.iter().all(|model| model["id"] != id),
@@ -1642,14 +1709,7 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 
     let first_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
-    assert_eq!(
-        first_capture.body["input"],
-        json!([{
-            "type":"message",
-            "role":"user",
-            "content":[{"type":"input_text","text":"relay json"}]
-        }])
-    );
+    assert_eq!(first_capture.body["input"], "relay json");
 
     let sse_response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -1737,14 +1797,7 @@ async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runt
 
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");
-    assert_eq!(
-        capture.body["input"],
-        json!([{
-            "type":"message",
-            "role":"user",
-            "content":[{"type":"input_text","text":"relay websocket"}]
-        }])
-    );
+    assert_eq!(capture.body["input"], "relay websocket");
 
     let _ = socket.close(None).await;
     handle.shutdown().await;
@@ -1837,7 +1890,10 @@ async fn p6_responses_endpoint_accepts_image_payload_above_one_mib() {
             .await
             .unwrap();
     let client = reqwest::Client::new();
-    let image_url = format!("data:image/png;base64,{}", "A".repeat(1_200_000));
+    let image_url = format!(
+        "data:image/png;base64,iVBORw0KGgoA{}",
+        "A".repeat(1_200_000)
+    );
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({
@@ -1904,7 +1960,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
     let body = response.text().await.unwrap();
     assert_eq!(
         body,
-        "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\ndata: [DONE]\n\n"
+        "event: response.created\ndata: {\"id\":\"resp_sse\"}\n\nevent: response.completed\ndata: {\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
     );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.accept.as_deref(), Some("text/event-stream"));
@@ -2201,7 +2257,7 @@ async fn responses_inbound_websocket_projects_json_completed_event_and_enters_ru
         .send(Message::Text(
             json!({
                 "type": "response.create",
-                "model": "client-test",
+                "model": "test",
                 "input": "use tool",
                 "tools": [{"type":"function","name":"lookup"}]
             })
@@ -2618,7 +2674,7 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         .send(Message::Text(
             json!({
                 "type": "response.create",
-                "model": "client-test",
+                "model": "test",
                 "input": "hello"
             })
             .to_string(),
@@ -2947,7 +3003,7 @@ async fn responses_direct_last_default_waits_twice_then_projects_on_third_failur
     let started = Instant::now();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"client-test","input":"last default should fail on third attempt"}))
+        .json(&json!({"model":"test","input":"last default should fail on third attempt"}))
         .send()
         .await
         .unwrap();
@@ -3210,11 +3266,7 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
     assert_eq!(
         body["providerRequest"]["body"]["input"],
-        json!([{
-            "type":"message",
-            "role":"user",
-            "content":[{"type":"input_text","text":"relay dry-run no upstream send"}]
-        }])
+        "relay dry-run no upstream send"
     );
     assert!(
         !provider_hit,

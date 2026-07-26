@@ -2569,41 +2569,46 @@ export class RouteCodexHttpServer {
       directResponseMetadata.clientModelId = clientModelForDirect;
       directResponseMetadata.originalModelId = clientModelForDirect;
     }
+    const directUsageLogInfo = normalized.usageLogInfo ?? { requestStartedAtMs: Date.now() };
+    Object.assign(directUsageLogInfo, {
+      providerKey: auditContext.providerKey,
+      model: providerModel,
+      requestModel,
+      providerProtocol: providerHandle.providerProtocol,
+      routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
+      externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
+      externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
+      requestStartedAtMs: directUsageLogInfo.requestStartedAtMs ?? Date.now(),
+      logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
+      clientTmuxSessionId: inputMetadata.clientTmuxSessionId,
+      client_tmux_session_id: inputMetadata.client_tmux_session_id,
+      tmuxSessionId: inputMetadata.tmuxSessionId,
+      tmux_session_id: inputMetadata.tmux_session_id,
+      rccSessionClientTmuxSessionId: inputMetadata.rccSessionClientTmuxSessionId,
+      rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
+      sessionId: readSessionIdForUsageLog(inputMetadata),
+      session_id: inputMetadata.session_id,
+      conversationId: readConversationIdForUsageLog(inputMetadata),
+      conversation_id: inputMetadata.conversation_id,
+      projectPath:
+        inputMetadata.clientWorkdir
+        ?? inputMetadata.client_workdir
+        ?? inputMetadata.workdir
+        ?? inputMetadata.cwd,
+      providerRequestId: input.requestId,
+      inputRequestId: input.requestId,
+    });
+    if (finishReason) {
+      directUsageLogInfo.finishReason = finishReason;
+    }
+    if (usage) {
+      directUsageLogInfo.usage = usage as Record<string, unknown>;
+    }
     const baseResult: PipelineExecutionResult = {
       ...normalized,
       continuationOwner: 'direct',
       metadata: directResponseMetadata,
-      usageLogInfo: {
-        ...normalized.usageLogInfo ?? {},
-        providerKey: auditContext.providerKey,
-        model: providerModel,
-        requestModel,
-        providerProtocol: providerHandle.providerProtocol,
-        routeName: `router-direct:${auditContext.routingDecision?.routeName ?? 'unknown'}`,
-        finishReason,
-        usage: usage ? (usage as Record<string, unknown>) : undefined,
-        externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
-        externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
-        requestStartedAtMs: Date.now(),
-        logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
-        clientTmuxSessionId: inputMetadata.clientTmuxSessionId,
-        client_tmux_session_id: inputMetadata.client_tmux_session_id,
-        tmuxSessionId: inputMetadata.tmuxSessionId,
-        tmux_session_id: inputMetadata.tmux_session_id,
-        rccSessionClientTmuxSessionId: inputMetadata.rccSessionClientTmuxSessionId,
-        rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
-        sessionId: readSessionIdForUsageLog(inputMetadata),
-        session_id: inputMetadata.session_id,
-        conversationId: readConversationIdForUsageLog(inputMetadata),
-        conversation_id: inputMetadata.conversation_id,
-        projectPath:
-          inputMetadata.clientWorkdir
-          ?? inputMetadata.client_workdir
-          ?? inputMetadata.workdir
-          ?? inputMetadata.cwd,
-        providerRequestId: input.requestId,
-        inputRequestId: input.requestId,
-      },
+      usageLogInfo: directUsageLogInfo,
     };
 
     return baseResult;
@@ -2691,6 +2696,39 @@ export class RouteCodexHttpServer {
         });
       }
     }
+    const providerDirectUsageLogInfo = normalized.usageLogInfo ?? { requestStartedAtMs: Date.now() };
+    Object.assign(providerDirectUsageLogInfo, {
+      providerKey: providerBinding,
+      model: providerModel,
+      routeName: 'port.provider-direct',
+      externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
+      externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
+      requestStartedAtMs: providerDirectUsageLogInfo.requestStartedAtMs ?? Date.now(),
+      logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
+      clientTmuxSessionId: inputMetadata.clientTmuxSessionId,
+      client_tmux_session_id: inputMetadata.client_tmux_session_id,
+      tmuxSessionId: inputMetadata.tmuxSessionId,
+      tmux_session_id: inputMetadata.tmux_session_id,
+      rccSessionClientTmuxSessionId: inputMetadata.rccSessionClientTmuxSessionId,
+      rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
+      sessionId: readSessionIdForUsageLog(inputMetadata),
+      session_id: inputMetadata.session_id,
+      conversationId: readConversationIdForUsageLog(inputMetadata),
+      conversation_id: inputMetadata.conversation_id,
+      projectPath:
+        inputMetadata.clientWorkdir
+        ?? inputMetadata.client_workdir
+        ?? inputMetadata.workdir
+        ?? inputMetadata.cwd,
+      providerRequestId: input.requestId,
+      inputRequestId: input.requestId,
+    });
+    if (finishReason) {
+      providerDirectUsageLogInfo.finishReason = finishReason;
+    }
+    if (usage) {
+      providerDirectUsageLogInfo.usage = usage as Record<string, unknown>;
+    }
     return {
       ...normalized,
       continuationOwner: 'direct',
@@ -2698,35 +2736,7 @@ export class RouteCodexHttpServer {
         input.metadata && typeof input.metadata === 'object'
           ? { ...(input.metadata as Record<string, unknown>) }
           : { ...(normalized.metadata ?? {}) },
-      usageLogInfo: {
-        ...(normalized.usageLogInfo ?? {}),
-        providerKey: providerBinding,
-        model: providerModel,
-        routeName: 'port.provider-direct',
-        finishReason,
-        usage: usage ? (usage as Record<string, unknown>) : undefined,
-        externalLatencyStartedAtMs: directResult.externalLatencyStartedAtMs,
-        externalLatencyMs: directResult.externalLatencyMs > 0 ? directResult.externalLatencyMs : undefined,
-        requestStartedAtMs: Date.now(),
-        logSessionColorKey: resolveSessionLogColorKey(inputMetadata),
-        clientTmuxSessionId: inputMetadata.clientTmuxSessionId,
-        client_tmux_session_id: inputMetadata.client_tmux_session_id,
-        tmuxSessionId: inputMetadata.tmuxSessionId,
-        tmux_session_id: inputMetadata.tmux_session_id,
-        rccSessionClientTmuxSessionId: inputMetadata.rccSessionClientTmuxSessionId,
-        rcc_session_client_tmux_session_id: inputMetadata.rcc_session_client_tmux_session_id,
-        sessionId: readSessionIdForUsageLog(inputMetadata),
-        session_id: inputMetadata.session_id,
-        conversationId: readConversationIdForUsageLog(inputMetadata),
-        conversation_id: inputMetadata.conversation_id,
-        projectPath:
-          inputMetadata.clientWorkdir
-          ?? inputMetadata.client_workdir
-          ?? inputMetadata.workdir
-          ?? inputMetadata.cwd,
-        providerRequestId: input.requestId,
-        inputRequestId: input.requestId,
-      },
+      usageLogInfo: providerDirectUsageLogInfo,
     };
   }
 

@@ -3,13 +3,16 @@ use axum::extract::{
     ws::{Message, WebSocket, WebSocketUpgrade},
     ConnectInfo, Request, State,
 };
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Response, StatusCode};
+use axum::http::{
+    header::{CONTENT_LENGTH, CONTENT_TYPE},
+    HeaderMap, HeaderValue, Response, StatusCode,
+};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{
-    resolve_routecodex_package_version_from_executable, V3Config05ManifestPublished,
-    V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
+    collect_v3_route_group_catalog_model_refs, resolve_routecodex_package_version_from_executable,
+    V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
     V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
@@ -52,7 +55,7 @@ use routecodex_v3_sse::{
     SseTransportLimits,
 };
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -572,7 +575,10 @@ async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::V
 }
 
 async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
-    json_response(200, build_v3_models_catalog(&state.manifest))
+    json_response(
+        200,
+        build_v3_models_catalog(&state.manifest, &state.server.routing_group),
+    )
 }
 
 async fn virtual_router_status(
@@ -3241,6 +3247,10 @@ fn enrich_v3_direct_observability_from_frame(
     }
     if let Some(finish_reason) = read_v3_console_finish_reason(body) {
         observability.finish_reason = Some(finish_reason);
+    } else if observability.finish_reason.is_none() {
+        observability.finish_reason = infer_v3_console_finish_reason_from_response_status(
+            observability.response_status.as_deref(),
+        );
     }
     if let Some(usage) = extract_v3_console_usage_summary(body) {
         observability.usage = Some(usage);
@@ -4120,7 +4130,10 @@ fn build_v3_foundation_console_observability(
         .body
         .pointer("/dry_run/response_payload")
         .and_then(read_v3_console_finish_reason)
-        .or_else(|| read_v3_console_finish_reason(&output.body));
+        .or_else(|| read_v3_console_finish_reason(&output.body))
+        .or_else(|| {
+            infer_v3_console_finish_reason_from_response_status(response_status.as_deref())
+        });
     let usage = output
         .body
         .pointer("/dry_run/response_payload")
@@ -4190,6 +4203,19 @@ fn read_v3_console_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_console_string_path(value, &["response", "stopReason"]))
         .or_else(|| read_v3_console_string_path(value, &["choices", "0", "finish_reason"]))
         .or_else(|| read_v3_console_string_path(value, &["candidates", "0", "finishReason"]))
+}
+
+fn infer_v3_console_finish_reason_from_response_status(
+    response_status: Option<&str>,
+) -> Option<String> {
+    match response_status.map(str::trim) {
+        Some(status) if status.eq_ignore_ascii_case("completed") => Some("stop".to_string()),
+        Some(status) if status.eq_ignore_ascii_case("done") => Some("stop".to_string()),
+        Some(status) if status.eq_ignore_ascii_case("requires_action") => {
+            Some("tool_calls".to_string())
+        }
+        _ => None,
+    }
 }
 
 fn read_v3_console_string_path(value: &Value, path: &[&str]) -> Option<String> {
@@ -5996,16 +6022,30 @@ pub fn build_v3_server_16_http_frame_from_v3_resp_15(
 }
 
 // feature_id: v3.models_capability_catalog
-fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json::Value {
+fn build_v3_models_catalog(
+    manifest: &V3Config05ManifestPublished,
+    routing_group: &str,
+) -> serde_json::Value {
     let mut data = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    let model_capabilities = build_v3_model_capability_index(manifest);
+    let scoped_models = collect_v3_route_group_catalog_model_refs(manifest, routing_group);
+    if scoped_models
+        .values()
+        .any(|model_ref| model_ref.visible_id == "gpt-5.5" || model_ref.model_id == "gpt-5.5")
     {
         let builtin_model_id = "gpt-5.5";
-        let capabilities = model_capabilities
-            .get(builtin_model_id)
-            .cloned()
-            .unwrap_or_else(|| default_builtin_v3_model_capabilities(builtin_model_id));
+        let capabilities = scoped_models
+            .values()
+            .filter(|model_ref| {
+                model_ref.visible_id == builtin_model_id || model_ref.model_id == builtin_model_id
+            })
+            .flat_map(|model_ref| model_ref.capabilities.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        let capabilities = if capabilities.is_empty() {
+            default_builtin_v3_model_capabilities(builtin_model_id)
+        } else {
+            capabilities
+        };
         let mut item = build_v3_codex_model_metadata(
             builtin_model_id,
             builtin_model_id,
@@ -6016,62 +6056,57 @@ fn build_v3_models_catalog(manifest: &V3Config05ManifestPublished) -> serde_json
         seen.insert(builtin_model_id.to_string());
         data.push(Value::Object(item));
     }
-    for provider in manifest
-        .providers
-        .values()
-        .filter(|provider| provider.enabled)
-    {
-        for model in provider.models.values() {
-            if is_v3_hidden_codex_future_model(&model.id) {
-                continue;
-            }
-            let visible_ids = if model.aliases.is_empty() {
-                vec![model.id.clone()]
-            } else {
-                model.aliases.clone()
-            };
-            for visible_id in visible_ids {
-                if is_v3_hidden_codex_future_model(&visible_id) {
-                    continue;
-                }
-                if seen.contains(&visible_id) {
-                    continue;
-                }
-                let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
-                let mut item = build_v3_codex_model_metadata(
-                    &visible_id,
-                    &model.id,
-                    model.max_context_tokens,
-                    Some(&capabilities),
-                );
-                item.insert(
-                    "owned_by".to_string(),
-                    json!(format!("provider:{}", provider.id)),
-                );
-                item.insert("provider_id".to_string(), json!(provider.id));
-                item.insert("canonical_model_id".to_string(), json!(model.id));
-                item.insert("wire_model".to_string(), json!(model.wire_name));
-                item.insert("aliases".to_string(), json!(model.aliases));
-                item.insert("capabilities".to_string(), json!(model.capabilities));
-                item.insert(
-                    "supports_streaming".to_string(),
-                    json!(model.supports_streaming),
-                );
-                item.insert(
-                    "supports_thinking".to_string(),
-                    json!(model.supports_thinking),
-                );
-                item.insert("thinking".to_string(), json!(model.thinking));
-                item.insert("max_tokens".to_string(), json!(model.max_tokens));
-                item.insert(
-                    "max_context_tokens".to_string(),
-                    json!(model.max_context_tokens),
-                );
-                item.insert("features".to_string(), json!(model.features));
-                seen.insert(visible_id);
-                data.push(Value::Object(item));
-            }
+    for model_ref in scoped_models.values() {
+        if is_v3_hidden_codex_future_model(&model_ref.visible_id)
+            || is_v3_hidden_codex_future_model(&model_ref.model_id)
+            || seen.contains(&model_ref.visible_id)
+        {
+            continue;
         }
+        let Some(provider) = manifest.providers.get(&model_ref.provider_id) else {
+            continue;
+        };
+        if !provider.enabled {
+            continue;
+        }
+        let Some(model) = provider.models.get(&model_ref.model_id) else {
+            continue;
+        };
+        let mut item = build_v3_codex_model_metadata(
+            &model_ref.visible_id,
+            &model.id,
+            model.max_context_tokens,
+            Some(&model_ref.capabilities),
+        );
+        item.insert(
+            "owned_by".to_string(),
+            json!(format!("provider:{}", provider.id)),
+        );
+        item.insert("provider_id".to_string(), json!(provider.id));
+        item.insert("canonical_model_id".to_string(), json!(model.id));
+        item.insert("wire_model".to_string(), json!(model.wire_name));
+        item.insert("aliases".to_string(), json!(model.aliases));
+        item.insert(
+            "capabilities".to_string(),
+            json!(model_ref.capabilities.iter().cloned().collect::<Vec<_>>()),
+        );
+        item.insert(
+            "supports_streaming".to_string(),
+            json!(model.supports_streaming),
+        );
+        item.insert(
+            "supports_thinking".to_string(),
+            json!(model.supports_thinking),
+        );
+        item.insert("thinking".to_string(), json!(model.thinking));
+        item.insert("max_tokens".to_string(), json!(model.max_tokens));
+        item.insert(
+            "max_context_tokens".to_string(),
+            json!(model.max_context_tokens),
+        );
+        item.insert("features".to_string(), json!(model.features));
+        seen.insert(model_ref.visible_id.clone());
+        data.push(Value::Object(item));
     }
     let models = data.clone();
     json!({
@@ -6091,28 +6126,6 @@ struct V3ModelCapabilityProjection {
     supports_image_detail_original: bool,
     supports_search_tool: bool,
     web_search_tool_type: &'static str,
-}
-
-fn build_v3_model_capability_index(
-    manifest: &V3Config05ManifestPublished,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mut index = BTreeMap::new();
-    for provider in manifest
-        .providers
-        .values()
-        .filter(|provider| provider.enabled)
-    {
-        for model in provider.models.values() {
-            let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
-            for visible_id in std::iter::once(&model.id).chain(model.aliases.iter()) {
-                index
-                    .entry(visible_id.clone())
-                    .or_insert_with(BTreeSet::new)
-                    .extend(capabilities.iter().cloned());
-            }
-        }
-    }
-    index
 }
 
 fn default_builtin_v3_model_capabilities(model_id: &str) -> BTreeSet<String> {
@@ -6384,6 +6397,11 @@ const V3_MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 async fn read_json_payload(
     request: Request,
 ) -> Result<serde_json::Value, routecodex_v3_error::V3Error06ClientProjected> {
+    let content_length = request
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok());
     let content_type = request
         .headers()
         .get(CONTENT_TYPE)
@@ -6413,9 +6431,15 @@ async fn read_json_payload(
             )
         })?;
     serde_json::from_slice(&bytes).map_err(|error| {
+        let content_length = content_length
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
         project_http_input_error(
             V3HttpBoundaryErrorKind::MalformedJson,
-            format!("malformed JSON request body: {error}"),
+            format!(
+                "malformed JSON request body: {error}; body_bytes={} content_length={content_length}",
+                bytes.len()
+            ),
         )
     })
 }
@@ -6534,6 +6558,7 @@ fn json_response(status: u16, body: serde_json::Value) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::sync::Mutex as StdMutex;
 
     static TEST_TZ_LOCK: StdMutex<()> = StdMutex::new(());
@@ -6972,6 +6997,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn malformed_json_error_includes_body_length_without_raw_payload() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/responses")
+            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_LENGTH, "27")
+            .body(Body::from(r#"{"model":"gpt-5.5","input":"#))
+            .unwrap();
+
+        let projected = read_json_payload(request)
+            .await
+            .expect_err("truncated JSON must fail at the HTTP boundary");
+
+        assert_eq!(projected.status, 400);
+        assert_eq!(projected.body["error"]["code"], "malformed_json");
+        let message = projected.body["error"]["message"].as_str().unwrap();
+        assert!(message.contains("malformed JSON request body"));
+        assert!(message.contains("EOF"));
+        assert!(message.contains("body_bytes=27"));
+        assert!(message.contains("content_length=27"));
+        assert!(
+            !message.contains("gpt-5.5") && !message.contains("input"),
+            "malformed JSON diagnostics must not echo raw client payload: {message}"
+        );
+    }
+
     #[test]
     fn error_console_prefix_can_preserve_request_project_path() {
         let line = format_v3_error_console_line_with_port(
@@ -7123,6 +7175,58 @@ mod tests {
                 && log.contains("req=req-direct-console-json"),
             "direct JSON console must emit start/route/terminal lines from pipeline observability provider.model, not request model or pre-route pending scope: {log}"
         );
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[test]
+    fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
+        let log_file = test_v3_console_log_file("direct-console-json-infer-finish");
+        let _ = std::fs::remove_file(&log_file);
+        let state = test_v3_listener_state(&log_file, 4444);
+        let headers = test_direct_console_headers();
+        let context = build_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            "req-direct-console-json-infer-finish",
+            &headers,
+            &json!({"model":"gpt-5.5"}),
+        );
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "application/json".to_string(),
+            body: V3Server16Body::Json(json!({
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 41,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 38,
+                    "total_tokens": 79
+                }
+            })),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            node_trace: vec!["V3Resp15ClientPayload"],
+            observability: Some(V3RuntimeObservability {
+                response_status: None,
+                finish_reason: None,
+                usage: None,
+                ..test_direct_observability(Vec::new())
+            }),
+            stream_observation: None,
+        };
+
+        assert!(emit_v3_direct_frame_console_lines(&context, &frame, Instant::now()).is_none());
+
+        let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
+        assert!(log.contains("event=completed"), "{log}");
+        assert!(log.contains("responseStatus=completed"), "{log}");
+        assert!(log.contains("finish_reason=stop"), "{log}");
+        assert!(log.contains("usage_in=41 usage_out=38"), "{log}");
+        assert!(log.contains("usage_total=79"), "{log}");
+        assert!(!log.contains("finish_reason=unreported"), "{log}");
         let _ = std::fs::remove_file(&log_file);
     }
 

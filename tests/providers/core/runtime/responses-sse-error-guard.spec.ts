@@ -75,13 +75,6 @@ describe('responses SSE error guard', () => {
       ].join('\n')
     ],
     [
-      'data-only done sentinel',
-      [
-        'data: [DONE]',
-        '',
-      ].join('\n')
-    ],
-    [
       'data-only completed type',
       [
         'data: {"type":"response.completed","response":{"status":"completed"}}',
@@ -95,6 +88,15 @@ describe('responses SSE error guard', () => {
   it('does not treat ordinary delta frames as terminal transport', () => {
     const block = [
       'data: {"type":"response.output_text.delta","delta":"hello"}',
+      '',
+    ].join('\n');
+
+    expect(isResponsesSseTerminalBlock(block)).toBe(false);
+  });
+
+  it('does not treat data-only DONE sentinel as Responses semantic terminal', () => {
+    const block = [
+      'data: [DONE]',
       '',
     ].join('\n');
 
