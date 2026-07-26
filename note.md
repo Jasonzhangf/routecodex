@@ -33585,3 +33585,14 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Map/gate 同步：file-size ratchet 下调 relay/kernel 快照；`v3.module_decomposition` function/verification map 切到 `phase4_runtime_stage_owner_active` 并登记新 owner files；direct remote continuation/debug error foundation caller edges 重绑到 `direct_exec/mod.rs`；locked `v3.debug_error_foundation.mainline` fingerprint 刷新为 `sha256:cf15bc1c3c75165554a03733afa46f17323f5d6ebe4ea15eb1688748ed915c58`，授权记录 `auth-20260727-v3-module-direct-exec-source-rebind`。`verify-v3-module-boundaries` 明确把 `hub_v1/relay_exec/` 纳入 runtime provider-health boundary，保持 Provider health store opaque 边界。
 - 验证：fmt、file-size、file-size red fixtures、resource-map、render/verify mainline caller flow、module-boundaries、rust-only、architecture-docs、compile-fail、focused `hub_relay_runtime_closeout` 22/22、focused `responses_direct_remote_continuation_integration` 16/16、`test:v3-workspace` 全部 PASS；scoped `git diff --check` PASS。
 - 架构 review：这是纯 cut/move/source-owner rebind；Direct/Relay 公开 ExecutionEnv 入口仍在原 runtime owner，provider transport/health/error/continuation 语义仍走原唯一 owner；无 fallback、无 provider 特例、无请求/响应 payload 变更。剩余：提交 Phase4 后执行 install:v3、rccv3 config check/restart、4444/5555/10000 health、dry-run、JSON/SSE live smoke、日志扫描、push。
+
+## 2026-07-27T04:50+0800 V3 module decomposition live closeout after Phase4
+- Install: `RUSTUP_TOOLCHAIN=stable npm run install:v3` installed rccv3 sha256 `ca64cd432060e3e4dbe886e4efeaa431d83ac67aa92d3a796c4d6c80dcc2ab30` into `~/.rcc/install/current` and `/Volumes/extension/.rcc/install/current`.
+- Restart: `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` instance `v3-04f1f1b9a58efb01f5ff`; binary used `/Users/fanzhang/.rcc/install/current/dist/bin/rccv3`.
+- Health: 10000/4444/5555 all `status=ok version=3`.
+- Dry-run: HTTP 200, `provider_network_send=false`, model `glm-5.2`.
+- JSON live smoke: request `647931-2448` HTTP 200, `status=completed`, `finish_reason=stop`, text `phase4-json-ok`, model `glm-5.2`.
+- SSE live smoke: request `647932-2449` HTTP 200, `text/event-stream`, `response.completed` + `response.done` + `[DONE]`, text `phase4-sse-ok`.
+- Post-restart log scan on `server-v3-5555.log` from restart line 25255: capability_mismatch/provider_response_sse_empty/debug sink failed/reasoning_summary unsupported/provider_response_sse_stream/error decoding response body/status=499/event=failed all 0.
+- Remaining risk: Phase4 is owner split + thin wrapper rebind, not full stage helper <=200-line extraction; `relay_exec/mod.rs` 745 and `direct_exec/mod.rs` 732 still oversized for optional Phase4.1.
+- Next: push branch `codex/v3-module-decomposition-20260726` HEAD `d34f7cfed`.
