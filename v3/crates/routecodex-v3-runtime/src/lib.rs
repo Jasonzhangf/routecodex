@@ -1,3 +1,5 @@
+pub use routecodex_v3_provider_responses::ResponsesTransport as V3ResponsesTransport;
+
 pub mod diagnostics;
 pub mod foundation;
 pub mod hooks;
@@ -19,19 +21,11 @@ pub use foundation::{
 pub use hooks::{register_responses_direct_hooks, V3HookPoint, V3HookRegistry, V3RegisteredHook};
 pub use hub_v1::*;
 pub use kernel::{
-    execute_v3_responses_direct_dry_run_runtime,
-    execute_v3_responses_direct_dry_run_runtime_with_initial_target,
-    execute_v3_responses_direct_runtime_kernel,
-    execute_v3_responses_direct_runtime_kernel_with_continuation,
-    execute_v3_responses_direct_runtime_kernel_with_default_transport,
-    execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug,
-    execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
-    execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
-    execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
-    execute_v3_responses_direct_runtime_kernel_with_transport_and_debug,
+    execute_v3_responses_direct_dry_run_runtime, execute_v3_responses_direct_runtime_kernel,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_protocol_execution_plan_failure, V3ResponsesDirectContinuationScope,
-    V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeOutput,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectDryRunExecutionEnv,
+    V3ResponsesDirectExecutionEnv, V3ResponsesDirectRuntimeOutput,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
     V3ResponsesProtocolExecutionPlanFailure,
 };

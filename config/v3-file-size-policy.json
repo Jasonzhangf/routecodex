@@ -7,9 +7,9 @@
     "/tests/"
   ],
   "ratchet_whitelist": {
-    "v3/crates/routecodex-v3-server/src/lib.rs": 8540,
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs": 7265,
-    "v3/crates/routecodex-v3-runtime/src/kernel.rs": 2969,
+    "v3/crates/routecodex-v3-server/src/lib.rs": 8527,
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs": 7159,
+    "v3/crates/routecodex-v3-runtime/src/kernel.rs": 2910,
     "v3/crates/routecodex-v3-lifecycle/src/lib.rs": 2795,
     "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs": 1712,
     "v3/crates/routecodex-v3-config/src/validate.rs": 1705,

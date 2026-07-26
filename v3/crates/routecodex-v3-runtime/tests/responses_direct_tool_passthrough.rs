@@ -5,9 +5,9 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw,
-    execute_v3_responses_direct_runtime_kernel_with_continuation, register_responses_direct_hooks,
-    V3ClientBody, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    build_v3_server_03_http_request_raw, execute_v3_responses_direct_runtime_kernel,
+    register_responses_direct_hooks, V3ClientBody, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectExecutionEnv,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -109,8 +109,7 @@ fn scope() -> V3ResponsesDirectContinuationScope {
 async fn assert_direct_response_request_does_not_inject_stopless(response: Value, label: &str) {
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(json!({
             "model": "gpt-5.5",
@@ -118,10 +117,12 @@ async fn assert_direct_response_request_does_not_inject_stopless(response: Value
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(
+                &V3ResponsesDirectContinuationState::default(),
+                scope(),
+                1_000,
+            ),
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
@@ -162,8 +163,7 @@ async fn assert_direct_response_passthrough_without_stopless(response: Value, la
     let expected_status = response.get("status").cloned();
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(json!({
             "model": "gpt-5.5",
@@ -171,10 +171,12 @@ async fn assert_direct_response_passthrough_without_stopless(response: Value, la
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(
+                &V3ResponsesDirectContinuationState::default(),
+                scope(),
+                1_000,
+            ),
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
@@ -236,14 +238,15 @@ async fn direct_kernel_preserves_tool_choice_parallel_tool_calls_and_tools_in_wi
         "metadata": {"client": "kept", "session": "abc"}
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(
+                &V3ResponsesDirectContinuationState::default(),
+                scope(),
+                1_000,
+            ),
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -301,14 +304,15 @@ async fn direct_kernel_preserves_service_tier_reasoning_effort_and_prompt_cache_
         "prompt_cache_key": "client-cache-1"
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(
+                &V3ResponsesDirectContinuationState::default(),
+                scope(),
+                1_000,
+            ),
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -355,14 +359,15 @@ async fn direct_kernel_response_propagates_provider_output_text_to_client_unchan
         "tools": [{"type": "function", "name": "search"}]
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(
+                &V3ResponsesDirectContinuationState::default(),
+                scope(),
+                1_000,
+            ),
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -411,14 +416,15 @@ async fn direct_kernel_passes_completed_response_without_summary_when_schema_gui
         "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
         "stream": false
     });
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(original_request.clone()),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(
+                &V3ResponsesDirectContinuationState::default(),
+                scope(),
+                1_000,
+            ),
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);

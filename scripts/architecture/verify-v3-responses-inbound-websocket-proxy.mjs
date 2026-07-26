@@ -40,8 +40,8 @@ for (const phrase of [
   'execute_responses_direct_server_frame(',
   'async fn execute_responses_relay_websocket_output(',
   'send_responses_relay_websocket_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(',
-  'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+  'execute_v3_responses_relay_runtime(',
+  'execute_v3_responses_direct_runtime_kernel(',
   'send_responses_websocket_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
@@ -161,11 +161,11 @@ if (runtimeSseDecodeGuards.length !== 2) {
   failures.push(files.server + ': expected Direct and Relay runtime SSE decode guards, got ' + runtimeSseDecodeGuards.length);
 }
 
-const directRuntimeCalls = text.server.match(/execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug\(/g) ?? [];
+const directRuntimeCalls = text.server.match(/execute_v3_responses_direct_runtime_kernel\(/g) ?? [];
 if (directRuntimeCalls.length !== 1) {
   failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
 }
-const relayRuntimeCalls = text.server.match(/execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control\(/g) ?? [];
+const relayRuntimeCalls = text.server.match(/execute_v3_responses_relay_runtime\(/g) ?? [];
 if (relayRuntimeCalls.length !== 2) {
   failures.push(files.server + ': expected HTTP plus WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
 }

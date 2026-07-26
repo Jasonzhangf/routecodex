@@ -5,7 +5,8 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayExecutionEnv,
+    V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -54,9 +55,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let output = execute_v3_responses_relay_runtime(
-        &manifest(),
-        V3ResponsesRelayRuntimeInput {
+    let output = execute_v3_responses_relay_runtime(&manifest(), V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
             request_id: "req-responses-anthropic-provider-wire".into(),
             payload: json!({
@@ -66,9 +65,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
                 "max_output_tokens":64,
                 "user":"anthropic-user-1"
             }),
-        },
-        &transport,
-    )
+        }, V3ResponsesRelayExecutionEnv::new(&transport))
     .await
     .unwrap();
 
@@ -126,7 +123,7 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
                 "metadata":{"client":"not-anthropic-wire-compatible"}
             }),
         },
-        &transport,
+        V3ResponsesRelayExecutionEnv::new(&transport),
     )
     .await
     .unwrap_err();
@@ -144,9 +141,7 @@ async fn responses_relay_reasoning_request_config_projects_anthropic_system_mark
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let output = execute_v3_responses_relay_runtime(
-        &manifest(),
-        V3ResponsesRelayRuntimeInput {
+    let output = execute_v3_responses_relay_runtime(&manifest(), V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
             request_id: "req-responses-reasoning-to-anthropic-marker".into(),
             payload: json!({
@@ -155,9 +150,7 @@ async fn responses_relay_reasoning_request_config_projects_anthropic_system_mark
                 "reasoning":{"effort":"medium","summary":"detailed"},
                 "stream":false
             }),
-        },
-        &transport,
-    )
+        }, V3ResponsesRelayExecutionEnv::new(&transport))
     .await
     .unwrap();
 
@@ -195,7 +188,7 @@ async fn responses_relay_string_input_reasoning_request_config_projects_anthropi
                 "stream":false
             }),
         },
-        &transport,
+        V3ResponsesRelayExecutionEnv::new(&transport),
     )
     .await
     .unwrap();
@@ -266,7 +259,7 @@ async fn responses_relay_anthropic_provider_json_preserves_thinking_to_responses
                 "stream":false
             }),
         },
-        &AnthropicProviderJsonReasoningTransport,
+        V3ResponsesRelayExecutionEnv::new(&AnthropicProviderJsonReasoningTransport),
     )
     .await
     .unwrap();
@@ -374,7 +367,7 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
                 "max_output_tokens":64
             }),
         },
-        &AnthropicProviderSseReasoningTransport,
+        V3ResponsesRelayExecutionEnv::new(&AnthropicProviderSseReasoningTransport),
     )
     .await
     .unwrap();

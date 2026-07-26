@@ -27,7 +27,7 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
                     "Responses endpoint must not fall through to relay or pending runtime."
                         .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation"
+                    "execute_v3_responses_direct_runtime_kernel"
                         .to_string(),
                 ),
                 runtime_owner_path: Some(

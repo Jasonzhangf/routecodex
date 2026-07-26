@@ -201,11 +201,16 @@ if (/execute_v3_foundation_dry_run_runtime/.test(foundationSource)) {
   fail('dead foundation Dry Run lifecycle must not coexist with the Runtime-owned P6 Dry Run');
 }
 
+
+const v3ProductionRustSource = files('v3/crates').filter((file) => file.endsWith('.rs') && !file.includes('/tests/')).map(read).join('\n');
+if (/execute_v3_responses_(?:relay|direct)[a-z0-9_]*_with_[a-z0-9_]*_and_[a-z0-9_]*/i.test(v3ProductionRustSource)) {
+  fail('V3 Responses production source must use ExecutionEnv entrypoints instead of combination wrapper names');
+}
+
 const runtimeKernelSource = read('v3/crates/routecodex-v3-runtime/src/kernel.rs');
-const dryRunSource = runtimeKernelSource.match(/pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*?\n}\n\npub async fn execute_v3_responses_direct_runtime_kernel/)?.[0] ?? '';
+const dryRunSource = runtimeKernelSource.match(/pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*?\n}\n\nasync fn execute_v3_responses_direct_runtime_kernel_core/)?.[0] ?? '';
 const dryRunUsesResponsesRuntimeKernel =
-  /execute_v3_responses_direct_runtime_kernel_with_transport_and_debug/.test(dryRunSource)
-  || /execute_v3_responses_direct_runtime_kernel_with_transport_debug_core/.test(dryRunSource);
+  /execute_v3_responses_direct_runtime_kernel_with_transport_debug_core/.test(dryRunSource);
 if (!/V3DryRunNoNetworkTransport/.test(dryRunSource)
     || !/"provider_pipeline_executed": true/.test(dryRunSource)
     || !/"provider_network_send": false/.test(dryRunSource)

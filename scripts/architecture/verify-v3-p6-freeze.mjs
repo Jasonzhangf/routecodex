@@ -52,12 +52,6 @@ for (const [label, pattern] of [
 const lifecycleExecutors = [...kernel.matchAll(/pub\s+async\s+fn\s+(execute_v3_[a-z0-9_]*responses_direct[a-z0-9_]*)/g)]
   .map((match) => match[1]);
 const allowedExecutors = new Set([
-  'execute_v3_responses_direct_runtime_kernel_with_default_transport',
-  'execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug',
-  'execute_v3_responses_direct_runtime_kernel_with_transport_and_debug',
-  'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation',
-  'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug',
-  'execute_v3_responses_direct_runtime_kernel_with_continuation',
   'execute_v3_responses_direct_dry_run_runtime',
   'execute_v3_responses_direct_runtime_kernel',
 ]);
@@ -76,7 +70,7 @@ const frameFunction = frameFunctionStart >= 0 && frameFunctionEnd > frameFunctio
   ? server.slice(frameFunctionStart, frameFunctionEnd)
   : '';
 const responsesBranch = `${directBranch}\n${frameFunction}`;
-if (!frameFunction.includes('execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug')) {
+if (!frameFunction.includes('execute_v3_responses_direct_runtime_kernel(')) {
   failures.push('P6 Server entry no longer calls the frozen Runtime kernel');
 }
 if ((frameFunction.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []).length !== 1) {
@@ -85,7 +79,7 @@ if ((frameFunction.match(/build_v3_server_16_http_frame_from_v3_resp_15/g) ?? []
 if ((directBranch.match(/responses_direct_output_response\(/g) ?? []).length !== 1) {
   failures.push('P6 must have exactly one response exit');
 }
-if (/routecodex_v3_provider_responses|ReqwestResponsesTransport|\.send\(/.test(responsesBranch)) {
+if (/routecodex_v3_provider_responses|\.send\(/.test(responsesBranch)) {
   failures.push('P6 Server shortcut to Provider transport is forbidden');
 }
 if (/provider_(?:id|family)\s*(?:==|!=)|model_prefix|starts_with\(|\bRelay\b|ChatProcess/i.test(responsesBranch)) {

@@ -18,15 +18,15 @@ use routecodex_v3_error::{
     V3ExternalErrorKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw,
-    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    ResponsesTransport, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
+    V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::remote_continuation::{
@@ -39,12 +39,6 @@ use routecodex_v3_sse::{
 };
 
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
-
-static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
-
-fn default_responses_transport() -> &'static ReqwestResponsesTransport {
-    DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectContinuationScope {
@@ -271,130 +265,88 @@ pub fn project_v3_protocol_execution_plan_failure(
     })
 }
 
-pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
+pub struct V3ResponsesDirectExecutionEnv<'state, T: ResponsesTransport> {
     hook_registry: V3HookRegistry,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel(
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-    )
-    .await
+    transport: &'state T,
+    debug: Option<&'state V3DebugRuntime>,
+    core_state: V3ResponsesDirectRuntimeCoreState<'state>,
 }
 
-pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_and_debug(
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
+impl<'state, T: ResponsesTransport> V3ResponsesDirectExecutionEnv<'state, T> {
+    pub fn new(hook_registry: V3HookRegistry, transport: &'state T) -> Self {
+        Self {
+            hook_registry,
+            transport,
+            debug: None,
+            core_state: V3ResponsesDirectRuntimeCoreState::no_continuation(),
+        }
+    }
 
-pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(
-    state: &V3ResponsesDirectContinuationState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    continuation_scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
-            state,
-            continuation_scope,
-            now_epoch_ms,
-        ),
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
+    pub fn with_debug(mut self, debug: &'state V3DebugRuntime) -> Self {
+        self.debug = Some(debug);
+        self
+    }
 
-pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    continuation_scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
+    pub fn with_continuation(
+        mut self,
+        state: &'state V3ResponsesDirectContinuationState,
+        scope: V3ResponsesDirectContinuationScope,
+        now_epoch_ms: u64,
+    ) -> Self {
+        self.core_state =
+            V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms);
+        self
+    }
+
+    pub fn with_shared_state_continuation(
+        mut self,
+        shared_state: V3ResponsesDirectRuntimeSharedState<'state>,
+        scope: V3ResponsesDirectContinuationScope,
+        now_epoch_ms: u64,
+    ) -> Self {
+        self.core_state = V3ResponsesDirectRuntimeCoreState::with_continuation(
             shared_state.continuation_state,
-            continuation_scope,
+            scope,
             now_epoch_ms,
         )
-        .with_provider_health(shared_state.provider_health),
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
+        .with_provider_health(shared_state.provider_health);
+        self
+    }
+
+    pub fn with_initial_plan(mut self, plan: &V3ResponsesProtocolExecutionPlan) -> Self {
+        self.core_state = self.core_state.with_initial_plan(plan);
+        self
+    }
 }
 
-pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
-    shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
+pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
-    continuation_scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-    now_epoch_ms: u64,
-    initial_plan: &V3ResponsesProtocolExecutionPlan,
+    env: V3ResponsesDirectExecutionEnv<'_, T>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
-            shared_state.continuation_state,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .with_provider_health(shared_state.provider_health)
-        .with_initial_plan(initial_plan),
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_direct_runtime_kernel_with_transport_and_debug<
-    T: ResponsesTransport,
->(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-    debug: &V3DebugRuntime,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation(),
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-        debug,
-    )
-    .await
+    match env.debug {
+        Some(debug) => {
+            execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
+                env.core_state,
+                manifest,
+                raw,
+                env.hook_registry,
+                env.transport,
+                debug,
+            )
+            .await
+        }
+        None => {
+            execute_v3_responses_direct_runtime_kernel_core(
+                env.core_state,
+                manifest,
+                raw,
+                env.hook_registry,
+                env.transport,
+            )
+            .await
+        }
+    }
 }
 
 pub fn plan_v3_responses_protocol_execution_with_provider_health(
@@ -627,21 +579,29 @@ impl ResponsesTransport for V3DryRunNoNetworkTransport {
     }
 }
 
+#[derive(Default)]
+pub struct V3ResponsesDirectDryRunExecutionEnv<'plan> {
+    initial_plan: Option<&'plan V3ResponsesProtocolExecutionPlan>,
+}
+
+impl<'plan> V3ResponsesDirectDryRunExecutionEnv<'plan> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_initial_plan(mut self, plan: &'plan V3ResponsesProtocolExecutionPlan) -> Self {
+        self.initial_plan = Some(plan);
+        self
+    }
+}
+
 pub async fn execute_v3_responses_direct_dry_run_runtime(
     fixture: V3DryRunFixture,
     manifest: &V3Config05ManifestPublished,
     debug: &V3DebugRuntime,
+    env: V3ResponsesDirectDryRunExecutionEnv<'_>,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_direct_dry_run_runtime_inner(fixture, manifest, debug, None).await
-}
-
-pub async fn execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-    fixture: V3DryRunFixture,
-    manifest: &V3Config05ManifestPublished,
-    debug: &V3DebugRuntime,
-    initial_plan: &V3ResponsesProtocolExecutionPlan,
-) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_direct_dry_run_runtime_inner(fixture, manifest, debug, Some(initial_plan))
+    execute_v3_responses_direct_dry_run_runtime_inner(fixture, manifest, debug, env.initial_plan)
         .await
 }
 
@@ -793,41 +753,6 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
     }
-}
-
-pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation(),
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(
-    state: &V3ResponsesDirectContinuationState,
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    scope: V3ResponsesDirectContinuationScope,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-    now_epoch_ms: u64,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms),
-        manifest,
-        raw,
-        hook_registry,
-        transport,
-    )
-    .await
 }
 
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
@@ -2341,8 +2266,10 @@ mod tests {
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello"}),
             },
-            crate::register_responses_direct_hooks(),
-            &CaptureTransport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &CaptureTransport,
+            ),
         )
         .await;
         assert_eq!(output.client_payload.status, 200);
@@ -2404,8 +2331,10 @@ mod tests {
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello"}),
             },
-            crate::register_responses_direct_hooks(),
-            &ErrorTransport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &ErrorTransport,
+            ),
         )
         .await;
         assert_eq!(output.client_payload.status, 502);
@@ -2447,8 +2376,10 @@ mod tests {
                     "metadataCenter": {"providerKey": "must-not-enter-body"}
                 }),
             },
-            crate::register_responses_direct_hooks(),
-            &NoSendTransport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &NoSendTransport,
+            ),
         )
         .await;
 
@@ -2501,8 +2432,10 @@ mod tests {
                     }]
                 }),
             },
-            crate::register_responses_direct_hooks(),
-            &NoSendTransport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &NoSendTransport,
+            ),
         )
         .await;
 
@@ -2571,8 +2504,10 @@ mod tests {
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello"}),
             },
-            crate::register_responses_direct_hooks(),
-            &transport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &transport,
+            ),
         )
         .await;
 
@@ -2669,8 +2604,10 @@ mod tests {
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello"}),
             },
-            crate::register_responses_direct_hooks(),
-            &transport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &transport,
+            ),
         )
         .await;
 
@@ -2744,8 +2681,10 @@ mod tests {
                 path: "/v1/responses".to_string(),
                 body: json!({"model":"client-model","input":"hello","stream":true}),
             },
-            crate::register_responses_direct_hooks(),
-            &transport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &transport,
+            ),
         )
         .await;
 
@@ -2830,8 +2769,10 @@ mod tests {
                     "tools": [{"type":"function","name":"run","parameters":{"type":"object"}}]
                 }),
             },
-            crate::register_responses_direct_hooks(),
-            &transport,
+            V3ResponsesDirectExecutionEnv::new(
+                crate::register_responses_direct_hooks(),
+                &transport,
+            ),
         )
         .await;
 

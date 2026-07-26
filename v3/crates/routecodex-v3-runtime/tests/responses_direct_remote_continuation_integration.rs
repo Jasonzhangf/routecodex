@@ -7,10 +7,9 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw,
-    execute_v3_responses_direct_runtime_kernel_with_continuation, register_responses_direct_hooks,
-    V3ClientBody, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3RuntimeUsageSummary,
+    build_v3_server_03_http_request_raw, execute_v3_responses_direct_runtime_kernel,
+    register_responses_direct_hooks, V3ClientBody, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectExecutionEnv, V3RuntimeUsageSummary,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -68,22 +67,14 @@ async fn direct_json_completed_without_summary_passes_through_without_synthetic_
         "g",
     );
 
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        build_v3_server_03_http_request_raw(
+    let first = execute_v3_responses_direct_runtime_kernel(&manifest, build_v3_server_03_http_request_raw(
             "s".into(),
             "req-direct-stopless-1".into(),
             "exec-direct-stopless-1".into(),
             "POST".into(),
             "/v1/responses".into(),
             json!({"model":"gpt-5.5","input":"continue until summary","tools":[{"type":"function","name":"exec_command"}]}),
-        ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope, 1_000))
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
     assert_eq!(
@@ -121,22 +112,14 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
         "g",
     );
 
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        build_v3_server_03_http_request_raw(
+    let first = execute_v3_responses_direct_runtime_kernel(&manifest, build_v3_server_03_http_request_raw(
             "s".into(),
             "req-direct-stopless-sse-1".into(),
             "exec-direct-stopless-sse-1".into(),
             "POST".into(),
             "/v1/responses".into(),
             json!({"model":"gpt-5.5","stream":true,"input":"stream until summary","tools":[{"type":"function","name":"exec_command"}]}),
-        ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope, 1_000))
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
     assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
@@ -658,19 +641,11 @@ async fn json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_with
         "g",
     );
 
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        build_v3_server_03_http_request_raw(
+    let first = execute_v3_responses_direct_runtime_kernel(&manifest, build_v3_server_03_http_request_raw(
             "s".into(), "req-1".into(), "exec-1".into(), "POST".into(),
             "/v1/responses".into(),
             json!({"model":"gpt-5.5","input":"use tool","tools":[{"type":"function","name":"lookup"}]})
-        ),
-        scope.clone(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
-    ).await;
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope.clone(), 1_000)).await;
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(count(&first.node_trace, "V3Router07OpaqueTargetHitOnce"), 1);
     assert!(first
@@ -678,8 +653,7 @@ async fn json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_with
         .contains(&"V3HubRespContinuation04Committed"));
     assert_eq!(state.len().unwrap(), 1);
 
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let second = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         build_v3_server_03_http_request_raw(
             "s".into(),
@@ -693,10 +667,8 @@ async fn json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_with
                 "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
             }),
         ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope, 2_000),
     )
     .await;
     assert_eq!(second.client_payload.status, 200);
@@ -734,18 +706,10 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     let transport = TwoTurnSseTransport::default();
     let scope = scope();
 
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        request(
+    let first = execute_v3_responses_direct_runtime_kernel(&manifest, request(
             "req-sse-1",
             json!({"model":"gpt-5.5","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
-        ),
-        scope.clone(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope.clone(), 1_000))
     .await;
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(count(&first.node_trace, "V3Router07OpaqueTargetHitOnce"), 1);
@@ -767,8 +731,7 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
     assert!(first_remainder.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 1);
 
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let second = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(
             "req-sse-2",
@@ -779,10 +742,8 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
                 "input":[{"type":"function_call_output","call_id":"call_sse_1","output":"ok"}]
             }),
         ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope, 2_000),
     )
     .await;
     assert_eq!(second.client_payload.status, 200);
@@ -813,17 +774,14 @@ async fn http_only_sse_terminal_response_streams_without_remote_continuation_com
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = TerminalSseWithoutRemoteContinuationTransport::default();
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let first = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(
             "req-http-sse-terminal",
             json!({"model":"gpt-5.5","stream":true,"input":"say done"}),
         ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope(), 1_000),
     )
     .await;
     assert_eq!(first.client_payload.status, 200);
@@ -844,17 +802,14 @@ async fn direct_provider_event_json_observation_records_usage_and_completed_term
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = ObservedTerminalSseTransport::default();
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(
             "req-http-sse-terminal-observed",
             json!({"model":"gpt-5.5","stream":true,"input":"say done"}),
         ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope(), 1_000),
     )
     .await;
 
@@ -888,17 +843,14 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = ObservedFailedTerminalOnlySseTransport::default();
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(
             "req-http-sse-terminal-observed-failed",
             json!({"model":"gpt-5.5","stream":true,"input":"fail"}),
         ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope(), 1_000),
     )
     .await;
 
@@ -921,17 +873,14 @@ async fn direct_provider_event_json_observation_infers_terminal_status_from_even
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = ObservedTerminalSseTransport::default();
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(
             "req-http-sse-terminal-inferred",
             json!({"model":"gpt-5.5","stream":true,"input":"turn"}),
         ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope(), 1_000),
     )
     .await;
 
@@ -960,18 +909,10 @@ async fn http_only_json_function_call_uses_v2_direct_http_continuation_without_r
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = PendingJsonWithoutRemoteContinuationTransport::default();
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        request(
+    let first = execute_v3_responses_direct_runtime_kernel(&manifest, request(
             "req-http-json-pending",
             json!({"model":"gpt-5.5","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
-        ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope(), 1_000))
     .await;
     assert_eq!(first.client_payload.status, 200, "{first:?}");
     assert!(first
@@ -984,22 +925,14 @@ async fn http_only_json_function_call_uses_v2_direct_http_continuation_without_r
     assert_eq!(first_body["id"], "resp_http_json_pending");
     assert_eq!(first_body["status"], "requires_action");
 
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        request(
+    let second = execute_v3_responses_direct_runtime_kernel(&manifest, request(
             "req-http-json-submit",
             json!({
                 "model":"gpt-5.5",
                 "previous_response_id":"resp_http_json_pending",
                 "input":[{"type":"function_call_output","call_id":"call_http_json_pending","output":"ok"}]
             }),
-        ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope(), 2_000))
     .await;
     assert_eq!(second.client_payload.status, 200, "{second:?}");
     assert!(second
@@ -1027,18 +960,10 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
     let manifest = http_only_manifest_without_remote_continuation();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = PendingSseWithoutRemoteContinuationTransport::default();
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        request(
+    let first = execute_v3_responses_direct_runtime_kernel(&manifest, request(
             "req-http-sse-pending",
             json!({"model":"gpt-5.5","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
-        ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope(), 1_000))
     .await;
     assert_eq!(first.client_payload.status, 200);
     let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
@@ -1057,10 +982,7 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
     assert!(remainder.contains("[DONE]"));
     assert_eq!(state.len().unwrap(), 1);
 
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        request(
+    let second = execute_v3_responses_direct_runtime_kernel(&manifest, request(
             "req-http-sse-submit",
             json!({
                 "model":"gpt-5.5",
@@ -1068,12 +990,7 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
                 "previous_response_id":"resp_http_sse_pending",
                 "input":[{"type":"function_call_output","call_id":"call_http_sse_pending","output":"ok"}]
             }),
-        ),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport).with_continuation(&state, scope(), 2_000))
     .await;
     assert_eq!(second.client_payload.status, 200, "{second:?}");
     assert!(second
@@ -1280,26 +1197,20 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
     let manifest = manifest();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = AlwaysSamePendingTransport::default();
-    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let first = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request("req-duplicate-1", json!({"model":"gpt-5.5","input":"one"})),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        1_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope(), 1_000),
     )
     .await;
     assert_eq!(first.client_payload.status, 200);
     assert_eq!(state.len().unwrap(), 1);
-    let duplicate = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
+    let duplicate = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request("req-duplicate-2", json!({"model":"gpt-5.5","input":"two"})),
-        scope(),
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &transport)
+            .with_continuation(&state, scope(), 2_000),
     )
     .await;
     assert_error_chain(&duplicate);
@@ -1307,17 +1218,14 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
 
     let terminal_state = V3ResponsesDirectContinuationState::default();
     let terminal_transport = TwoTurnTransport::default();
-    let terminal = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &terminal_state,
+    let terminal = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(
             "req-terminal-1",
             json!({"model":"gpt-5.5","previous_response_id":"never_committed","input":[]}),
         ),
-        scope(),
-        register_responses_direct_hooks(),
-        &terminal_transport,
-        2_000,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), &terminal_transport)
+            .with_continuation(&terminal_state, scope(), 2_000),
     )
     .await;
     assert_error_chain(&terminal);
@@ -1503,18 +1411,10 @@ async fn prime_pending_with_id<T: ResponsesTransport>(
     now: u64,
     request_id: &str,
 ) {
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        state,
-        manifest,
-        request(
+    let output = execute_v3_responses_direct_runtime_kernel(manifest, request(
             request_id,
             json!({"model":"gpt-5.5","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
-        ),
-        scope,
-        register_responses_direct_hooks(),
-        transport,
-        now,
-    )
+        ), V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), transport).with_continuation(state, scope, now))
     .await;
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(state.len().unwrap(), 1);
@@ -1529,8 +1429,7 @@ async fn continuation_turn<T: ResponsesTransport>(
     request_id: &str,
     now: u64,
 ) -> routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_continuation(
-        state,
+    execute_v3_responses_direct_runtime_kernel(
         manifest,
         request(
             request_id,
@@ -1540,10 +1439,8 @@ async fn continuation_turn<T: ResponsesTransport>(
                 "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
             }),
         ),
-        scope,
-        register_responses_direct_hooks(),
-        transport,
-        now,
+        V3ResponsesDirectExecutionEnv::new(register_responses_direct_hooks(), transport)
+            .with_continuation(state, scope, now),
     )
     .await
 }

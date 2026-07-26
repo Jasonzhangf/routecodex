@@ -474,7 +474,7 @@ function verifyRuntimeSeparation() {
   );
   requireTextIncludes(
     runtimeSource,
-    'execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control',
+    'with_stopless_control(',
     paths.runtime,
   );
   requireTextIncludes(

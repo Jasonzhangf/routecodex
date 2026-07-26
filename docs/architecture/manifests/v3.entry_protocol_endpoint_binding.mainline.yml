@@ -47,7 +47,7 @@ entry_protocol_bindings:
     execution_mode: direct
     implementation_status: implemented
     owner_feature_id: v3.responses_direct_mvp_architecture
-    runtime_owner_symbol: execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation
+    runtime_owner_symbol: execute_v3_responses_direct_runtime_kernel
     runtime_owner_path: v3/crates/routecodex-v3-runtime/src/kernel.rs
     forbidden_fallback_behavior: "Responses endpoint must enter same-protocol Direct runtime and must not fall through to Relay or generic foundation pending."
   - entry_protocol: anthropic

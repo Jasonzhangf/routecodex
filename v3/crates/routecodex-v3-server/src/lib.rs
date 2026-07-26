@@ -25,17 +25,8 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime_with_default_transport,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
-    execute_v3_responses_direct_dry_run_runtime,
-    execute_v3_responses_direct_dry_run_runtime_with_initial_target,
-    execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
-    execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target,
-    execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_initial_target,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target,
+    execute_v3_responses_direct_dry_run_runtime, execute_v3_responses_direct_runtime_kernel,
+    execute_v3_responses_relay_dry_run_runtime, execute_v3_responses_relay_runtime,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
@@ -47,15 +38,17 @@ use routecodex_v3_runtime::{
     V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
     V3Execution11ProtocolDecisionMode, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
-    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
-    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
-    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
-    V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
+    V3LiveSnapResponsesTransport, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
+    V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectDryRunExecutionEnv,
+    V3ResponsesDirectExecutionEnv, V3ResponsesDirectRuntimeSharedState,
+    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ResponsesRelayDefaultTransport, V3ResponsesRelayDryRunExecutionEnv,
+    V3ResponsesRelayExecutionEnv, V3ResponsesRelayLocalContinuationScope,
+    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
+    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayStoplessControlState, V3ResponsesTransport, V3RuntimeObservability,
     V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
@@ -100,6 +93,7 @@ struct V3ListenerState {
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
     responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    responses_direct_transport: Arc<V3ResponsesRelayDefaultTransport>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -471,6 +465,7 @@ pub async fn spawn_v3_server_aggregate(
     let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
         &manifest,
     ));
+    let responses_direct_transport = Arc::new(V3ResponsesRelayDefaultTransport::default());
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -495,6 +490,7 @@ pub async fn spawn_v3_server_aggregate(
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
             responses_relay_stopless_control: responses_relay_stopless_control.clone(),
             provider_health: provider_health.clone(),
+            responses_direct_transport: responses_direct_transport.clone(),
         });
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(async move {
@@ -1051,17 +1047,22 @@ async fn pending_endpoint(
         };
         let output = match responses_protocol_plan.as_ref() {
             Some(plan) => {
-                execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                execute_v3_responses_direct_dry_run_runtime(
                     fixture,
                     &state.manifest,
                     &state.debug,
-                    plan,
+                    V3ResponsesDirectDryRunExecutionEnv::new().with_initial_plan(plan),
                 )
                 .await
             }
             None => {
-                execute_v3_responses_direct_dry_run_runtime(fixture, &state.manifest, &state.debug)
-                    .await
+                execute_v3_responses_direct_dry_run_runtime(
+                    fixture,
+                    &state.manifest,
+                    &state.debug,
+                    V3ResponsesDirectDryRunExecutionEnv::new(),
+                )
+                .await
             }
         };
         let observability = build_v3_foundation_console_observability(&state, &output);
@@ -1142,35 +1143,40 @@ async fn pending_endpoint(
         };
         let output = match responses_protocol_plan.as_ref() {
             Some(plan) => {
-                let mut output = execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target(
+                let mut output = execute_v3_responses_relay_dry_run_runtime(
                     &state.manifest,
                     V3ResponsesRelayRuntimeInput {
                         server_id: state.server.id.clone(),
                         request_id: request_id.clone(),
                         payload: payload.clone(),
                     },
-                    &state.responses_relay_local_continuation,
-                    &state.responses_relay_stopless_control,
-                    continuation_scope,
-                    now_epoch_ms,
-                    plan.decision.target.clone(),
+                    V3ResponsesRelayDryRunExecutionEnv::new()
+                        .with_local_stopless_control(
+                            &state.responses_relay_local_continuation,
+                            &state.responses_relay_stopless_control,
+                            continuation_scope,
+                            now_epoch_ms,
+                        )
+                        .with_initial_target(plan.decision.target.clone()),
                 )
                 .await;
                 prepend_v3_protocol_plan_trace_to_foundation_output(&mut output, &plan.node_trace);
                 output
             }
             None => {
-                execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
+                execute_v3_responses_relay_dry_run_runtime(
                     &state.manifest,
                     V3ResponsesRelayRuntimeInput {
                         server_id: state.server.id.clone(),
                         request_id: request_id.clone(),
                         payload: payload.clone(),
                     },
-                    &state.responses_relay_local_continuation,
-                    &state.responses_relay_stopless_control,
-                    continuation_scope,
-                    now_epoch_ms,
+                    V3ResponsesRelayDryRunExecutionEnv::new().with_local_stopless_control(
+                        &state.responses_relay_local_continuation,
+                        &state.responses_relay_stopless_control,
+                        continuation_scope,
+                        now_epoch_ms,
+                    ),
                 )
                 .await
             }
@@ -1412,93 +1418,35 @@ async fn pending_endpoint(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let mut output = if capture_provider_request || capture_provider_response {
-            match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    V3ResponsesRelayLocalStoplessControlInput::new(
-                        &state.responses_relay_local_continuation,
-                        &state.responses_relay_stopless_control,
-                        continuation_scope.clone(),
-                        now_epoch_ms,
-                    ),
-                    V3ResponsesRelayProviderSnapshotCapture::new(
-                        capture_provider_request,
-                        capture_provider_response,
-                    ),
-                    plan.decision.target.clone(),
-                )
-                .await
-                {
-                    Ok(mut output) => {
-                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                            &mut output,
-                            &plan.node_trace,
-                        );
-                        output
-                    }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
-                },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    V3ResponsesRelayLocalStoplessControlInput::new(
-                        &state.responses_relay_local_continuation,
-                        &state.responses_relay_stopless_control,
-                        continuation_scope.clone(),
-                        now_epoch_ms,
-                    ),
-                    V3ResponsesRelayProviderSnapshotCapture::new(
-                        capture_provider_request,
-                        capture_provider_response,
-                    ),
-                )
-                .await
-                {
-                    Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
-                },
-            }
+            let transport = V3LiveSnapResponsesTransport::with_default_transport();
+            let snapshots = transport.snapshots();
+            let capture = V3ResponsesRelayProviderSnapshotCapture::new(
+                capture_provider_request,
+                capture_provider_response,
+            );
+            let mut output = execute_responses_relay_runtime_for_http_request(
+                &state,
+                runtime_input,
+                &transport,
+                continuation_scope,
+                now_epoch_ms,
+                responses_protocol_plan.as_ref(),
+            )
+            .await;
+            output.provider_snapshots =
+                Some(snapshots.into_payload(capture.provider_request, capture.provider_response));
+            output
         } else {
-            match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_initial_target(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_local_continuation,
-                    &state.responses_relay_stopless_control,
-                    continuation_scope.clone(),
-                    now_epoch_ms,
-                    plan.decision.target.clone(),
-                )
-                .await
-                {
-                    Ok(mut output) => {
-                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                            &mut output,
-                            &plan.node_trace,
-                        );
-                        output
-                    }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
-                },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_local_continuation,
-                    &state.responses_relay_stopless_control,
-                    continuation_scope,
-                    now_epoch_ms,
-                )
-                .await
-                {
-                    Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error),
-                },
-            }
+            let transport = V3ResponsesRelayDefaultTransport::default();
+            execute_responses_relay_runtime_for_http_request(
+                &state,
+                runtime_input,
+                &transport,
+                continuation_scope,
+                now_epoch_ms,
+                responses_protocol_plan.as_ref(),
+            )
+            .await
         };
         if let Some(response) = capture_v3_responses_relay_provider_snapshots(
             &state,
@@ -2007,18 +1955,15 @@ async fn execute_responses_relay_websocket_output(
             );
         }
     };
-    match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
+    let transport = V3ResponsesRelayDefaultTransport::default();
+    match execute_v3_responses_relay_runtime(
         &state.manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
             request_id,
             payload,
         },
-        &state.provider_health,
-        &state.responses_relay_local_continuation,
-        &state.responses_relay_stopless_control,
-        continuation_scope,
-        now_epoch_ms,
+        build_responses_relay_execution_env(&state, &transport, continuation_scope, now_epoch_ms),
     )
     .await
     {
@@ -2405,38 +2350,29 @@ async fn execute_responses_direct_server_frame(
         path,
         payload,
     );
+    let env = V3ResponsesDirectExecutionEnv::new(
+        register_responses_direct_hooks(),
+        state.responses_direct_transport.as_ref(),
+    )
+    .with_debug(&state.debug)
+    .with_shared_state_continuation(
+        V3ResponsesDirectRuntimeSharedState::new(
+            &state.responses_direct_continuation,
+            state.provider_health.store(),
+        ),
+        continuation_scope,
+        now_epoch_ms,
+    );
     let output = match responses_protocol_plan {
         Some(plan) => {
-            execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
-                V3ResponsesDirectRuntimeSharedState::new(
-                    &state.responses_direct_continuation,
-                    state.provider_health.store(),
-                ),
+            execute_v3_responses_direct_runtime_kernel(
                 &state.manifest,
                 raw,
-                continuation_scope,
-                register_responses_direct_hooks(),
-                &state.debug,
-                now_epoch_ms,
-                plan,
+                env.with_initial_plan(plan),
             )
             .await
         }
-        None => {
-            execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
-                V3ResponsesDirectRuntimeSharedState::new(
-                    &state.responses_direct_continuation,
-                    state.provider_health.store(),
-                ),
-                &state.manifest,
-                raw,
-                continuation_scope,
-                register_responses_direct_hooks(),
-                &state.debug,
-                now_epoch_ms,
-            )
-            .await
-        }
+        None => execute_v3_responses_direct_runtime_kernel(&state.manifest, raw, env).await,
     };
     let scope = match state
         .debug
@@ -5421,6 +5357,48 @@ fn build_responses_direct_continuation_scope(
     ))
 }
 
+fn build_responses_relay_execution_env<'a, T: V3ResponsesTransport>(
+    state: &'a V3ListenerState,
+    transport: &'a T,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+) -> V3ResponsesRelayExecutionEnv<'a, T> {
+    V3ResponsesRelayExecutionEnv::new(transport)
+        .with_provider_health(&state.provider_health)
+        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            &state.responses_relay_local_continuation,
+            &state.responses_relay_stopless_control,
+            scope,
+            now_epoch_ms,
+        ))
+}
+
+async fn execute_responses_relay_runtime_for_http_request<T: V3ResponsesTransport>(
+    state: &V3ListenerState,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+    plan: Option<&V3ResponsesProtocolExecutionPlan>,
+) -> V3ResponsesRelayRuntimeOutput {
+    let mut env = build_responses_relay_execution_env(state, transport, scope, now_epoch_ms);
+    if let Some(plan) = plan {
+        env = env.with_initial_target(plan.decision.target.clone());
+    }
+    match execute_v3_responses_relay_runtime(&state.manifest, input, env).await {
+        Ok(mut output) => {
+            if let Some(plan) = plan {
+                prepend_v3_protocol_plan_trace_to_responses_relay_output(
+                    &mut output,
+                    &plan.node_trace,
+                );
+            }
+            output
+        }
+        Err(error) => project_v3_responses_relay_runtime_failure(error),
+    }
+}
+
 fn build_responses_relay_local_continuation_scope(
     headers: &HeaderMap,
     request_id: &str,
@@ -5797,7 +5775,13 @@ pub async fn execute_v3_responses_relay_request(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> Result<V3ResponsesRelayRuntimeOutput, routecodex_v3_runtime::V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_default_transport(manifest, input).await
+    let transport = V3ResponsesRelayDefaultTransport::default();
+    execute_v3_responses_relay_runtime(
+        manifest,
+        input,
+        V3ResponsesRelayExecutionEnv::new(&transport),
+    )
+    .await
 }
 
 fn responses_relay_output_response(
@@ -6169,6 +6153,7 @@ async fn debug_dry_run(
         },
         &state.manifest,
         &state.debug,
+        V3ResponsesDirectDryRunExecutionEnv::new(),
     )
     .await;
     foundation_output_response(output)
@@ -7102,6 +7087,7 @@ mod tests {
             provider_health: Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
                 &manifest,
             )),
+            responses_direct_transport: Arc::new(V3ResponsesRelayDefaultTransport::default()),
         })
     }
 
@@ -8275,6 +8261,7 @@ mod tests {
             provider_health: Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
                 &manifest,
             )),
+            responses_direct_transport: Arc::new(V3ResponsesRelayDefaultTransport::default()),
         };
         let trace_scope = state
             .debug

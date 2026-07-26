@@ -54,7 +54,7 @@ source_entry_bindings:
     endpoint_pattern: /v1/responses
     execution_mode: relay
     owner_feature_id: v3.hub_relay_runtime_closeout
-    runtime_owner_symbol: execute_v3_responses_relay_runtime_with_default_transport
+    runtime_owner_symbol: execute_v3_responses_relay_runtime
     runtime_owner_path: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     evidence:
       - v3-responses-relay-server-01

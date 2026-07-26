@@ -34,9 +34,9 @@ const failures = [];
 for (const [owner, text, phrases] of [
   [runtimePath, runtime, [
     'execute_v3_responses_direct_runtime_kernel_core(',
-    'static DEFAULT_RESPONSES_TRANSPORT',
-    'fn default_responses_transport()',
-    'execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(',
+    'pub struct V3ResponsesDirectExecutionEnv',
+    'with_continuation(',
+    'pub struct V3ResponsesDirectExecutionEnv',
     '.load_for_req03(response_id, &scope.key, now_epoch_ms)',
     'locator.validate_capability_revision(&current_capability_revision)',
     'target.resolve_exact_provider_model_auth(',
@@ -103,7 +103,7 @@ for (const [owner, text, phrases] of [
     'first_header_text(headers, &["session-id", "session_id", "x-session-id"])',
     'resolve_transparent_continuation_scope(',
     'payload_needs_direct_continuation_scope(payload)',
-    'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
+    'execute_v3_responses_direct_runtime_kernel(',
   ]],
   [testPath, tests, [
     'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',

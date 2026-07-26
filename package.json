@@ -287,7 +287,7 @@
     "test:v3-vr-full-function-cli": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test vr_full_function_controlled_replay -- --nocapture",
     "test:v3-foundation-runtime-contract": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime foundation --lib -- --nocapture",
     "test:v3-server-debug-error-blackbox": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server -- --nocapture",
-    "test:v3-workspace": "npm run verify:v3-file-size && cargo +stable test --manifest-path v3/Cargo.toml --workspace -- --nocapture",
+    "test:v3-workspace": "npm run verify:v3-file-size && cargo +stable test --manifest-path v3/Cargo.toml --workspace -- --nocapture --test-threads=1",
     "verify:architecture-review-surface": "npm run verify:architecture-review-surface-light && npm run verify:architecture-wiki-browser-smoke",
     "verify:architecture-feature-map-growth-discipline": "node scripts/architecture/verify-architecture-feature-map-growth-discipline.mjs",
     "verify:architecture-forbidden-path-growth": "node scripts/architecture/verify-architecture-forbidden-path-growth.mjs",

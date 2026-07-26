@@ -165,8 +165,8 @@ forbid(tests, testPath, [
 ]);
 
 for (const phrase of [
-  'execute_v3_responses_relay_runtime_with_default_transport',
-  'execute_v3_responses_relay_runtime_with_local_continuation',
+  'V3ResponsesRelayExecutionEnv',
+  'V3ResponsesRelayDryRunExecutionEnv',
   'V3ResponsesRelayLocalContinuationState',
   'V3ResponsesRelayLocalContinuationScope',
   'find_responses_tool_output_ids',
@@ -250,8 +250,8 @@ for (const phrase of [
 for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots',
+  'execute_v3_responses_relay_runtime',
+  'V3ResponsesRelayExecutionEnv::new',
   'responses_relay_local_continuation',
   'responses_relay_stopless_control',
   'project_v3_responses_relay_runtime_failure',
@@ -304,7 +304,7 @@ for (const phrase of [
 }
 for (const phrase of [
   'source_entry_bindings',
-  'execute_v3_responses_relay_runtime_with_default_transport',
+  'execute_v3_responses_relay_runtime',
   'live_replay_5555',
 ]) {
   requireText(readFileSync(manifestPath, 'utf8'), manifestPath, phrase);

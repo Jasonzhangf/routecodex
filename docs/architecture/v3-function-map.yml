@@ -387,7 +387,6 @@ features:
       - v3-rd-16
     entry_symbols:
       - execute_v3_responses_direct_runtime_kernel
-      - execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug
       - V3Execution11ProtocolDecision
       - V3Execution11ProtocolDecisionMode
       - build_v3_execution_11_protocol_decision_from_v3_target_10
@@ -1517,7 +1516,7 @@ features:
     entry_symbols:
       - V3ResponsesDirectContinuationState
       - V3ResponsesDirectContinuationScope
-      - execute_v3_responses_direct_runtime_kernel_with_continuation
+      - execute_v3_responses_direct_runtime_kernel
       - execute_v3_responses_direct_runtime_kernel_core
       - resolve_v3_responses_previous_response_owner_execution_mode_at_req03
       - V3ResponsesPreviousResponseOwnerResolutionError
@@ -2185,9 +2184,7 @@ features:
       - v3-responses-relay-server-04
     entry_symbols:
       - execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile
-      - execute_v3_responses_relay_runtime_with_default_transport
       - execute_v3_responses_relay_runtime
-      - execute_v3_responses_relay_runtime_with_local_continuation
       - execute_v3_responses_relay_dry_run_runtime
       - V3ProviderRequestDryRunNoNetworkTransport
       - V3ResponsesRelayLocalContinuationState
@@ -2719,7 +2716,7 @@ features:
       - V3ResponsesRelayStoplessControlState::load_for_scope
       - V3ResponsesRelayStoplessControlState::store_for_scope
       - V3ResponsesRelayStoplessControlState::clear_for_scope
-      - execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control
+      - execute_v3_responses_relay_runtime
       - apply_v3_responses_relay_stopless_control_request_transition
       - build_v3_relay_local_continuation_context_at_resp04
       - natural_stop_projects_noop_cli_without_cli_state_json
