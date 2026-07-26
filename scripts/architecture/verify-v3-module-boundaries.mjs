@@ -113,6 +113,7 @@ if (/serde_json::from_slice|default_tier|providers\.get/.test(hookSource)) {
 }
 
 const serverSource = files('v3/crates/routecodex-v3-server/src')
+  .filter((path) => !path.includes('/tests/'))
   .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
   .join('\n');
 if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {

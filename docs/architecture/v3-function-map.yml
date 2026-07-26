@@ -183,6 +183,10 @@ features:
     owner_files:
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/src/error_projection.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/continuation_scope.rs
+      - v3/crates/routecodex-v3-server/src/relay_frame.rs
+      - v3/crates/routecodex-v3-server/src/models_catalog.rs
       - v3/crates/routecodex-v3-debug/src/lib.rs
       - v3/crates/routecodex-v3-error/src/lib.rs
       - v3/crates/routecodex-v3-config/src/lib.rs
@@ -370,6 +374,10 @@ features:
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
       - v3/crates/routecodex-v3-server/src/error_projection.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/continuation_scope.rs
+      - v3/crates/routecodex-v3-server/src/relay_frame.rs
+      - v3/crates/routecodex-v3-server/src/models_catalog.rs
     resource_bindings:
       - v3.request.protocol_context
       - v3.request.normal_payload
@@ -2492,6 +2500,10 @@ features:
       - v3/crates/routecodex-v3-server/src/websocket.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
       - v3/crates/routecodex-v3-server/src/error_projection.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/continuation_scope.rs
+      - v3/crates/routecodex-v3-server/src/relay_frame.rs
+      - v3/crates/routecodex-v3-server/src/models_catalog.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
@@ -2522,6 +2534,10 @@ features:
       - v3/crates/routecodex-v3-server/src/websocket.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
       - v3/crates/routecodex-v3-server/src/error_projection.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/continuation_scope.rs
+      - v3/crates/routecodex-v3-server/src/relay_frame.rs
+      - v3/crates/routecodex-v3-server/src/models_catalog.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
@@ -2963,7 +2979,7 @@ features:
     runtime_status: source_controlled_no_live_cutover
 
   - feature_id: v3.module_decomposition
-    status: phase3_error_projection_module_active
+    status: phase3_lib_closeout_active
     design_truth: docs/goals/v3-god-file-decomposition-plan.md
     sop: docs/architecture/wiki/v3-module-decomposition-sop.md
     owner_crates: [routecodex-v3-server, routecodex-v3-runtime]
@@ -2981,6 +2997,10 @@ features:
       - v3/crates/routecodex-v3-server/src/endpoints.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
       - v3/crates/routecodex-v3-server/src/error_projection.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/continuation_scope.rs
+      - v3/crates/routecodex-v3-server/src/relay_frame.rs
+      - v3/crates/routecodex-v3-server/src/models_catalog.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - scripts/architecture/verify-v3-file-size.mjs

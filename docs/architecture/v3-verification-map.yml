@@ -1990,7 +1990,7 @@ features:
       forbidden_claim: "Do not claim provider protocol terminal validation, continuation correctness, or live SSE provider behavior from this transport boundary gate alone."
 
   - feature_id: v3.module_decomposition
-    status: phase3_error_projection_module_active
+    status: phase3_lib_closeout_active
     change_risk: medium
     owner_kind: rust_project_v3_structure_gate
     owner_scope: "V3 god-file decomposition governance: file-size ratchet, phase SOP, and zero-behavior-change module split verification."
@@ -2013,6 +2013,10 @@ features:
       - v3/crates/routecodex-v3-server/src/endpoints.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
       - v3/crates/routecodex-v3-server/src/error_projection.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/continuation_scope.rs
+      - v3/crates/routecodex-v3-server/src/relay_frame.rs
+      - v3/crates/routecodex-v3-server/src/models_catalog.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
     design:

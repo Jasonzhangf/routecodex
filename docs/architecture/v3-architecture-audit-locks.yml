@@ -113,9 +113,17 @@ locked_items:
     locked_at: '2026-07-24T12:00:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
-    fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
+    fingerprint: sha256:857e7035523a13410d0bc7fb258f5dc3545f8593929339200808072e2fbae492
+    last_manual_authorization_id: auth-20260727-v3-module-relay-frame-source-rebind
 manual_authorizations:
 
+  - authorization_id: auth-20260727-v3-module-relay-frame-source-rebind
+    item_id: chain:v3.sse.transport_boundary
+    approved_by: Jason
+    approved_at: '2026-07-27T03:18:00+08:00'
+    reason: "Jason-authorized V3 module decomposition Phase 3.8 source rebind: wrap_v3_relay_sse_closeout_stream and related relay frame projection helpers moved from server/lib.rs to server/relay_frame.rs as a pure cut/move; SSE transport remains opaque frame/closeout projection, no provider event semantic parsing, retry, routing, continuation, or error-policy logic was added."
+    fingerprint_before: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
+    fingerprint_after: sha256:857e7035523a13410d0bc7fb258f5dc3545f8593929339200808072e2fbae492
   - authorization_id: auth-20260727-v3-module-error-projection-source-rebind
     item_id: chain:v3.server.startup
     approved_by: Jason
