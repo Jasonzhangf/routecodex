@@ -1988,3 +1988,44 @@ features:
       live_cutover: false
       global_install_restart: false
       forbidden_claim: "Do not claim provider protocol terminal validation, continuation correctness, or live SSE provider behavior from this transport boundary gate alone."
+
+  - feature_id: v3.module_decomposition
+    status: phase0_file_size_gate_active_modules_pending
+    change_risk: medium
+    owner_kind: rust_project_v3_structure_gate
+    owner_scope: "V3 god-file decomposition governance: file-size ratchet, phase SOP, and zero-behavior-change module split verification."
+    owner_modules:
+      - docs/goals/v3-god-file-decomposition-plan.md
+      - docs/architecture/wiki/v3-module-decomposition-sop.md
+      - config/v3-file-size-policy.json
+      - scripts/architecture/verify-v3-file-size.mjs
+      - scripts/tests/v3-file-size-red-fixtures.mjs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+    design:
+      - docs/goals/v3-god-file-decomposition-plan.md
+      - docs/architecture/wiki/v3-module-decomposition-sop.md
+    required_contract:
+      - V3 production Rust files under v3/crates must stay <=1500 lines unless whitelisted by an exact ratchet snapshot.
+      - Ratchet whitelist entries may only shrink and must be removed once a file is <=1500 lines.
+      - New module files created during decomposition must be <=1500 lines.
+      - Phase work is zero behavior change: move, delete dead wrappers, or converge entrypoints only; no routing, retry, health, continuation, SSE, or error semantics change.
+      - Each phase updates code, maps, and review surfaces in the same commit and uses precise staging only.
+    required_gates:
+      - npm run verify:v3-file-size
+      - npm run test:v3-file-size-red-fixtures
+      - cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check
+      - npm run test:v3-workspace
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-architecture-docs
+      - npm run test:v3-compile-fail
+      - scoped git diff --check
+    completion_boundary:
+      phase0: "File-size ratchet gate is wired into npm scripts, test:v3-workspace, and CI; no runtime behavior change."
+      phase1_to_4: "Each phase must pass the required gates and commit separately before the next phase starts."
+      live_closeout: "After Phase 0-4, global install, managed restart, health probes, provider-request dry-run, JSON/SSE smoke, and log scan are required before final completion."
+      forbidden_claim: "Do not claim decomposition complete from Phase 0 gate alone; do not treat skipped gates or unrelated dirty-worktree blockers as pass evidence."

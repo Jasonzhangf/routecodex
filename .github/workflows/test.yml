@@ -31,6 +31,8 @@ jobs:
         run: npm run verify:architecture-ci
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
+      - name: V3 file-size ratchet gate (<=1500)
+        run: npm run verify:v3-file-size
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Ensure release llms module
@@ -67,6 +69,8 @@ jobs:
         run: npm run verify:architecture-ci
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
+      - name: V3 file-size ratchet gate (<=1500)
+        run: npm run verify:v3-file-size
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Ensure release llms module

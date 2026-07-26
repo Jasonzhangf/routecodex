@@ -1,0 +1,18 @@
+{
+  "feature_id": "v3.module_decomposition",
+  "limit": 1500,
+  "scope": "v3/crates",
+  "exclude_path_segments": [
+    "/target/",
+    "/tests/"
+  ],
+  "ratchet_whitelist": {
+    "v3/crates/routecodex-v3-server/src/lib.rs": 8540,
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs": 7338,
+    "v3/crates/routecodex-v3-runtime/src/kernel.rs": 2969,
+    "v3/crates/routecodex-v3-lifecycle/src/lib.rs": 2795,
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs": 1712,
+    "v3/crates/routecodex-v3-config/src/validate.rs": 1705,
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs": 1588
+  }
+}
