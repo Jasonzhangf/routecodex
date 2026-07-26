@@ -245,6 +245,23 @@ fn stopless_noop_cmd(payload: &Value) -> String {
     parsed["cmd"].as_str().expect("cmd").to_string()
 }
 
+fn active_stopless_response_profile(
+    consecutive_stop_count: u32,
+    request_id: &'static str,
+) -> V3HubRelayResponseHookProfile {
+    V3HubRelayResponseHookProfile::empty()
+        .with_stopless_reasoning_stop()
+        .with_stopless_transition_context(request_id, 111_000)
+        .with_stopless_center_state(
+            V3StoplessCenterState::new(
+                consecutive_stop_count,
+                3,
+                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+            )
+            .provider_turn_in_flight(Some(request_id), Some(111_000)),
+        )
+}
+
 #[test]
 fn stopless_response_hook_projects_noop_cli_for_natural_stop_without_cli_state_json() {
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -262,7 +279,7 @@ fn stopless_response_hook_projects_noop_cli_for_natural_stop_without_cli_state_j
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-natural-noop"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -324,7 +341,7 @@ fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-tool-repair"),
         )
         .unwrap();
 
@@ -404,7 +421,7 @@ fn stopless_response_hook_empty_natural_stop_projects_noop_without_synthetic_tex
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-empty-natural"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -448,7 +465,7 @@ fn stopless_response_hook_ignores_assistant_text_schema_fence_as_state_source() 
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-fence-ignored"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -481,7 +498,7 @@ fn stopless_response_hook_reasoning_stop_continue_projects_noop_and_center_state
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-reasoning-continue"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -526,7 +543,7 @@ fn stopless_response_hook_terminal_reasoning_stop_returns_visible_completed_evid
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-reasoning-terminal"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
@@ -565,7 +582,7 @@ fn stopless_response_hook_blocked_reasoning_stop_requires_reason_and_evidence() 
     let resp03 = hooks
         .govern(
             missing_evidence,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-blocked-missing"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -589,7 +606,7 @@ fn stopless_response_hook_blocked_reasoning_stop_requires_reason_and_evidence() 
     let resp03 = hooks
         .govern(
             with_evidence,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-stopless-blocked-with-evidence"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
@@ -617,13 +634,7 @@ fn stopless_response_hook_third_natural_stop_still_projects_noop_cli() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    2,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(2, "req-stopless-third-natural"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -661,13 +672,7 @@ fn stopless_response_hook_fourth_natural_stop_guard_passes_cleaned_original_resp
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    3,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(3, "req-stopless-fourth-natural"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);

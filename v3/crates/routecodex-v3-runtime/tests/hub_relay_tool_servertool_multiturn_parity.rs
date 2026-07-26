@@ -81,6 +81,23 @@ fn stopless_projected_call(payload: &Value) -> &Value {
         .expect("projected stopless exec_command call")
 }
 
+fn active_stopless_response_profile(
+    consecutive_stop_count: u32,
+    request_id: &'static str,
+) -> V3HubRelayResponseHookProfile {
+    V3HubRelayResponseHookProfile::empty()
+        .with_stopless_reasoning_stop()
+        .with_stopless_transition_context(request_id, 88_000)
+        .with_stopless_center_state(
+            V3StoplessCenterState::new(
+                consecutive_stop_count,
+                3,
+                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+            )
+            .provider_turn_in_flight(Some(request_id), Some(88_000)),
+        )
+}
+
 fn assert_full_stopless_continuation_prompt(prompt: &str) {
     for required in [
         "继续当前目标",
@@ -488,7 +505,7 @@ fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state(
     let resp03 = response_hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-blackbox-stopless-noop"),
         )
         .unwrap();
     let resp04 = response_hooks.commit(resp03).unwrap();
@@ -727,7 +744,7 @@ fn stopless_hook_blackbox_terminal_reasoning_stop_skips_cli_roundtrip() {
     let resp03 = response_hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-blackbox-stopless-terminal"),
         )
         .unwrap();
     assert_eq!(
@@ -766,13 +783,7 @@ fn stopless_guard_terminal_strips_raw_stop_schema_text_without_cli_roundtrip() {
     let resp03 = response_hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    3,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(3, "req-blackbox-stopless-guard-schema"),
         )
         .unwrap();
     assert_eq!(

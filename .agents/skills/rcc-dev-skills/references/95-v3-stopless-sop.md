@@ -55,11 +55,13 @@ routecodex hook run reasoningStop
 
 ## Schema guidance activation 合同
 
-stopless 拦截的先决条件不是“看见 stop/end_turn”本身，而是**same-turn schema guidance activation**：当次 provider 请求已经带有 stop schema guidance 激活标记。该标记由 Req04 在合法注入 schema guidance 时写入 runtime control side-channel；Resp03 只能消费同一 scoped turn 的标记，不能从 provider/client payload、SSE、handler、continuation store、debug snapshot、CLI stdout 或 visible text 推断。
+English contract tokens (gate-locked): same-turn schema guidance; activation marker is forbidden as truth; No activation / inactive state means pass-through.
+
+stopless 拦截的先决条件不是“看见 stop/end_turn”本身，而是**StoplessCenter MetadataCenter 状态机处于同轮 `schema_guidance_active=true`**：Req04 合法注入 schema guidance 后，把 scoped StoplessCenter 状态迁移到本轮 active state；Resp03 只能读取同一 scoped turn 的 StoplessCenter 状态机，不能从 provider/client payload、SSE、handler、continuation store、debug snapshot、CLI stdout、visible text 或临时 marker 推断。
 
 判定矩阵：
 
-| 当次 schema guidance active | stop/end_turn | accepted summary | accepted stop_schema | Resp03 行为 |
+| StoplessCenter same-turn `schema_guidance_active` | stop/end_turn | accepted summary | accepted stop_schema | Resp03 行为 |
 | --- | --- | --- | --- | --- |
 | 否 | 是 | 任意 | 任意 | 不激发 stopless；不投影 CLI；不写 StoplessCenter；原样放行 |
 | 是 | 否 | 任意 | 任意 | 正常进展/工具调用；reset 或透明放行 |
@@ -72,10 +74,10 @@ stopless 拦截的先决条件不是“看见 stop/end_turn”本身，而是**s
 
 - 只统计/拦截 `finish_reason=stop`、`stop_reason=end_turn` 或协议等价自然停止；非 stop 进展和普通工具调用不触发 stopless。
 - 响应侧 accepted evidence 只有 canonical reasoning `summary` 和 canonical sibling `stop_schema` / `stopSchema`；assistant visible text、fenced JSON、`<rcc_stop_schema>`、CLI stdout 永远不是证据。
-- schema guidance 本身是触发 stopless 的条件；没有同轮 activation marker 时，即使响应缺 summary/schema，也必须放行，禁止静默合成续杯。No activation means pass-through.
-- Anthropic 等 provider 若因系统提示词/工具 schema 校验无法合法注入 guidance，provider-validity 优先；本轮不设置 activation marker，不激发 stopless。
-- 该合同适用于 Responses 协议 provider turn（direct 或 relay）。Relay 可写 StoplessCenter；direct 只可在同轮 activation 存在时使用响应侧 evidence gate，不得写 relay StoplessCenter 或伪造非 provider-native continuation。
-- same-turn schema guidance activation 时，no marker means pass-through without CLI projection; accepted canonical summary and accepted stop_schema pass through.
+- schema guidance 本身是触发 stopless 的条件；StoplessCenter 同轮 inactive state 时，即使响应缺 summary/schema，也必须放行，禁止静默合成续杯。Inactive state means pass-through.
+- Anthropic 等 provider 若因系统提示词/工具 schema 校验无法合法注入 guidance，provider-validity 优先；本轮 StoplessCenter 保持 inactive state，不激发 stopless。
+- 该合同适用于 Responses 协议 provider turn（direct 或 relay）。Relay 可写 StoplessCenter；direct 只可在同轮 StoplessCenter active state 存在时使用响应侧 evidence gate，不得写 relay StoplessCenter 或伪造非 provider-native continuation。
+- StoplessCenter state machine 是唯一 activation truth；`schema_guidance_active` inactive state means pass-through without CLI projection; accepted canonical summary and accepted stop_schema pass through.
 - 详细设计真源：`docs/design/v3-stopless-schema-guidance-activation-contract.md`。
 
 ## CLI no-op 合同
@@ -104,7 +106,7 @@ routecodex hook run reasoningStop --input-json '{"sessionId":"..."}'
 - 若当前已安装 CLI 要求 `--input-json <json>`，这是 CLI no-input-hook contract bug，不能把 fake empty JSON 保留下来当 stopless 设计。
 - `exec_command.arguments` 只能包含公共命令本身，例如 `{"cmd":"routecodex hook run reasoningStop"}`；不得把 stopless control 写入 arguments。
 
-## MetadataCenter StoplessCenter 状态机
+## MetadataCenter StoplessCenter 状态机机制
 
 StoplessCenter 是 Metadata Center 中的控制状态机，不是计数器。状态 key 至少绑定：
 
@@ -113,6 +115,17 @@ entryEndpoint + sessionId + conversationId? + port/serverId + routingGroup
 ```
 
 其中 `sessionId` 是隔离不同请求 session 的硬边界；缺失或空白时不得拦截 stop、不得写状态，必须自然放行并记录诊断。
+
+### 机制说明
+
+- StoplessCenter 是本 SOP 的唯一控制真源；它只存在于 MetadataCenter/runtime_control，不存在于 CLI、payload、continuation store、SSE、handler、debug/snapshot、provider body 或 client body。
+- 这个状态机不是“看见 stop 就拦一下”的规则集合，而是一个按同一 scoped turn 读写的控制状态机：Req04 写入，Resp03 读取，Req04 下一轮再消费。
+- 状态机的 activation truth 不是 loose marker；唯一真源是 `schema_guidance_active` 这个状态字段及其同轮 scoped state。Resp03 只能按这个状态判断是否允许续杯拦截。
+- 只有相邻迁移合法：`Idle -> ProviderTurnInFlight -> RespStopObserved -> CliNoopProjected -> CliNoopObserved -> ContinuationGuidancePrepared -> ProviderTurnInFlight`，以及 `TerminalCompleted/TerminalBlocked/GuardTerminal` 的显式终态或 `Idle(reset)`。
+- `Req04` 负责把合法 schema guidance 转成 active state；`Resp03` 负责把 stop/end_turn + summary/schema evidence 转成终态、续杯、或 guard。
+- `Resp03` 只会在 active state 下对 stop/end_turn 做拦截判定；inactive state 必须原样放行，不得静默补偿，不得从 visible text、fenced JSON、CLI stdout、continuation store 反推状态。
+- `guard_exhausted` 不是任务完成，只是停止继续拦截当前 stop；`GuardTerminal` 必须显式放行，不得合成内部状态诊断。
+- 这套状态机机制必须在本文、manifest、function map、verification map 与 generated review surface 同步出现；缺一处就是 contract drift。
 
 ### 最小状态字段
 
@@ -255,12 +268,12 @@ Req04 Chat Process:
 - Managed relay 必须注入 stopless guidance。
 - 原 client tool surface 必须保留：顶层 `tools` 仍顶层，Responses `input[].type=additional_tools.tools` 仍嵌入原路径。
 - 只允许追加 exactly-one 内部/model-visible `reasoningStop` tool。
-- Responses 协议 direct/provider-direct 默认零 relay stopless 注入；只有当同轮请求已由合法 hook/schema guidance 设置 activation marker 时，response-side 才允许按本合同做 evidence gate。direct 续轮只承认 provider 原生 pending/function_call 或同轮 activation 后的标准 continuation 合同；本地 stopless control state 不能写入 direct 上游或 relay StoplessCenter。
+- Responses 协议 direct/provider-direct 默认零 relay stopless 注入；只有当同轮请求已由合法 hook/schema guidance 驱动 StoplessCenter 进入 `schema_guidance_active` state 时，response-side 才允许按本合同做 evidence gate。direct 续轮只承认 provider 原生 pending/function_call 或同轮 activation 后的标准 continuation 合同；本地 stopless control state 不能写入 direct 上游或 relay StoplessCenter。
 
 ### Round 1 response：client-visible
 
-- Resp03 只在当次 provider request 有 schema guidance activation marker 时拦截提前 stop 或 provider/model-visible `reasoningStop` event；没有 marker 必须放行。
-- Resp03 先限定 stop/end_turn，再检查 canonical reasoning summary 与同一 reasoning item 的 sibling `stop_schema` / `stopSchema`；没有 summary 且没有 schema 时，只有 activation marker 存在才当提前 stop 续轮。visible/fenced schema 仍不是状态源。
+- Resp03 只在 StoplessCenter 同轮 `schema_guidance_active` state 存在时拦截提前 stop 或 provider/model-visible `reasoningStop` event；inactive state 必须放行。
+- Resp03 先限定 stop/end_turn，再检查 canonical reasoning summary 与同一 reasoning item 的 sibling `stop_schema` / `stopSchema`；没有 summary 且没有 schema 时，只有 StoplessCenter active state 存在才当提前 stop 续轮。visible/fenced schema 仍不是状态源。
 - `stop_schema.finished=true`：不拦截，不计数，直接返回。
 - `stop_schema.blocked=true` 且存在 `blockedReason` / `blocked_reason` / `reason`：把 blocked reason 追加进 canonical summary，不拦截，不计数，直接返回。
 - `stop_schema.finished=false` / unfinished：继续续轮；如果有 `nextStep` / `next_step`，只存为 scoped `next_step_prompt` 并在下一轮 Req04 当前轮 continuation prompt 中作为“上一轮给出的下一步”使用。
@@ -268,7 +281,7 @@ Req04 Chat Process:
 - CLI 命令必须是 no-input：`routecodex hook run reasoningStop`。
 - 投影结果不得泄漏 raw internal `reasoningStop`、StoplessCenter state、repeat counter、schema feedback、metadata/debug 字段。
 - 投影完成后才允许进入 continuation save。
-- Responses 协议 direct 不写 relay StoplessCenter，也不从无 activation 的 completed stop 合成本地 stopless no-op：terminal stop/status completed 若没有同轮 schema guidance marker，必须作为 provider 原生完成响应透传。若同轮 marker 存在，direct 可按同一 response-side summary/schema gate 决定放行或续杯，但 continuation 必须保持 direct owner，不能伪装 relay continuation。
+- Responses 协议 direct 不写 relay StoplessCenter，也不从无 activation 的 completed stop 合成本地 stopless no-op：terminal stop/status completed 若 StoplessCenter 同轮 inactive state，必须作为 provider 原生完成响应透传。若 StoplessCenter 同轮 active state 存在，direct 可按同一 response-side summary/schema gate 决定放行或续杯，但 continuation 必须保持 direct owner，不能伪装 relay continuation。
 
 ### Round 2 request：state-machine guideline
 
@@ -345,11 +358,11 @@ Req04 Chat Process:
 4. Req04 guidance：同一 no-op output 在不同 StoplessCenter state 下输出不同 provider-facing guideline/policy；提示必须是完整但透明的任务导向 guideline，包含上下文复核、继续推理、工具推进、完成/阻塞证据要求，且不得暴露 no-op/CLI/client bridge/`finish_reason=stop` 机制；单一硬编码 `继续。` 覆盖全部状态必须红。
 5. Continuation boundary：Resp03 投影先于 Resp04 save，Req04 hook 晚于 restore；反向顺序必须红。
 6. Provider blackbox：Round2 provider request 无 shell/control artifacts，保留原工具声明面，追加 exactly-one `reasoningStop`，OpenAI Chat wire 不能只比 name，必须比 description/schema/strict/custom format。
-7. Direct/relay activation conditional：Responses 协议 direct 或 relay 的 response-side stopless 只能在同轮 schema guidance activation marker 存在时激发；无 marker 的 no-summary terminal stop 必须放行；有 summary 或 accepted schema 必须按合同放行/判定。provider-direct/非 Responses direct 不启用 relay StoplessCenter。
+7. Direct/relay activation conditional：Responses 协议 direct 或 relay 的 response-side stopless 只能在同轮 StoplessCenter `schema_guidance_active` state 存在时激发；inactive state 的 no-summary terminal stop 必须放行；有 summary 或 accepted schema 必须按合同放行/判定。provider-direct/非 Responses direct 不启用 relay StoplessCenter。
 8. Guard/terminal：完成、阻塞、guard、non-stop progress、already-terminal 均有正反测试。
 9. Generated guideline history：多轮 no-op/guard 前 provider request 中 generated continuation guideline 必须 exactly-one；旧 generated guideline 累积必须红。
 10. Dry-run read-only：带 StoplessCenter 的 provider-request dry-run 不得改变 live StoplessCenter，连续 dry-run 产物必须 identical；dry-run 推进 count/phase 或 clear state 必须红。
-11. Summary/stop_schema activation：只有同轮 schema guidance active 时，无 summary 且无 schema 的 stop/end_turn 才必须续轮；无 activation 必须放行。summary + `stop_schema.finished=true` 必须通过且不计数；summary + unfinished `nextStep` 必须续轮并让 Req04 prompt 带 nextStep；summary + blocked reason 必须把 reason 写入 summary 并通过；visible text/fenced schema 仍必须红锁为非状态源。
+11. Summary/stop_schema activation：只有同轮 StoplessCenter `schema_guidance_active` 时，无 summary 且无 schema 的 stop/end_turn 才必须续轮；inactive state 必须放行。summary + `stop_schema.finished=true` 必须通过且不计数；summary + unfinished `nextStep` 必须续轮并让 Req04 prompt 带 nextStep；summary + blocked reason 必须把 reason 写入 summary 并通过；visible text/fenced schema 仍必须红锁为非状态源。
 
 验证升级：
 
@@ -384,7 +397,7 @@ SOP/docs/gate 红锁
 ### Stop schema vs natural stop 判定补充
 
 - 如果 provider-facing system guidance 和 `reasoningStop` schema 已完整存在，模型真要完成/阻塞时应调用 `reasoningStop`，不能把自然 `finish_reason=stop` 当合法终态证据。
-- 新 summary/schema completion gate 只在同轮 schema guidance active 时拦截自然 stop；有 accepted summary 放行，有 sibling `stop_schema` 时按 schema 判定 finished / blocked / unfinished nextStep；没有 summary/schema 的自然 stop 只有在 activation marker 存在时继续续轮。
+- 新 summary/schema completion gate 只在同轮 schema guidance active 时拦截自然 stop；有 accepted summary 放行，有 sibling `stop_schema` 时按 schema 判定 finished / blocked / unfinished nextStep；没有 summary/schema 的自然 stop 只有在 StoplessCenter active state 存在时继续续轮。
 - 如果自然 stop 是偶发早停，下一轮 managed stopless provider request 必须仍保留完整原系统/工具语义，并把工具决策提升为 required/any：有真实工具可推进就调用真实工具；无完成/阻塞证据不得连续 text-only stop。
 - Live stopless probe 必须带真实可隔离 `client_metadata.session_id/thread_id`（或 Codex 等价 session scope）。缺失 session scope 的轻量 curl 会按合同不写 StoplessCenter/不注入 stopless，不能作为 stopless 生效或失效证据。
 

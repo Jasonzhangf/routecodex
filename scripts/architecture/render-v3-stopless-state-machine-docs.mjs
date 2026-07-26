@@ -145,6 +145,14 @@ function validateManifest(doc) {
   requireValue(doc?.dry_run_contract?.repeated_dry_run_same_state_provider_request === 'identical', `${manifestPath}: dry_run_contract.repeated_dry_run_same_state_provider_request must be identical`);
   requireValue(arrayOf(doc?.verification_gates).includes('npm run verify:v3-stopless-state-machine-docs'), `${manifestPath}: verification_gates must include npm run verify:v3-stopless-state-machine-docs`);
   requireValue(arrayOf(doc?.verification_gates).includes('npm run test:v3-stopless-state-machine-docs-red-fixtures'), `${manifestPath}: verification_gates must include npm run test:v3-stopless-state-machine-docs-red-fixtures`);
+  requireValue(doc?.activation_contract?.design_doc === 'docs/design/v3-stopless-schema-guidance-activation-contract.md', `${manifestPath}: activation_contract.design_doc mismatch`);
+  requireValue(doc?.activation_contract?.request_schema_guidance_required === true, `${manifestPath}: activation_contract.request_schema_guidance_required must be true`);
+  requireValue(doc?.activation_contract?.response_intercept_without_activation === 'forbidden', `${manifestPath}: activation_contract.response_intercept_without_activation must be forbidden`);
+  requireValue(doc?.activation_contract?.no_activation_policy === 'pass_through_without_stopless_projection_or_state_write', `${manifestPath}: activation_contract.no_activation_policy mismatch`);
+  requireValue(arrayOf(doc?.activation_contract?.accepted_stop_evidence).includes('canonical_reasoning_summary'), `${manifestPath}: activation_contract.accepted_stop_evidence missing canonical_reasoning_summary`);
+  requireValue(arrayOf(doc?.activation_contract?.accepted_stop_evidence).includes('accepted_stop_schema'), `${manifestPath}: activation_contract.accepted_stop_evidence missing accepted_stop_schema`);
+  requireValue(doc?.activation_contract?.missing_summary_and_schema === 'continue_when_activated', `${manifestPath}: activation_contract.missing_summary_and_schema mismatch`);
+  requireValue(doc?.activation_contract?.provider_validation_exception === 'disable_activation_when_guidance_injection_is_provider_invalid', `${manifestPath}: activation_contract.provider_validation_exception mismatch`);
 }
 
 function validateMainlineMap(doc, mainlineMapDoc) {
@@ -193,6 +201,7 @@ function renderMarkdown(doc, mainlineMapDoc) {
     '- `docs/architecture/v3-mainline-call-map.yml` (`chain_id: v3.servertool_hook_skeleton_lifecycle`)',
     '- `docs/architecture/v3-verification-map.yml`',
     '- `.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md`',
+    '- `docs/design/v3-stopless-schema-guidance-activation-contract.md`',
     '',
     'Generated artifacts:',
     `- Markdown: \`${markdownPath}\``,
@@ -200,7 +209,7 @@ function renderMarkdown(doc, mainlineMapDoc) {
     `- Generator: \`${doc.edge_flow_docs.generator}\``,
     `- Verifier: \`${doc.edge_flow_docs.verifier}\``,
     '',
-    'Main rule: stopless is transparent to client/provider/agent except for the public no-input `exec_command` bridge that lets the black-box client display the stopped assistant text. StoplessCenter is the only control truth and lives in MetadataCenter/runtime_control; it never lives in CLI args/stdout, provider payload, client payload, continuation store, SSE, handler, debug snapshot, or dry-run metadata. Provider-request dry-run may read the scoped StoplessCenter state to build an observational provider request, but it must never write, clear, or advance that live state.',
+    'Main rule: stopless is transparent to client/provider/agent except for the public no-input `exec_command` bridge that lets the black-box client display the stopped assistant text. Stopless response interception is additionally gated by the MetadataCenter StoplessCenter state machine: inactive `schema_guidance_active` state means no CLI projection and no StoplessCenter write. StoplessCenter is the only control truth and lives in MetadataCenter/runtime_control; it never lives in CLI args/stdout, provider payload, client payload, continuation store, SSE, handler, debug snapshot, or dry-run metadata. Provider-request dry-run may read the scoped StoplessCenter state to build an observational provider request, but it must never write, clear, or advance that live state.',
     '',
     '## Stopless Session Mainline',
     '',
@@ -213,6 +222,25 @@ function renderMarkdown(doc, mainlineMapDoc) {
     '```mermaid',
     renderStateDiagram(doc),
     '```',
+    '',
+    '## Activation Contract',
+    '',
+    `- Design doc: \`${doc.activation_contract.design_doc}\``,
+    `- Request schema guidance required: \`${String(doc.activation_contract.request_schema_guidance_required)}\``,
+    `- Activation truth owner: \`${doc.activation_contract.activation_truth_owner}\``,
+    `- Activation state fields: ${arrayOf(doc.activation_contract.activation_state_fields).map((value) => `\`${value}\``).join(', ')}`,
+    `- Response intercept without activation: \`${doc.activation_contract.response_intercept_without_activation}\``,
+    `- No activation policy: \`${doc.activation_contract.no_activation_policy}\``,
+    `- Accepted stop evidence: ${arrayOf(doc.activation_contract.accepted_stop_evidence).map((value) => `\`${value}\``).join(', ')}`,
+    `- Missing summary/schema: \`${doc.activation_contract.missing_summary_and_schema}\``,
+    `- Provider validation exception: \`${doc.activation_contract.provider_validation_exception}\``,
+    '',
+    '| StoplessCenter `schema_guidance_active` | terminal stop/end_turn | accepted summary/schema | decision |',
+    '| --- | --- | --- | --- |',
+    '| `false` | `true` | any | pass through; no stopless projection/state write |',
+    '| `true` | `false` | any | normal non-stop/tool progress |',
+    '| `true` | `true` | accepted summary or terminal schema | pass through terminal evidence |',
+    '| `true` | `true` | unfinished schema or no summary/schema | continue via no-input CLI bridge before continuation commit |',
     '',
     '## State Contract',
     '',
@@ -253,7 +281,7 @@ function renderMarkdown(doc, mainlineMapDoc) {
     '## Abnormal Closure',
     '',
     '- `GuardTerminal`: when the configured consecutive-stop guard is reached, stopless stops intercepting the current provider `finish_reason=stop`; it does not project another no-op and does not expose guard/budget/counter diagnostics.',
-    '- Missing client session scope, direct/provider-direct paths, disabled feature flags, and scope changes never write StoplessCenter and never inject relay stopless guidance/tool/projection.',
+    '- Missing client session scope, inactive `schema_guidance_active` state, disabled feature flags, provider validation exceptions, and scope changes never write StoplessCenter and never inject relay stopless guidance/tool/projection.',
     '- Provider or route terminal errors stay real ErrorErr-chain errors; stopless must not synthesize success, fallback, or diagnostics and must not retain stale bridge state as user-visible truth.',
     '',
     '## Provider/Client Transparency Checklist',
@@ -278,7 +306,7 @@ function renderMarkdown(doc, mainlineMapDoc) {
     '',
     '## Review Checklist',
     '',
-    '- Resp03 projects no-input CLI or transparent terminal/pass-through before Resp04 continuation commit.',
+    '- Resp03 projects no-input CLI only when StoplessCenter `schema_guidance_active` state exists and stop/end_turn lacks accepted summary/schema; otherwise it transparently passes terminal evidence or inactive-state stops before Resp04 continuation commit.',
     '- Req04 runs only after continuation/local context restore; it consumes no-op output only as evidence and loads StoplessCenter from MetadataCenter/runtime_control.',
     '- Req04 removes stale generated stopless continuation guidelines before appending one current-turn guideline.',
     '- Provider-request dry-run reads StoplessCenter for projection only and does not commit StoplessCenter transitions.',

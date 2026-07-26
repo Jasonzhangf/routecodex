@@ -38,6 +38,23 @@ fn relay_raw(payload: Value) -> routecodex_v3_runtime::V3ProviderRespInbound01Ra
     )
 }
 
+fn active_stopless_response_profile(
+    consecutive_stop_count: u32,
+    request_id: &'static str,
+) -> V3HubRelayResponseHookProfile {
+    V3HubRelayResponseHookProfile::empty()
+        .with_stopless_reasoning_stop()
+        .with_stopless_transition_context(request_id, 77_000)
+        .with_stopless_center_state(
+            V3StoplessCenterState::new(
+                consecutive_stop_count,
+                3,
+                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+            )
+            .provider_turn_in_flight(Some(request_id), Some(77_000)),
+        )
+}
+
 #[test]
 fn stopless_live_shape_natural_stop_missing_finish_reason_projects_noop_cli() {
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -58,7 +75,7 @@ fn stopless_live_shape_natural_stop_missing_finish_reason_projects_noop_cli() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-live-missing-finish-reason"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -112,7 +129,7 @@ fn stopless_live_shape_preface_and_fenced_schema_text_is_visible_only_not_state(
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-live-text-schema-ignored"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -142,13 +159,7 @@ fn stopless_live_shape_third_natural_stop_projects_noop_cli() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    2,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(2, "req-live-third-natural-stop"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -179,13 +190,7 @@ fn stopless_live_shape_fourth_natural_stop_passes_original_text_without_cli() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    3,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(3, "req-live-fourth-natural-stop"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
@@ -218,13 +223,7 @@ fn stopless_live_shape_guard_schema_only_text_strips_control_without_intercept()
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    3,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(3, "req-live-guard-schema-only"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
@@ -279,7 +278,7 @@ fn stopless_live_shape_reasoning_stop_tool_call_is_the_only_state_source() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-live-reasoning-stop-continue"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -322,13 +321,7 @@ fn stopless_live_shape_guard_reasoning_continue_tool_does_not_project_noop_or_di
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty()
-                .with_stopless_reasoning_stop()
-                .with_stopless_center_state(V3StoplessCenterState::new(
-                    3,
-                    3,
-                    V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-                )),
+            &active_stopless_response_profile(3, "req-live-reasoning-stop-guard"),
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);

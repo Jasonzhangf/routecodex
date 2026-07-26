@@ -42,7 +42,7 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
     mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
-    if !profile.stopless_reasoning_stop_enabled() {
+    if !profile.stopless_reasoning_stop_enabled() || !profile.stopless_schema_guidance_active() {
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
@@ -138,7 +138,7 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
     mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
-    if !profile.stopless_reasoning_stop_enabled() {
+    if !profile.stopless_reasoning_stop_enabled() || !profile.stopless_schema_guidance_active() {
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
@@ -274,20 +274,38 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         inject_stopless_guidance(payload, None)?;
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(None);
+        return Ok(initial_stopless_provider_turn_state(
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        ));
     };
     let Some((index, _output)) = active_stopless_cli_output(input) else {
         strip_stopless_cli_artifacts(input);
         strip_stopless_generated_system_guidance_items(input);
         inject_stopless_guidance(payload, None)?;
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(None);
+        return Ok(initial_stopless_provider_turn_state(
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        ));
     };
+    let had_restored_state = restored_stopless_center_state.is_some();
     let state = restored_stopless_center_state
         .cloned()
+        .or_else(|| {
+            initial_stopless_provider_turn_state(
+                restored_stopless_center_state,
+                transition_request_id,
+                transition_updated_at,
+            )
+        })
         .map(|state| state.cli_noop_observed(transition_request_id, transition_updated_at));
-    if state.is_some() {
+    if had_restored_state {
         events.push(V3HubRelayRequestHookEvent::Req04StoplessControlLoaded);
+    }
+    if state.is_some() {
         events.push(V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved);
     }
     strip_active_stopless_pair_and_stale(input, index);
@@ -327,20 +345,38 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         inject_stopless_guidance(payload, None)?;
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(None);
+        return Ok(initial_stopless_provider_turn_state(
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        ));
     };
     let Some(index) = active_stopless_chat_cli_output(messages) else {
         strip_stopless_chat_cli_artifacts(messages);
         strip_stopless_generated_system_guidance_items(messages);
         inject_stopless_guidance(payload, None)?;
         events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
-        return Ok(None);
+        return Ok(initial_stopless_provider_turn_state(
+            restored_stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        ));
     };
+    let had_restored_state = restored_stopless_center_state.is_some();
     let state = restored_stopless_center_state
         .cloned()
+        .or_else(|| {
+            initial_stopless_provider_turn_state(
+                restored_stopless_center_state,
+                transition_request_id,
+                transition_updated_at,
+            )
+        })
         .map(|state| state.cli_noop_observed(transition_request_id, transition_updated_at));
-    if state.is_some() {
+    if had_restored_state {
         events.push(V3HubRelayRequestHookEvent::Req04StoplessControlLoaded);
+    }
+    if state.is_some() {
         events.push(V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved);
     }
     strip_active_stopless_chat_pair_and_stale(messages, index);
@@ -361,6 +397,26 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
     events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
     Ok(state
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
+}
+
+fn initial_stopless_provider_turn_state(
+    restored_stopless_center_state: Option<&V3StoplessCenterState>,
+    transition_request_id: Option<&str>,
+    transition_updated_at: Option<u64>,
+) -> Option<V3StoplessCenterState> {
+    let request_id = transition_request_id
+        .map(str::trim)
+        .filter(|request_id| !request_id.is_empty())?;
+    Some(
+        V3StoplessCenterState::new(
+            0,
+            restored_stopless_center_state
+                .map(V3StoplessCenterState::max_natural_stops)
+                .unwrap_or(3),
+            V3StoplessCenterSteering::Continue,
+        )
+        .provider_turn_in_flight(Some(request_id), transition_updated_at),
+    )
 }
 
 fn output_item_text(item: &Value) -> Option<&str> {

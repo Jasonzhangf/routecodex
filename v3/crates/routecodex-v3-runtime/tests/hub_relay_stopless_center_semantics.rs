@@ -70,6 +70,23 @@ fn stopless_cmd(payload: &Value) -> String {
         .to_string()
 }
 
+fn active_stopless_response_profile(
+    consecutive_stop_count: u32,
+    request_id: &'static str,
+) -> V3HubRelayResponseHookProfile {
+    V3HubRelayResponseHookProfile::empty()
+        .with_stopless_reasoning_stop()
+        .with_stopless_transition_context(request_id, 55_000)
+        .with_stopless_center_state(
+            V3StoplessCenterState::new(
+                consecutive_stop_count,
+                3,
+                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+            )
+            .provider_turn_in_flight(Some(request_id), Some(55_000)),
+        )
+}
+
 fn reasoning_summary_texts(payload: &Value) -> Vec<String> {
     payload
         .get("output")
@@ -198,6 +215,10 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
         first.next_request_policy(),
         V3StoplessCenterNextRequestPolicy::ContinueDefault
     );
+    assert!(!first.schema_guidance_active());
+    assert_eq!(first.schema_guidance_request_id(), None);
+    assert_eq!(first.schema_guidance_contract(), None);
+    assert!(!first.schema_guidance_active_for(Some("req-1")));
 
     let observed = first.clone().cli_noop_observed(Some("req-2"), Some(20));
     assert_eq!(observed.phase(), V3StoplessCenterPhase::CliNoopObserved);
@@ -207,6 +228,9 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
         observed.last_transition_reason(),
         Some("req04_stopless_noop_observed")
     );
+    assert!(!observed.schema_guidance_active());
+    assert_eq!(observed.schema_guidance_request_id(), None);
+    assert_eq!(observed.schema_guidance_contract(), None);
 
     let prepared = observed
         .clone()
@@ -221,6 +245,9 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
         prepared.last_transition_reason(),
         Some("req04_stopless_continuation_guidance_prepared")
     );
+    assert!(!prepared.schema_guidance_active());
+    assert_eq!(prepared.schema_guidance_request_id(), None);
+    assert_eq!(prepared.schema_guidance_contract(), None);
 
     let in_flight = prepared
         .clone()
@@ -236,6 +263,21 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
         Some("req04_stopless_guidance_prepared")
     );
     assert_eq!(in_flight.consecutive_stop_count(), 1);
+    assert!(in_flight.schema_guidance_active());
+    assert_eq!(in_flight.schema_guidance_request_id(), Some("req-2"));
+    assert_eq!(in_flight.schema_guidance_contract(), Some("stop_schema"));
+    assert!(in_flight.schema_guidance_active_for(Some("req-2")));
+    assert!(!in_flight.schema_guidance_active_for(Some("req-3")));
+    assert!(!in_flight.schema_guidance_active_for(None));
+
+    let no_request_in_flight = prepared.clone().provider_turn_in_flight(None, Some(23));
+    assert_eq!(
+        no_request_in_flight.phase(),
+        V3StoplessCenterPhase::ProviderTurnInFlight
+    );
+    assert!(!no_request_in_flight.schema_guidance_active());
+    assert_eq!(no_request_in_flight.schema_guidance_request_id(), None);
+    assert_eq!(no_request_in_flight.schema_guidance_contract(), None);
 
     let stronger = V3StoplessCenterState::new(
         2,
@@ -399,7 +441,7 @@ fn natural_stop_projects_noop_cli_without_cli_state_json() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-natural-stop-noop"),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -427,7 +469,7 @@ fn natural_stop_projects_noop_cli_without_cli_state_json() {
         state.next_request_policy(),
         V3StoplessCenterNextRequestPolicy::ContinueDefault
     );
-    assert_eq!(state.last_request_id(), None);
+    assert_eq!(state.last_request_id(), Some("req-natural-stop-noop"));
     assert_eq!(state.last_response_id(), Some("resp_natural_stop_noop"));
     assert_eq!(
         state.last_transition_reason(),
@@ -451,6 +493,40 @@ fn natural_stop_projects_noop_cli_without_cli_state_json() {
         serialized.contains("自然停下的可见文本"),
         "client-visible assistant text must survive natural-stop projection: {serialized}"
     );
+}
+
+#[test]
+fn inactive_schema_guidance_stop_passes_without_cli_projection_or_state_write() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = hooks
+        .normalize(relay_response(json!({
+            "id":"resp_inactive_stop_passthrough",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"inactive stop must pass through"}]
+            }]
+        })))
+        .unwrap();
+    let resp03 = hooks
+        .govern(
+            resp02,
+            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+        )
+        .unwrap();
+    let resp04 = hooks.commit(resp03).unwrap();
+    let payload = resp04.finalized_payload();
+    let serialized = serde_json::to_string(payload).unwrap();
+
+    assert_eq!(payload["status"], "completed");
+    assert_eq!(payload["finish_reason"], "stop");
+    assert!(resp04.stopless_center_state().is_none());
+    assert!(serialized.contains("inactive stop must pass through"));
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
 }
 
 #[test]
@@ -486,7 +562,7 @@ fn natural_stop_with_canonical_reasoning_summary_passes_without_stopless_project
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-summary-next-step"),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -545,7 +621,10 @@ fn third_consecutive_natural_stop_with_summary_passes_without_incrementing_stopl
             resp02,
             &V3HubRelayResponseHookProfile::empty()
                 .with_stopless_reasoning_stop()
-                .with_stopless_center_state(prior_state),
+                .with_stopless_transition_context("req-summary-third", 55_000)
+                .with_stopless_center_state(
+                    prior_state.provider_turn_in_flight(Some("req-summary-third"), Some(55_000)),
+                ),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -597,7 +676,7 @@ fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-summary-blocked"),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -660,7 +739,7 @@ fn natural_stop_with_summary_stop_schema_blocked_reason_passes_and_augments_summ
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-anthropic-end-turn"),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -712,7 +791,7 @@ fn anthropic_end_turn_text_stop_schema_is_natural_stop_for_stopless() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-assistant-fence"),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -747,7 +826,7 @@ fn assistant_text_stop_schema_fence_is_not_a_stopless_state_source() {
     let resp03 = hooks
         .govern(
             resp02,
-            &V3HubRelayResponseHookProfile::empty().with_stopless_reasoning_stop(),
+            &active_stopless_response_profile(0, "req-fence-active"),
         )
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
@@ -831,6 +910,13 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
     assert_eq!(state.phase(), V3StoplessCenterPhase::ProviderTurnInFlight);
     assert_eq!(state.consecutive_stop_count(), 1);
     assert_eq!(state.last_request_id(), Some("req-stopless-req04-state"));
+    assert!(state.schema_guidance_active());
+    assert_eq!(
+        state.schema_guidance_request_id(),
+        Some("req-stopless-req04-state")
+    );
+    assert_eq!(state.schema_guidance_contract(), Some("stop_schema"));
+    assert!(state.schema_guidance_active_for(Some("req-stopless-req04-state")));
     assert_eq!(state.updated_at(), 12_345);
     assert_eq!(
         state.last_transition_reason(),

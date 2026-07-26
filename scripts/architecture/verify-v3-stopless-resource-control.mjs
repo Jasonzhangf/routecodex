@@ -12,6 +12,8 @@ const paths = {
   verificationMap: 'docs/architecture/v3-verification-map.yml',
   manifest: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
   snapshotContract: 'docs/architecture/snapshot-stage-contract.md',
+  designContract: 'docs/design/v3-stopless-schema-guidance-activation-contract.md',
+  stoplessSop: '.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md',
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   runtime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
@@ -31,6 +33,8 @@ const mainlineMap = readYaml(paths.mainlineMap);
 const verificationMap = readYaml(paths.verificationMap);
 const manifest = readYaml(paths.manifest);
 const snapshotContract = readText(paths.snapshotContract);
+const designContract = readText(paths.designContract);
+const stoplessSop = readText(paths.stoplessSop);
 const hubSource = [readText(paths.hub), readText(paths.hubCommon)].join('\n');
 const runtimeSource = readText(paths.runtime);
 const hookSource = readText(paths.hooks);
@@ -45,6 +49,7 @@ verifyRuntimeSeparation();
 verifyStoplessStateMachineShape();
 verifyCliProjection();
 verifyStoplessGuideline();
+verifyActivationContract();
 verifySnapshotBoundary();
 
 if (failures.length > 0) {
@@ -313,6 +318,29 @@ function verifyLifecycleManifest() {
       `${paths.manifest}.guidance_rewrite.forbidden_model_visible`,
     );
   }
+  const activation = manifest.activation_contract ?? {};
+  requireEqual(activation.design_doc, paths.designContract, `${paths.manifest}.activation_contract.design_doc`);
+  requireEqual(activation.request_schema_guidance_required, true, `${paths.manifest}.activation_contract.request_schema_guidance_required`);
+  requireEqual(activation.activation_truth_owner, 'metadata_center_stopless_state_machine', `${paths.manifest}.activation_contract.activation_truth_owner`);
+  requireEqual(activation.loose_activation_marker, 'forbidden', `${paths.manifest}.activation_contract.loose_activation_marker`);
+  for (const field of ['schema_guidance_active', 'schema_guidance_request_id', 'schema_guidance_contract']) {
+    requireArrayIncludes(activation.activation_state_fields, field, `${paths.manifest}.activation_contract.activation_state_fields`);
+  }
+  requireEqual(activation.response_intercept_without_activation, 'forbidden', `${paths.manifest}.activation_contract.response_intercept_without_activation`);
+  requireEqual(activation.no_activation_policy, 'pass_through_without_stopless_projection_or_state_write', `${paths.manifest}.activation_contract.no_activation_policy`);
+  requireEqual(activation.missing_summary_and_schema, 'continue_when_activated', `${paths.manifest}.activation_contract.missing_summary_and_schema`);
+  requireEqual(activation.unfinished_schema, 'continue_when_activated', `${paths.manifest}.activation_contract.unfinished_schema`);
+  requireEqual(activation.visible_or_fenced_schema_truth, 'forbidden', `${paths.manifest}.activation_contract.visible_or_fenced_schema_truth`);
+  requireEqual(activation.provider_validation_exception, 'disable_activation_when_guidance_injection_is_provider_invalid', `${paths.manifest}.activation_contract.provider_validation_exception`);
+  requireEqual(activation.relay_stopless_center_write, 'relay_only', `${paths.manifest}.activation_contract.relay_stopless_center_write`);
+  requireEqual(activation.direct_stopless_center_write, 'forbidden', `${paths.manifest}.activation_contract.direct_stopless_center_write`);
+  requireArrayIncludes(activation.terminal_reasons_only, 'stop', `${paths.manifest}.activation_contract.terminal_reasons_only`);
+  requireArrayIncludes(activation.terminal_reasons_only, 'end_turn', `${paths.manifest}.activation_contract.terminal_reasons_only`);
+  requireArrayIncludes(activation.accepted_stop_evidence, 'canonical_reasoning_summary', `${paths.manifest}.activation_contract.accepted_stop_evidence`);
+  requireArrayIncludes(activation.accepted_stop_evidence, 'accepted_stop_schema', `${paths.manifest}.activation_contract.accepted_stop_evidence`);
+  requireArrayIncludes(activation.provider_validation_exception_provider_family, 'anthropic', `${paths.manifest}.activation_contract.provider_validation_exception_provider_family`);
+  requireArrayIncludes(activation.applies_to_paths, 'responses_direct', `${paths.manifest}.activation_contract.applies_to_paths`);
+  requireArrayIncludes(activation.applies_to_paths, 'responses_relay', `${paths.manifest}.activation_contract.applies_to_paths`);
 }
 
 function verifyFunctionAndVerificationMaps() {
@@ -330,6 +358,8 @@ function verifyFunctionAndVerificationMaps() {
     for (const token of [
       'Metadata Center control-signal',
       'state machine',
+      'schema_guidance_active',
+      'inactive state',
       'data/control',
       'normal payload',
       'CLI',
@@ -337,6 +367,9 @@ function verifyFunctionAndVerificationMaps() {
       'debug/snapshot',
       'declared',
       'SOP',
+      'accepted canonical summary',
+      'accepted_stop_schema',
+      'Anthropic',
     ]) {
       if (!serializedLower.includes(token.toLowerCase().replace(/\s+/gu, ' '))) {
         fail(`${label} ${featureId} missing ${token}`);
@@ -345,6 +378,8 @@ function verifyFunctionAndVerificationMaps() {
     requireArrayIncludes(feature.required_gates, verifyGate, `${label} ${featureId}.required_gates`);
     requireArrayIncludes(feature.required_gates, redGate, `${label} ${featureId}.required_gates`);
     requireArrayIncludes(feature.required_gates, cliGate, `${label} ${featureId}.required_gates`);
+    const designRefs = [...(feature.design ?? []), ...(feature.owner_files ?? []), ...(feature.allowed_paths ?? [])];
+    requireArrayIncludes(designRefs, paths.designContract, `${label} ${featureId}.design/owner_files/allowed_paths`);
   }
   requireArrayIncludes(
     functionFeature?.entry_symbols,
@@ -616,6 +651,52 @@ function verifyStoplessGuideline() {
     const serialized = YAML.stringify(feature ?? {});
     for (const token of ['complete non-persistent', 'guideline', '继续。', 'transparent']) {
       requireTextIncludes(serialized, token, `${label} ${featureId} guideline contract`);
+    }
+  }
+}
+
+function verifyActivationContract() {
+  for (const [rel, source] of [
+    [paths.designContract, designContract],
+    [paths.stoplessSop, stoplessSop],
+  ]) {
+    for (const token of [
+      'same-turn schema guidance',
+      'activation marker',
+      'stop/end_turn',
+      'canonical reasoning `summary`',
+      'stop_schema',
+      'No activation',
+      'Anthropic',
+      'direct',
+      'relay',
+    ]) {
+      requireTextIncludes(source, token, rel);
+    }
+    for (const forbidden of [
+      'without activation projects no-op',
+      'no marker projects no-op',
+      'visible text is accepted evidence',
+      'fenced JSON is accepted evidence',
+    ]) {
+      if (source.includes(forbidden)) fail(`${rel}: activation contract must not allow ${forbidden}`);
+    }
+  }
+  for (const [label, feature] of [
+    [paths.functionMap, (functionMap.features ?? []).find((candidate) => candidate?.feature_id === featureId)],
+    [paths.verificationMap, (verificationMap.features ?? []).find((candidate) => candidate?.feature_id === featureId)],
+  ]) {
+    const serialized = YAML.stringify(feature ?? {});
+    for (const token of [
+      'schema_guidance_active',
+      'inactive state',
+      'accepted canonical summary',
+      'accepted_stop_schema',
+      'without CLI projection',
+      'Anthropic',
+      'StoplessCenter',
+    ]) {
+      requireTextIncludes(serialized, token, `${label} ${featureId} activation contract`);
     }
   }
 }

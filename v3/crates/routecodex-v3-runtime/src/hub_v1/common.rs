@@ -200,6 +200,9 @@ pub struct V3StoplessCenterState {
     guard_exhausted: bool,
     next_request_policy: V3StoplessCenterNextRequestPolicy,
     next_step_prompt: Option<String>,
+    schema_guidance_active: bool,
+    schema_guidance_request_id: Option<String>,
+    schema_guidance_contract: Option<String>,
     last_request_id: Option<String>,
     last_response_id: Option<String>,
     last_transition_reason: Option<String>,
@@ -266,6 +269,9 @@ impl V3StoplessCenterState {
             guard_exhausted,
             next_request_policy,
             next_step_prompt: None,
+            schema_guidance_active: false,
+            schema_guidance_request_id: None,
+            schema_guidance_contract: None,
             last_request_id: None,
             last_response_id: None,
             last_transition_reason: None,
@@ -320,6 +326,31 @@ impl V3StoplessCenterState {
 
     pub fn next_step_prompt(&self) -> Option<&str> {
         self.next_step_prompt.as_deref()
+    }
+
+    pub fn schema_guidance_active(&self) -> bool {
+        self.schema_guidance_active
+    }
+
+    pub fn schema_guidance_request_id(&self) -> Option<&str> {
+        self.schema_guidance_request_id.as_deref()
+    }
+
+    pub fn schema_guidance_contract(&self) -> Option<&str> {
+        self.schema_guidance_contract.as_deref()
+    }
+
+    pub fn schema_guidance_active_for(&self, request_id: Option<&str>) -> bool {
+        if !self.schema_guidance_active {
+            return false;
+        }
+        let Some(expected) = request_id.map(str::trim).filter(|value| !value.is_empty()) else {
+            return false;
+        };
+        self.schema_guidance_request_id
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|actual| actual == expected)
     }
 
     pub fn last_request_id(&self) -> Option<&str> {
@@ -377,9 +408,16 @@ impl V3StoplessCenterState {
         updated_at: Option<u64>,
     ) -> Self {
         self.phase = V3StoplessCenterPhase::ProviderTurnInFlight;
+        self.schema_guidance_active = false;
+        self.schema_guidance_request_id = None;
+        self.schema_guidance_contract = None;
         if let Some(request_id) = request_id {
-            if !request_id.trim().is_empty() {
+            let request_id = request_id.trim();
+            if !request_id.is_empty() {
                 self.last_request_id = Some(request_id.to_string());
+                self.schema_guidance_active = true;
+                self.schema_guidance_request_id = Some(request_id.to_string());
+                self.schema_guidance_contract = Some("stop_schema".to_string());
             }
         }
         if let Some(updated_at) = updated_at {
@@ -400,6 +438,9 @@ impl V3StoplessCenterState {
             self.updated_at = updated_at;
         }
         self.last_transition_reason = Some("req04_stopless_noop_observed".to_string());
+        self.schema_guidance_active = false;
+        self.schema_guidance_request_id = None;
+        self.schema_guidance_contract = None;
         self
     }
 
@@ -419,6 +460,9 @@ impl V3StoplessCenterState {
         }
         self.last_transition_reason =
             Some("req04_stopless_continuation_guidance_prepared".to_string());
+        self.schema_guidance_active = false;
+        self.schema_guidance_request_id = None;
+        self.schema_guidance_contract = None;
         self
     }
 }

@@ -26,11 +26,11 @@ servertool / stopless / followup / schema gate 改动前，先查：
 1. 新 servertool 改造方向以 `docs/design/servertool-cli-projection-migration.md` 为准。
 2. 被迁移的 servertool 一律投影成客户端可见的 `exec_command` CLI 调用，不再走私有 server-side followup/reenter。
 3. 有输入的普通 servertool 可执行 `routecodex servertool run <toolName> --input-json <json>` 后通过正常 `submit_tool_outputs` 回传；V3 stopless 的 `reasoningStop` 是例外：它必须是 no-input no-op `routecodex hook run reasoningStop`。
-4. V3 stopless 的权威 SOP 是 `.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md`：CLI 只闭合客户端工具轮，状态机归 `MetadataCenter.runtime_control.stopless` / StoplessCenter；managed relay 的完整当前轮 stopless guideline 必须同时出现在 provider-facing system prompt 与 Req04 ordinary user continuation，但对模型必须透明，不得提 no-op/CLI/client bridge；内部 `reasoningStop` tool schema 必须保留完成/阻塞/继续状态契约；direct/provider-direct 不得注入。
+4. V3 stopless 的权威 SOP 是 `.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md`：CLI 只闭合客户端工具轮，状态机归 `MetadataCenter.runtime_control.stopless` / StoplessCenter；managed relay 的完整当前轮 stopless guideline 必须同时出现在 provider-facing system prompt 与 Req04 ordinary user continuation，但对模型必须透明，不得提 no-op/CLI/client bridge；内部 `reasoningStop` tool schema 必须保留完成/阻塞/继续状态契约；response-side 拦截必须由 MetadataCenter/StoplessCenter 状态机的同轮 `schema_guidance_active` state 驱动；inactive state 的 direct/provider-direct terminal stop 放行。
 5. `apply_patch` 不属于 servertool CLI migration；保持原生/freeform 客户端工具链。
 
 ## stopless 生命周期
-1. 当前 stopless 默认开启，默认次数 3。每个受管 provider request 注入完整 system stop schema；旧默认 `继续执行` 只允许作为无 trigger/feedback 的 legacy explicit continuation 输入，不得作为 no_schema/invalid fallback。
+1. 当前 stopless 默认开启，默认次数 3。每个合法受管 provider request 注入完整 system stop schema，并通过 MetadataCenter/StoplessCenter 状态机设置同轮 `schema_guidance_active`；只有 active state 存在时，Resp03 才能对 stop/end_turn 缺 summary/schema 做续杯拦截。旧默认 `继续执行` 只允许作为无 trigger/feedback 的 legacy explicit continuation 输入，不得作为 no_schema/invalid fallback。
 2. `/goal active` 时收到 `finish_reason=stop`：不自动续轮。
 3. `/goal non-active` 时收到 missing/invalid-schema `finish_reason=stop`：默认预算 3 表示连续第 1、2、3 次都投影客户端 no-input CLI；第 4 次才 guard 放行。下一轮 provider 收到由 StoplessCenter 状态机选择的完整非持久、模型透明 continuation guideline（基于恢复上下文继续推理、按需调用工具、完成/阻塞需证据；不得提 no-op/CLI/client bridge），并继续收到完整 system stop guideline/tool schema。
 4. 非 `/goal` 时使用同一 missing/invalid-schema 处理合同，不另建提示或计数语义。

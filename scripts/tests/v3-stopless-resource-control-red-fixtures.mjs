@@ -14,6 +14,8 @@ const copied = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
   'docs/architecture/snapshot-stage-contract.md',
+  'docs/design/v3-stopless-schema-guidance-activation-contract.md',
+  '.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md',
   'scripts/architecture/verify-v3-stopless-resource-control.mjs',
   'scripts/tests/v3-stopless-resource-control-red-fixtures.mjs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
@@ -25,6 +27,63 @@ const copied = [
 ];
 
 const cases = [
+
+  {
+    name: 'activation contract stops requiring same-turn schema guidance',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  request_schema_guidance_required: true\n',
+    replacement: '  request_schema_guidance_required: false\n',
+    diagnostic: /activation_contract\.request_schema_guidance_required must equal true/u,
+  },
+  {
+    name: 'activation contract mislabels activation truth owner',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  activation_truth_owner: metadata_center_stopless_state_machine\n',
+    replacement: '  activation_truth_owner: loose_runtime_marker\n',
+    diagnostic: /activation_contract\.activation_truth_owner must equal "metadata_center_stopless_state_machine"/u,
+  },
+  {
+    name: 'activation contract allows response intercept without marker',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  response_intercept_without_activation: forbidden\n',
+    replacement: '  response_intercept_without_activation: allowed\n',
+    diagnostic: /activation_contract\.response_intercept_without_activation must equal "forbidden"/u,
+  },
+  {
+    name: 'activation contract allows loose activation marker',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  loose_activation_marker: forbidden\n',
+    replacement: '  loose_activation_marker: allowed\n',
+    diagnostic: /activation_contract\.loose_activation_marker must equal "forbidden"/u,
+  },
+  {
+    name: 'activation contract loses schema_guidance_active state field',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '    - schema_guidance_active\n',
+    replacement: '',
+    diagnostic: /activation_contract\.activation_state_fields must include schema_guidance_active/u,
+  },
+  {
+    name: 'activation contract loses accepted stop schema evidence',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '    - accepted_stop_schema\n',
+    replacement: '',
+    diagnostic: /activation_contract\.accepted_stop_evidence must include accepted_stop_schema/u,
+  },
+  {
+    name: 'activation contract loses Anthropic validation exception',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  provider_validation_exception: disable_activation_when_guidance_injection_is_provider_invalid\n',
+    replacement: '  provider_validation_exception: force_schema_guidance\n',
+    diagnostic: /activation_contract\.provider_validation_exception must equal "disable_activation_when_guidance_injection_is_provider_invalid"/u,
+  },
+  {
+    name: 'design doc allows no-marker no-op projection',
+    path: 'docs/design/v3-stopless-schema-guidance-activation-contract.md',
+    marker: 'Inactive state, no intercept',
+    replacement: 'no marker projects no-op',
+    diagnostic: /activation contract must not allow no marker projects no-op/u,
+  },
   {
     name: 'runtime adapter promoted to semantic owner',
     path: 'docs/architecture/v3-resource-operation-map.yml',

@@ -159,6 +159,7 @@ async fn assert_direct_response_request_does_not_inject_stopless(response: Value
 }
 
 async fn assert_direct_response_passthrough_without_stopless(response: Value, label: &str) {
+    let expected_status = response.get("status").cloned();
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
     let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -187,6 +188,13 @@ async fn assert_direct_response_passthrough_without_stopless(response: Value, la
     let V3ClientBody::Json(parsed) = &output.client_payload.body else {
         panic!("{label}: direct client body must be JSON: {:#?}", output);
     };
+    if let Some(expected_status) = expected_status {
+        assert_eq!(
+            parsed.get("status"),
+            Some(&expected_status),
+            "{label}: direct inactive stopless must pass provider status through: {parsed}"
+        );
+    }
     let client_serialized = serde_json::to_string(parsed).unwrap();
     for forbidden in [
         "call_stopless_reasoning",
@@ -384,7 +392,7 @@ async fn direct_kernel_response_propagates_provider_output_text_to_client_unchan
 }
 
 #[tokio::test]
-async fn direct_kernel_projects_stopless_noop_for_completed_response_without_summary() {
+async fn direct_kernel_passes_completed_response_without_summary_when_schema_guidance_inactive() {
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(json!({
         "object":"response",
@@ -465,18 +473,18 @@ async fn direct_kernel_projects_stopless_noop_for_completed_response_without_sum
         );
     };
     assert_eq!(
-        parsed["status"], "requires_action",
-        "client body shape wrong: {parsed}"
+        parsed["status"], "completed",
+        "direct inactive schema guidance must not synthesize stopless no-op: {parsed}"
     );
     assert_eq!(parsed["id"], "resp_direct_missing_schema");
     let serialized = serde_json::to_string(parsed).unwrap();
     assert!(
-        serialized.contains("call_stopless_reasoning"),
-        "direct no-summary stop must project client-visible no-op call: {serialized}"
+        !serialized.contains("call_stopless_reasoning"),
+        "direct inactive no-summary stop must not project client-visible no-op call: {serialized}"
     );
     assert!(
-        serialized.contains("routecodex hook run reasoningStop"),
-        "direct no-summary stop must project no-input reasoningStop CLI: {serialized}"
+        !serialized.contains("routecodex hook run reasoningStop"),
+        "direct inactive no-summary stop must not project no-input reasoningStop CLI: {serialized}"
     );
     assert!(
         serialized.contains("direct response without stop schema"),
@@ -485,7 +493,7 @@ async fn direct_kernel_projects_stopless_noop_for_completed_response_without_sum
 }
 
 #[tokio::test]
-async fn direct_kernel_uses_summary_gate_for_same_stopless_payload_matrix() {
+async fn direct_kernel_passes_summary_matrix_when_schema_guidance_inactive() {
     let payloads = [
         (
             "no_schema",
@@ -561,36 +569,6 @@ async fn direct_kernel_uses_summary_gate_for_same_stopless_payload_matrix() {
     ];
     for (label, payload) in payloads {
         assert_direct_response_request_does_not_inject_stopless(payload.clone(), label).await;
-        if label == "canonical_summary" {
-            assert_direct_response_passthrough_without_stopless(payload, label).await;
-            continue;
-        }
-        let manifest = manifest();
-        let transport = PassthroughTransport::with_response(payload);
-        let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-            &V3ResponsesDirectContinuationState::default(),
-            &manifest,
-            request(json!({
-                "model": "gpt-5.5",
-                "input": format!("direct stopless matrix {label}"),
-                "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
-                "stream": false
-            })),
-            scope(),
-            register_responses_direct_hooks(),
-            &transport,
-            1_000,
-        )
-        .await;
-        assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
-        let V3ClientBody::Json(parsed) = &output.client_payload.body else {
-            panic!("{label}: direct client body must be JSON: {:#?}", output);
-        };
-        let serialized = serde_json::to_string(parsed).unwrap();
-        assert_eq!(parsed["status"], "requires_action", "{label}: {parsed}");
-        assert!(
-            serialized.contains("routecodex hook run reasoningStop"),
-            "{label}: no-summary direct stop must continue via client no-op: {serialized}"
-        );
+        assert_direct_response_passthrough_without_stopless(payload, label).await;
     }
 }

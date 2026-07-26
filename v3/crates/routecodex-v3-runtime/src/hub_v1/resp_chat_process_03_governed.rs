@@ -108,6 +108,12 @@ impl V3HubRelayResponseHookProfile {
         self.stopless_center_state.as_ref()
     }
 
+    pub fn stopless_schema_guidance_active(&self) -> bool {
+        self.stopless_center_state.as_ref().is_some_and(|state| {
+            state.schema_guidance_active_for(self.stopless_transition_request_id())
+        })
+    }
+
     pub fn stopless_transition_request_id(&self) -> Option<&str> {
         self.stopless_transition_request_id.as_deref()
     }

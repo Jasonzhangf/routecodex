@@ -133,6 +133,7 @@
           <li><code>docs/architecture/v3-mainline-call-map.yml</code> (<code>chain_id: v3.servertool_hook_skeleton_lifecycle</code>)</li>
           <li><code>docs/architecture/v3-verification-map.yml</code></li>
           <li><code>.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md</code></li>
+          <li><code>docs/design/v3-stopless-schema-guidance-activation-contract.md</code></li>
         </ul>
         <p>Generated artifacts:</p>
         <ul>
@@ -141,7 +142,7 @@
           <li>Generator: <code>scripts/architecture/render-v3-stopless-state-machine-docs.mjs</code></li>
           <li>Verifier: <code>scripts/architecture/verify-v3-stopless-state-machine-docs.mjs</code></li>
         </ul>
-        <p>Main rule: stopless is transparent to client/provider/agent except for the public no-input <code>exec_command</code> bridge that lets the black-box client display the stopped assistant text. StoplessCenter is the only control truth and lives in MetadataCenter/runtime_control; it never lives in CLI args/stdout, provider payload, client payload, continuation store, SSE, handler, debug snapshot, or dry-run metadata. Provider-request dry-run may read the scoped StoplessCenter state to build an observational provider request, but it must never write, clear, or advance that live state.</p>
+        <p>Main rule: stopless is transparent to client/provider/agent except for the public no-input <code>exec_command</code> bridge that lets the black-box client display the stopped assistant text. Stopless response interception is additionally gated by the MetadataCenter StoplessCenter state machine: inactive <code>schema_guidance_active</code> state means no CLI projection and no StoplessCenter write. StoplessCenter is the only control truth and lives in MetadataCenter/runtime_control; it never lives in CLI args/stdout, provider payload, client payload, continuation store, SSE, handler, debug snapshot, or dry-run metadata. Provider-request dry-run may read the scoped StoplessCenter state to build an observational provider request, but it must never write, clear, or advance that live state.</p>
         <h2>Stopless Session Mainline</h2>
         <pre class="mermaid">flowchart LR
           V3HubReqContinuation03Classified[&quot;V3HubReqContinuation03Classified&quot;]
@@ -169,7 +170,7 @@
           ProviderTurnInFlight --&gt; Idle: stsm-02 resp03_non_stop_progress_or_ordinary_tool_call
           ProviderTurnInFlight --&gt; TerminalCompleted: stsm-03 resp03_reasoning_stop_or_summary_schema_finished_with_evidence
           ProviderTurnInFlight --&gt; TerminalBlocked: stsm-04 resp03_reasoning_stop_or_summary_schema_blocked_with_reason_and_evidence
-          ProviderTurnInFlight --&gt; RespStopObserved: stsm-05 resp03_natural_stop_or_invalid_or_need_continue_or_summary_schema_unfinished
+          ProviderTurnInFlight --&gt; RespStopObserved: stsm-05 resp03_activated_stop_missing_summary_schema_or_invalid_or_need_continue_or_summary_schema_unfinished
           RespStopObserved --&gt; CliNoopProjected: stsm-06 budget_remaining
           CliNoopProjected --&gt; CliNoopObserved: stsm-07 req04_after_restore_current_noop_output_seen
           CliNoopObserved --&gt; ContinuationGuidancePrepared: stsm-08 req04_shell_artifacts_removed
@@ -177,7 +178,7 @@
           RespStopObserved --&gt; GuardTerminal: stsm-10 budget_exhausted
           CliNoopProjected --&gt; Idle: stsm-11 latest_real_user_turn_after_noop_or_scope_change
           ProviderTurnInFlight --&gt; Idle: stsm-12 provider_or_route_terminal_error_before_resp03
-          Idle --&gt; Idle: stsm-13 direct_provider_direct_disabled_or_missing_client_session_scope
+          Idle --&gt; Idle: stsm-13 direct_provider_direct_disabled_missing_client_session_scope_or_inactive_schema_guidance_state
           TerminalCompleted --&gt; [*]
           TerminalBlocked --&gt; [*]
           GuardTerminal --&gt; [*]
@@ -187,14 +188,36 @@
           note right of ContinuationGuidancePrepared
             provider sees only transparent task guideline + reasoningStop tool
           end note</pre>
+        <h2>Activation Contract</h2>
+        <ul>
+          <li>Design doc: <code>docs/design/v3-stopless-schema-guidance-activation-contract.md</code></li>
+          <li>Request schema guidance required: <code>true</code></li>
+          <li>Activation truth owner: <code>metadata_center_stopless_state_machine</code></li>
+          <li>Activation state fields: <code>schema_guidance_active</code>, <code>schema_guidance_request_id</code>, <code>schema_guidance_contract</code></li>
+          <li>Response intercept without activation: <code>forbidden</code></li>
+          <li>No activation policy: <code>pass_through_without_stopless_projection_or_state_write</code></li>
+          <li>Accepted stop evidence: <code>canonical_reasoning_summary</code>, <code>accepted_stop_schema</code></li>
+          <li>Missing summary/schema: <code>continue_when_activated</code></li>
+          <li>Provider validation exception: <code>disable_activation_when_guidance_injection_is_provider_invalid</code></li>
+        </ul>
+        <table>
+        <thead><tr><th>StoplessCenter <code>schema_guidance_active</code></th><th>terminal stop/end_turn</th><th>accepted summary/schema</th><th>decision</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>false</code></td><td><code>true</code></td><td>any</td><td>pass through; no stopless projection/state write</td></tr>
+        <tr><td><code>true</code></td><td><code>false</code></td><td>any</td><td>normal non-stop/tool progress</td></tr>
+        <tr><td><code>true</code></td><td><code>true</code></td><td>accepted summary or terminal schema</td><td>pass through terminal evidence</td></tr>
+        <tr><td><code>true</code></td><td><code>true</code></td><td>unfinished schema or no summary/schema</td><td>continue via no-input CLI bridge before continuation commit</td></tr>
+        </tbody>
+        </table>
         <h2>State Contract</h2>
         <table>
         <thead><tr><th>state</th><th>kind</th><th>stored</th><th>client-visible</th><th>provider-visible</th><th>description</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td><code>Idle</code></td><td><code>reset</code></td><td><code>false</code></td><td><code>false</code></td><td><code>false</code></td><td>No active stopless control state for this scoped session.</td></tr>
-        <tr><td><code>ProviderTurnInFlight</code></td><td><code>active</code></td><td><code>true</code></td><td><code>false</code></td><td><code>false</code></td><td>A managed relay provider turn is in flight with transparent stopless guidance and exactly one internal reasoningStop declaration.</td></tr>
-        <tr><td><code>RespStopObserved</code></td><td><code>transient</code></td><td><code>false</code></td><td><code>false</code></td><td><code>false</code></td><td>Resp03 observed a natural stop, invalid/no evidence reasoningStop, explicit continue signal, or canonical summary stop_schema unfinished signal before deciding projection or pass-through.</td></tr>
+        <tr><td><code>ProviderTurnInFlight</code></td><td><code>active</code></td><td><code>true</code></td><td><code>false</code></td><td><code>false</code></td><td>A provider turn is in flight with same-turn StoplessCenter schema_guidance_active state, transparent stopless guidance, and exactly one internal reasoningStop declaration where legal.</td></tr>
+        <tr><td><code>RespStopObserved</code></td><td><code>transient</code></td><td><code>false</code></td><td><code>false</code></td><td><code>false</code></td><td>Resp03 observed stop/end_turn with same-turn StoplessCenter schema_guidance_active state plus missing evidence, invalid/no evidence reasoningStop, explicit continue signal, or canonical summary stop_schema unfinished signal before deciding projection or pass-through.</td></tr>
         <tr><td><code>CliNoopProjected</code></td><td><code>active</code></td><td><code>true</code></td><td><code>true</code></td><td><code>false</code></td><td>Resp03 preserved visible assistant text and projected no-input exec_command for client tool-round closure.</td></tr>
         <tr><td><code>CliNoopObserved</code></td><td><code>transient</code></td><td><code>false</code></td><td><code>false</code></td><td><code>false</code></td><td>Req04 after continuation restore observed the current no-op output only as tool-round completion evidence.</td></tr>
         <tr><td><code>ContinuationGuidancePrepared</code></td><td><code>transient</code></td><td><code>false</code></td><td><code>false</code></td><td><code>true</code></td><td>Req04 removed no-op shell artifacts and stale generated stopless guidelines, then prepared one ordinary, transparent provider-facing current-turn continuation guideline.</td></tr>
@@ -223,11 +246,11 @@
         <thead><tr><th>transition</th><th>class</th><th>from</th><th>to</th><th>event</th><th>action</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td><code>stsm-01</code></td><td><code>normal</code></td><td><code>Idle</code></td><td><code>ProviderTurnInFlight</code></td><td><code>managed_relay_req04_without_active_noop</code></td><td>Inject transparent base guidance and exactly one reasoningStop tool; no StoplessCenter write unless a prior state is being consumed.</td></tr>
+        <tr><td><code>stsm-01</code></td><td><code>normal</code></td><td><code>Idle</code></td><td><code>ProviderTurnInFlight</code></td><td><code>managed_relay_req04_without_active_noop</code></td><td>With valid client session scope and request id, inject transparent base guidance plus exactly one reasoningStop tool and store same-turn schema_guidance_active ProviderTurnInFlight state before VR/provider wire; missing scope/request id stays inactive/pass-through.</td></tr>
         <tr><td><code>stsm-02</code></td><td><code>normal</code></td><td><code>ProviderTurnInFlight</code></td><td><code>Idle</code></td><td><code>resp03_non_stop_progress_or_ordinary_tool_call</code></td><td>Clear scoped StoplessCenter; preserve normal response/tool progression.</td></tr>
         <tr><td><code>stsm-03</code></td><td><code>normal</code></td><td><code>ProviderTurnInFlight</code></td><td><code>TerminalCompleted</code></td><td><code>resp03_reasoning_stop_or_summary_schema_finished_with_evidence</code></td><td>Strip internal reasoningStop artifact when present, preserve/replace visible completion text, clear state, no CLI projection.</td></tr>
         <tr><td><code>stsm-04</code></td><td><code>normal</code></td><td><code>ProviderTurnInFlight</code></td><td><code>TerminalBlocked</code></td><td><code>resp03_reasoning_stop_or_summary_schema_blocked_with_reason_and_evidence</code></td><td>Strip internal reasoningStop artifact when present; for canonical stop_schema blocked, append blocked reason to canonical summary, clear or wait-user state, no CLI projection.</td></tr>
-        <tr><td><code>stsm-05</code></td><td><code>normal</code></td><td><code>ProviderTurnInFlight</code></td><td><code>RespStopObserved</code></td><td><code>resp03_natural_stop_or_invalid_or_need_continue_or_summary_schema_unfinished</code></td><td>Classify stop kind and compute next consecutive stop count in MetadataCenter control, not from visible text/CLI/stdout. Canonical summary stop_schema nextStep may store one next_step_prompt control string for Req04.</td></tr>
+        <tr><td><code>stsm-05</code></td><td><code>normal</code></td><td><code>ProviderTurnInFlight</code></td><td><code>RespStopObserved</code></td><td><code>resp03_activated_stop_missing_summary_schema_or_invalid_or_need_continue_or_summary_schema_unfinished</code></td><td>Only after same-turn StoplessCenter schema_guidance_active state, classify stop kind and compute next consecutive stop count in MetadataCenter control, not from visible text/CLI/stdout. Canonical summary stop_schema nextStep may store one next_step_prompt control string for Req04.</td></tr>
         <tr><td><code>stsm-06</code></td><td><code>normal</code></td><td><code>RespStopObserved</code></td><td><code>CliNoopProjected</code></td><td><code>budget_remaining</code></td><td>Store scoped StoplessCenter state and project client-visible no-input exec_command while preserving assistant visible text.</td></tr>
         <tr><td><code>stsm-07</code></td><td><code>normal</code></td><td><code>CliNoopProjected</code></td><td><code>CliNoopObserved</code></td><td><code>req04_after_restore_current_noop_output_seen</code></td><td>Consume no-op output only as current-turn evidence; do not parse stdout or args.</td></tr>
         <tr><td><code>stsm-08</code></td><td><code>normal</code></td><td><code>CliNoopObserved</code></td><td><code>ContinuationGuidancePrepared</code></td><td><code>req04_shell_artifacts_removed</code></td><td>Remove matching stopless shell call/output, stale internal artifacts, and previously generated stopless continuation guidelines; append exactly one transparent current-turn guideline.</td></tr>
@@ -235,7 +258,7 @@
         <tr><td><code>stsm-10</code></td><td><code>abnormal</code></td><td><code>RespStopObserved</code></td><td><code>GuardTerminal</code></td><td><code>budget_exhausted</code></td><td>Do not project another no-op; pass through current finish_reason=stop response without guard/budget/counter diagnostic and clear state.</td></tr>
         <tr><td><code>stsm-11</code></td><td><code>abnormal</code></td><td><code>CliNoopProjected</code></td><td><code>Idle</code></td><td><code>latest_real_user_turn_after_noop_or_scope_change</code></td><td>Reset scoped StoplessCenter and remove only stale stopless shell artifacts; preserve the real user turn verbatim.</td></tr>
         <tr><td><code>stsm-12</code></td><td><code>abnormal</code></td><td><code>ProviderTurnInFlight</code></td><td><code>Idle</code></td><td><code>provider_or_route_terminal_error_before_resp03</code></td><td>Project the real error through ErrorErr chain; stopless must not synthesize success/fallback/diagnostic or retain stale client-visible bridge state.</td></tr>
-        <tr><td><code>stsm-13</code></td><td><code>abnormal</code></td><td><code>Idle</code></td><td><code>Idle</code></td><td><code>direct_provider_direct_disabled_or_missing_client_session_scope</code></td><td>No stopless guidance/tool/projection/control write; pass provider response through the normal path.</td></tr>
+        <tr><td><code>stsm-13</code></td><td><code>abnormal</code></td><td><code>Idle</code></td><td><code>Idle</code></td><td><code>direct_provider_direct_disabled_missing_client_session_scope_or_inactive_schema_guidance_state</code></td><td>Inactive StoplessCenter schema_guidance state means no stopless projection/control write; pass provider response through the normal path. Provider validation exceptions such as Anthropic keep the state inactive instead of forcing illegal guidance.</td></tr>
         </tbody>
         </table>
         <h2>Normal Closure</h2>
@@ -247,7 +270,7 @@
         <h2>Abnormal Closure</h2>
         <ul>
           <li><code>GuardTerminal</code>: when the configured consecutive-stop guard is reached, stopless stops intercepting the current provider <code>finish_reason=stop</code>; it does not project another no-op and does not expose guard/budget/counter diagnostics.</li>
-          <li>Missing client session scope, direct/provider-direct paths, disabled feature flags, and scope changes never write StoplessCenter and never inject relay stopless guidance/tool/projection.</li>
+          <li>Missing client session scope, inactive <code>schema_guidance_active</code> state, disabled feature flags, provider validation exceptions, and scope changes never write StoplessCenter and never inject relay stopless guidance/tool/projection.</li>
           <li>Provider or route terminal errors stay real ErrorErr-chain errors; stopless must not synthesize success, fallback, or diagnostics and must not retain stale bridge state as user-visible truth.</li>
         </ul>
         <h2>Provider/Client Transparency Checklist</h2>
@@ -282,7 +305,7 @@
         </ul>
         <h2>Review Checklist</h2>
         <ul>
-          <li>Resp03 projects no-input CLI or transparent terminal/pass-through before Resp04 continuation commit.</li>
+          <li>Resp03 projects no-input CLI only when StoplessCenter <code>schema_guidance_active</code> state exists and stop/end_turn lacks accepted summary/schema; otherwise it transparently passes terminal evidence or inactive-state stops before Resp04 continuation commit.</li>
           <li>Req04 runs only after continuation/local context restore; it consumes no-op output only as evidence and loads StoplessCenter from MetadataCenter/runtime_control.</li>
           <li>Req04 removes stale generated stopless continuation guidelines before appending one current-turn guideline.</li>
           <li>Provider-request dry-run reads StoplessCenter for projection only and does not commit StoplessCenter transitions.</li>
