@@ -44,10 +44,11 @@ use routecodex_v3_runtime::{
     V3ResponsesDirectExecutionEnv, V3ResponsesDirectRuntimeSharedState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDefaultTransport, V3ResponsesRelayDryRunExecutionEnv,
-    V3ResponsesRelayExecutionEnv, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
-    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayExecutionEnv, V3ResponsesRelayHealthSource,
+    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
+    V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
     V3ResponsesRelayStoplessControlState, V3ResponsesTransport, V3RuntimeObservability,
     V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
@@ -276,7 +277,6 @@ struct V3RequestIdClock {
     local_date_key: String,
     utc_iso: String,
 }
-
 fn resolve_v3_request_id_counter_file() -> PathBuf {
     if let Some(path) = non_empty_env_path("ROUTECODEX_REQUEST_ID_COUNTER_FILE")
         .or_else(|| non_empty_env_path("RCC_REQUEST_ID_COUNTER_FILE"))
@@ -290,13 +290,11 @@ fn resolve_v3_request_id_counter_file() -> PathBuf {
         .join("state")
         .join("request-id-counter.json")
 }
-
 fn non_empty_env_path(name: &str) -> Option<PathBuf> {
     env::var_os(name)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
-
 fn v3_request_id_clock_now() -> Result<V3RequestIdClock, String> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5363,14 +5361,16 @@ fn build_responses_relay_execution_env<'a, T: V3ResponsesTransport>(
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> V3ResponsesRelayExecutionEnv<'a, T> {
-    V3ResponsesRelayExecutionEnv::new(transport)
-        .with_provider_health(&state.provider_health)
-        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
-            &state.responses_relay_local_continuation,
-            &state.responses_relay_stopless_control,
-            scope,
-            now_epoch_ms,
-        ))
+    V3ResponsesRelayExecutionEnv::new(
+        transport,
+        V3ResponsesRelayHealthSource::Shared(&state.provider_health),
+    )
+    .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        &state.responses_relay_local_continuation,
+        &state.responses_relay_stopless_control,
+        scope,
+        now_epoch_ms,
+    ))
 }
 
 async fn execute_responses_relay_runtime_for_http_request<T: V3ResponsesTransport>(
@@ -5779,7 +5779,7 @@ pub async fn execute_v3_responses_relay_request(
     execute_v3_responses_relay_runtime(
         manifest,
         input,
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
 }

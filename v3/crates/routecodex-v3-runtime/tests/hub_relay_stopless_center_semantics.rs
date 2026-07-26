@@ -11,9 +11,9 @@ use routecodex_v3_runtime::{
     V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
     V3HubProviderWireProtocol, V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile,
     V3HubServertoolRequestProfile, V3HubTransportIntent, V3ResponsesRelayClientBody,
-    V3ResponsesRelayExecutionEnv, V3ResponsesRelayRuntimeInput, V3StoplessCenterNextRequestPolicy,
-    V3StoplessCenterPhase, V3StoplessCenterState, V3StoplessCenterSteering,
-    V3StoplessCenterStopKind,
+    V3ResponsesRelayExecutionEnv, V3ResponsesRelayHealthSource, V3ResponsesRelayRuntimeInput,
+    V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase, V3StoplessCenterState,
+    V3StoplessCenterSteering, V3StoplessCenterStopKind,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -1047,7 +1047,7 @@ async fn feature_toggle_false_disables_relay_stopless_injection_and_projection()
                 "tools":[{"type":"function","name":"exec","description":"original tool"}]
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();

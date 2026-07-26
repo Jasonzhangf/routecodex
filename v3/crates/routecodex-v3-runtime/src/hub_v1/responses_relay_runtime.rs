@@ -226,7 +226,6 @@ struct V3ResponsesRelayProviderFailure {
 pub struct V3ResponsesRelayProviderHealthHandle {
     store: V3ProviderHealthStore,
 }
-
 impl V3ResponsesRelayProviderHealthHandle {
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
@@ -238,7 +237,11 @@ impl V3ResponsesRelayProviderHealthHandle {
         self.store.clone()
     }
 }
-
+#[derive(Debug, Clone, Copy)]
+pub enum V3ResponsesRelayHealthSource<'state> {
+    Shared(&'state V3ResponsesRelayProviderHealthHandle),
+    ManifestLocal,
+}
 struct V3ResponsesRelayProviderRetryState<'state> {
     failed_candidates: &'state mut BTreeSet<String>,
     same_candidate_retries: &'state mut BTreeMap<String, usize>,
@@ -1097,7 +1100,7 @@ impl<'state> V3ResponsesRelayStoplessControlEnv<'state> {
 #[derive(Debug)]
 pub struct V3ResponsesRelayExecutionEnv<'state, T: ResponsesTransport> {
     pub transport: &'state T,
-    pub provider_health: Option<&'state V3ResponsesRelayProviderHealthHandle>,
+    pub provider_health: V3ResponsesRelayHealthSource<'state>,
     pub retry_policy: V3ResponsesRelayRetryPolicy,
     pub local_continuation: Option<V3ResponsesRelayLocalContinuationEnv<'state>>,
     pub stopless_control: Option<V3ResponsesRelayStoplessControlEnv<'state>>,
@@ -1105,23 +1108,18 @@ pub struct V3ResponsesRelayExecutionEnv<'state, T: ResponsesTransport> {
 }
 
 impl<'state, T: ResponsesTransport> V3ResponsesRelayExecutionEnv<'state, T> {
-    pub fn new(transport: &'state T) -> Self {
+    pub fn new(
+        transport: &'state T,
+        provider_health: V3ResponsesRelayHealthSource<'state>,
+    ) -> Self {
         Self {
             transport,
-            provider_health: None,
+            provider_health,
             retry_policy: V3ResponsesRelayRetryPolicy::default(),
             local_continuation: None,
             stopless_control: None,
             initial_selected_target: None,
         }
-    }
-
-    pub fn with_provider_health(
-        mut self,
-        provider_health: &'state V3ResponsesRelayProviderHealthHandle,
-    ) -> Self {
-        self.provider_health = Some(provider_health);
-        self
     }
 
     pub fn with_retry_policy(mut self, retry_policy: V3ResponsesRelayRetryPolicy) -> Self {
@@ -1251,10 +1249,12 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
                 scope: control.scope,
                 commit_effects: control.commit_effects,
             });
-    let provider_health = env
-        .provider_health
-        .map(|health| health.store.clone())
-        .unwrap_or_else(|| V3ResponsesRelayProviderHealthHandle::from_manifest(manifest).store);
+    let provider_health = match env.provider_health {
+        V3ResponsesRelayHealthSource::Shared(health) => health.store.clone(),
+        V3ResponsesRelayHealthSource::ManifestLocal => {
+            V3ResponsesRelayProviderHealthHandle::from_manifest(manifest).store
+        }
+    };
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,

@@ -12,8 +12,9 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile,
     execute_v3_responses_relay_runtime, V3AnthropicRelayLocalContinuationScope,
     V3AnthropicRelayLocalContinuationState, V3AnthropicRelayRuntimeInput,
-    V3ResponsesRelayClientBody, V3ResponsesRelayExecutionEnv, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayRetryPolicy, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayClientBody, V3ResponsesRelayExecutionEnv, V3ResponsesRelayHealthSource,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::{
@@ -199,7 +200,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -292,7 +293,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -422,7 +423,7 @@ async fn responses_relay_client_sse_request_projects_sse_even_when_provider_retu
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -505,7 +506,7 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
                 }]
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -588,7 +589,7 @@ async fn responses_relay_openai_chat_target_projects_responses_builtin_tools_to_
                 }]
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -691,7 +692,7 @@ async fn responses_relay_openai_chat_target_normalizes_redacted_tool_schema_plac
                 }]
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -785,7 +786,7 @@ async fn responses_relay_openai_chat_target_keeps_tool_result_immediately_after_
                 ]
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -875,7 +876,10 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&CompletedTextSseTransport),
+        V3ResponsesRelayExecutionEnv::new(
+            &CompletedTextSseTransport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        ),
     )
     .await
     .unwrap();
@@ -937,7 +941,10 @@ async fn responses_relay_client_json_request_projects_json_even_when_provider_re
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&CompletedTextSseTransport),
+        V3ResponsesRelayExecutionEnv::new(
+            &CompletedTextSseTransport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        ),
     )
     .await
     .unwrap();
@@ -1341,7 +1348,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -1395,7 +1402,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -1452,12 +1459,14 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
                     "stream":false
                 }),
             },
-            V3ResponsesRelayExecutionEnv::new(&transport)
-                .with_provider_health(&provider_health)
-                .with_retry_policy(V3ResponsesRelayRetryPolicy {
-                    same_candidate_retries: 3,
-                    retry_delay_ms: 1,
-                }),
+            V3ResponsesRelayExecutionEnv::new(
+                &transport,
+                V3ResponsesRelayHealthSource::Shared(&provider_health),
+            )
+            .with_retry_policy(V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 3,
+                retry_delay_ms: 1,
+            }),
         )
         .await
         .unwrap();
@@ -1507,12 +1516,14 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
-            .with_provider_health(&provider_health)
-            .with_retry_policy(V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 3,
-                retry_delay_ms: 1,
-            }),
+        V3ResponsesRelayExecutionEnv::new(
+            &transport,
+            V3ResponsesRelayHealthSource::Shared(&provider_health),
+        )
+        .with_retry_policy(V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 3,
+            retry_delay_ms: 1,
+        }),
     )
     .await
     .unwrap();
@@ -1563,13 +1574,12 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_retry_policy(
-            V3ResponsesRelayRetryPolicy {
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_retry_policy(V3ResponsesRelayRetryPolicy {
                 same_candidate_retries: V3ResponsesRelayRetryPolicy::default()
                     .same_candidate_retries,
                 retry_delay_ms: 0,
-            },
-        ),
+            }),
     )
     .await
     .unwrap();
@@ -1611,12 +1621,14 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
                     "stream":false
                 }),
             },
-            V3ResponsesRelayExecutionEnv::new(&transport).with_retry_policy(
-                V3ResponsesRelayRetryPolicy {
-                    same_candidate_retries: 2,
-                    retry_delay_ms: 1,
-                },
-            ),
+            V3ResponsesRelayExecutionEnv::new(
+                &transport,
+                V3ResponsesRelayHealthSource::ManifestLocal,
+            )
+            .with_retry_policy(V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 2,
+                retry_delay_ms: 1,
+            }),
         ),
     )
     .await
@@ -1671,12 +1683,11 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_retry_policy(
-            V3ResponsesRelayRetryPolicy {
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_retry_policy(V3ResponsesRelayRetryPolicy {
                 same_candidate_retries: 1,
                 retry_delay_ms: 25,
-            },
-        ),
+            }),
     )
     .await
     .unwrap();
@@ -1716,12 +1727,14 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&ResponsesSseBodyReadErrorTransport).with_retry_policy(
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-                retry_delay_ms: 0,
-            },
-        ),
+        V3ResponsesRelayExecutionEnv::new(
+            &ResponsesSseBodyReadErrorTransport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        )
+        .with_retry_policy(V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+            retry_delay_ms: 0,
+        }),
     )
     .await
     .unwrap();
@@ -1758,12 +1771,14 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&ResponsesSseInvalidUtf8Transport).with_retry_policy(
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-                retry_delay_ms: 0,
-            },
-        ),
+        V3ResponsesRelayExecutionEnv::new(
+            &ResponsesSseInvalidUtf8Transport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        )
+        .with_retry_policy(V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+            retry_delay_ms: 0,
+        }),
     )
     .await
     .unwrap();
@@ -1799,11 +1814,14 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&ResponsesSseMalformedEventJsonTransport)
-            .with_retry_policy(V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-                retry_delay_ms: 0,
-            }),
+        V3ResponsesRelayExecutionEnv::new(
+            &ResponsesSseMalformedEventJsonTransport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        )
+        .with_retry_policy(V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+            retry_delay_ms: 0,
+        }),
     )
     .await
     .unwrap();

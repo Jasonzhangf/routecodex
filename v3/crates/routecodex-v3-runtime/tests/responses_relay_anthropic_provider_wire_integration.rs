@@ -6,7 +6,7 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayExecutionEnv,
-    V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayHealthSource, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -65,7 +65,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
                 "max_output_tokens":64,
                 "user":"anthropic-user-1"
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal))
     .await
     .unwrap();
 
@@ -123,7 +123,7 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
                 "metadata":{"client":"not-anthropic-wire-compatible"}
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap_err();
@@ -150,7 +150,7 @@ async fn responses_relay_reasoning_request_config_projects_anthropic_system_mark
                 "reasoning":{"effort":"medium","summary":"detailed"},
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal))
     .await
     .unwrap();
 
@@ -188,7 +188,7 @@ async fn responses_relay_string_input_reasoning_request_config_projects_anthropi
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal),
     )
     .await
     .unwrap();
@@ -259,7 +259,10 @@ async fn responses_relay_anthropic_provider_json_preserves_thinking_to_responses
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&AnthropicProviderJsonReasoningTransport),
+        V3ResponsesRelayExecutionEnv::new(
+            &AnthropicProviderJsonReasoningTransport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        ),
     )
     .await
     .unwrap();
@@ -367,7 +370,10 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
                 "max_output_tokens":64
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&AnthropicProviderSseReasoningTransport),
+        V3ResponsesRelayExecutionEnv::new(
+            &AnthropicProviderSseReasoningTransport,
+            V3ResponsesRelayHealthSource::ManifestLocal,
+        ),
     )
     .await
     .unwrap();

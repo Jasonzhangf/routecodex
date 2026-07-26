@@ -166,6 +166,7 @@ forbid(tests, testPath, [
 
 for (const phrase of [
   'V3ResponsesRelayExecutionEnv',
+  'V3ResponsesRelayHealthSource',
   'V3ResponsesRelayDryRunExecutionEnv',
   'V3ResponsesRelayLocalContinuationState',
   'V3ResponsesRelayLocalContinuationScope',
@@ -210,6 +211,9 @@ requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
 ]);
 forbid(responsesRuntime, responsesRuntimePath, [
+  /provider_health:\s*Option<[^>]*V3ResponsesRelayProviderHealthHandle/,
+  /unwrap_or_else\(\|\|\s*V3ResponsesRelayProviderHealthHandle::from_manifest/,
+  /pub\s+fn\s+with_provider_health\s*\(/,
   /struct\s+V3ResponsesRelayExcludedAvailability\b/,
   /struct\s+V3ResponsesRelayProviderFailureContext\b/,
   /restore_at_req04\s*\(/,
@@ -252,6 +256,7 @@ for (const phrase of [
   'responses_relay_output_response',
   'execute_v3_responses_relay_runtime',
   'V3ResponsesRelayExecutionEnv::new',
+  'V3ResponsesRelayHealthSource::Shared(&state.provider_health)',
   'responses_relay_local_continuation',
   'responses_relay_stopless_control',
   'project_v3_responses_relay_runtime_failure',
@@ -263,6 +268,8 @@ for (const phrase of [
 ]) requireText(server, serverPath, phrase);
 for (const phrase of [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
+  'V3ResponsesRelayHealthSource::ManifestLocal',
+  'V3ResponsesRelayHealthSource::Shared(&provider_health)',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
   'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
   '"type":"function_call_output"',

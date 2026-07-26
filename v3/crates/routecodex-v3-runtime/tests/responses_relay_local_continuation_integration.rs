@@ -8,10 +8,11 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_runtime::{
     execute_v3_responses_relay_dry_run_runtime, execute_v3_responses_relay_runtime,
     V3ResponsesRelayClientBody, V3ResponsesRelayDryRunExecutionEnv, V3ResponsesRelayExecutionEnv,
-    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
-    V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayStoplessControlScope,
-    V3ResponsesRelayStoplessControlState, V3StoplessCenterPhase,
+    V3ResponsesRelayHealthSource, V3ResponsesRelayLocalContinuationScope,
+    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayStoplessControlScope, V3ResponsesRelayStoplessControlState,
+    V3StoplessCenterPhase,
 };
 use serde_json::{json, Value};
 use std::{
@@ -946,7 +947,7 @@ async fn json_stopless_center_persists_without_local_continuation_store() {
                 "input":[{"role":"user","content":"Trigger stopless center without local continuation"}],
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_stopless_control(&stopless_control, scope.clone()))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_stopless_control(&stopless_control, scope.clone()))
     .await
     .unwrap();
 
@@ -1032,14 +1033,16 @@ async fn json_stopless_center_missing_client_session_scope_passes_stop_without_c
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
-            .with_provider_health(&provider_health)
-            .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
-                &state,
-                &stopless_control,
-                scope,
-                41_000,
-            )),
+        V3ResponsesRelayExecutionEnv::new(
+            &transport,
+            V3ResponsesRelayHealthSource::Shared(&provider_health),
+        )
+        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            41_000,
+        )),
     )
     .await
     .unwrap();
@@ -1133,14 +1136,16 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
-            .with_provider_health(&provider_health)
-            .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
-                &state,
-                stopless_control.as_ref(),
-                scope.clone(),
-                30_000,
-            )),
+        V3ResponsesRelayExecutionEnv::new(
+            &transport,
+            V3ResponsesRelayHealthSource::Shared(&provider_health),
+        )
+        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            stopless_control.as_ref(),
+            scope.clone(),
+            30_000,
+        )),
     )
     .await
     .unwrap();
@@ -1181,7 +1186,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
                 "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             stopless_control.as_ref(),
             scope,
@@ -1271,7 +1276,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
                 ],
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             stopless_control.as_ref(),
             scope.clone(),
@@ -1299,7 +1304,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
                 "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             stopless_control.as_ref(),
             scope,
@@ -1371,14 +1376,16 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
-            .with_provider_health(&provider_health)
-            .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
-                &state,
-                &stopless_control,
-                scope.clone(),
-                70_000,
-            )),
+        V3ResponsesRelayExecutionEnv::new(
+            &transport,
+            V3ResponsesRelayHealthSource::Shared(&provider_health),
+        )
+        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope.clone(),
+            70_000,
+        )),
     )
     .await
     .unwrap();
@@ -1405,7 +1412,7 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
                 "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             &stopless_control,
             scope,
@@ -1469,14 +1476,18 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
                 request_id: format!("req-stopless-guard-{round}"),
                 payload: body,
             },
-            V3ResponsesRelayExecutionEnv::new(&transport)
-                .with_provider_health(&provider_health)
-                .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            V3ResponsesRelayExecutionEnv::new(
+                &transport,
+                V3ResponsesRelayHealthSource::Shared(&provider_health),
+            )
+            .with_local_stopless_control(
+                V3ResponsesRelayLocalStoplessControlInput::new(
                     &state,
                     &stopless_control,
                     scope.clone(),
                     40_000 + round,
-                )),
+                ),
+            ),
         )
         .await
         .unwrap();
@@ -1490,7 +1501,7 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             server_id: "controlled".into(),
             request_id: "req-stopless-guard-4".into(),
             payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             &stopless_control,
             scope,
@@ -1552,14 +1563,16 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
-            .with_provider_health(&provider_health)
-            .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
-                &state,
-                &stopless_control,
-                scope.clone(),
-                90_000,
-            )),
+        V3ResponsesRelayExecutionEnv::new(
+            &transport,
+            V3ResponsesRelayHealthSource::Shared(&provider_health),
+        )
+        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope.clone(),
+            90_000,
+        )),
     )
     .await
     .unwrap();
@@ -1688,14 +1701,18 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
                 request_id: format!("req-stopless-guard-pass-through-{round}"),
                 payload: body,
             },
-            V3ResponsesRelayExecutionEnv::new(&transport)
-                .with_provider_health(&provider_health)
-                .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            V3ResponsesRelayExecutionEnv::new(
+                &transport,
+                V3ResponsesRelayHealthSource::Shared(&provider_health),
+            )
+            .with_local_stopless_control(
+                V3ResponsesRelayLocalStoplessControlInput::new(
                     &state,
                     &stopless_control,
                     scope.clone(),
                     41_000 + round,
-                )),
+                ),
+            ),
         )
         .await
         .unwrap();
@@ -1709,7 +1726,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
             server_id: "controlled".into(),
             request_id: "req-stopless-guard-pass-through-4".into(),
             payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_diag_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             &stopless_control,
             scope,
@@ -1768,7 +1785,7 @@ async fn sse_runtime_runs_stopless_center_through_json_hub_pipeline_before_clien
             server_id: "controlled".into(),
             request_id: "req-stopless-sse-center".into(),
             payload: json!({"model":"gpt-5.5","input":[{"role":"user","content":"stream stopless"}],"stream":true}),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 50_000)).await.unwrap();
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 50_000)).await.unwrap();
     match output.client_body {
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut text = String::new();
@@ -1854,7 +1871,7 @@ async fn json_runtime_preserves_responses_reasoning_and_visible_text_fields_to_c
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
             .with_local_continuation(&state, scope, 32_000),
     )
     .await
@@ -1942,11 +1959,8 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
             request_id: "req-stopless-dry-run-1".into(),
             payload: original_request.clone(),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(
-            &state,
-            scope.clone(),
-            70_000,
-        ),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope.clone(), 70_000),
     )
     .await
     .unwrap();
@@ -2074,7 +2088,7 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
                 "stream":true
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
             .with_local_continuation(&state, scope, 33_000),
     )
     .await
@@ -2201,11 +2215,8 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(
-            &state,
-            scope.clone(),
-            1_000,
-        ),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope.clone(), 1_000),
     )
     .await
     .unwrap();
@@ -2231,7 +2242,8 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 2_000),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope, 2_000),
     )
     .await
     .unwrap();
@@ -2341,11 +2353,8 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
             request_id: "req-additional-tools-normal-1".into(),
             payload: original_request.clone(),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(
-            &state,
-            scope.clone(),
-            2_100,
-        ),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope.clone(), 2_100),
     )
     .await
     .unwrap();
@@ -2366,7 +2375,8 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 2_200),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope, 2_200),
     )
     .await
     .unwrap();
@@ -2479,11 +2489,8 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(
-            &state,
-            scope.clone(),
-            20_000,
-        ),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope.clone(), 20_000),
     )
     .await
     .unwrap();
@@ -2512,7 +2519,7 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
                 }],
                 "stream":false
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 21_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 21_000))
     .await
     .unwrap();
     match second.client_body {
@@ -2571,11 +2578,8 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(
-            &state,
-            scope.clone(),
-            10_000,
-        ),
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
+            .with_local_continuation(&state, scope.clone(), 10_000),
     )
     .await
     .unwrap();
@@ -2596,7 +2600,7 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
             .with_local_continuation(&state, scope, 11_000),
     )
     .await
@@ -2650,7 +2654,7 @@ async fn full_history_paired_tool_output_does_not_require_local_restore() {
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
             .with_local_continuation(&state, scope, 20_000),
     )
     .await
@@ -2736,7 +2740,7 @@ async fn responses_relay_selected_openai_chat_provider_uses_chat_wire_tools_and_
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger chat provider wire"}]}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 12_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 12_000))
     .await;
 
     let captures = transport.captures.lock().unwrap();
@@ -2860,7 +2864,7 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger chat provider natural stopless submit"}]}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             &stopless_control,
             scope.clone(),
@@ -2895,14 +2899,16 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
-            .with_provider_health(&provider_health)
-            .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
-                &state,
-                &stopless_control,
-                scope,
-                12_400,
-            )),
+        V3ResponsesRelayExecutionEnv::new(
+            &transport,
+            V3ResponsesRelayHealthSource::Shared(&provider_health),
+        )
+        .with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+            &state,
+            &stopless_control,
+            scope,
+            12_400,
+        )),
     )
     .await
     .expect(
@@ -3020,7 +3026,7 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger chat provider stopless submit"}]}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope.clone(), 12_100))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope.clone(), 12_100))
     .await
     .expect("first stopless OpenAI Chat provider turn must project no-op continuation");
     let first_body = match first.client_body {
@@ -3045,7 +3051,7 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
                 "stream":false
             }),
         },
-        V3ResponsesRelayExecutionEnv::new(&transport)
+        V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal)
             .with_local_continuation(&state, scope, 12_200),
     )
     .await
@@ -3138,7 +3144,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger custom exec"}]}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 12_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 12_000))
     .await
     .expect("OpenAI Chat provider custom tool response must project back to Responses");
 
@@ -3222,7 +3228,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger custom exec with quoted script"}]}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 12_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 12_000))
     .await
     .expect("OpenAI Chat provider custom tool response with unescaped raw input must project back to Responses");
 
@@ -3303,7 +3309,7 @@ async fn responses_openai_chat_field_parity_request_matrix() {
                 "client_metadata":{"codex":"client-metadata-kept"},
                 "stop":["<END>"]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 12_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 12_000))
     .await
     .expect("Responses -> OpenAI Chat request field parity must execute");
 
@@ -3419,7 +3425,7 @@ async fn responses_openai_chat_field_parity_response_matrix() {
                     "parameters":{"type":"object","properties":{"q":{"type":"string"}}}
                 }]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 12_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 12_000))
     .await
     .expect("OpenAI Chat provider response must project to Responses");
 
@@ -3487,7 +3493,7 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
                     {"type":"function_call_output","call_id":"call_stopless_reasoning","output":"Chunk ID: 46b4b1\nWall time: 0.1266 seconds\nProcess exited with code 1\nOriginal token count: 15\nOutput:\nerror: required option '--input-json <json>' not specified\n"}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_provider_health(&provider_health).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::Shared(&provider_health)).with_local_stopless_control(V3ResponsesRelayLocalStoplessControlInput::new(
             &state,
             &stopless_control,
             scope,
@@ -3620,7 +3626,7 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger chat provider wire SSE"}]}
                 ]
             }),
-        }, V3ResponsesRelayExecutionEnv::new(&transport).with_local_continuation(&state, scope, 12_000))
+        }, V3ResponsesRelayExecutionEnv::new(&transport, V3ResponsesRelayHealthSource::ManifestLocal).with_local_continuation(&state, scope, 12_000))
     .await
     .expect("OpenAI Chat provider SSE must re-enter Responses relay Chat Process");
 
