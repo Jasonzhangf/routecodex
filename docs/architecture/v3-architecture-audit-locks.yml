@@ -104,8 +104,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
-    last_manual_authorization_id: auth-20260726-v3-internal-external-error-identity
+    fingerprint: sha256:cf15bc1c3c75165554a03733afa46f17323f5d6ebe4ea15eb1688748ed915c58
+    last_manual_authorization_id: auth-20260727-v3-module-direct-exec-source-rebind
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -117,6 +117,13 @@ locked_items:
     last_manual_authorization_id: auth-20260727-v3-module-relay-frame-source-rebind
 manual_authorizations:
 
+  - authorization_id: auth-20260727-v3-module-direct-exec-source-rebind
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-27T04:20:00+08:00'
+    reason: "Jason-authorized V3 module decomposition Phase 4 source rebind: direct provider failure/success health observation callers moved from kernel.rs to direct_exec/mod.rs through a pure cut/move stage owner; Error01-06 policy, provider health mutation owner, retry/reroute, continuation, and client projection semantics remain unchanged."
+    fingerprint_before: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+    fingerprint_after: sha256:cf15bc1c3c75165554a03733afa46f17323f5d6ebe4ea15eb1688748ed915c58
   - authorization_id: auth-20260727-v3-module-relay-frame-source-rebind
     item_id: chain:v3.sse.transport_boundary
     approved_by: Jason

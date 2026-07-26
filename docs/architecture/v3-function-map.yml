@@ -1503,6 +1503,7 @@ features:
       - v3/crates/routecodex-v3-config/src/validate.rs
       - v3/crates/routecodex-v3-provider-responses/src/transport.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
       - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
       - v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs
       - v3/crates/routecodex-v3-runtime/src/shared.rs
@@ -1528,7 +1529,7 @@ features:
       - V3ResponsesDirectContinuationState
       - V3ResponsesDirectContinuationScope
       - execute_v3_responses_direct_runtime_kernel
-      - execute_v3_responses_direct_runtime_kernel_core
+      - execute_v3_responses_direct_runtime_kernel_core_stages
       - resolve_v3_responses_previous_response_owner_execution_mode_at_req03
       - V3ResponsesPreviousResponseOwnerResolutionError
       - V3RemoteContinuationStore::load_for_req03
@@ -1542,6 +1543,7 @@ features:
       - V3RemoteContinuationObservation
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
       - v3/crates/routecodex-v3-runtime/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
       - v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs
@@ -2148,6 +2150,7 @@ features:
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_exec/mod.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - v3/crates/routecodex-v3-config/src/v2_compat.rs
@@ -2979,7 +2982,7 @@ features:
     runtime_status: source_controlled_no_live_cutover
 
   - feature_id: v3.module_decomposition
-    status: phase3_lib_closeout_active
+    status: phase4_runtime_stage_owner_active
     design_truth: docs/goals/v3-god-file-decomposition-plan.md
     sop: docs/architecture/wiki/v3-module-decomposition-sop.md
     owner_crates: [routecodex-v3-server, routecodex-v3-runtime]
@@ -3002,7 +3005,9 @@ features:
       - v3/crates/routecodex-v3-server/src/relay_frame.rs
       - v3/crates/routecodex-v3-server/src/models_catalog.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_exec/mod.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
       - scripts/architecture/verify-v3-file-size.mjs
       - scripts/tests/v3-file-size-red-fixtures.mjs
       - config/v3-file-size-policy.json
@@ -3016,17 +3021,14 @@ features:
       - v3.response.client_payload
     entry_symbols:
       - execute_v3_responses_relay_runtime
-      - execute_v3_responses_direct_runtime_kernel
-      - spawn_v3_server_aggregate
-    pending_modules:
-      # 目标态。代码搬入前这些路径不存在；每个 Phase 落地时将对应条目
-      # 迁入 owner_files 并从这里删除（护栏 22b：目标态不冒充现状）。
-      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_execution_env.rs
-      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_exec
-      - v3/crates/routecodex-v3-runtime/src/direct_exec
-    pending_entry_symbols:
+      - execute_v3_responses_relay_runtime_inner_stages
       - V3ResponsesRelayExecutionEnv
+      - execute_v3_responses_direct_runtime_kernel
+      - execute_v3_responses_direct_runtime_kernel_core_stages
       - V3ResponsesDirectExecutionEnv
+      - spawn_v3_server_aggregate
+    pending_modules: []
+    pending_entry_symbols: []
     allowed_paths:
       - v3/crates/routecodex-v3-server
       - v3/crates/routecodex-v3-runtime
@@ -3056,4 +3058,4 @@ features:
       - npm run test:v3-compile-fail
       - npm run test:v3-workspace
       - npm run verify:v3-cargo-fmt
-    runtime_status: phase0_gate_active_no_runtime_change
+    runtime_status: phase4_source_decomposition_active_no_behavior_change

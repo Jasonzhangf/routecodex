@@ -40,6 +40,7 @@ for (const path of all) {
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
   const isProviderHealthRuntimeBoundary =
     path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs')
+    || path.includes('routecodex-v3-runtime/src/hub_v1/relay_exec/')
     || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs');
   const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
     || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');

@@ -682,8 +682,8 @@ chains:
       - step_id: v3-de-14
         from_node: V3Transport13ResponsesHttpRequest
         to_node: V3ProviderHealthStateMutated
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: V3ProviderHealthStore::record_provider_failure
         callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
         owner_feature_id: v3.debug_error_foundation
@@ -696,8 +696,8 @@ chains:
       - step_id: v3-de-15
         from_node: V3ProviderResp14Raw
         to_node: V3ProviderHealthStateMutated
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: V3ProviderHealthStore::record_provider_success
         callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
         owner_feature_id: v3.debug_error_foundation
@@ -826,8 +826,8 @@ chains:
       - step_id: v3-rci-02
         from_node: V3HubReqContinuation03Classified
         to_node: V3HubReqTarget06Resolved
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: V3TargetInterpreter::resolve_exact_provider_model_auth
         callee_file: v3/crates/routecodex-v3-target/src/lib.rs
         owner_feature_id: v3.responses_direct_remote_continuation_integration
@@ -856,8 +856,8 @@ chains:
       - step_id: v3-rci-03
         from_node: V3ProviderResp14Raw
         to_node: V3DirectResp14ProviderProjectionPrepared
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: responses_direct_response_projection_hook
         callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
         owner_feature_id: v3.responses_direct_remote_continuation_integration
@@ -871,8 +871,8 @@ chains:
       - step_id: v3-rci-04
         from_node: V3DirectResp14ProviderProjectionPrepared
         to_node: V3HubRespContinuation04Committed
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: V3RemoteContinuationStore::commit
         callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
         owner_feature_id: v3.responses_direct_remote_continuation_integration
@@ -886,8 +886,8 @@ chains:
       - step_id: v3-rci-05
         from_node: V3HubRespContinuation04Committed
         to_node: V3DirectResp15ClientPayloadReady
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: V3ResponsesDirectRuntimeOutput
         callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
         owner_feature_id: v3.responses_direct_remote_continuation_integration
@@ -901,8 +901,8 @@ chains:
       - step_id: v3-rci-06
         from_node: V3DirectResp15ClientPayloadReady
         to_node: V3Resp15ClientPayload
-        caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-        caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+        caller_symbol: execute_v3_responses_direct_runtime_kernel_core_stages
+        caller_file: v3/crates/routecodex-v3-runtime/src/direct_exec/mod.rs
         callee_symbol: V3ResponsesDirectRuntimeOutput
         callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
         owner_feature_id: v3.responses_direct_remote_continuation_integration
