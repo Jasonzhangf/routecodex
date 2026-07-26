@@ -1055,7 +1055,7 @@ async fn pending_endpoint(
                     fixture,
                     &state.manifest,
                     &state.debug,
-                    plan.decision.target.clone(),
+                    plan,
                 )
                 .await
             }
@@ -2418,7 +2418,7 @@ async fn execute_responses_direct_server_frame(
                 register_responses_direct_hooks(),
                 &state.debug,
                 now_epoch_ms,
-                plan.decision.target.clone(),
+                plan,
             )
             .await
         }

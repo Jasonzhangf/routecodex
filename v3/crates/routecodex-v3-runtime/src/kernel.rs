@@ -169,6 +169,13 @@ struct V3ResponsesDirectRuntimeCoreState<'a> {
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    // Candidate set from the Server-side protocol plan; always set together
+    // with initial_selected_target so in-Target reselection keeps working
+    // when routing was preplanned.
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    // Node trace the protocol plan already executed for this request; the
+    // kernel splices it in instead of re-running Router05..Target09.
+    initial_plan_trace: Option<Vec<&'static str>>,
 }
 
 impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
@@ -179,6 +186,8 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             now_epoch_ms: 0,
             provider_health: None,
             initial_selected_target: None,
+            initial_expanded: None,
+            initial_plan_trace: None,
         }
     }
 
@@ -193,6 +202,8 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             now_epoch_ms,
             provider_health: None,
             initial_selected_target: None,
+            initial_expanded: None,
+            initial_plan_trace: None,
         }
     }
 
@@ -201,11 +212,10 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
         self
     }
 
-    fn with_initial_selected_target(
-        mut self,
-        selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    ) -> Self {
-        self.initial_selected_target = Some(selected);
+    fn with_initial_plan(mut self, plan: &V3ResponsesProtocolExecutionPlan) -> Self {
+        self.initial_selected_target = Some(plan.decision.target.clone());
+        self.initial_expanded = Some(plan.expanded.clone());
+        self.initial_plan_trace = Some(plan.routing_trace_segment());
         self
     }
 }
@@ -223,6 +233,25 @@ pub struct V3ResponsesDirectRuntimeOutput {
 pub struct V3ResponsesProtocolExecutionPlan {
     pub decision: V3Execution11ProtocolDecision,
     pub node_trace: Vec<&'static str>,
+    // Candidate set expanded at Target09 during planning; carried so the
+    // kernel can reselect inside the Target on provider failure without
+    // re-entering the Router (Router re-entry after Target10 is forbidden).
+    pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+}
+
+impl V3ResponsesProtocolExecutionPlan {
+    // Routing nodes the plan already executed between Req04 and Target10.
+    // The kernel splices these into its trace when starting from this plan so
+    // the client-visible node trace stays identical to the unplanned path.
+    fn routing_trace_segment(&self) -> Vec<&'static str> {
+        self.node_trace
+            .iter()
+            .skip_while(|node| **node != "V3Req04StandardizedResponses")
+            .skip(1)
+            .take_while(|node| **node != "V3Target10ConcreteProviderSelected")
+            .copied()
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -329,7 +358,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     hook_registry: V3HookRegistry,
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
-    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_plan: &V3ResponsesProtocolExecutionPlan,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
@@ -338,7 +367,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
             now_epoch_ms,
         )
         .with_provider_health(shared_state.provider_health)
-        .with_initial_selected_target(initial_selected_target),
+        .with_initial_plan(initial_plan),
         manifest,
         raw,
         hook_registry,
@@ -470,7 +499,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     };
     trace.push("V3Target09CandidateSetExpanded");
     let provider_health = provider_health.into();
-    let selected = match target.select_available(expanded, &provider_health, now_epoch_ms) {
+    let selected = match target.select_available(expanded.clone(), &provider_health, now_epoch_ms) {
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(
@@ -503,6 +532,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     Ok(V3ResponsesProtocolExecutionPlan {
         decision,
         node_trace: trace,
+        expanded,
     })
 }
 
@@ -609,22 +639,17 @@ pub async fn execute_v3_responses_direct_dry_run_runtime_with_initial_target(
     fixture: V3DryRunFixture,
     manifest: &V3Config05ManifestPublished,
     debug: &V3DebugRuntime,
-    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_plan: &V3ResponsesProtocolExecutionPlan,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_direct_dry_run_runtime_inner(
-        fixture,
-        manifest,
-        debug,
-        Some(initial_selected_target),
-    )
-    .await
+    execute_v3_responses_direct_dry_run_runtime_inner(fixture, manifest, debug, Some(initial_plan))
+        .await
 }
 
 async fn execute_v3_responses_direct_dry_run_runtime_inner(
     fixture: V3DryRunFixture,
     manifest: &V3Config05ManifestPublished,
     debug: &V3DebugRuntime,
-    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_plan: Option<&V3ResponsesProtocolExecutionPlan>,
 ) -> crate::V3FoundationRuntimeOutput {
     if let Err(error) = debug.register_dry_run_fixture(fixture.clone()) {
         return crate::project_v3_debug_failure("V3DryRunFixtureRegistered", error);
@@ -649,9 +674,8 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         response_payload: fixture.response_payload.clone(),
         captured_provider_request: Arc::clone(&captured_provider_request),
     };
-    let core_state = match initial_selected_target {
-        Some(selected) => V3ResponsesDirectRuntimeCoreState::no_continuation()
-            .with_initial_selected_target(selected),
+    let core_state = match initial_plan {
+        Some(plan) => V3ResponsesDirectRuntimeCoreState::no_continuation().with_initial_plan(plan),
         None => V3ResponsesDirectRuntimeCoreState::no_continuation(),
     };
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
@@ -821,10 +845,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         now_epoch_ms,
         provider_health,
         initial_selected_target,
+        initial_expanded,
+        initial_plan_trace,
     } = state;
 
     let mut standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
     trace.push("V3Req04StandardizedResponses");
+    if let Some(plan_trace) = initial_plan_trace {
+        // Router05..Target09 already ran in the Server-side protocol plan;
+        // splice those nodes so the client-visible trace stays identical to
+        // the unplanned path without re-entering the Router.
+        trace.extend(plan_trace);
+    }
     if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&standardized.body) {
         return error_output(
             runtime_source(
@@ -991,7 +1023,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         None
     };
     let initial_selected_target_present = initial_selected_target.is_some();
-    let expanded = if pinned_selected.is_none() && !initial_selected_target_present {
+    let expanded = if let Some(initial_expanded) = initial_expanded {
+        // Server-side protocol plan already ran Router05..Target09; reuse its
+        // candidate set for in-Target reselection instead of re-entering the
+        // Router.
+        Some(initial_expanded)
+    } else if pinned_selected.is_none() && !initial_selected_target_present {
         let routing_facts = build_v3_router_request_facts_from_v3_req_04(&standardized);
         let router = V3VirtualRouter::process_shared();
         let classified = match router.classify_request_with_facts(
@@ -2329,6 +2366,7 @@ mod tests {
                 "V3Target08KindClassified",
                 "V3Target09CandidateSetExpanded",
                 "V3Target10ConcreteProviderSelected",
+                "V3Execution11ProtocolDecision",
                 "V3ResponsesDirect11Policy",
                 "V3Provider12ResponsesWirePayload",
                 "V3Transport13ResponsesHttpRequest",
