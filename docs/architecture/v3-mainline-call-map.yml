@@ -82,6 +82,13 @@ chains:
     edges:
       - { step_id: v3-console-01, from_node: V3RuntimeObservability, to_node: V3ServerHumanConsoleProjection, caller_symbol: emit_v3_observability_console_lines, caller_file: v3/crates/routecodex-v3-server/src/console/emit.rs, callee_symbol: append_v3_human_console_line, callee_file: v3/crates/routecodex-v3-server/src/console/emit.rs, status: anchored, owner_feature_id: v3.module_decomposition, resource_flow: { consumes: [], produces: [], side_channel_reads: [v3.error.chain], side_channel_writes: [v3.debug.human_console_projection] } }
 
+
+  - chain_id: v3.server.live_snapshot_capture
+    owner_feature_id: v3.module_decomposition
+    summary: "Server live snapshot capture persists redacted debug artifacts for current-request diagnostics only; it is not a request/response semantic owner and cannot feed provider payload, client payload, retry, health, routing, or continuation policy."
+    edges:
+      - { step_id: v3-live-snapshot-01, from_node: V3DebugTraceContextStarted, to_node: V3ServerLiveSnapshotArtifact, caller_symbol: capture_v3_live_raw_request, caller_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs, callee_symbol: persist_v3_codex_sample_payload, callee_file: v3/crates/routecodex-v3-server/src/live_snapshot.rs, status: anchored, owner_feature_id: v3.module_decomposition, resource_flow: { consumes: [], produces: [], side_channel_reads: [v3.debug.trace_context, v3.debug.raw_capture, v3.debug.snapshot_session], side_channel_writes: [v3.debug.live_snapshot_artifact] } }
+
   - chain_id: v3.config.compact_hub_v1_defaults
     owner_feature_id: v3.config_interpreter_contract
     summary: "Compact user-facing Hub V1 authoring derives the closed fixed pipeline defaults inside routecodex-v3-config before Manifest publication."

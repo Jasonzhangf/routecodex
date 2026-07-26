@@ -2952,7 +2952,7 @@ features:
     runtime_status: source_controlled_no_live_cutover
 
   - feature_id: v3.module_decomposition
-    status: phase3_console_module_active
+    status: phase3_live_snapshot_module_active
     design_truth: docs/goals/v3-god-file-decomposition-plan.md
     sop: docs/architecture/wiki/v3-module-decomposition-sop.md
     owner_crates: [routecodex-v3-server, routecodex-v3-runtime]
@@ -2965,6 +2965,7 @@ features:
       - v3/crates/routecodex-v3-server/src/console/format.rs
       - v3/crates/routecodex-v3-server/src/console/error.rs
       - v3/crates/routecodex-v3-server/src/console/color.rs
+      - v3/crates/routecodex-v3-server/src/live_snapshot.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - scripts/architecture/verify-v3-file-size.mjs
@@ -2972,6 +2973,7 @@ features:
       - config/v3-file-size-policy.json
     resource_bindings:
       - v3.debug.human_console_projection
+      - v3.debug.live_snapshot_artifact
     entry_symbols:
       - execute_v3_responses_relay_runtime
       - execute_v3_responses_direct_runtime_kernel
@@ -2979,7 +2981,6 @@ features:
     pending_modules:
       # 目标态。代码搬入前这些路径不存在；每个 Phase 落地时将对应条目
       # 迁入 owner_files 并从这里删除（护栏 22b：目标态不冒充现状）。
-      - v3/crates/routecodex-v3-server/src/live_snapshot.rs
       - v3/crates/routecodex-v3-server/src/websocket.rs
       - v3/crates/routecodex-v3-server/src/endpoints.rs
       - v3/crates/routecodex-v3-server/src/direct_frame.rs
