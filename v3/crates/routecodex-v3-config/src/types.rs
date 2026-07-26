@@ -756,6 +756,61 @@ impl V3HubV1Manifest {
     }
 }
 
+/// Result of resolving a client model string as a `provider.model` direct
+/// route. Declared here so the Virtual Router can consume the resolution
+/// without interpreting provider internals itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3DirectModelResolution {
+    /// Not a direct route (no dot, or the segment before the first dot is not
+    /// an enabled provider id) — fall back to normal classification.
+    NotDirect,
+    /// Resolved to an enabled provider and canonical model id.
+    Resolved {
+        provider_id: String,
+        model_id: String,
+        model_capabilities: Vec<String>,
+    },
+    /// The provider exists but declares no such model or alias.
+    UnknownModel {
+        provider_id: String,
+        model_id: String,
+    },
+}
+
+impl V3Config05ManifestPublished {
+    /// Splits `requested` on its first `.` and resolves the leading segment
+    /// against enabled providers, mapping model aliases to the canonical id.
+    pub fn resolve_direct_provider_model(&self, requested: &str) -> V3DirectModelResolution {
+        let requested = requested.trim();
+        let Some((provider_id, model_part)) = requested.split_once('.') else {
+            return V3DirectModelResolution::NotDirect;
+        };
+        if provider_id.is_empty() || model_part.is_empty() {
+            return V3DirectModelResolution::NotDirect;
+        }
+        let Some(provider) = self
+            .providers
+            .get(provider_id)
+            .filter(|provider| provider.enabled)
+        else {
+            return V3DirectModelResolution::NotDirect;
+        };
+        match provider.models.values().find(|model| {
+            model.id == model_part || model.aliases.iter().any(|alias| alias == model_part)
+        }) {
+            Some(model) => V3DirectModelResolution::Resolved {
+                provider_id: provider_id.to_string(),
+                model_id: model.id.clone(),
+                model_capabilities: model.capabilities.clone(),
+            },
+            None => V3DirectModelResolution::UnknownModel {
+                provider_id: provider_id.to_string(),
+                model_id: model_part.to_string(),
+            },
+        }
+    }
+}
+
 fn entry_protocol_endpoint_pattern_matches(pattern: &str, endpoint_path: &str) -> bool {
     if pattern == endpoint_path {
         return true;

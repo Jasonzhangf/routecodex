@@ -90,7 +90,7 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
 
     let default_response = client
         .post(format!("http://127.0.0.1:{success_port}/v1/responses"))
-        .json(&json!({"model":"other-model","input":"default route"}))
+        .json(&json!({"model":"gpt-5.5","input":"default route"}))
         .send()
         .await
         .unwrap();
@@ -144,7 +144,10 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .send()
         .await
         .unwrap();
-    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
+    assert_eq!(
+        exhausted_response.status(),
+        ReqwestStatusCode::SERVICE_UNAVAILABLE
+    );
     let exhausted_trace = trace(&exhausted_response);
     assert_eq!(
         count_node(&exhausted_trace, "V3Router07OpaqueTargetHitOnce"),
@@ -158,6 +161,17 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         "V3Error01SourceRaised,V3Error02Classified,V3Error03TargetLocalAction,V3Error04TargetExhaustionDecision,V3Error05ExecutionDecision,V3Error06ClientProjected"
     );
     let exhausted_body = exhausted_response.json::<Value>().await.unwrap();
+    assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
+    assert_eq!(
+        exhausted_body["error"]["external_error"]["kind"],
+        "provider"
+    );
+    assert_eq!(
+        exhausted_body["error"]["external_error"]["code"],
+        "HTTP_503"
+    );
+    assert_eq!(exhausted_body["error"]["external_error"]["status"], 503);
+    assert!(exhausted_body["error"].get("internal_code").is_none());
     assert_eq!(exhausted_body["error"]["target_exhausted"], true);
     assert_eq!(exhausted_body["error"]["candidates_remaining"], 0);
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;

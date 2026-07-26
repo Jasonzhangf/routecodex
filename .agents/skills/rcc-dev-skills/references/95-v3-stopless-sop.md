@@ -195,7 +195,7 @@ Reset 边界：
 - valid finished/blocked terminal。
 - 最新真实 user turn 在 stopless pair 之后出现。
 - session/scope 改变。
-- profile disabled / direct/provider-direct。
+- profile disabled / provider-direct。Responses 协议 direct 只允许 response-side summary gate 和下一轮标准 Responses continuation 信号处理，不写 StoplessCenter 控制状态，不注入 provider/model-visible `reasoningStop`。
 
 ## `/v1/responses` continuation 不可变区顺序
 
@@ -229,7 +229,7 @@ Req04 Chat Process:
 - Managed relay 必须注入 stopless guidance。
 - 原 client tool surface 必须保留：顶层 `tools` 仍顶层，Responses `input[].type=additional_tools.tools` 仍嵌入原路径。
 - 只允许追加 exactly-one 内部/model-visible `reasoningStop` tool。
-- Direct / provider-direct 必须零注入、零 stopless hook。
+- Responses 协议 direct/provider-direct 请求侧必须零 provider-visible `reasoningStop` 注入、零 stopless system guidance。direct 续轮唯一例外：如果上一轮 direct response-side summary gate 投影了 no-op CLI，下一轮客户端回传的 `function_call_output(call_stopless_reasoning)` 是 Responses continuation 信号；请求侧不得把它改写成普通 user prompt 当作“修复”，也不得把 `routecodex hook run reasoningStop` 命令文本发给 provider。
 
 ### Round 1 response：client-visible
 
@@ -242,6 +242,7 @@ Req04 Chat Process:
 - CLI 命令必须是 no-input：`routecodex hook run reasoningStop`。
 - 投影结果不得泄漏 raw internal `reasoningStop`、StoplessCenter state、repeat counter、schema feedback、metadata/debug 字段。
 - 投影完成后才允许进入 continuation save。
+- Responses 协议 direct 同样使用这条 summary-first response gate：terminal stop/status completed 没有非空 canonical reasoning summary 时投影同一个 no-input `exec_command` no-op，保留本轮可见文本，并把 direct remote continuation locator 按投影后的 pending response commit；有非空 canonical summary 时透明放行。direct 不写 StoplessCenter，不追加 provider-visible internal `reasoningStop`。下一轮只允许按标准 Responses continuation 信号进入 direct continuation owner；如果 live provider 对合成 no-op output 返回 4xx，必须显式暴露并回 direct continuation owner 修协议，禁止吞掉错误或改成静默成功。
 
 ### Round 2 request：state-machine guideline
 
@@ -318,7 +319,7 @@ Req04 Chat Process:
 4. Req04 guidance：同一 no-op output 在不同 StoplessCenter state 下输出不同 provider-facing guideline/policy；提示必须是完整但透明的任务导向 guideline，包含上下文复核、继续推理、工具推进、完成/阻塞证据要求，且不得暴露 no-op/CLI/client bridge/`finish_reason=stop` 机制；单一硬编码 `继续。` 覆盖全部状态必须红。
 5. Continuation boundary：Resp03 投影先于 Resp04 save，Req04 hook 晚于 restore；反向顺序必须红。
 6. Provider blackbox：Round2 provider request 无 shell/control artifacts，保留原工具声明面，追加 exactly-one `reasoningStop`，OpenAI Chat wire 不能只比 name，必须比 description/schema/strict/custom format。
-7. Direct negative：direct/provider-direct 无 stopless guidance/tool/CLI。
+7. Direct conditional：Responses 协议 direct 请求侧无 provider-visible stopless guidance/tool；response-side 无 summary terminal stop 必须投影 no-input CLI 并支持下一轮 exact-pin continuation；有 canonical summary 必须放行。provider-direct/非 Responses direct 不启用 relay stopless。
 8. Guard/terminal：完成、阻塞、guard、non-stop progress、already-terminal 均有正反测试。
 9. Generated guideline history：多轮 no-op/guard 前 provider request 中 generated continuation guideline 必须 exactly-one；旧 generated guideline 累积必须红。
 10. Dry-run read-only：带 StoplessCenter 的 provider-request dry-run 不得改变 live StoplessCenter，连续 dry-run 产物必须 identical；dry-run 推进 count/phase 或 clear state 必须红。

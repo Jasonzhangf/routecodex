@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { FileHandle } from 'node:fs/promises';
 import { formatUnknownError, isRecord } from './common-utils.js';
 
-const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = 50;
+const DEFAULT_SNAPSHOT_KEEP_RECENT_REQUEST_DIRS = 500;
 const SNAPSHOT_RETENTION_NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
 const snapshotRetentionNonBlockingLogState = new Map<string, number>();
 

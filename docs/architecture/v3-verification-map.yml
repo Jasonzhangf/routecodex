@@ -994,14 +994,17 @@ features:
       - docs/architecture/wiki/v3-responses-direct-mainline.md
     required_unit:
       - typed Responses request facts preserve client model, capabilities, and deterministic input-token estimate
+      - input-token estimate uses tiktoken BPE with the legacy model-to-encoding table (cl100k fallback), max-merges chat messages and responses context, and omits media payload bytes
       - non-default pool match and no-match/default behavior
       - lower explicit precedence wins and only equal-best valid matches are rejected as ambiguous
-      - priority, weighted, and listener/group/pool isolated round-robin ordering
+      - priority, smooth-weighted-round-robin (SWRR), and listener/group/pool isolated round-robin ordering; selection state persists across requests via the process-shared router and peek ordering never advances it
       - optional/default semantic target deduplication without second Router hit
       - Target internal Forwarder expansion and availability reselection across the captured plan
       - non-built-in requested model ids use explicit `match.models` pools as inbound-to-target mapping declarations; default/no-explicit-model paths filter Target candidates by configured target model ids, ignore provider aliases for runtime matching, and fail explicitly when no configured candidate matches
+      - "`provider.model` direct routing follows V2 semantics: the client model splits on its first dot into an existing enabled provider id (unknown provider falls back to normal classification), aliases resolve to the canonical model id (unknown model fails as a config error without reroute), unmet vision/multimodal requirements fail fast, health cooldowns are reported but never veto the pin while request-local exclusions still block, and /v1/models exposes every enabled provider model as a provider.model direct id"
     required_contract:
       - default pool is explicit, non-empty, and captured during the original route decision
+      - virtual-router dry-run projects reasoning, defaultFloorProtected, routeResult, and an alias-only target object, and never advances round-robin/SWRR selection state
       - Virtual Router cannot read Provider health/error or expand Forwarders/providers/keys/models
       - Target cannot re-enter Virtual Router after the opaque handoff
       - selection plan is non-Clone and cannot be consumed twice
@@ -1844,7 +1847,7 @@ features:
       - stop/end_turn with canonical reasoning summary and unfinished `stop_schema.nextStep` projects no-op, stores the nextStep only as scoped StoplessCenter `next_step_prompt`, and Req04 carries it into the next provider-facing continuation prompt
       - stop/end_turn with canonical reasoning summary and `stop_schema.blocked=true` plus blocked reason appends the blocked reason to canonical summary and passes through without no-op or counter increment
       - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
-      - direct negative stays exactly-zero relay stopless for the same payload matrix
+      - Responses protocol direct stays zero provider-visible relay stopless injection/guidance on request, but uses the same response-side summary gate: no canonical reasoning summary projects no-input CLI and commits a direct continuation locator; canonical summary passes through; next-turn provider 4xx must be explicit and must not be swallowed as a successful continuation
       - "`[features].stopless_center = false` disables relay stopless injection and projection"
       - architecture resource-control gate rejects StoplessCenter state modeled as CLI args/stdout, local continuation context/store, provider/client normal payload, debug/snapshot truth, generic Hub closeout, or server-entry aggregate ownership
       - normalization boundary gate rejects tool governance hook schema and tool-result payload logic in ReqInbound RespInbound ReqOutbound RespOutbound
@@ -1862,6 +1865,7 @@ features:
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration -- --nocapture
       - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts
       - npm run verify:v3-relay-response-semantics
       - npm run verify:v3-relay-request-semantics

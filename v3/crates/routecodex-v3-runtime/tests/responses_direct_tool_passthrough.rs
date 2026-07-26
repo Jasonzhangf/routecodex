@@ -106,14 +106,14 @@ fn scope() -> V3ResponsesDirectContinuationScope {
     )
 }
 
-async fn assert_direct_response_does_not_run_relay_stopless(response: Value, label: &str) {
+async fn assert_direct_response_request_does_not_inject_stopless(response: Value, label: &str) {
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
     let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &V3ResponsesDirectContinuationState::default(),
         &manifest,
         request(json!({
-            "model": "client-model",
+            "model": "gpt-5.5",
             "input": format!("direct stopless negative {label}"),
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
@@ -156,6 +156,34 @@ async fn assert_direct_response_does_not_run_relay_stopless(response: Value, lab
         "{label}: direct runtime must not enter Relay RespChatProcess: {:?}",
         output.node_trace
     );
+}
+
+async fn assert_direct_response_passthrough_without_stopless(response: Value, label: &str) {
+    let manifest = manifest();
+    let transport = PassthroughTransport::with_response(response);
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &V3ResponsesDirectContinuationState::default(),
+        &manifest,
+        request(json!({
+            "model": "gpt-5.5",
+            "input": format!("direct stopless pass {label}"),
+            "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
+            "stream": false
+        })),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
+    assert!(
+        !output
+            .node_trace
+            .contains(&"V3HubRespChatProcess03Governed"),
+        "{label}: direct runtime must not enter Relay RespChatProcess: {:?}",
+        output.node_trace
+    );
     let V3ClientBody::Json(parsed) = &output.client_payload.body else {
         panic!("{label}: direct client body must be JSON: {:#?}", output);
     };
@@ -189,7 +217,7 @@ async fn direct_kernel_preserves_tool_choice_parallel_tool_calls_and_tools_in_wi
     let transport = PassthroughTransport::default();
 
     let body = json!({
-        "model": "client-model",
+        "model": "gpt-5.5",
         "input": "use tools",
         "tools": [
             {"type": "function", "name": "search", "description": "search web"},
@@ -255,7 +283,7 @@ async fn direct_kernel_preserves_service_tier_reasoning_effort_and_prompt_cache_
     let transport = PassthroughTransport::default();
 
     let body = json!({
-        "model": "client-model",
+        "model": "gpt-5.5",
         "input": "reason about tool use",
         "tools": [{"type": "function", "name": "compute"}],
         "tool_choice": "auto",
@@ -314,7 +342,7 @@ async fn direct_kernel_response_propagates_provider_output_text_to_client_unchan
     let transport = PassthroughTransport::default();
 
     let body = json!({
-        "model": "client-model",
+        "model": "gpt-5.5",
         "input": "use tools",
         "tools": [{"type": "function", "name": "search"}]
     });
@@ -356,7 +384,7 @@ async fn direct_kernel_response_propagates_provider_output_text_to_client_unchan
 }
 
 #[tokio::test]
-async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_response() {
+async fn direct_kernel_projects_stopless_noop_for_completed_response_without_summary() {
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(json!({
         "object":"response",
@@ -370,8 +398,8 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
     }));
 
     let original_request = json!({
-        "model": "client-model",
-        "input": "direct must not use stopless",
+        "model": "gpt-5.5",
+        "input": "direct uses stopless when completed response has no summary",
         "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
         "stream": false
     });
@@ -396,7 +424,7 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
     assert_eq!(
         wire.get("tools"),
         original_request.get("tools"),
-        "direct provider request must preserve the original Responses $.tools field exactly and must not run relay stopless injection"
+        "direct provider request must preserve the original Responses $.tools field exactly and must not inject request-side stopless guidance"
     );
     assert_eq!(
         wire["tools"].as_array().map(|items| items.len()),
@@ -410,7 +438,7 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
                 .as_str()
                 .unwrap_or_default()
                 .contains("reasoningStop"),
-        "direct provider request must not get stopless guidance: {wire}"
+        "direct provider request must not get request-side stopless guidance: {wire}"
     );
     for forbidden in [
         "reasoningStop",
@@ -419,7 +447,7 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
     ] {
         assert!(
             !wire_serialized.contains(forbidden),
-            "direct provider wire leaked stopless artifact: {forbidden}"
+            "direct provider wire leaked request-side stopless artifact: {forbidden}"
         );
     }
     assert!(
@@ -437,25 +465,27 @@ async fn direct_kernel_does_not_run_stopless_for_completed_missing_schema_respon
         );
     };
     assert_eq!(
-        parsed["status"], "completed",
+        parsed["status"], "requires_action",
         "client body shape wrong: {parsed}"
     );
     assert_eq!(parsed["id"], "resp_direct_missing_schema");
     let serialized = serde_json::to_string(parsed).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "reasoningStop",
-        "routecodex hook run",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "direct response leaked stopless projection: {forbidden}"
-        );
-    }
+    assert!(
+        serialized.contains("call_stopless_reasoning"),
+        "direct no-summary stop must project client-visible no-op call: {serialized}"
+    );
+    assert!(
+        serialized.contains("routecodex hook run reasoningStop"),
+        "direct no-summary stop must project no-input reasoningStop CLI: {serialized}"
+    );
+    assert!(
+        serialized.contains("direct response without stop schema"),
+        "direct no-summary stop must preserve visible assistant text: {serialized}"
+    );
 }
 
 #[tokio::test]
-async fn direct_kernel_does_not_run_relay_stopless_for_same_stopless_payload_matrix() {
+async fn direct_kernel_uses_summary_gate_for_same_stopless_payload_matrix() {
     let payloads = [
         (
             "no_schema",
@@ -484,16 +514,35 @@ async fn direct_kernel_does_not_run_relay_stopless_for_same_stopless_payload_mat
             }),
         ),
         (
-            "terminal_schema",
+            "visible_text_schema_without_summary",
             json!({
-                "object":"response",
-                "id":"resp_direct_matrix_terminal_schema",
-                "status":"completed",
-                "output":[{
-                    "type":"message",
-                    "role":"assistant",
-                    "content":[{"type":"output_text","text":"done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"direct proof\",\"needs_user_input\":false}\n</rcc_stop_schema>"}]
+                "object": "response",
+                "id": "resp_direct_matrix_visible_schema_no_summary",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"direct proof\",\"needs_user_input\":false}\n</rcc_stop_schema>"}]
                 }]
+            }),
+        ),
+        (
+            "canonical_summary",
+            json!({
+                "object": "response",
+                "id": "resp_direct_matrix_summary",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": "The task is complete with direct evidence."}]
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "done with summary"}]
+                    }
+                ]
             }),
         ),
         (
@@ -511,6 +560,37 @@ async fn direct_kernel_does_not_run_relay_stopless_for_same_stopless_payload_mat
         ),
     ];
     for (label, payload) in payloads {
-        assert_direct_response_does_not_run_relay_stopless(payload, label).await;
+        assert_direct_response_request_does_not_inject_stopless(payload.clone(), label).await;
+        if label == "canonical_summary" {
+            assert_direct_response_passthrough_without_stopless(payload, label).await;
+            continue;
+        }
+        let manifest = manifest();
+        let transport = PassthroughTransport::with_response(payload);
+        let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+            &V3ResponsesDirectContinuationState::default(),
+            &manifest,
+            request(json!({
+                "model": "gpt-5.5",
+                "input": format!("direct stopless matrix {label}"),
+                "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
+                "stream": false
+            })),
+            scope(),
+            register_responses_direct_hooks(),
+            &transport,
+            1_000,
+        )
+        .await;
+        assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
+        let V3ClientBody::Json(parsed) = &output.client_payload.body else {
+            panic!("{label}: direct client body must be JSON: {:#?}", output);
+        };
+        let serialized = serde_json::to_string(parsed).unwrap();
+        assert_eq!(parsed["status"], "requires_action", "{label}: {parsed}");
+        assert!(
+            serialized.contains("routecodex hook run reasoningStop"),
+            "{label}: no-summary direct stop must continue via client no-op: {serialized}"
+        );
     }
 }

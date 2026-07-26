@@ -390,7 +390,11 @@ async fn provider_error_after_restore_does_not_release_or_project_success() {
     .await
     .unwrap();
     assert_eq!(output.status, 429);
-    assert_eq!(output.client_response["type"], "error");
+    assert_eq!(
+        output.client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert_eq!(output.client_response["error"]["message"], "retry later");
     assert_eq!(output.error_chain.as_ref().unwrap().len(), 6);
     assert_eq!(state.len().unwrap(), 1);
 }
@@ -493,6 +497,10 @@ wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning"]
+[route_groups.controlled.pools.claude_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]

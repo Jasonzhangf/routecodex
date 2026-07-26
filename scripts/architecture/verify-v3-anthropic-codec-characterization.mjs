@@ -55,6 +55,10 @@ requireAll(source, sourcePath, [
   'ChatImageUrlUrl',
   'ChatInlineMediaData',
   'ChatMediaMimeType',
+  'responses_web_search_tool_as_anthropic_tool',
+  'web_search_20250305',
+  'web_search_preview',
+  'allowed_domains',
 ]);
 
 requireNear(source, sourcePath, '"request.messages[].content[].image.source.url"', 'ChatImageUrlUrl');
@@ -76,6 +80,10 @@ requireAll(tests, 'focused Anthropic codec tests', [
   'anthropic_image_source_url_maps_only_to_chat_image_url_url',
   'anthropic_image_base64_data_maps_to_chat_inline_media_data',
   'anthropic_image_base64_media_type_maps_to_chat_media_mime_type',
+  'responses_builtin_tool_types_encode_with_anthropic_native_web_search_and_object_tool_choice',
+  'web_search_20250305',
+  'tools[1].get("input_schema").is_none()',
+  'search_context_size',
   'anthropic_image_url_does_not_map_to_inline_media_data',
   'anthropic_image_base64_data_does_not_map_to_chat_media_mime_type',
   'anthropic_image_shape_branch_semantics_do_not_mutate_provider_wire_payload',

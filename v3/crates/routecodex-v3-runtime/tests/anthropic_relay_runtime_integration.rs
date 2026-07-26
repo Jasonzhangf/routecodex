@@ -137,7 +137,7 @@ async fn anthropic_responses_field_parity_request_matrix() {
                         "role":"user",
                         "content":[
                             {"type":"text","text":"Describe image"},
-                            {"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAA"}}
+                            {"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="}}
                         ]
                     },
                     {
@@ -189,7 +189,7 @@ async fn anthropic_responses_field_parity_request_matrix() {
     );
     assert_eq!(
         body["input"][1]["content"][1],
-        json!({"type":"input_image","image_url":"data:image/png;base64,AAA"})
+        json!({"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="})
     );
     assert_eq!(body["input"][2]["type"], "function_call");
     assert_eq!(body["input"][2]["call_id"], "call_lookup");
@@ -415,7 +415,7 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         V3AnthropicRelayRuntimeInput {
             server_id: "controlled".into(),
             request_id: "req-error".into(),
-            payload: json!({"model":"alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
+            payload: json!({"model":"claude-client-alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
         },
         &ErrorTransport,
     )
@@ -538,6 +538,10 @@ wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
+[route_groups.controlled.pools.claude_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
@@ -580,6 +584,13 @@ aliases = ["claude-client-alias"]
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
+[route_groups.controlled.pools.claude_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
+targets = [
+  { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 1 },
+  { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 2 }
+]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [

@@ -340,7 +340,7 @@ pub(crate) fn resolve_v3_relay_target<R: V3ProviderAvailabilityReader + ?Sized>(
     input: V3RelayProviderTargetResolutionInput<'_, R>,
 ) -> Result<V3Target10ConcreteProviderSelected, String> {
     let facts = crate::build_v3_router_request_facts_for_entry(input.body, input.entry_kind);
-    let router = V3VirtualRouter::default();
+    let router = V3VirtualRouter::process_shared();
     let classified = router
         .classify_request_with_facts(input.manifest, input.server_id, input.endpoint_path, facts)
         .map_err(|error| format!("{error:?}"))?;

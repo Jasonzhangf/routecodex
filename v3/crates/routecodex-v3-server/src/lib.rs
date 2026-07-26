@@ -6489,6 +6489,54 @@ fn build_v3_models_catalog(
         seen.insert(model_ref.visible_id.clone());
         data.push(Value::Object(item));
     }
+    // Direct-routing surface: every enabled provider model is addressable as
+    // `provider.model` regardless of route-group declarations, so expose those
+    // ids alongside the routed catalog.
+    for provider in manifest.providers.values() {
+        if !provider.enabled {
+            continue;
+        }
+        for model in provider.models.values() {
+            let direct_id = format!("{}.{}", provider.id, model.id);
+            if seen.contains(&direct_id) || is_v3_hidden_codex_future_model(&model.id) {
+                continue;
+            }
+            let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
+            let mut item = build_v3_codex_model_metadata(
+                &direct_id,
+                &model.id,
+                model.max_context_tokens,
+                Some(&capabilities),
+            );
+            item.insert(
+                "owned_by".to_string(),
+                json!(format!("provider:{}", provider.id)),
+            );
+            item.insert("provider_id".to_string(), json!(provider.id));
+            item.insert("canonical_model_id".to_string(), json!(model.id));
+            item.insert("wire_model".to_string(), json!(model.wire_name));
+            item.insert("direct_route".to_string(), json!(true));
+            item.insert(
+                "capabilities".to_string(),
+                json!(model.capabilities.clone()),
+            );
+            item.insert(
+                "supports_streaming".to_string(),
+                json!(model.supports_streaming),
+            );
+            item.insert(
+                "supports_thinking".to_string(),
+                json!(model.supports_thinking),
+            );
+            item.insert("max_tokens".to_string(), json!(model.max_tokens));
+            item.insert(
+                "max_context_tokens".to_string(),
+                json!(model.max_context_tokens),
+            );
+            seen.insert(direct_id);
+            data.push(Value::Object(item));
+        }
+    }
     let models = data.clone();
     json!({
         "object": "list",

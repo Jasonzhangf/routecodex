@@ -947,7 +947,7 @@ async fn json_stopless_center_persists_without_local_continuation_store() {
             server_id: "controlled".into(),
             request_id: "req-stopless-center-metadata-only".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"Trigger stopless center without local continuation"}],
                 "stream":false
             }),
@@ -1037,7 +1037,7 @@ async fn json_stopless_center_missing_client_session_scope_passes_stop_without_c
             server_id: "controlled".into(),
             request_id: "req-stopless-missing-session".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"No session id must not start stopless control"}],
                 "stream":false
             }),
@@ -1137,7 +1137,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
             server_id: "controlled".into(),
             request_id: "req-stopless-center-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"Trigger stopless center"}],
                 "tools": original_tools.clone(),
                 "stream":false
@@ -1188,7 +1188,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
             server_id: "controlled".into(),
             request_id: "req-stopless-center-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "previous_response_id":"resp_stopless_center_1",
                 "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
                 "stream":false
@@ -1282,7 +1282,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
             server_id: "controlled".into(),
             request_id: "req-stopless-additional-tools-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[
                     {"type":"additional_tools","role":"developer","tools":original_tools.clone()},
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"Trigger stopless center with additional_tools"}]}
@@ -1318,7 +1318,7 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
             server_id: "controlled".into(),
             request_id: "req-stopless-additional-tools-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "previous_response_id":"resp_stopless_additional_tools_1",
                 "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
                 "stream":false
@@ -1394,7 +1394,7 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
             server_id: "controlled".into(),
             request_id: "req-stopless-error-cleanup-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"Trigger cleanup stopless"}],
                 "stream":false
             }),
@@ -1430,7 +1430,7 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
             server_id: "controlled".into(),
             request_id: "req-stopless-error-cleanup-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "previous_response_id":"resp_stopless_error_cleanup_1",
                 "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
                 "stream":false
@@ -1492,9 +1492,9 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
 
     for round in 1..=3 {
         let body = if round == 1 {
-            json!({"model":"client-responses","input":[{"role":"user","content":"guard"}],"stream":false})
+            json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard"}],"stream":false})
         } else {
-            json!({"model":"client-responses","previous_response_id":format!("resp_guard_{}", round - 1),"input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
+            json!({"model":"gpt-5.5","previous_response_id":format!("resp_guard_{}", round - 1),"input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
         };
         let out = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
             &manifest(),
@@ -1525,7 +1525,7 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
             request_id: "req-stopless-guard-4".into(),
-            payload: json!({"model":"client-responses","previous_response_id":"resp_guard_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
         },
         &transport,
         &provider_health,
@@ -1587,7 +1587,7 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
             server_id: "controlled".into(),
             request_id: "req-stopless-control-dryrun-readonly-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"dry-run readonly"}],
                 "stream":false
             }),
@@ -1619,7 +1619,7 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
     );
 
     let submit_payload = json!({
-        "model":"client-responses",
+        "model":"gpt-5.5",
         "previous_response_id": first_body["id"].as_str().unwrap(),
         "input":[{
             "type":"function_call_output",
@@ -1715,9 +1715,9 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
 
     for round in 1..=3 {
         let body = if round == 1 {
-            json!({"model":"client-responses","input":[{"role":"user","content":"guard pass through"}],"stream":false})
+            json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard pass through"}],"stream":false})
         } else {
-            json!({"model":"client-responses","previous_response_id":format!("resp_guard_diag_{}", round - 1),"input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
+            json!({"model":"gpt-5.5","previous_response_id":format!("resp_guard_diag_{}", round - 1),"input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
         };
         let out = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
             &manifest(),
@@ -1748,7 +1748,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
             request_id: "req-stopless-guard-pass-through-4".into(),
-            payload: json!({"model":"client-responses","previous_response_id":"resp_guard_diag_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_diag_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
         },
         &transport,
         &provider_health,
@@ -1813,7 +1813,7 @@ async fn sse_runtime_runs_stopless_center_through_json_hub_pipeline_before_clien
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
             request_id: "req-stopless-sse-center".into(),
-            payload: json!({"model":"client-responses","input":[{"role":"user","content":"stream stopless"}],"stream":true}),
+            payload: json!({"model":"gpt-5.5","input":[{"role":"user","content":"stream stopless"}],"stream":true}),
         },
         &transport,
         &state,
@@ -1900,7 +1900,7 @@ async fn json_runtime_preserves_responses_reasoning_and_visible_text_fields_to_c
             server_id: "controlled".into(),
             request_id: "req-reasoning-text-runtime".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"Return reasoning and visible text"}],
                 "stream":false
             }),
@@ -1972,7 +1972,7 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     let original_tools =
         json!([{"type":"function","name":"exec_command","description":"run command"}]);
     let original_request = json!({
-        "model":"client-responses",
+        "model":"gpt-5.5",
         "input":[
             {
                 "type":"additional_tools",
@@ -2010,7 +2010,7 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     assert_eq!(state.len().unwrap(), 1);
 
     let submit_payload = json!({
-        "model":"client-responses",
+        "model":"gpt-5.5",
         "previous_response_id": first_body["id"].as_str().unwrap(),
         "input":[{
             "type":"function_call_output",
@@ -2122,7 +2122,7 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
             server_id: "controlled".into(),
             request_id: "req-apply-patch-sse-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":"Patch a file over SSE",
                 "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}],
                 "stream":true
@@ -2251,7 +2251,7 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
             server_id: "controlled".into(),
             request_id: "req-local-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"Lookup alpha"}],
                 "tools":second_tools.clone(),
                 "stream":false
@@ -2276,7 +2276,7 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
             server_id: "controlled".into(),
             request_id: "req-local-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_local_1",
@@ -2387,7 +2387,7 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
         "controlled",
     );
     let original_request = json!({
-        "model":"client-responses",
+        "model":"gpt-5.5",
         "input":[original_additional_tools_item.clone(), original_user_item.clone()],
         "stream":false
     });
@@ -2418,7 +2418,7 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
             server_id: "controlled".into(),
             request_id: "req-additional-tools-normal-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[provider_function_output.clone()],
                 "stream":false
             }),
@@ -2533,7 +2533,7 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
             server_id: "controlled".into(),
             request_id: "req-apply-patch-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{"role":"user","content":"Patch a file"}],
                 "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}],
                 "stream":false
@@ -2565,7 +2565,7 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
             server_id: "controlled".into(),
             request_id: "req-apply-patch-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{
                     "type":"custom_tool_call_output",
                     "call_id":"call_apply_patch_freeform",
@@ -2632,7 +2632,7 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
             server_id: "controlled".into(),
             request_id: "req-wrong-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":"save context",
                 "stream":false
             }),
@@ -2652,7 +2652,7 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
             server_id: "controlled".into(),
             request_id: "req-wrong-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":[{
                     "type":"function_call_output",
                     "call_id":"call_missing",
@@ -2698,7 +2698,7 @@ async fn full_history_paired_tool_output_does_not_require_local_restore() {
             server_id: "controlled".into(),
             request_id: "req-full-history".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "previous_response_id":"1a3e546c-0a32-4667-933c-03f88aafc05c",
                 "input":[
                     {"role":"user","content":"Lookup alpha"},
@@ -2799,7 +2799,7 @@ async fn responses_relay_selected_openai_chat_provider_uses_chat_wire_tools_and_
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-wire".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "instructions":"client instruction",
                 "input":[
@@ -2930,7 +2930,7 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-natural-stopless-submit-tools-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "instructions":"client instruction",
                 "input":[
@@ -2967,7 +2967,7 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-natural-stopless-submit-tools-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "previous_response_id": first_body["id"].as_str().unwrap(),
                 "input":[{
                     "type":"function_call_output",
@@ -3094,7 +3094,7 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-stopless-submit-tools-1".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "instructions":"client instruction",
                 "input":[
@@ -3122,7 +3122,7 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-stopless-submit-tools-2".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "previous_response_id": first_body["id"].as_str().unwrap(),
                 "input":[{
                     "type":"function_call_output",
@@ -3221,7 +3221,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-custom".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "instructions":"client instruction",
                 "input":[
@@ -3312,7 +3312,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-custom-unescaped".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "instructions":"client instruction",
                 "input":[
@@ -3383,7 +3383,7 @@ async fn responses_openai_chat_field_parity_request_matrix() {
             server_id: "chatwire".into(),
             request_id: "req-responses-openai-chat-field-request".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "instructions":"field parity system",
                 "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"run request matrix"}]}],
@@ -3521,7 +3521,7 @@ async fn responses_openai_chat_field_parity_response_matrix() {
             server_id: "chatwire".into(),
             request_id: "req-responses-openai-chat-field-response".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"run response matrix"}]}],
                 "tools":[{
@@ -3596,7 +3596,7 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
             server_id: "chatwire".into(),
             request_id: "req-stopless-noop-provider-wire".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":false,
                 "tool_choice":"auto",
                 "input":[
@@ -3737,7 +3737,7 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
             server_id: "chatwire".into(),
             request_id: "req-openai-chat-wire-sse".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "stream":true,
                 "instructions":"client instruction",
                 "input":[

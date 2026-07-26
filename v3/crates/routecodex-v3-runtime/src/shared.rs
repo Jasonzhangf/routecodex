@@ -43,7 +43,10 @@ impl V3SseRemoteContinuationObservationState {
             .map_err(|error| error.to_string())
     }
 
-    fn record_pending_response_id(&self, response_id: &str) -> Result<(), V3Error01SourceRaised> {
+    pub(crate) fn record_pending_response_id(
+        &self,
+        response_id: &str,
+    ) -> Result<(), V3Error01SourceRaised> {
         self.inner
             .lock()
             .map_err(|error| {

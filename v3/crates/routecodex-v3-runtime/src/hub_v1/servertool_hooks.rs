@@ -28,7 +28,6 @@ const STOPLESS_NOOP_CONTINUATION_GUIDELINE: &str = r#"继续当前目标。
 4. 只有目标确实完成并有证据时，调用 reasoningStop 设置 stopreason=0 并提供 evidence。
 5. 只有真实阻塞且需要用户或外部状态时，调用 reasoningStop 设置 stopreason=1，并提供 reason、evidence、needs_user_input。
 6. 不要把“还需要继续”或自然停止作为最终响应；既未完成也未阻塞，继续工作并执行工具动作。"#;
-
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }
@@ -306,6 +305,16 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
     Ok(state
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
+}
+
+pub fn apply_v3_responses_direct_stopless_request_hook(
+    payload: &mut Value,
+) -> Result<bool, V3HubRelayRequestError> {
+    let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
+        return Ok(false);
+    };
+    strip_stopless_generated_system_guidance_items(input);
+    Ok(false)
 }
 
 fn apply_v3_stopless_chat_request_hook_at_req04(

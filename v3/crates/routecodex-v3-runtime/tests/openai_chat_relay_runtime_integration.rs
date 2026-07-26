@@ -657,6 +657,10 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "chat-wire-model"
 supports_streaming = true
 capabilities = ["text", "tools"]
+[route_groups.controlled.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }]
@@ -697,6 +701,13 @@ wire_name = "chat-wire-model"
 aliases = ["chat-client-alias"]
 supports_streaming = true
 capabilities = ["text", "tools"]
+[route_groups.controlled.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
+targets = [
+  { kind = "provider_model", provider = "primary", model = "chat-wire-model", key = "primary", priority = 1 },
+  { kind = "provider_model", provider = "secondary", model = "chat-wire-model", key = "secondary", priority = 2 }
+]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [

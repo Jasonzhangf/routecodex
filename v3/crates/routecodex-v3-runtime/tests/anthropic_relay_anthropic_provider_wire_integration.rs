@@ -150,10 +150,10 @@ impl ResponsesTransport for AnthropicProviderJsonToolMissingNameTransport {
                 value: b"application/json".to_vec(),
             }],
             serde_json::to_vec(&json!({
-                "id":"msg_glmrelay_missing_name",
+                "id":"msg_minimax_missing_name",
                 "type":"message",
                 "role":"assistant",
-                "model":"glm-5.2",
+                "model":"MiniMax-M3",
                 "content":[{
                     "type":"tool_use",
                     "id":"call_missing_name",
@@ -283,7 +283,7 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() {
-    let error = execute_v3_anthropic_relay_runtime(
+    let output = execute_v3_anthropic_relay_runtime(
         &manifest(),
         V3AnthropicRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
@@ -298,11 +298,16 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
         &AnthropicProviderSseEofBeforeStopTransport,
     )
     .await
-    .unwrap_err();
+    .unwrap();
 
-    let message = error.to_string();
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    let message = output.client_response["error"]["message"].as_str().unwrap();
     assert!(
-        message.contains("Anthropic provider SSE ended without message_stop"),
+        message.contains("Anthropic provider event stream ended without message_stop"),
         "unexpected error: {message}"
     );
     assert!(
@@ -313,13 +318,13 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_inference() {
-    let error = execute_v3_anthropic_relay_runtime(
+    let output = execute_v3_anthropic_relay_runtime(
         &manifest(),
         V3AnthropicRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
             request_id: "req-anthropic-provider-tool-missing-name".into(),
             payload: json!({
-                "model":"glm-5.2",
+                "model":"MiniMax-M3",
                 "max_tokens":64,
                 "messages":[{"role":"user","content":"Use lookup_test with query=\"ping\"."}],
                 "tools":[{
@@ -334,9 +339,14 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
         &AnthropicProviderJsonToolMissingNameTransport,
     )
     .await
-    .unwrap_err();
+    .unwrap();
 
-    let message = error.to_string();
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.client_response["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    let message = output.client_response["error"]["message"].as_str().unwrap();
     assert!(
         message.contains("missing name/function.name"),
         "provider tool_use without name must fail-fast instead of inferring from tool_choice: {message}"

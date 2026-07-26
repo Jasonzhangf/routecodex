@@ -1411,6 +1411,93 @@ fn assert_route_targets(actual: Vec<&str>, expected: &[&str]) {
     assert_eq!(actual, expected);
 }
 
+#[test]
+fn v2_compat_maps_tier_load_balancing_to_pool_selection_and_weights() {
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-v2-load-balancing-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    write_v2_provider(
+        &root,
+        "cc-sol",
+        "responses",
+        "https://cc-sol.invalid/openai/v1",
+        "gpt-5.6-sol",
+        &["gpt-5.6-sol"],
+    );
+
+    let path = root.join("config.toml");
+    fs::write(&path, V2_LOAD_BALANCED_CONFIG).unwrap();
+    let manifest = V3ConfigStore::new(&path).load_snapshot().unwrap();
+    let group = &manifest.route_groups["gateway_priority_5555"];
+
+    let tools = &group.pools["tools"];
+    assert_eq!(tools.selection.strategy, V3SelectionStrategy::Weighted);
+    let weights = tools
+        .targets
+        .iter()
+        .map(|target| (target.id.as_deref().unwrap(), target.weight.unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(weights, [("fwd.a", 8), ("fwd.b", 3)]);
+
+    let default = &group.pools["default"];
+    assert_eq!(
+        default.selection.strategy,
+        V3SelectionStrategy::Priority,
+        "tiers without loadBalancing must keep priority selection"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+const V2_LOAD_BALANCED_CONFIG: &str = r#"
+version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+port = 5555
+host = "127.0.0.1"
+
+[[httpserver.ports]]
+name = "gateway_priority_5555"
+port = 5555
+host = "0.0.0.0"
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+
+[virtualrouter]
+
+[virtualrouter.forwarders."fwd.a"]
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.a".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.forwarders."fwd.b"]
+model = "gpt-5.6-sol"
+strategy = "priority"
+[[virtualrouter.forwarders."fwd.b".targets]]
+providerId = "cc-sol"
+priority = 1
+
+[virtualrouter.routingPolicyGroups."gateway_priority_5555"]
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools]]
+priority = 100
+targets = ["fwd.a", "fwd.b"]
+[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools.loadBalancing]
+strategy = "weighted"
+[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.tools.loadBalancing.weights]
+"fwd.a" = 8
+"fwd.b" = 3
+
+[[virtualrouter.routingPolicyGroups."gateway_priority_5555".routing.default]]
+priority = 100
+targets = ["fwd.a"]
+"#;
+
 fn write_v2_provider(
     root: &std::path::Path,
     id: &str,

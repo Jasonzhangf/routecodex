@@ -1382,6 +1382,7 @@ features:
       - v3/crates/routecodex-v3-virtual-router/src/lib.rs
       - v3/crates/routecodex-v3-target/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/nodes.rs
+      - v3/crates/routecodex-v3-runtime/src/token_estimation.rs
       - v3/crates/routecodex-v3-runtime/src/foundation.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - v3/crates/routecodex-v3-runtime/src/diagnostics.rs
@@ -1396,7 +1397,10 @@ features:
       - build_v3_router_request_facts_from_v3_req_04
       - V3VirtualRouter::classify_request_with_facts
       - V3VirtualRouter::resolve_route_pool_plan
+      - resolve_v3_direct_model_plan
       - V3VirtualRouter::hit_opaque_target_plan_once
+      - V3VirtualRouter::hit_opaque_target_plan_once_peek
+      - V3VirtualRouter::process_shared
       - V3TargetInterpreter::expand_candidates
       - V3TargetInterpreter::select_available
       - project_v3_virtual_router_status
@@ -2790,9 +2794,9 @@ features:
       - "The no-op CLI command has no args, no JSON envelope, no scope, and no state. Req04 consumes the current stopless call/output as current-turn evidence but never parses CLI stdout/args as StoplessCenter state."
       - "StoplessCenter side-channel state is stored only in MetadataCenter/runtime_control equivalent V3 relay control state, bound by entry endpoint + session + conversation + port + routing group. `V3ResponsesRelayStoplessControlState` is an adapter runtime handle under `StoplessCenterMetadataControl`, not the semantic owner. Local continuation context/store must never carry stopless control fields."
       - "Data/control lock: client/provider normal payload carries user/model data only; StoplessCenter is control_signal. CLI-carried scope/state, empty CLI JSON envelopes, normal payload state, continuation context state, debug/snapshot truth restore, and undeclared cross-SOP access are forbidden."
-      - "Central aggregation may call StoplessCenter only through the declared v3.servertool_hook_skeleton_lifecycle SOP nodes. Generic Hub closeout, server entry/output aggregate edges, direct/provider-direct, provider runtime, SSE, debug, and continuation stores cannot claim StoplessCenter read/write ownership."
+      - "Central aggregation may call StoplessCenter only through the declared v3.servertool_hook_skeleton_lifecycle SOP nodes. Generic Hub closeout, server entry/output aggregate edges, provider-direct, provider runtime, SSE, debug, and continuation stores cannot claim StoplessCenter read/write ownership; Responses protocol direct may reuse the response-side summary gate without writing StoplessCenter control state."
       - "Tool injection preserves the original declaration surface: top-level `tools` stays top-level, Responses `input[].type=additional_tools.tools` stays embedded, and stopless only appends exactly one internal `reasoningStop` declaration."
-      - "Direct/provider-direct remains exactly-zero relay stopless: no schema/tool injection, no no-op CLI projection, and no relay stopless response hook activation."
+      - "Responses protocol direct remains zero provider-visible relay stopless injection/guidance but conditionally enables response-side summary gate: no canonical reasoning summary projects no-input CLI and commits a direct continuation locator; canonical summary passes through. Next-turn continuation must stay in the direct continuation owner and expose provider 4xx explicitly; provider-direct and non-Responses direct remain zero relay stopless."
       - "Stopless lifecycle docs are generated from `docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml`; `docs/architecture/wiki/stopless-session-mainline-source.md` and `docs/architecture/wiki/html/stopless-session-mainline-source.html` must contain both the hook edge flowchart and StoplessCenter state transition diagram."
     runtime_status: controlled_runtime_slice_only
 

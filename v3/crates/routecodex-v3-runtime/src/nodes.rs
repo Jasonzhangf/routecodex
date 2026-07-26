@@ -259,59 +259,12 @@ fn is_v3_coding_tool_name(name: &str) -> bool {
 }
 
 fn estimate_v3_routing_input_tokens(body: &Value) -> u64 {
-    let chars = ["input", "instructions", "tools"]
-        .iter()
-        .filter_map(|field| body.get(*field))
-        .map(estimate_v3_structured_chars)
-        .sum::<usize>();
-    if chars == 0 {
-        0
-    } else {
-        (chars as f64 / 3.2).ceil() as u64
-    }
+    crate::token_estimation::estimate_v3_request_tokens(body)
 }
 
-fn estimate_v3_structured_chars(value: &Value) -> usize {
-    match value {
-        Value::Null => 0,
-        Value::Bool(value) => value.to_string().len(),
-        Value::Number(value) => value.to_string().len(),
-        Value::String(value) => estimate_v3_text_or_structured_chars(value),
-        Value::Array(values) => values.iter().map(estimate_v3_structured_chars).sum(),
-        Value::Object(values) => {
-            if detect_v3_media_kind(values).is_some() {
-                let type_len = values
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .map(str::len)
-                    .unwrap_or(5);
-                return type_len + "[omitted_media]".len();
-            }
-            values
-                .iter()
-                .filter(|(key, _)| !matches!(key.as_str(), "metadata" | "client_metadata"))
-                .map(|(key, value)| key.len() + estimate_v3_structured_chars(value))
-                .sum()
-        }
-    }
-}
-
-fn estimate_v3_text_or_structured_chars(raw: &str) -> usize {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return 0;
-    }
-    let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
-    if likely_json {
-        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-            return estimate_v3_structured_chars(&parsed);
-        }
-    }
-    raw.chars().count()
-}
-
-fn detect_v3_media_kind(values: &serde_json::Map<String, Value>) -> Option<&'static str> {
+pub(crate) fn detect_v3_media_kind(
+    values: &serde_json::Map<String, Value>,
+) -> Option<&'static str> {
     let type_value = values
         .get("type")
         .and_then(Value::as_str)

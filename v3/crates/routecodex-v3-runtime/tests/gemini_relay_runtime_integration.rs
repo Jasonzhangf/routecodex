@@ -751,6 +751,14 @@ aliases = ["gemini-client"]
 supports_streaming = true
 capabilities = ["text", "tools"]
 
+[route_groups.controlled.pools.gemini_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-client"] }}
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "gemini-wire", key = "primary", priority = 1 }},
+  {{ kind = "provider_model", provider = "secondary", model = "gemini-wire", key = "secondary", priority = 2 }}
+]
+
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [
@@ -791,6 +799,10 @@ wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
 capabilities = ["text", "tools"]
+[route_groups.controlled.pools.gemini_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-client"] }}
+targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-wire", key = "controlled", priority = 1 }}]
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-wire", key = "controlled", priority = 1 }}]

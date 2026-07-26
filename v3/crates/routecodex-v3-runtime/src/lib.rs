@@ -9,6 +9,7 @@ mod provider_failure_runtime_policy;
 pub mod remote_continuation;
 pub mod responses_continuation_owner;
 mod shared;
+mod token_estimation;
 
 pub use diagnostics::{project_v3_virtual_router_dry_run, project_v3_virtual_router_status};
 pub use foundation::{

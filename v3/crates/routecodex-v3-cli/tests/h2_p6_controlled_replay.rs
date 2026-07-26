@@ -115,6 +115,8 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         &json_trace,
         &[
             "V3ProviderResp14Raw",
+            "V3DirectResp14ProviderProjectionPrepared",
+            "V3DirectResp15ClientPayloadReady",
             "V3Resp15ClientPayload",
             "V3Server16HttpFrame",
         ],
@@ -162,6 +164,8 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         &sse_trace,
         &[
             "V3ProviderResp14Raw",
+            "V3DirectResp14ProviderProjectionPrepared",
+            "V3DirectResp15ClientPayloadReady",
             "V3Resp15ClientPayload",
             "V3Server16HttpFrame",
         ],
@@ -173,7 +177,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     let sse_body = sse_response.text().await.unwrap();
     assert_eq!(
         sse_body,
-        "event: response.created\ndata: {\"id\":\"h2_sse\"}\n\ndata: [DONE]\n\n"
+        "event: response.created\ndata: {\"id\":\"h2_sse\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
     );
     let sse_capture = next_capture(&mut success.captures, "sse success").await;
     assert_eq!(sse_capture.accept.as_deref(), Some("text/event-stream"));
@@ -223,7 +227,10 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .send()
         .await
         .unwrap();
-    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
+    assert_eq!(
+        exhausted_response.status(),
+        ReqwestStatusCode::SERVICE_UNAVAILABLE
+    );
     assert_eq!(
         exhausted_response.headers()["x-routecodex-v3-error-chain"]
             .to_str()
@@ -237,7 +244,17 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     );
     assert!(has_node(&exhausted_trace, "V3TargetLocalReselected"));
     let exhausted_body: Value = exhausted_response.json().await.unwrap();
-    assert_eq!(exhausted_body["error"]["code"], "provider_transport_error");
+    assert_eq!(exhausted_body["error"]["code"], "provider_http_503");
+    assert_eq!(
+        exhausted_body["error"]["external_error"]["kind"],
+        "provider"
+    );
+    assert_eq!(
+        exhausted_body["error"]["external_error"]["code"],
+        "HTTP_503"
+    );
+    assert_eq!(exhausted_body["error"]["external_error"]["status"], 503);
+    assert!(exhausted_body["error"].get("internal_code").is_none());
     assert_eq!(exhausted_body["error"]["target_exhausted"], true);
     assert_eq!(exhausted_body["error"]["candidates_remaining"], 0);
     assert_eq!(exhausted_body["error"]["decision"], "project_client_error");
@@ -437,7 +454,7 @@ async fn controlled_responses_upstream(
                 .status(StatusCode::OK)
                 .header("content-type", "text/event-stream")
                 .body(Body::from(
-                    "event: response.created\ndata: {\"id\":\"h2_sse\"}\n\ndata: [DONE]\n\n",
+                    "event: response.created\ndata: {\"id\":\"h2_sse\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
                 ))
                 .unwrap()
         }
@@ -635,12 +652,27 @@ targets = [
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "forwarder", id = "h2_success", priority = 1 }}]
 
+[route_groups.h2_success.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "h2_success", priority = 1 }}]
+
 [route_groups.h2_reselect.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "forwarder", id = "h2_reselect", priority = 1 }}]
 
+[route_groups.h2_reselect.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "h2_reselect", priority = 1 }}]
+
 [route_groups.h2_exhausted.pools.default]
 selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
+
+[route_groups.h2_exhausted.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["client-test"] }}
 targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
 "#,
             success_port = ports.success,

@@ -13,6 +13,8 @@ const fixtures = [
   ['provider error guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'MalformedProviderError', 'MalformedProviderFailure', /missing MalformedProviderError/],
   ['SSE coverage removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
   ['shape branch helper removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'collect_v3_anthropic_request_shape_branch_semantics', 'collect_v3_anthropic_request_branch_semantics_removed', /missing collect_v3_anthropic_request_shape_branch_semantics/],
+  ['native web search type removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'web_search_20250305', 'web_search_generic_removed', /missing web_search_20250305/],
+  ['web search preview mapping removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'web_search_preview', 'search_preview_removed', /missing web_search_preview/],
   ['image url collapses to inline media data', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', `"request.messages[].content[].image.source.url",
                             V3AnthropicChatShapeBranchSemantic::ChatImageUrlUrl,`, `"request.messages[].content[].image.source.url",
                             V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, /image\.source\.url.*must map near ChatImageUrlUrl|image\.source\.url.*must not collapse near ChatInlineMediaData/],

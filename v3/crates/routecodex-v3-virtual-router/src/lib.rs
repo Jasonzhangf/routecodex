@@ -1,9 +1,9 @@
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3RoutePoolManifest, V3RoutePoolMatchManifest,
-    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
+    V3Config05ManifestPublished, V3DirectModelResolution, V3RoutePoolManifest,
+    V3RoutePoolMatchManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3RouterRequestFacts {
@@ -45,6 +45,7 @@ pub struct V3Router06SelectionPlanTier {
     pool_id: String,
     selection: V3SelectionStrategy,
     targets: Vec<V3RoutePoolTargetManifest>,
+    direct_provider_model: Option<(String, String)>,
 }
 
 impl V3Router06RoutePoolResolved {
@@ -82,6 +83,10 @@ pub struct V3Router07OpaqueTargetPlanEntry {
     pub target_index: usize,
     pub target_kind: V3RouteTargetKind,
     pub target_id: Option<String>,
+    /// Set only for `provider.model` direct routes: the resolved provider and
+    /// canonical model, carried on the plan because the synthetic `direct`
+    /// pool has no manifest declaration for Target to look up.
+    pub direct_provider_model: Option<(String, String)>,
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -109,14 +114,38 @@ pub enum V3VirtualRouterError {
     PoolMatchMissing { group_id: String, pool_id: String },
     #[error("routing facts entry protocol is empty or does not match endpoint {0}")]
     InvalidRoutingFacts(String),
+    #[error("unknown model {model} for provider {provider}")]
+    DirectModelUnknown { provider: String, model: String },
+    #[error("direct route {provider}.{model} cannot serve this request: model lacks {capability}")]
+    DirectModelMediaUnsatisfied {
+        provider: String,
+        model: String,
+        capability: String,
+    },
+}
+
+#[derive(Debug, Default)]
+struct V3RouterSelectionState {
+    cursors: BTreeMap<String, usize>,
+    swrr_current: BTreeMap<String, Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct V3VirtualRouter {
-    cursors: Arc<Mutex<BTreeMap<String, usize>>>,
+    selection_state: Arc<Mutex<V3RouterSelectionState>>,
 }
 
 impl V3VirtualRouter {
+    /// Router backed by process-wide selection state so round-robin cursors and
+    /// SWRR scores survive across requests. State keys are
+    /// `server:group:pool`, so listeners never share a cursor.
+    pub fn process_shared() -> Self {
+        static SHARED: OnceLock<Arc<Mutex<V3RouterSelectionState>>> = OnceLock::new();
+        Self {
+            selection_state: SHARED.get_or_init(Default::default).clone(),
+        }
+    }
+
     pub fn classify_request(
         &self,
         manifest: &V3Config05ManifestPublished,
@@ -162,6 +191,9 @@ impl V3VirtualRouter {
         manifest: &V3Config05ManifestPublished,
         classified: V3Router05RequestClassified,
     ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
+        if let Some(direct) = resolve_v3_direct_model_plan(manifest, &classified) {
+            return direct;
+        }
         let group = manifest
             .route_groups
             .get(&classified.routing_group_id)
@@ -241,6 +273,26 @@ impl V3VirtualRouter {
         plan: V3Router06RoutePoolResolved,
         deterministic_sample: u64,
     ) -> Result<V3Router07OpaqueTargetHitOnce, V3VirtualRouterError> {
+        self.hit_opaque_target_plan(plan, deterministic_sample, true)
+    }
+
+    /// Dry-run variant: computes the same ordering as
+    /// `hit_opaque_target_plan_once` from the current selection state without
+    /// advancing round-robin cursors or SWRR scores.
+    pub fn hit_opaque_target_plan_once_peek(
+        &self,
+        plan: V3Router06RoutePoolResolved,
+        deterministic_sample: u64,
+    ) -> Result<V3Router07OpaqueTargetHitOnce, V3VirtualRouterError> {
+        self.hit_opaque_target_plan(plan, deterministic_sample, false)
+    }
+
+    fn hit_opaque_target_plan(
+        &self,
+        plan: V3Router06RoutePoolResolved,
+        deterministic_sample: u64,
+        advance_state: bool,
+    ) -> Result<V3Router07OpaqueTargetHitOnce, V3VirtualRouterError> {
         if plan.tiers.is_empty() {
             return Err(V3VirtualRouterError::SelectionPlanEmpty(
                 plan.routing_group_id,
@@ -256,7 +308,8 @@ impl V3VirtualRouter {
                 &plan.server_id,
                 &plan.routing_group_id,
                 &tier.pool_id,
-                &self.cursors,
+                &self.selection_state,
+                advance_state,
             ) {
                 let target = &tier.targets[target_index];
                 let semantic_key = semantic_target_key(target);
@@ -269,6 +322,7 @@ impl V3VirtualRouter {
                     target_index,
                     target_kind: target.kind.clone(),
                     target_id: target.id.clone(),
+                    direct_provider_model: tier.direct_provider_model.clone(),
                 });
             }
         }
@@ -295,7 +349,76 @@ fn build_plan_tier(pool: &V3RoutePoolManifest) -> V3Router06SelectionPlanTier {
         pool_id: pool.id.clone(),
         selection: pool.selection.strategy.clone(),
         targets: pool.targets.clone(),
+        direct_provider_model: None,
     }
+}
+
+/// `provider.model` direct routing, matching the V2 engine semantics: when the
+/// client model splits on its first `.` into an existing provider id, the
+/// request pins that provider and skips pool matching entirely. An unknown
+/// provider segment falls back to normal classification (returns None); an
+/// unknown model or an unsatisfiable media requirement fails explicitly
+/// without rerouting. Provider/model interpretation stays in the config layer
+/// (`resolve_direct_provider_model`); the router only consumes the resolution.
+fn resolve_v3_direct_model_plan(
+    manifest: &V3Config05ManifestPublished,
+    classified: &V3Router05RequestClassified,
+) -> Option<Result<V3Router06RoutePoolResolved, V3VirtualRouterError>> {
+    let requested = classified.facts.client_model.as_deref()?;
+    let (direct_provider_id, direct_model_id, model_capabilities) =
+        match manifest.resolve_direct_provider_model(requested) {
+            V3DirectModelResolution::NotDirect => return None,
+            V3DirectModelResolution::UnknownModel {
+                provider_id,
+                model_id,
+            } => {
+                return Some(Err(V3VirtualRouterError::DirectModelUnknown {
+                    provider: provider_id,
+                    model: model_id,
+                }))
+            }
+            V3DirectModelResolution::Resolved {
+                provider_id,
+                model_id,
+                model_capabilities,
+            } => (provider_id, model_id, model_capabilities),
+        };
+    for media_capability in ["vision", "multimodal"] {
+        if classified.facts.capabilities.contains(media_capability)
+            && !model_capabilities
+                .iter()
+                .any(|capability| capability == "vision" || capability == "multimodal")
+        {
+            return Some(Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
+                provider: direct_provider_id,
+                model: direct_model_id,
+                capability: media_capability.to_string(),
+            }));
+        }
+    }
+    let mut facts = classified.facts.clone();
+    // Rewrite to the bare canonical model so downstream requested-model
+    // filtering matches the provider's visible model ids.
+    facts.client_model = Some(direct_model_id.clone());
+    Some(Ok(V3Router06RoutePoolResolved {
+        server_id: classified.server_id.clone(),
+        routing_group_id: classified.routing_group_id.clone(),
+        facts,
+        tiers: vec![V3Router06SelectionPlanTier {
+            pool_id: "direct".to_string(),
+            selection: V3SelectionStrategy::RoundRobin,
+            targets: vec![V3RoutePoolTargetManifest {
+                kind: V3RouteTargetKind::ProviderModel,
+                id: None,
+                provider: Some(direct_provider_id.clone()),
+                model: Some(direct_model_id.clone()),
+                key: None,
+                priority: Some(1),
+                weight: Some(1),
+            }],
+            direct_provider_model: Some((direct_provider_id, direct_model_id)),
+        }],
+    }))
 }
 
 fn pool_matches(rule: &V3RoutePoolMatchManifest, facts: &V3RouterRequestFacts) -> bool {
@@ -319,14 +442,16 @@ fn pool_matches(rule: &V3RoutePoolMatchManifest, facts: &V3RouterRequestFacts) -
             .is_none_or(|maximum| facts.input_tokens <= maximum)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ordered_target_indices(
     strategy: &V3SelectionStrategy,
     targets: &[V3RoutePoolTargetManifest],
-    sample: u64,
+    _sample: u64,
     server_id: &str,
     routing_group_id: &str,
     pool_id: &str,
-    cursors: &Arc<Mutex<BTreeMap<String, usize>>>,
+    selection_state: &Arc<Mutex<V3RouterSelectionState>>,
+    advance_state: bool,
 ) -> Vec<usize> {
     match strategy {
         V3SelectionStrategy::Priority => {
@@ -334,13 +459,23 @@ fn ordered_target_indices(
             order.sort_by_key(|index| (targets[*index].priority.unwrap_or(0), *index));
             order
         }
-        V3SelectionStrategy::Weighted => weighted_order(targets, sample),
+        V3SelectionStrategy::Weighted => {
+            let key = format!("{server_id}:{routing_group_id}:{pool_id}");
+            let mut state = selection_state.lock().expect("router selection state lock");
+            let current = state.swrr_current.entry(key).or_default();
+            if current.len() != targets.len() {
+                *current = vec![0; targets.len()];
+            }
+            swrr_order(targets, current, advance_state)
+        }
         V3SelectionStrategy::RoundRobin => {
             let key = format!("{server_id}:{routing_group_id}:{pool_id}");
-            let mut cursor_guard = cursors.lock().expect("router cursor lock");
-            let cursor = cursor_guard.entry(key).or_default();
+            let mut state = selection_state.lock().expect("router selection state lock");
+            let cursor = state.cursors.entry(key).or_default();
             let start = *cursor % targets.len();
-            *cursor = cursor.wrapping_add(1);
+            if advance_state {
+                *cursor = cursor.wrapping_add(1);
+            }
             (0..targets.len())
                 .map(|offset| (start + offset) % targets.len())
                 .collect()
@@ -348,31 +483,40 @@ fn ordered_target_indices(
     }
 }
 
-fn weighted_order(targets: &[V3RoutePoolTargetManifest], sample: u64) -> Vec<usize> {
-    let first = weighted_index(targets, sample);
-    let mut remaining = (0..targets.len())
-        .filter(|index| *index != first)
-        .collect::<Vec<_>>();
-    remaining.sort_by_key(|index| (targets[*index].priority.unwrap_or(0), *index));
-    let mut order = vec![first];
-    order.extend(remaining);
-    order
-}
-
-fn weighted_index(targets: &[V3RoutePoolTargetManifest], sample: u64) -> usize {
-    let total = targets
+/// Smooth weighted round-robin (nginx SWRR), ported from the V2 engine: each
+/// step adds every target's weight to its running score, emits the highest
+/// score, then subtracts the total weight from the emitted target. Per request
+/// only the first emission advances the persistent scores (`current`); the
+/// remaining ranks are secondary ordering computed on a scratch copy.
+fn swrr_order(
+    targets: &[V3RoutePoolTargetManifest],
+    current: &mut Vec<i64>,
+    advance_state: bool,
+) -> Vec<usize> {
+    let weights = targets
         .iter()
-        .map(|target| u64::from(target.weight.unwrap_or(1)))
-        .sum::<u64>();
-    let mut point = sample % total;
-    for (index, target) in targets.iter().enumerate() {
-        let weight = u64::from(target.weight.unwrap_or(1));
-        if point < weight {
-            return index;
+        .map(|target| i64::from(target.weight.unwrap_or(1).max(1)))
+        .collect::<Vec<_>>();
+    let total_weight: i64 = weights.iter().sum();
+    let mut scratch = current.clone();
+    let mut order = Vec::with_capacity(targets.len());
+    let mut emitted = vec![false; targets.len()];
+    for rank in 0..targets.len() {
+        for (index, weight) in weights.iter().enumerate() {
+            scratch[index] += weight;
         }
-        point -= weight;
+        let selected = (0..targets.len())
+            .filter(|index| !emitted[*index])
+            .max_by_key(|index| (scratch[*index], std::cmp::Reverse(*index)))
+            .expect("non-empty unemitted target set");
+        scratch[selected] -= total_weight;
+        emitted[selected] = true;
+        order.push(selected);
+        if rank == 0 && advance_state {
+            *current = scratch.clone();
+        }
     }
-    unreachable!("positive compiled weights have a selected bucket")
+    order
 }
 
 fn semantic_target_key(target: &V3RoutePoolTargetManifest) -> String {
@@ -498,6 +642,149 @@ mod tests {
             capabilities: BTreeSet::from(["tools".into()]),
             input_tokens: 10,
         }
+    }
+
+    fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
+        let mut manifest = manifest(V3SelectionStrategy::Priority);
+        manifest.providers.insert(
+            "prov".into(),
+            V3ProviderManifest {
+                id: "prov".into(),
+                enabled: true,
+                provider_type: "responses".into(),
+                base_url: "http://127.0.0.1:9/v1".into(),
+                default_model: "model-x".into(),
+                auth: V3ProviderAuthManifest {
+                    auth_type: V3ProviderAuthType::ApiKey,
+                    entries: vec![V3ProviderAuthEntryManifest {
+                        alias: "key1".into(),
+                        env: Some("PROV_KEY".into()),
+                        token_file: None,
+                    }],
+                },
+                models: BTreeMap::from([(
+                    "model-x".into(),
+                    V3ProviderModelManifest {
+                        id: "model-x".into(),
+                        wire_name: "model-x-wire".into(),
+                        aliases: vec!["mx".into()],
+                        capabilities: vec!["text".into()],
+                        supports_streaming: true,
+                        supports_thinking: false,
+                        thinking: None,
+                        max_tokens: None,
+                        max_context_tokens: None,
+                        features: BTreeMap::new(),
+                    },
+                )]),
+                responses: None,
+                concurrency: None,
+                health: None,
+                compatibility_profile: None,
+                features: BTreeMap::new(),
+            },
+        );
+        manifest
+    }
+
+    fn direct_facts(model: &str, capabilities: BTreeSet<String>) -> V3RouterRequestFacts {
+        V3RouterRequestFacts {
+            entry_protocol: "responses".into(),
+            client_model: Some(model.into()),
+            capabilities,
+            input_tokens: 10,
+        }
+    }
+
+    #[test]
+    fn direct_provider_model_short_circuits_pool_matching() {
+        let router = V3VirtualRouter::default();
+        let manifest = manifest_with_direct_provider();
+        for requested in ["prov.model-x", "prov.mx"] {
+            let classified = router
+                .classify_request_with_facts(
+                    &manifest,
+                    "s",
+                    "/v1/responses",
+                    direct_facts(requested, BTreeSet::new()),
+                )
+                .unwrap();
+            let plan = router
+                .resolve_route_pool_plan(&manifest, classified)
+                .unwrap();
+            let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+            assert_eq!(hit.pool_id, "direct");
+            assert_eq!(hit.target_plan.len(), 1);
+            assert_eq!(
+                hit.target_plan[0].direct_provider_model,
+                Some(("prov".to_string(), "model-x".to_string()))
+            );
+            assert_eq!(
+                hit.request_client_model.as_deref(),
+                Some("model-x"),
+                "client model must be rewritten to the bare canonical id"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_unknown_provider_falls_back_to_classification() {
+        let router = V3VirtualRouter::default();
+        let manifest = manifest_with_direct_provider();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                direct_facts("nosuch.model-x", BTreeSet::new()),
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        assert_eq!(
+            hit.pool_id, "default",
+            "unknown provider segment must fall back to normal pool routing"
+        );
+    }
+
+    #[test]
+    fn direct_unknown_model_and_media_mismatch_fail_without_reroute() {
+        let router = V3VirtualRouter::default();
+        let manifest = manifest_with_direct_provider();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                direct_facts("prov.absent-model", BTreeSet::new()),
+            )
+            .unwrap();
+        assert_eq!(
+            router.resolve_route_pool_plan(&manifest, classified),
+            Err(V3VirtualRouterError::DirectModelUnknown {
+                provider: "prov".into(),
+                model: "absent-model".into(),
+            })
+        );
+
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                direct_facts("prov.model-x", BTreeSet::from(["vision".into()])),
+            )
+            .unwrap();
+        assert_eq!(
+            router.resolve_route_pool_plan(&manifest, classified),
+            Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
+                provider: "prov".into(),
+                model: "model-x".into(),
+                capability: "vision".into(),
+            })
+        );
     }
 
     #[test]
@@ -735,6 +1022,115 @@ mod tests {
                 .target_id
                 .as_deref(),
             Some("b")
+        );
+    }
+
+    #[test]
+    fn weighted_selection_follows_smooth_weighted_round_robin_sequence() {
+        let router = V3VirtualRouter::default();
+        let mut weighted = manifest(V3SelectionStrategy::Weighted);
+        let pool = weighted
+            .route_groups
+            .get_mut("g")
+            .unwrap()
+            .pools
+            .get_mut("default")
+            .unwrap();
+        pool.targets = vec![target("a", 1, 5), target("b", 1, 1), target("c", 1, 1)];
+        let mut first_choices = Vec::new();
+        for _request in 0..7 {
+            let plan = router
+                .resolve_route_pool_plan(
+                    &weighted,
+                    router
+                        .classify_request(&weighted, "s", "/v1/responses")
+                        .unwrap(),
+                )
+                .unwrap();
+            let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+            first_choices.push(hit.target_id.unwrap());
+        }
+        // Canonical nginx SWRR emission for weights 5/1/1.
+        assert_eq!(first_choices, vec!["a", "a", "b", "a", "c", "a", "a"]);
+    }
+
+    #[test]
+    fn peek_does_not_advance_selection_state() {
+        let router = V3VirtualRouter::default();
+        let rr = manifest(V3SelectionStrategy::RoundRobin);
+        let plan = |router: &V3VirtualRouter| {
+            router
+                .resolve_route_pool_plan(
+                    &rr,
+                    router.classify_request(&rr, "s", "/v1/responses").unwrap(),
+                )
+                .unwrap()
+        };
+        let peek_one = router
+            .hit_opaque_target_plan_once_peek(plan(&router), 0)
+            .unwrap();
+        let peek_two = router
+            .hit_opaque_target_plan_once_peek(plan(&router), 0)
+            .unwrap();
+        assert_eq!(peek_one.target_id, peek_two.target_id);
+        let live = router
+            .hit_opaque_target_plan_once(plan(&router), 0)
+            .unwrap();
+        assert_eq!(live.target_id, peek_one.target_id);
+        let peek_after = router
+            .hit_opaque_target_plan_once_peek(plan(&router), 0)
+            .unwrap();
+        assert_ne!(peek_after.target_id, live.target_id);
+
+        let weighted = manifest(V3SelectionStrategy::Weighted);
+        let wplan = |router: &V3VirtualRouter| {
+            router
+                .resolve_route_pool_plan(
+                    &weighted,
+                    router
+                        .classify_request(&weighted, "s", "/v1/responses")
+                        .unwrap(),
+                )
+                .unwrap()
+        };
+        let wpeek_one = router
+            .hit_opaque_target_plan_once_peek(wplan(&router), 0)
+            .unwrap();
+        let wpeek_two = router
+            .hit_opaque_target_plan_once_peek(wplan(&router), 0)
+            .unwrap();
+        assert_eq!(wpeek_one.target_id, wpeek_two.target_id);
+    }
+
+    #[test]
+    fn process_shared_router_persists_selection_state_across_instances() {
+        let rr = manifest(V3SelectionStrategy::RoundRobin);
+        // Unique group id so this test never shares state with other tests
+        // using the process-wide router.
+        let mut rr_scoped = rr.clone();
+        let group = rr_scoped.route_groups.remove("g").unwrap();
+        rr_scoped.route_groups.insert("g-shared-test".into(), group);
+        rr_scoped.servers.get_mut("s").unwrap().routing_group = "g-shared-test".into();
+        let hit = |router: &V3VirtualRouter| {
+            let plan = router
+                .resolve_route_pool_plan(
+                    &rr_scoped,
+                    router
+                        .classify_request(&rr_scoped, "s", "/v1/responses")
+                        .unwrap(),
+                )
+                .unwrap();
+            router
+                .hit_opaque_target_plan_once(plan, 0)
+                .unwrap()
+                .target_id
+                .unwrap()
+        };
+        let first = hit(&V3VirtualRouter::process_shared());
+        let second = hit(&V3VirtualRouter::process_shared());
+        assert_ne!(
+            first, second,
+            "process-shared router instances must rotate the same cursor"
         );
     }
 

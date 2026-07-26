@@ -1281,6 +1281,25 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
             .all(|model| model["id"] != "offroute-test"),
         "models endpoint must stay scoped to the current listener route group like V2, not every enabled manifest provider model"
     );
+    let direct = response["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == "test.offroute")
+        .expect(
+            "every enabled provider model must be addressable as provider.model for direct routing",
+        );
+    assert_eq!(direct["direct_route"], true);
+    assert_eq!(direct["provider_id"], "test");
+    assert_eq!(direct["canonical_model_id"], "offroute");
+    assert!(
+        response["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|model| model["id"] == "test.test"),
+        "routed models must also appear under their provider.model direct id"
+    );
     for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
         assert!(
             response["data"]

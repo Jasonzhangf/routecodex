@@ -246,18 +246,33 @@ fn compile_v2_route_groups(
             let mut pools = BTreeMap::new();
             for (route_id, mut routes) in group.routing {
                 routes.sort_by_key(|route| std::cmp::Reverse(route.priority.unwrap_or(0)));
+                // v2 declares loadBalancing per tier; v3 pools have one policy,
+                // so the highest-priority tier that declares one wins.
+                let load_balancing = routes
+                    .iter()
+                    .find_map(|route| route.load_balancing.as_ref());
+                let strategy = load_balancing
+                    .map(|policy| selection_strategy(policy.strategy.as_deref()))
+                    .unwrap_or(V3SelectionStrategy::Priority);
+                let tier_weights = load_balancing
+                    .map(|policy| policy.weights.clone())
+                    .unwrap_or_default();
                 let mut targets = Vec::new();
                 let mut next_priority = 1_i32;
-                for route in routes {
-                    for target_id in route.targets {
+                for route in &routes {
+                    for target_id in &route.targets {
+                        let weight = tier_weights
+                            .get(target_id)
+                            .map(|value| (value.round().max(1.0)) as u32)
+                            .unwrap_or(1);
                         targets.push(V3RoutePoolTargetAuthoringConfig {
                             kind: V3RouteTargetKind::Forwarder,
-                            id: Some(target_id),
+                            id: Some(target_id.clone()),
                             provider: None,
                             model: None,
                             key: None,
                             priority: Some(next_priority),
-                            weight: Some(1),
+                            weight: Some(weight),
                         });
                         next_priority += 1;
                     }
@@ -282,9 +297,7 @@ fn compile_v2_route_groups(
                 pools.insert(
                     route_id.clone(),
                     V3RoutePoolAuthoringConfig {
-                        selection: V3SelectionPolicy {
-                            strategy: V3SelectionStrategy::Priority,
-                        },
+                        selection: V3SelectionPolicy { strategy },
                         match_rule,
                         targets,
                         features: BTreeMap::new(),
@@ -654,6 +667,15 @@ struct V2RouteTier {
     priority: Option<i32>,
     #[serde(default)]
     targets: Vec<String>,
+    load_balancing: Option<V2LoadBalancing>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2LoadBalancing {
+    strategy: Option<String>,
+    #[serde(default)]
+    weights: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Deserialize)]

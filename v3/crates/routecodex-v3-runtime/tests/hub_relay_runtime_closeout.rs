@@ -224,7 +224,10 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         json_observability.routing_group_id.as_deref(),
         Some("controlled")
     );
-    assert_eq!(json_observability.pool_id.as_deref(), Some("default"));
+    assert_eq!(
+        json_observability.pool_id.as_deref(),
+        Some("client_responses")
+    );
     assert_eq!(
         json_observability.provider_id.as_deref(),
         Some("controlled")
@@ -1557,7 +1560,7 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
             server_id: "controlled".into(),
             request_id: "req-responses-context-exhausted".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":"same large payload",
                 "stream":false
             }),
@@ -1603,7 +1606,7 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
                 server_id: "controlled".into(),
                 request_id: "req-responses-default-floor-cap".into(),
                 payload: json!({
-                    "model":"client-responses",
+                    "model":"gpt-5.5",
                     "input":"same large payload",
                     "stream":false
                 }),
@@ -1662,7 +1665,7 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
             server_id: "controlled".into(),
             request_id: "req-responses-default-floor-waits".into(),
             payload: json!({
-                "model":"client-responses",
+                "model":"gpt-5.5",
                 "input":"same large payload",
                 "stream":false
             }),
@@ -1932,6 +1935,13 @@ supports_streaming = true
 supports_thinking = true
 max_context_tokens = 1000000
 capabilities = ["text", "tools", "reasoning"]
+[route_groups.controlled.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [
@@ -1966,6 +1976,12 @@ supports_streaming = true
 supports_thinking = true
 max_context_tokens = 200000
 capabilities = ["text", "tools", "reasoning"]
+[route_groups.controlled.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 }
+]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [
@@ -2011,6 +2027,14 @@ wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
+[route_groups.controlled.pools.claude_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+[route_groups.controlled.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]

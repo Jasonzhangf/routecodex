@@ -32,8 +32,9 @@ registration must call these protocol-owned transformations through the fixed Hu
 - JSON request preserves Anthropic messages, tool_use, tool_result, tools, system blocks, and
   thinking/reasoning fields.
 - Responses-to-Anthropic provider-wire request preserves replay-safe tool context while normalizing
-  Responses builtin tool declarations (`tool_search`, `web_search`) into Anthropic-safe named tools
-  and Anthropic object-shaped `tool_choice`.
+  `tool_search` into an Anthropic-safe named object tool and `web_search` / `web_search_preview`
+  into Anthropic native `web_search_20250305`; unsupported Responses-only search hints are not
+  leaked to provider wire. Anthropic object-shaped `tool_choice` is preserved.
 - Responses-to-Anthropic provider-wire request groups consecutive Responses `function_call` /
   `custom_tool_call` items into one Anthropic assistant `tool_use` message and the immediately
   following outputs into one user `tool_result` message, so Anthropic sees valid tool-result order.

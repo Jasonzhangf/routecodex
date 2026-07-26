@@ -22,6 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 routecodex-v3-sse = { path = "../routecodex-v3-sse" }
 thiserror.workspace = true
+tiktoken-rs.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

@@ -358,7 +358,7 @@ fn responses_developer_messages_project_to_anthropic_system_not_message_role() {
 }
 
 #[test]
-fn responses_builtin_tool_types_encode_with_anthropic_names_and_object_tool_choice() {
+fn responses_builtin_tool_types_encode_with_anthropic_native_web_search_and_object_tool_choice() {
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": false,
@@ -375,9 +375,16 @@ fn responses_builtin_tool_types_encode_with_anthropic_names_and_object_tool_choi
                 }
             },
             {
-                "type":"web_search",
-                "external_web_access": true,
-                "search_content_types":["text","image"]
+                "type":"web_search_preview",
+                "filters":{"allowed_domains":["example.com"]},
+                "user_location":{
+                    "type":"approximate",
+                    "city":"San Francisco",
+                    "country":"US",
+                    "region":"California",
+                    "timezone":"America/Los_Angeles"
+                },
+                "search_context_size":"high"
             }
         ]
     }))
@@ -393,10 +400,12 @@ fn responses_builtin_tool_types_encode_with_anthropic_names_and_object_tool_choi
     assert_eq!(tools[0]["input_schema"]["required"], json!(["query"]));
     assert!(tools[0].get("type").is_none());
     assert!(tools[0].get("parameters").is_none());
+    assert_eq!(tools[1]["type"], json!("web_search_20250305"));
     assert_eq!(tools[1]["name"], json!("web_search"));
-    assert_eq!(tools[1]["input_schema"], json!({"type":"object"}));
-    assert!(tools[1].get("external_web_access").is_none());
-    assert!(tools[1].get("search_content_types").is_none());
+    assert_eq!(tools[1]["allowed_domains"], json!(["example.com"]));
+    assert_eq!(tools[1]["user_location"]["country"], json!("US"));
+    assert!(tools[1].get("input_schema").is_none());
+    assert!(tools[1].get("search_context_size").is_none());
 
     let required_choice = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",

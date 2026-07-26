@@ -62,7 +62,9 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
     let endpoint = read_dry_run_endpoint(input, metadata).unwrap_or("/v1/responses");
     let entry_protocol = entry_protocol_from_endpoint(endpoint);
     let facts = crate::build_v3_router_request_facts_for_entry(request, entry_protocol);
-    let router = V3VirtualRouter::default();
+    // Reflects the live process-wide selection state without advancing it, so a
+    // dry-run probe never perturbs round-robin/SWRR rotation.
+    let router = V3VirtualRouter::process_shared();
     let classified = router
         .classify_request_with_facts(manifest, server_id, endpoint, facts)
         .map_err(|error| error.to_string())?;
@@ -70,7 +72,7 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
         .resolve_route_pool_plan(manifest, classified)
         .map_err(|error| error.to_string())?;
     let hit = router
-        .hit_opaque_target_plan_once(plan, deterministic_sample_from_metadata(metadata))
+        .hit_opaque_target_plan_once_peek(plan, deterministic_sample_from_metadata(metadata))
         .map_err(|error| error.to_string())?;
     let target = V3TargetInterpreter::default();
     let expanded = target
@@ -100,24 +102,53 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
         .collect::<Vec<Value>>();
     let selection = target.select_available(expanded, availability, now_ms);
     let decision = match selection {
-        Ok(selected) => json!({
-            "selectedRouteName": selected.route.routing_group_id,
-            "selectedPoolId": selected.route.pool_id,
-            "selectedProviderKey": format_candidate_key(&selected.candidate),
-            "selectedProviderId": selected.candidate.provider_id,
-            "selectedAuthAlias": selected.candidate.auth_alias,
-            "selectedModelId": selected.candidate.model_id,
-            "selectedWireModel": selected.candidate.wire_model,
-            "selectedProviderType": selected.candidate.provider_type,
-            "selectedTransport": format!("{:?}", selected.candidate.responses_transport),
-            "selectedTargetPath": selected.candidate.path,
-            "candidateProviderKeys": candidate_keys,
-            "candidatePools": candidate_pools,
-            "unavailableCandidates": selected.unavailable_candidates,
-            "attempts": selected.attempts,
-            "defaultFloorSelection": selected.route.pool_id == "default",
-            "wouldReturnProviderNotAvailable": false
-        }),
+        Ok(selected) => {
+            let reasoning = if selected.route.pool_id == "direct" {
+                format!(
+                    "direct_model:{}.{}",
+                    selected.candidate.provider_id, selected.candidate.model_id
+                )
+            } else if selected.route.pool_id == "default" {
+                "default_floor".to_string()
+            } else {
+                format!("pool_match:{}", selected.route.pool_id)
+            };
+            json!({
+                "selectedRouteName": selected.route.routing_group_id,
+                "selectedPoolId": selected.route.pool_id,
+                "selectedProviderKey": format_candidate_key(&selected.candidate),
+                "selectedProviderId": selected.candidate.provider_id,
+                "selectedAuthAlias": selected.candidate.auth_alias,
+                "selectedModelId": selected.candidate.model_id,
+                "selectedWireModel": selected.candidate.wire_model,
+                "selectedProviderType": selected.candidate.provider_type,
+                "selectedTransport": format!("{:?}", selected.candidate.responses_transport),
+                "selectedTargetPath": selected.candidate.path,
+                "candidateProviderKeys": candidate_keys,
+                "candidatePools": candidate_pools,
+                "unavailableCandidates": selected.unavailable_candidates,
+                "attempts": selected.attempts,
+                "defaultFloorSelection": selected.route.pool_id == "default",
+                "defaultFloorProtected": selected.default_floor_protected,
+                "reasoning": reasoning,
+                "target": {
+                    "providerId": selected.candidate.provider_id,
+                    "authAlias": selected.candidate.auth_alias,
+                    "modelId": selected.candidate.model_id,
+                    "wireModel": selected.candidate.wire_model,
+                    "providerType": selected.candidate.provider_type,
+                    "transport": format!("{:?}", selected.candidate.responses_transport),
+                    "path": selected.candidate.path
+                },
+                "routeResult": {
+                    "routeName": selected.route.routing_group_id,
+                    "poolId": selected.route.pool_id,
+                    "providerKey": format_candidate_key(&selected.candidate),
+                    "confidence": 1.0
+                },
+                "wouldReturnProviderNotAvailable": false
+            })
+        }
         Err(exhausted) => json!({
             "selectedRouteName": exhausted.route.routing_group_id,
             "selectedPoolId": exhausted.route.pool_id,
@@ -608,9 +639,72 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         assert_eq!(output["ok"], true);
         assert_eq!(output["decision"]["selectedProviderKey"], "test:key1:test");
         assert_eq!(output["decision"]["selectedPoolId"], "default");
+        assert_eq!(output["decision"]["reasoning"], "default_floor");
+        assert_eq!(output["decision"]["defaultFloorProtected"], false);
+        assert_eq!(output["decision"]["routeResult"]["poolId"], "default");
+        assert_eq!(output["decision"]["routeResult"]["confidence"], 1.0);
+        assert_eq!(output["decision"]["target"]["providerId"], "test");
+        assert_eq!(output["decision"]["target"]["authAlias"], "key1");
+        assert!(
+            output["decision"]["target"].get("env").is_none()
+                && !serde_json::to_string(&output["decision"]["target"])
+                    .expect("target json")
+                    .contains("TEST_KEY"),
+            "dry-run target must expose the auth alias only, never the env binding"
+        );
         assert_eq!(output["diagnosticInput"]["metadataRequestId"], "diag-1");
         assert!(!serde_json::to_string(&output)
             .expect("serialized diagnostics")
             .contains("must-not-become-provider-payload"));
+    }
+
+    #[test]
+    fn virtual_router_dry_run_does_not_advance_round_robin_state() {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.dry-run-rr]
+bind = "127.0.0.1"
+port = 5556
+routing_group = "dry-run-rr-gateway"
+endpoints = ["responses"]
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "a"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "TEST_KEY" }] }
+[providers.test.models.a]
+[providers.test.models.b]
+[route_groups.dry-run-rr-gateway.pools.default]
+selection = { strategy = "round_robin" }
+targets = [
+  { kind = "provider_model", provider = "test", model = "a", key = "key1" },
+  { kind = "provider_model", provider = "test", model = "b", key = "key1" }
+]
+"#,
+        )
+        .expect("config");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
+        let input = json!({
+            "request": {"model": "a", "input": "probe"},
+            "metadata": {"requestId": "diag-rr", "entryEndpoint": "/v1/responses"}
+        });
+        let dry_run = |label: &str| {
+            project_v3_virtual_router_dry_run(
+                &manifest,
+                "dry-run-rr",
+                &input,
+                &V3ProviderAllAvailable,
+                1_000,
+            )
+            .unwrap_or_else(|error| panic!("dry-run {label}: {error}"))["decision"]
+                ["selectedProviderKey"]
+                .clone()
+        };
+        assert_eq!(
+            dry_run("first"),
+            dry_run("second"),
+            "consecutive dry-runs must observe, not rotate, the round-robin cursor"
+        );
     }
 }

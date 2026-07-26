@@ -144,6 +144,102 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
             .unwrap()
     }
 
+    fn direct_selected(
+        requested_model: &str,
+        blocked: BTreeSet<String>,
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+        let manifest = manifest();
+        let router = V3VirtualRouter::default();
+        let target = V3TargetInterpreter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some(requested_model.into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        assert_eq!(hit.pool_id, "direct");
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        target.select_available(expanded, &Availability { blocked }, 0)
+    }
+
+    #[test]
+    fn direct_provider_model_expands_pinned_provider_and_bypasses_health_cooldown() {
+        let selected = direct_selected("a.m", BTreeSet::new()).unwrap();
+        assert_eq!(selected.candidate.provider_id, "a");
+        assert_eq!(selected.candidate.model_id, "m");
+
+        // Health cooldown must not veto an explicit pin.
+        let cooled = direct_selected("a.m", BTreeSet::from(["a:ka:m".into()])).unwrap();
+        assert_eq!(cooled.candidate.provider_id, "a");
+        assert_eq!(
+            cooled.unavailable_candidates,
+            vec!["a:ka:m"],
+            "cooldown must still be reported even when bypassed"
+        );
+    }
+
+    #[test]
+    fn direct_provider_model_respects_request_local_exclusion() {
+        let manifest = manifest();
+        let router = V3VirtualRouter::default();
+        let target = V3TargetInterpreter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("a.m".into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        struct ExcludedAvailability;
+        impl V3ProviderAvailabilityReader for ExcludedAvailability {
+            fn availability(
+                &self,
+                provider_id: &str,
+                auth_alias: Option<&str>,
+                model_id: Option<&str>,
+                _now_ms: u64,
+            ) -> V3ProviderAvailabilityProjection {
+                V3ProviderAvailabilityProjection {
+                    provider_id: provider_id.into(),
+                    auth_alias: auth_alias.map(Into::into),
+                    model_id: model_id.map(Into::into),
+                    available: false,
+                    blocked_scopes: vec!["request_local_provider_failure".into()],
+                }
+            }
+        }
+        let exhausted = target
+            .select_available(expanded, &ExcludedAvailability, 0)
+            .unwrap_err();
+        assert_eq!(exhausted.attempted_candidates, vec!["a:ka:m"]);
+    }
+
     #[test]
     fn requested_forwarder_model_filters_default_pool_candidates() {
         let source = r#"
@@ -855,6 +951,46 @@ impl V3TargetInterpreter {
         let requested_model_filter =
             selected_route_requested_model_filter(group, &classified.route);
         for (plan_index, entry) in classified.route.target_plan.iter().enumerate() {
+            // `provider.model` direct entries carry their own provider/model
+            // pin and have no manifest pool to consult.
+            if let Some((provider_id, model_id)) = &entry.direct_provider_model {
+                match self.expand_provider(
+                    manifest,
+                    Some(provider_id),
+                    Some(model_id),
+                    None,
+                    V3TargetExpansionScope {
+                        path: vec![format!("direct:{provider_id}.{model_id}")],
+                        pool_ids: vec![entry.pool_id.clone()],
+                        default_pool_member: false,
+                        required_capabilities: Vec::new(),
+                        requested_model_filter: None,
+                        visible_model_ids: Vec::new(),
+                    },
+                ) {
+                    Ok(expanded) => {
+                        for candidate in expanded {
+                            let key = format!(
+                                "{}:{}:{}",
+                                candidate.provider_id, candidate.auth_alias, candidate.model_id
+                            );
+                            if let Some(index) = candidate_indices.get(&key).copied() {
+                                merge_candidate_route_provenance(
+                                    &mut candidates[index],
+                                    &candidate,
+                                );
+                            } else {
+                                candidate_indices.insert(key, candidates.len());
+                                candidates.push(candidate);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        last_error = Some(error);
+                    }
+                }
+                continue;
+            }
             let pool = group
                 .pools
                 .get(&entry.pool_id)
@@ -921,6 +1057,11 @@ impl V3TargetInterpreter {
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
         let mut default_floor_candidate: Option<(usize, V3TargetCandidate)> = None;
+        // An explicit `provider.model` pin is diagnostic intent (V2 semantics):
+        // health cooldowns are reported but never veto the pinned provider.
+        // Explicit exclusions still block via the exhaustion path below.
+        let direct_route = expanded.route.pool_id == "direct";
+        let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -947,10 +1088,28 @@ impl V3TargetInterpreter {
                     default_floor_protected: false,
                 });
             }
+            if direct_route
+                && direct_fallback.is_none()
+                && !projection
+                    .blocked_scopes
+                    .iter()
+                    .any(|scope| scope == "request_local_provider_failure")
+            {
+                direct_fallback = Some((index, candidate.clone()));
+            }
             unavailable.push(format!(
                 "{}:{}:{}",
                 candidate.provider_id, candidate.auth_alias, candidate.model_id
             ));
+        }
+        if let Some((index, candidate)) = direct_fallback {
+            return Ok(V3Target10ConcreteProviderSelected {
+                route: expanded.route,
+                candidate,
+                unavailable_candidates: unavailable,
+                attempts: index + 1,
+                default_floor_protected: false,
+            });
         }
         if let Some((index, candidate)) = default_floor_candidate {
             return Ok(V3Target10ConcreteProviderSelected {

@@ -101,7 +101,7 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     ) {
         return project_v3_debug_failure("V3Req04StandardizedResponses", error);
     }
-    let router = V3VirtualRouter::default();
+    let router = V3VirtualRouter::process_shared();
     let routing_facts = build_v3_router_request_facts_from_v3_req_04(&standardized);
     let classified = match router.classify_request_with_facts(
         manifest,

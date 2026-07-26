@@ -1554,6 +1554,12 @@ fn append_responses_tools_for_anthropic_wire(
 fn responses_tool_as_anthropic_tool(
     tool: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
+    if matches!(
+        tool.get("type").and_then(Value::as_str),
+        Some("web_search" | "web_search_preview")
+    ) {
+        return responses_web_search_tool_as_anthropic_tool(tool);
+    }
     let mut output = Map::new();
     let name = tool
         .get("name")
@@ -1567,7 +1573,7 @@ fn responses_tool_as_anthropic_tool(
         .or_else(|| {
             tool.get("type")
                 .and_then(Value::as_str)
-                .filter(|tool_type| matches!(*tool_type, "tool_search" | "web_search"))
+                .filter(|tool_type| matches!(*tool_type, "tool_search"))
                 .map(str::to_string)
         })
         .ok_or(V3AnthropicCodecError::MalformedField {
@@ -1590,6 +1596,40 @@ fn responses_tool_as_anthropic_tool(
             .cloned()
             .unwrap_or_else(|| json!({"type":"object"})),
     );
+    Ok(Value::Object(output))
+}
+
+fn responses_web_search_tool_as_anthropic_tool(
+    tool: &Map<String, Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    let mut output = Map::from_iter([
+        (
+            "type".to_string(),
+            Value::String("web_search_20250305".to_string()),
+        ),
+        ("name".to_string(), Value::String("web_search".to_string())),
+    ]);
+    for key in ["blocked_domains", "cache_control", "max_uses", "strict"] {
+        if let Some(value) = tool.get(key) {
+            output.insert(key.to_string(), value.to_owned());
+        }
+    }
+    let allowed_domains = tool.get("allowed_domains").or_else(|| {
+        tool.get("filters")
+            .and_then(Value::as_object)
+            .and_then(|filters| filters.get("allowed_domains"))
+    });
+    if let Some(allowed_domains) = allowed_domains {
+        output.insert("allowed_domains".to_string(), allowed_domains.to_owned());
+    }
+    if let Some(user_location) = tool.get("user_location") {
+        output.insert("user_location".to_string(), user_location.to_owned());
+    }
+    if output.contains_key("allowed_domains") && output.contains_key("blocked_domains") {
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "tools[].web_search.allowed_domains",
+        });
+    }
     Ok(Value::Object(output))
 }
 
