@@ -195,6 +195,41 @@ fn file_sink_creates_parent_dirs_and_appends_human_console_lines() {
 }
 
 #[test]
+fn file_sink_recreates_parent_dir_after_runtime_start() {
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-v3-debug-recreate-parent-{}",
+        std::process::id()
+    ));
+    let file = path.join("nested").join("debug.jsonl");
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: Some(file.display().to_string()),
+        snapshots_enabled: false,
+        snapshot_stages: None,
+        dry_run_enabled: false,
+        raw_request_retention: 0,
+        raw_response_retention: 0,
+        event_retention: 4,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    fs::remove_dir_all(&path).unwrap();
+
+    let scope = runtime.start_trace("srv", "req", "exec").unwrap();
+    runtime
+        .record_node_event(&scope, "V3DebugEventLedgerRecorded", "recreated", None)
+        .unwrap();
+    runtime
+        .append_human_console_line("[5555] recreated sink parent")
+        .unwrap();
+
+    let written = fs::read_to_string(&file).unwrap();
+    assert!(written.contains("V3DebugEventLedgerRecorded"));
+    assert!(written.contains("recreated sink parent"));
+    fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
 fn retention_and_concurrent_event_order_are_bounded_and_unique() {
     let runtime = Arc::new(
         V3DebugRuntime::new(V3DebugRuntimeConfig {

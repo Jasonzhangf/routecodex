@@ -25,9 +25,12 @@ pub(crate) fn provider_wire_protocol_for_provider_type(
         "anthropic" | "anthropic_messages" | "anthropic-messages" => {
             Ok(V3HubProviderWireProtocol::Anthropic)
         }
-        "openai_chat" | "openai-chat" | "openai_chat_completions" | "openai-chat-completions" => {
-            Ok(V3HubProviderWireProtocol::OpenAiChat)
-        }
+        "openai_chat"
+        | "openai-chat"
+        | "openai_chat_completions"
+        | "openai-chat-completions"
+        | "chat_completions"
+        | "chat-completions" => Ok(V3HubProviderWireProtocol::OpenAiChat),
         "gemini" | "gemini_chat" | "gemini-chat" => Ok(V3HubProviderWireProtocol::Gemini),
         other => Err(format!(
             "selected unsupported provider wire protocol: provider={provider_id} type={other}"

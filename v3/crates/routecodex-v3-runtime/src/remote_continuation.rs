@@ -367,6 +367,10 @@ impl V3RemoteContinuationStore {
         self.locators.remove(remote_response_id).is_some()
     }
 
+    pub fn contains(&self, remote_response_id: &str) -> bool {
+        self.locators.contains_key(remote_response_id)
+    }
+
     pub fn len(&self) -> usize {
         self.locators.len()
     }

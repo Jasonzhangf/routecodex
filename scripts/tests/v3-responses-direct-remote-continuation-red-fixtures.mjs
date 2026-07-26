@@ -13,7 +13,7 @@ const server = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const configValidate = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const providerTransport = 'v3/crates/routecodex-v3-provider-responses/src/transport.rs';
 const cases = [
-  ['Req03 load removed', runtime, '.load_for_req03(response_id, &scope.key, now_epoch_ms)', '.load(response_id)', /load_for_req03/],
+  ['Req03 load removed', runtime, '.load_for_req03(response_id, &scope.key, now_epoch_ms)', '.load(response_id)', /forbidden|load_for_req03/],
   ['Default transport session state removed', runtime, 'static DEFAULT_RESPONSES_TRANSPORT', 'static REMOVED_DEFAULT_RESPONSES_TRANSPORT', /DEFAULT_RESPONSES_TRANSPORT/],
   ['second response exit', runtime, 'fn release_terminal_failure_locator(', 'async fn execute_selected_continuation() {}\nfn release_terminal_failure_locator(', /execute_selected_continuation/],
   ['Router reentry marker', runtime, 'trace.push("V3HubReqTarget06Resolved");', 'trace.push("V3HubReqTarget06Resolved");\n        let fallback_router = V3VirtualRouter::default();', /fallback/],
@@ -23,7 +23,7 @@ const cases = [
   ['SSE stream materialized before projection', response, 'let provider_body = raw.into_body();', 'let body_bytes = raw.into_body_bytes().await.unwrap();\n    let provider_body = V3ProviderResponseBody::Json(body_bytes);', /into_body_bytes/],
   ['structured SSE pending record removed', response, 'observation_state.record_pending_response_id(&response_id)?;', '// structured pending record removed', /record_pending_response_id/],
   ['Server store owner', server, 'fn build_responses_direct_continuation_scope(', 'fn forbidden(store: V3RemoteContinuationStore) {}\nfn build_responses_direct_continuation_scope(', /V3RemoteContinuationStore/],
-  ['HTTP-only remote continuation accepted', configValidate, 'let responses = compile_provider_responses(&id, provider.responses, &models)?;', 'let responses = provider.responses;', /compile_provider_responses/],
+  ['Implicit continuation capability derivation reintroduced', configValidate, 'fn apply_implicit_provider_model_capabilities(', 'fn apply_implicit_provider_model_capabilities_removed(', /apply_implicit_provider_model_capabilities/],
   ['WebSocket stream field leaks into event', providerTransport, 'event.remove("stream");', '// stream field leak', /event\.remove\("stream"\)/],
   ['WebSocket SSE materialization', providerTransport, 'fn websocket_sse_stream(', 'fn materialized() { let mut sse_frames = Vec::new(); sse_frames.push(Vec::<u8>::new()); }\nfn websocket_sse_stream(', /sse_frames/],
   ['WebSocket fallback marker', providerTransport, 'fn websocket_sse_stream(', 'fn fallback_http_retry() {}\nfn websocket_sse_stream(', /fallback/i],

@@ -1,4 +1,8 @@
 use super::*;
+#[cfg(test)]
+use crate::local_continuation::{
+    V3LocalContinuationResp04SaveInput, V3LocalContinuationTerminalOutcome,
+};
 use crate::provider_failure_runtime_policy::{
     resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
     v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
@@ -162,6 +166,10 @@ pub struct V3RuntimeProviderFailureObservation {
     pub model_id: String,
     pub status: u16,
     pub error_type: Option<String>,
+    pub external_error_kind: Option<String>,
+    pub external_error_code: Option<String>,
+    pub external_error_status: Option<u16>,
+    pub internal_code: Option<String>,
     pub message: String,
     pub failure_count: u32,
     pub health_state: String,
@@ -363,6 +371,40 @@ pub struct V3ResponsesRelayLocalContinuationState {
 }
 
 impl V3ResponsesRelayLocalContinuationState {
+    pub fn contains(&self, continuation_id: &str) -> Result<bool, V3ResponsesRelayRuntimeError> {
+        Ok(self.lock_store()?.contains(continuation_id))
+    }
+
+    pub fn contains_for_req03(
+        &self,
+        continuation_id: &str,
+        scope: &V3ResponsesRelayLocalContinuationScope,
+    ) -> Result<bool, V3ResponsesRelayRuntimeError> {
+        Ok(self
+            .lock_store()?
+            .contains_in_scope(&scope.local_key(), continuation_id))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn commit_for_req03_test(
+        &self,
+        continuation_id: &str,
+        scope: &V3ResponsesRelayLocalContinuationScope,
+        now_epoch_ms: u64,
+    ) -> Result<(), V3ResponsesRelayRuntimeError> {
+        self.lock_store()?
+            .commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
+                continuation_id,
+                scope.local_key(),
+                json!({"output":[]}),
+                V3LocalContinuationTerminalOutcome::NonTerminal,
+                now_epoch_ms,
+                now_epoch_ms + V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS,
+            ))
+            .map(|_| ())
+            .map_err(V3ResponsesRelayRuntimeError::LocalContinuation)
+    }
+
     pub fn len(&self) -> Result<usize, V3ResponsesRelayRuntimeError> {
         Ok(self.lock_store()?.len())
     }
@@ -1043,6 +1085,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_an
         None,
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
+        None,
     )
     .await
 }
@@ -1071,6 +1114,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_local_
         None,
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
+        None,
     )
     .await
 }
@@ -1097,6 +1141,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
         }),
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
+        None,
     )
     .await
 }
@@ -1128,6 +1173,40 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         }),
         provider_health.store.clone(),
         V3ResponsesRelayRetryPolicy::default(),
+        None,
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target<
+    T: ResponsesTransport,
+>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
+    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        input,
+        transport,
+        Some(V3ResponsesRelayLocalContinuationExecution {
+            state: local_stopless.state,
+            scope: local_stopless.scope,
+            now_epoch_ms: local_stopless.now_epoch_ms,
+            commit_resp04_effects: true,
+        }),
+        Some(V3ResponsesRelayStoplessControlExecution {
+            control: local_stopless.stopless_control,
+            scope: stopless_scope,
+            commit_effects: true,
+        }),
+        provider_health.store.clone(),
+        V3ResponsesRelayRetryPolicy::default(),
+        Some(initial_selected_target),
     )
     .await
 }
@@ -1156,6 +1235,32 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     .await
 }
 
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_initial_target(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
+    state: &V3ResponsesRelayLocalContinuationState,
+    stopless_control: &V3ResponsesRelayStoplessControlState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
+        manifest,
+        input,
+        &ReqwestResponsesTransport::default(),
+        provider_health,
+        V3ResponsesRelayLocalStoplessControlInput::new(
+            state,
+            stopless_control,
+            scope,
+            now_epoch_ms,
+        ),
+        initial_selected_target,
+    )
+    .await
+}
+
 pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
@@ -1172,6 +1277,31 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
             &transport,
             provider_health,
             local_stopless,
+        )
+        .await?;
+    output.provider_snapshots =
+        Some(snapshots.into_payload(capture.provider_request, capture.provider_response));
+    Ok(output)
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
+    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    capture: V3ResponsesRelayProviderSnapshotCapture,
+    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    let transport = V3LiveSnapResponsesTransport::with_default_transport();
+    let snapshots = transport.snapshots();
+    let mut output =
+        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
+            manifest,
+            input,
+            &transport,
+            provider_health,
+            local_stopless,
+            initial_selected_target,
         )
         .await?;
     output.provider_snapshots =
@@ -1208,6 +1338,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         provider_health.store,
         retry_policy,
+        None,
     )
     .await
 }
@@ -1229,6 +1360,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         provider_health.store.clone(),
         retry_policy,
+        None,
     )
     .await
 }
@@ -1255,6 +1387,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
         None,
         provider_health.store,
         V3ResponsesRelayRetryPolicy::default(),
+        None,
     )
     .await
 }
@@ -1280,6 +1413,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
     provider_health: V3ProviderHealthStore,
     retry_policy: V3ResponsesRelayRetryPolicy,
+    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
@@ -1397,6 +1531,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let mut failed_candidates = BTreeSet::new();
     let mut pending_provider_failure: Option<V3ResponsesRelayProviderFailure> = None;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let mut initial_selected_target = initial_selected_target;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
     let mut provider_send_attempts = 0usize;
@@ -1415,6 +1550,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     };
     loop {
         let selected = if let Some(selected) = retry_selected.take() {
+            selected
+        } else if let Some(selected) = initial_selected_target.take() {
             selected
         } else {
             match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
@@ -2199,6 +2336,10 @@ fn build_v3_runtime_provider_failure_observation_from_policy_event(
         model_id: event.candidate.model_id.clone(),
         status: event.status,
         error_type: event.error_type.clone(),
+        external_error_kind: None,
+        external_error_code: None,
+        external_error_status: None,
+        internal_code: None,
         message: event.message.clone(),
         failure_count: event.health_record.failure_count,
         health_state: event.health_record.state.clone(),
@@ -2277,7 +2418,7 @@ pub async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None).await
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None).await
 }
 
 pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
@@ -2296,6 +2437,7 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
             now_epoch_ms,
             commit_resp04_effects: false,
         }),
+        None,
         None,
     )
     .await
@@ -2324,6 +2466,36 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
             scope: stopless_scope,
             commit_effects: false,
         }),
+        None,
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    state: &V3ResponsesRelayLocalContinuationState,
+    stopless_control: &V3ResponsesRelayStoplessControlState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+) -> crate::V3FoundationRuntimeOutput {
+    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+    execute_v3_responses_relay_dry_run_runtime_inner(
+        manifest,
+        input,
+        Some(V3ResponsesRelayLocalContinuationExecution {
+            state,
+            scope,
+            now_epoch_ms,
+            commit_resp04_effects: false,
+        }),
+        Some(V3ResponsesRelayStoplessControlExecution {
+            control: stopless_control,
+            scope: stopless_scope,
+            commit_effects: false,
+        }),
+        Some(initial_selected_target),
     )
     .await
 }
@@ -2333,6 +2505,7 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
     input: V3ResponsesRelayRuntimeInput,
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
+    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
 ) -> crate::V3FoundationRuntimeOutput {
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
@@ -2357,6 +2530,7 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
         stopless_control,
         provider_health.store,
         V3ResponsesRelayRetryPolicy::default(),
+        initial_selected_target,
     )
     .await
     {

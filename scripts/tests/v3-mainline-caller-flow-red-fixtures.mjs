@@ -27,6 +27,7 @@ function runExpectFail(name, mutate, expectedText) {
     const expected = renderV3MainlineCallerFlowMarkdown(root, mapPath);
     const failures = [];
     if (audit.forbiddenDirectProjection.length) failures.push('forbidden direct response projection edge');
+    if (audit.forbiddenResponsesDirectProtocolShortcut.length) failures.push('forbidden Responses Direct protocol shortcut edge');
     if (audit.invalidAggregateEntry.length) failures.push('invalid aggregate wrapper edge');
     if (audit.missing.length) failures.push('missing caller map field');
     if (!expected.includes('flowchart TD')) failures.push('render missing flowchart');
@@ -61,6 +62,20 @@ runExpectFail('forbidden-direct-response-projection-edge', (copy) => {
     owner_feature_id: copy.chains[0].owner_feature_id,
   });
 }, 'forbidden direct response projection edge');
+
+runExpectFail('forbidden-responses-direct-protocol-shortcut-edge', (copy) => {
+  copy.chains[0].edges.push({
+    step_id: 'red-protocol-shortcut',
+    from_node: 'V3Target10ConcreteProviderSelected',
+    to_node: 'V3ResponsesDirect11Policy',
+    caller_symbol: 'execute_v3_responses_direct_runtime_kernel',
+    caller_file: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    callee_symbol: 'responses_direct_route_hook',
+    callee_file: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
+    status: 'anchored',
+    owner_feature_id: copy.chains[0].owner_feature_id,
+  });
+}, 'forbidden Responses Direct protocol shortcut edge');
 
 runExpectFail('aggregate-entry-edge-missing-kind', (copy) => {
   copy.chains[0].edges.push({
@@ -100,6 +115,28 @@ runExpectFail('missing-caller-symbol', (copy) => {
     process.exit(1);
   }
   console.log('[v3-mainline-caller-flow-red] source-registered-direct-response-hook: failed as expected');
+}
+
+{
+  const script = `
+    import { auditV3CallerFlowSourceText } from ${JSON.stringify(path.join(root, 'scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
+    const audit = auditV3CallerFlowSourceText('fn resolve_v3_responses_effective_execution_mode() {}', 'fixture/server.rs');
+    if (!audit.forbiddenProtocolDecisionHelpers.length) process.exit(0);
+    console.error('forbidden source protocol preplanning helper');
+    process.exit(1);
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  if (result.status === 0) {
+    console.error('[v3-mainline-caller-flow-red] source-protocol-preplanning-helper: expected failure but passed');
+    process.exit(1);
+  }
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (!output.includes('forbidden source protocol preplanning helper')) {
+    console.error('[v3-mainline-caller-flow-red] source-protocol-preplanning-helper: missing expected text');
+    console.error(output);
+    process.exit(1);
+  }
+  console.log('[v3-mainline-caller-flow-red] source-protocol-preplanning-helper: failed as expected');
 }
 
 {

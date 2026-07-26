@@ -29,6 +29,7 @@ The following big-skeleton chains are SOP and cannot change without a Jason manu
 
 - Request skeleton is `ReqInbound -> ReqChatProcess -> ReqOutbound -> ProviderReqCompat -> ProviderReqOutbound -> Transport`.
 - Response skeleton is `ProviderRespInbound -> ProviderRespCompat -> RespInbound -> RespChatProcess -> RespContinuation save -> RespOutbound -> Server frame`.
+- Responses Direct is `V3Target10ConcreteProviderSelected -> V3Execution11ProtocolDecision -> V3ResponsesDirect11Policy`; Direct is allowed only for same entry/provider protocol, and mismatch must enter Relay or explicit Error06 before provider send.
 - Direct response projection must pass through Direct-only projection nodes; no provider raw / Resp03 / Resp04 direct-to-client shortcut.
 - Stopless/servertool request-side governance is Req04-owned; response-side governance is Resp03-owned; continuation save is Resp04-owned.
 - Error handling is a resource graph with Error01-06 plus provider health/availability; side-channel is carrier mechanism, not the resource owner.
@@ -50,6 +51,7 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
    - `V3Target08KindClassified`
    - `V3Target09CandidateSetExpanded`
    - `V3Target10ConcreteProviderSelected`
+   - `V3Execution11ProtocolDecision`
    - `V3Provider12ResponsesWirePayload`
 3. Apply model mapping rules:
    - explicit `match.models` route pools declare inbound client model -> allowed targets mapping.

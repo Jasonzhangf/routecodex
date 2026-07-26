@@ -779,10 +779,11 @@ features:
       - docs/design/v3-system-definition.md
       - docs/goals/v3-foundation-implementation-order.md
       - docs/goals/v3-responses-direct-mvp-implementation-plan.md
+      - docs/goals/v3-vr-target-protocol-execution-decision-sop.md
     test_design:
       - docs/goals/v3-responses-direct-mvp-test-design.md
     required_contract:
-      - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame
+      - P6 owns only adjacent transitions V3Target10ConcreteProviderSelected through V3Server16HttpFrame, with V3Execution11ProtocolDecision between Target10 and Direct policy
       - Runtime remains the only complete lifecycle executor
       - routecodex-v3-provider-responses is generic and contains no deployment provider ID or provider-family branch
       - Server and CLI cannot import or call Provider transport
@@ -795,6 +796,10 @@ features:
       - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; it does not mutate the JSON client body, parse SSE transport as semantic truth, or switch client protocol
       - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
     required_gates:
+      - npm run render:v3-mainline-caller-flow
+      - npm run verify:v3-mainline-caller-flow
+      - npm run test:v3-mainline-caller-flow-red-fixtures
+      - npm run verify:architecture-wiki-html-sync
       - npm run verify:v3-architecture-docs
       - npm run verify:v3-rust-only
       - npm run verify:v3-module-boundaries
@@ -900,6 +905,9 @@ features:
       - Server projects Debug/Error/Dry Run through HTTP only and does not duplicate policy
       - Debug sink and malformed/disabled Dry Run failures enter the six-node Error chain without panic or silent success
       - Provider health mutation methods are crate-private and external Target-style compile fixtures cannot call them
+      - External provider/upstream/transport errors keep external_error identity and never receive internal_code
+      - RouteCodex-owned runtime failures receive stable internal_code 500-* by node and never receive external_error
+      - Client-input malformed request projection has neither internal_code nor external_error
     required_integration:
       - Server pending endpoint emits Debug events and full six-node Error projection
       - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
@@ -947,6 +955,9 @@ features:
       - P5 Runtime stops before Provider send and only full selected-target exhaustion enters Error01-Error06
       - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
       - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools, tool_search, and web_search surfaces become routing capabilities before pool matching
+      - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization never hard-reject a candidate
+      - Responses continuation is owner-routed by previous_response_id at V3HubReqContinuation03Classified: remote/direct records exact-pin to the same GPT-family provider/model/auth; local/relay records restore from the local continuation store; neither path is a Target model capability
+      - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
       - Target dedupe retains optional/default provenance and protects the default floor's final compatible provider
     required_gates:
       - npm run test:v3-p5-router-target
@@ -1161,7 +1172,7 @@ features:
       - missing locator entry owner scope pin capability expiry and availability mismatches enter Error01-06
       - still-running replaces only the matching locator and terminal failure releases only the matching locator
       - provider and client normal payloads exclude internal scope pin route auth capability and owner truth
-      - Config rejects remote_continuation on HTTP-only providers and contradictory WebSocket declarations
+      - Config accepts continuation route/protocol declarations without treating remote_continuation/tool_outputs as model capability; previous_response_id owner resolution picks direct or relay before Target, and unknown/ambiguous owner enters Error01-06 instead of default routing
       - Provider WebSocket v2 owns handshake auth correlation cancellation terminal projection and connection-local continuation state
       - WebSocket provider or protocol errors enter Error01-06 without HTTP retry Relay local materialization or provider reselection
     required_blackbox:

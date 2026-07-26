@@ -153,7 +153,7 @@ resources:
     owner_node: V3Server03HttpRequestRaw
     identity: [requestId, serverId, endpoint, method, streamIntent]
     allowed_writers: [V3Server03HttpRequestRaw]
-    allowed_readers: [V3Req04StandardizedResponses, V3Server16HttpFrame]
+    allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -176,6 +176,11 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3RouterRequestFacts
     identity: [serverId, entryProtocol, clientModel, capabilities, inputTokens]
+    semantic_contract:
+      target_hard_capabilities: [multimodal, vision, search, web_search]
+      route_signals: [text, tools, tool_outputs, reasoning, thinking, coding, longcontext, remote_continuation, local_materialization]
+      continuation_rule: previous_response_id owner chooses direct remote exact-pin or relay local restore; continuation ownership is not a model capability
+      rule: route_signals may select a route/pool but must not become Target capability_mismatch; only target_hard_capabilities can reject a candidate for semantic loss
     allowed_writers: [build_v3_router_request_facts_from_v3_req_04]
     allowed_readers: [V3VirtualRouter::classify_request_with_facts]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-debug]
@@ -225,8 +230,20 @@ resources:
     owner_node: V3Target10ConcreteProviderSelected
     identity: [requestId, targetId, providerId, providerType, authAlias, modelId]
     allowed_writers: [V3Target10ConcreteProviderSelected]
-    allowed_readers: [V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
+    allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.execution.protocol_decision
+    resource_kind: control_contract
+    lifecycle: v3.responses_direct.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3Execution11ProtocolDecision
+    identity: [requestId, targetId, providerId, modelId, entryProtocol, selectedProviderProtocol, executionMode]
+    allowed_writers: [V3Execution11ProtocolDecision]
+    allowed_readers: [V3ResponsesDirect11Policy]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -513,8 +530,8 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubReqContinuation03Classified
     identity: [requestId, ownerKind, scopeId]
-    allowed_writers: [V3HubReqContinuation03Classified, V3HubRespContinuation04Committed]
-    allowed_readers: [V3HubReqChatProcess04Governed, V3HubReqExecution05Planned, V3HubReqTarget06Resolved]
+    allowed_writers: [V3HubReqContinuation03Classified, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3HubRespContinuation04Committed]
+    allowed_readers: [pending_endpoint, V3HubReqChatProcess04Governed, V3HubReqExecution05Planned, V3HubReqTarget06Resolved]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubRespOutbound05ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -598,7 +615,7 @@ resources:
     owner_node: V3HubRespContinuation04Committed
     identity: [remoteResponseId, continuationOwner, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, providerId, modelId, authHandleId, capabilityRevision, expiresAtEpochMs]
     allowed_writers: [execute_v3_responses_direct_runtime_kernel_core, V3HubRespContinuation04Committed, V3RemoteContinuationStore::commit, V3RemoteContinuationStore::release, decode_v3_remote_continuation_locator]
-    allowed_readers: [V3RemoteContinuationStore::load, V3RemoteContinuationStore::load_for_req03, V3RemoteContinuationLocator::validate_capability_revision, encode_v3_remote_continuation_locator, V3HubReqContinuation03Classified, V3HubReqTarget06Resolved]
+    allowed_readers: [V3RemoteContinuationStore::load, V3RemoteContinuationStore::load_for_req03, V3ResponsesDirectContinuationState::contains_for_req03, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3RemoteContinuationLocator::validate_capability_revision, encode_v3_remote_continuation_locator, V3HubReqContinuation03Classified, V3HubReqTarget06Resolved]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubReqChatProcess04Governed, continuation_store_transport_local_context]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -610,7 +627,7 @@ resources:
     owner_node: V3HubRespContinuation04Committed
     identity: [contextId, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, ownerKind]
     allowed_writers: [V3HubRespContinuation04Committed, commit_or_release_local_continuation, V3LocalContinuationStore::commit_at_resp04, V3LocalContinuationStore::release]
-    allowed_readers: [V3HubReqContinuation03Classified, V3HubReqChatProcess04Governed, execute_v3_anthropic_relay_runtime_with_local_continuation, V3HubContinuationLookup::with_local_context_from_req04_store, V3LocalContinuationStore::restore_at_req04]
+    allowed_readers: [V3HubReqContinuation03Classified, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3ResponsesRelayLocalContinuationState::contains_for_req03, V3HubReqChatProcess04Governed, execute_v3_anthropic_relay_runtime_with_local_continuation, V3HubContinuationLookup::with_local_context_from_req04_store, V3LocalContinuationStore::restore_at_req04]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, continuation_store_transport, response_projector, sse_framer]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -696,6 +713,30 @@ resources:
     allowed_writers: [borrow_v3_hub_current_node]
     allowed_readers: [V3HubHookDeclaration::invoke]
     forbidden_writers: [V3HubStaticHookRegistry, routecodex-v3-debug, snapshot_recorder, continuation_store]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.internal_identity
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error01SourceRaised
+    identity: [internalCode, nodeId, ownerFeatureId]
+    allowed_writers: [build_v3_error_01_source_raised_internal, build_v3_internal_error_envelope]
+    allowed_readers: [V3Error02Classified, V3Error06ClientProjected]
+    forbidden_writers: [routecodex-v3-server, V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.error.external_link
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error01SourceRaised
+    identity: [kind, status, code, providerId]
+    allowed_writers: [build_v3_error_01_source_raised_external]
+    allowed_readers: [V3Error02Classified, V3Error06ClientProjected]
+    forbidden_writers: [routecodex-v3-server, V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

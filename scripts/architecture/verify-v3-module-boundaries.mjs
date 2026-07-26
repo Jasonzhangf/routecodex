@@ -203,12 +203,15 @@ if (/execute_v3_foundation_dry_run_runtime/.test(foundationSource)) {
 
 const runtimeKernelSource = read('v3/crates/routecodex-v3-runtime/src/kernel.rs');
 const dryRunSource = runtimeKernelSource.match(/pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*?\n}\n\npub async fn execute_v3_responses_direct_runtime_kernel/)?.[0] ?? '';
+const dryRunUsesResponsesRuntimeKernel =
+  /execute_v3_responses_direct_runtime_kernel_with_transport_and_debug/.test(dryRunSource)
+  || /execute_v3_responses_direct_runtime_kernel_with_transport_debug_core/.test(dryRunSource);
 if (!/V3DryRunNoNetworkTransport/.test(dryRunSource)
     || !/"provider_pipeline_executed": true/.test(dryRunSource)
     || !/"provider_network_send": false/.test(dryRunSource)
     || !/"stopped_before_provider_send": true/.test(dryRunSource)
     || /"provider_network_send": true/.test(dryRunSource)
-    || !/execute_v3_responses_direct_runtime_kernel_with_transport_and_debug/.test(dryRunSource)
+    || !dryRunUsesResponsesRuntimeKernel
     || !/V3Transport13ResponsesHttpRequest/.test(dryRunSource)
     || !/V3DryRunNoNetworkTerminalEffect/.test(dryRunSource)) {
   fail('P6 Dry Run must execute the Provider pipeline and stop only the Provider network-send effect');

@@ -4,8 +4,10 @@ use crate::nodes::{
 };
 use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error01SourceRaised, V3Error06ClientProjected,
+    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
+    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error06ClientProjected,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -178,7 +180,7 @@ fn responses_direct_request_projection_hook(
         (None, Some(path)) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
         (Some(name), Some(_)) => V3ProviderAuthSecretHandle::Environment(name.clone()),
         (None, None) => {
-            return Err(build_v3_error_01_source_raised(
+            return Err(build_v3_error_01_source_raised_internal(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Provider12ResponsesWirePayload",
                 "provider_auth_handle_missing",
@@ -186,6 +188,7 @@ fn responses_direct_request_projection_hook(
                     "provider {} selected without auth handle",
                     candidate.provider_id
                 ),
+                V3InternalErrorCode::V3Provider12ResponsesWirePayload,
             ))
         }
     };
@@ -223,25 +226,227 @@ fn responses_direct_response_projection_hook(raw: V3ProviderResp14Raw) -> Respon
 fn provider_error_source(
     stage: &'static str,
 ) -> impl FnOnce(V3ProviderError) -> V3Error01SourceRaised {
-    move |error| {
-        let invalid_request = matches!(
-            error,
-            V3ProviderError::InvalidWireBody { .. }
-                | V3ProviderError::InvalidStreamIntent { .. }
-                | V3ProviderError::InvalidDataImage { .. }
-        );
-        let source_kind = if invalid_request {
-            V3ErrorSourceKind::InvalidRequest
-        } else {
-            V3ErrorSourceKind::ProviderFailure
-        };
-        let code = if invalid_request {
-            "invalid_provider_request_payload"
-        } else {
-            "provider_responses_error"
-        };
-        build_v3_error_01_source_raised(source_kind, stage, code, error.to_string())
+    move |error| build_v3_provider_error_source(stage, error)
+}
+
+pub(crate) fn build_v3_provider_error_source(
+    stage: &'static str,
+    error: V3ProviderError,
+) -> V3Error01SourceRaised {
+    let message = error.to_string();
+    match error {
+        V3ProviderError::InvalidWireBody { .. }
+        | V3ProviderError::InvalidStreamIntent { .. }
+        | V3ProviderError::InvalidDataImage { .. } => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::InvalidRequest,
+            stage,
+            "invalid_provider_request_payload",
+            message,
+        ),
+        V3ProviderError::ControlFieldInWireBody { .. } => build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            "provider_wire_control_field_leaked",
+            message,
+            internal_error_code_for_stage(stage),
+        ),
+        V3ProviderError::InvalidBaseUrl { .. }
+        | V3ProviderError::MissingAuthSecret { .. }
+        | V3ProviderError::AuthSecretRead { .. } => build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            "provider_local_runtime_error",
+            message,
+            internal_error_code_for_stage(stage),
+        ),
+        V3ProviderError::ClientDisconnect { .. } => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ClientDisconnect,
+            stage,
+            "client_disconnect",
+            message,
+        ),
+        error => {
+            let external_error = external_link_for_provider_error(&error);
+            let code = source_code_for_external_provider_error(&error);
+            build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                stage,
+                code,
+                message,
+                external_error,
+            )
+        }
     }
+}
+
+fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
+    match error {
+        V3ProviderError::HttpStatus { response } => format!("provider_http_{}", response.status),
+        V3ProviderError::Transport { .. } | V3ProviderError::WebSocketTransport { .. } => {
+            "provider_transport_error".to_string()
+        }
+        V3ProviderError::WebSocketProtocol { .. } => {
+            "provider_websocket_protocol_error".to_string()
+        }
+        V3ProviderError::WebSocketProviderEvent { code, status, .. } => code
+            .clone()
+            .or_else(|| status.map(|value| format!("provider_http_{value}")))
+            .unwrap_or_else(|| "provider_websocket_event_error".to_string()),
+        V3ProviderError::UnexpectedContentType { .. } => {
+            "provider_content_type_unexpected".to_string()
+        }
+        V3ProviderError::ResponseBody { .. } => "provider_response_body_error".to_string(),
+        V3ProviderError::MalformedSse { .. } => "provider_malformed_sse".to_string(),
+        V3ProviderError::InvalidWireBody { .. }
+        | V3ProviderError::ControlFieldInWireBody { .. }
+        | V3ProviderError::InvalidStreamIntent { .. }
+        | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::InvalidBaseUrl { .. }
+        | V3ProviderError::MissingAuthSecret { .. }
+        | V3ProviderError::AuthSecretRead { .. }
+        | V3ProviderError::ClientDisconnect { .. } => "provider_responses_error".to_string(),
+    }
+}
+
+fn internal_error_code_for_stage(stage: &str) -> V3InternalErrorCode {
+    match stage {
+        "V3Provider12ResponsesWirePayload" => V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        "V3Transport13ResponsesHttpRequest" => {
+            V3InternalErrorCode::V3Transport13ResponsesHttpRequest
+        }
+        "V3ProviderResp14Raw" => V3InternalErrorCode::V3ProviderResp14Raw,
+        _ => V3InternalErrorCode::V3StaticHookRegistry,
+    }
+}
+
+fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorLink {
+    match error {
+        V3ProviderError::HttpStatus { response } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(response.status),
+            code: Some(format!("HTTP_{}", response.status)),
+            provider_id: Some(response.provider_id.clone()),
+            upstream_request_id: upstream_request_id_from_headers(&response.headers),
+            message: Some(format!("provider returned HTTP {}", response.status)),
+        },
+        V3ProviderError::Transport {
+            provider_id,
+            reason,
+            ..
+        }
+        | V3ProviderError::WebSocketTransport {
+            provider_id,
+            reason,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Transport,
+            status: None,
+            code: Some("TRANSPORT_ERROR".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.clone()),
+        },
+        V3ProviderError::WebSocketProtocol {
+            provider_id,
+            reason,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("WEBSOCKET_PROTOCOL_ERROR".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.clone()),
+        },
+        V3ProviderError::WebSocketProviderEvent {
+            provider_id,
+            status,
+            code,
+            message,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: *status,
+            code: code
+                .clone()
+                .or_else(|| status.map(|value| format!("HTTP_{value}"))),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(message.clone()),
+        },
+        V3ProviderError::UnexpectedContentType {
+            provider_id,
+            expected,
+            content_type,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("UNEXPECTED_CONTENT_TYPE".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(format!(
+                "expected {expected} content-type, got {:?}",
+                content_type
+            )),
+        },
+        V3ProviderError::ResponseBody {
+            provider_id,
+            reason,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("PROVIDER_RESPONSE_BODY".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.clone()),
+        },
+        V3ProviderError::MalformedSse {
+            provider_id,
+            reason,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("PROVIDER_MALFORMED_SSE".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: None,
+            message: Some(reason.clone()),
+        },
+        V3ProviderError::InvalidWireBody { .. }
+        | V3ProviderError::ControlFieldInWireBody { .. }
+        | V3ProviderError::InvalidStreamIntent { .. }
+        | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::InvalidBaseUrl { .. }
+        | V3ProviderError::MissingAuthSecret { .. }
+        | V3ProviderError::AuthSecretRead { .. }
+        | V3ProviderError::ClientDisconnect { .. } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("PROVIDER_RESPONSES_ERROR".to_string()),
+            provider_id: None,
+            upstream_request_id: None,
+            message: Some(error.to_string()),
+        },
+    }
+}
+
+fn upstream_request_id_from_headers(
+    headers: &[routecodex_v3_provider_responses::V3ProviderResponseHeader],
+) -> Option<String> {
+    headers
+        .iter()
+        .find(|header| {
+            matches!(
+                header.name.to_ascii_lowercase().as_str(),
+                "x-request-id" | "request-id" | "openai-request-id" | "x-openai-request-id"
+            )
+        })
+        .and_then(|header| std::str::from_utf8(&header.value).ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn responses_direct_error_hook(
@@ -260,6 +465,8 @@ fn responses_direct_error_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
+
     #[test]
     fn responses_direct_static_hooks_are_registered() {
         let registry = register_responses_direct_hooks();
@@ -289,6 +496,109 @@ mod tests {
                 b"not-json".to_vec(),
             ))
             .await;
-        assert!(result.is_err());
+        let source = result.expect_err("malformed provider JSON must be an explicit error");
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert!(source.internal_error.is_none());
+        let external = source
+            .external_error
+            .expect("malformed provider JSON is external provider identity");
+        assert_eq!(external.provider_id.as_deref(), Some("test"));
+        assert_eq!(
+            external.code.as_deref(),
+            Some("PROVIDER_RESPONSE_JSON_INVALID")
+        );
+    }
+
+    #[test]
+    fn provider_http_status_source_is_external_provider_identity_without_internal_code() {
+        let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
+            V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: "req".to_string(),
+                    provider_id: "asxs-grok".to_string(),
+                    status: 429,
+                    headers: vec![V3ProviderResponseHeader {
+                        name: "x-request-id".to_string(),
+                        value: b"upstream-req".to_vec(),
+                    }],
+                    body: b"{\"error\":{\"code\":\"rate_limit\"}}".to_vec(),
+                }),
+            },
+        );
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert!(source.internal_error.is_none());
+        let external = source.external_error.expect("external provider link");
+        assert_eq!(external.status, Some(429));
+        assert_eq!(external.provider_id.as_deref(), Some("asxs-grok"));
+        assert_eq!(external.code.as_deref(), Some("HTTP_429"));
+    }
+
+    #[test]
+    fn provider_transport_source_is_external_transport_identity_without_internal_code() {
+        let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
+            V3ProviderError::Transport {
+                request_id: "req".to_string(),
+                provider_id: "asxs-grok".to_string(),
+                reason: "error sending request for url".to_string(),
+            },
+        );
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert!(source.internal_error.is_none());
+        let external = source.external_error.expect("external transport link");
+        assert_eq!(external.kind, V3ExternalErrorKind::Transport);
+        assert_eq!(external.status, None);
+        assert_eq!(external.provider_id.as_deref(), Some("asxs-grok"));
+        assert_eq!(external.code.as_deref(), Some("TRANSPORT_ERROR"));
+    }
+
+    #[test]
+    fn provider_local_auth_secret_failure_is_internal_runtime_identity() {
+        let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
+            V3ProviderError::MissingAuthSecret {
+                request_id: "req".to_string(),
+                provider_id: "cc".to_string(),
+                auth_alias: "key1".to_string(),
+            },
+        );
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert!(source.external_error.is_none());
+        let internal = source.internal_error.expect("internal auth/runtime code");
+        assert_eq!(internal.internal_code, "500-160");
+        assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+    }
+
+    #[test]
+    fn malformed_current_image_source_is_client_input_without_internal_or_external_identity() {
+        let source = provider_error_source("V3Provider12ResponsesWirePayload")(
+            V3ProviderError::InvalidDataImage {
+                request_id: "req".to_string(),
+                media_type: "image/png".to_string(),
+                reason: "base64 decode failed".to_string(),
+            },
+        );
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::InvalidRequest);
+        assert_eq!(source.code, "invalid_provider_request_payload");
+        assert!(source.internal_error.is_none());
+        assert!(source.external_error.is_none());
+    }
+
+    #[test]
+    fn control_field_leak_source_is_internal_wire_boundary_violation() {
+        let source = provider_error_source("V3Provider12ResponsesWirePayload")(
+            V3ProviderError::ControlFieldInWireBody {
+                request_id: "req".to_string(),
+                field: "metadata",
+            },
+        );
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert!(source.external_error.is_none());
+        let internal = source.internal_error.expect("internal wire boundary code");
+        assert_eq!(internal.internal_code, "500-150");
+        assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
     }
 }

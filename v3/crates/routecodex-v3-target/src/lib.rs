@@ -480,19 +480,88 @@ targets = [
     }
 
     #[test]
-    fn tool_outputs_are_part_of_tool_capability_for_relay_selection() {
+    fn tools_are_route_signals_not_target_capability_filters() {
         let expanded = expanded_tools();
         let mut candidate = expanded
             .candidates
             .first()
             .expect("tools route must expand candidates")
             .clone();
-        candidate.required_capabilities = vec!["tool_outputs".into()];
-        candidate.model_capabilities = vec!["text".into(), "tools".into()];
+        candidate.required_capabilities = vec!["tools".into()];
+        candidate.model_capabilities = vec!["text".into()];
 
         assert!(
             candidate_satisfies_required_capabilities(&candidate),
-            "tool outputs are the second half of a tools roundtrip and must not require a separate provider config flag"
+            "tools are a request/route/protocol surface, not a provider model hard capability"
+        );
+    }
+
+    #[test]
+    fn continuation_signals_are_owner_paths_not_target_capability_filters() {
+        let expanded = expanded_tools();
+        let mut candidate = expanded
+            .candidates
+            .first()
+            .expect("tools route must expand candidates")
+            .clone();
+        candidate.required_capabilities = vec![
+            "tool_outputs".into(),
+            "remote_continuation".into(),
+            "local_materialization".into(),
+        ];
+        candidate.model_capabilities = vec!["text".into()];
+
+        assert!(
+            candidate_satisfies_required_capabilities(&candidate),
+            "previous_response_id must be resolved by continuation owner (direct remote vs relay local), not by Target model capability_mismatch"
+        );
+    }
+
+    #[test]
+    fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
+        let expanded = expanded_tools();
+        let mut search_candidate = expanded
+            .candidates
+            .first()
+            .expect("tools route must expand candidates")
+            .clone();
+        search_candidate.required_capabilities = vec!["web_search".into()];
+        search_candidate.model_capabilities = vec!["text".into()];
+
+        assert!(
+            !candidate_satisfies_required_capabilities(&search_candidate),
+            "web_search/search requires an explicit model/provider capability because the model may not have search"
+        );
+
+        let mut vision_candidate = search_candidate.clone();
+        vision_candidate.required_capabilities = vec!["vision".into()];
+        vision_candidate.model_capabilities = vec!["text".into(), "web_search".into()];
+
+        assert!(
+            !candidate_satisfies_required_capabilities(&vision_candidate),
+            "vision/multimodal requires an explicit model/provider capability because the model may not read images"
+        );
+    }
+
+    #[test]
+    fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_mismatch() {
+        let expanded = expanded_tools();
+        let mut candidate = expanded
+            .candidates
+            .first()
+            .expect("tools route must expand candidates")
+            .clone();
+        candidate.required_capabilities = vec![
+            "text".into(),
+            "tools".into(),
+            "reasoning".into(),
+            "thinking".into(),
+        ];
+        candidate.model_capabilities = vec!["text".into(), "tools".into(), "web_search".into()];
+
+        assert!(
+            candidate_satisfies_required_capabilities(&candidate),
+            "reasoning/thinking is a soft proxy compatibility request for no-image traffic; only hard execution semantics such as tools and vision should make a candidate unavailable"
         );
     }
 
@@ -1252,16 +1321,8 @@ fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> b
 fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
     let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
     match required {
-        "text" => has("text") || capabilities.is_empty(),
-        "tools" => has("tools"),
         "search" | "web_search" => has("web_search"),
         "multimodal" | "vision" => has("multimodal") || has("vision"),
-        "thinking" => has("thinking") || has("reasoning"),
-        "reasoning" => has("reasoning") || has("thinking"),
-        "remote_continuation" => has("remote_continuation"),
-        "local_materialization" => has("local_materialization"),
-        "tool_outputs" => has("tool_outputs") || has("tools"),
-        "coding" | "longcontext" => true,
         _ => true,
     }
 }

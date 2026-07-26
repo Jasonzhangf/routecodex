@@ -347,6 +347,107 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn responses_direct_binding_provider_protocol_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_type: &str,
+    provider_base_url: &str,
+    allowed_modes: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.a.execution]
+allowed_modes = [{allowed_modes}]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b.execution]
+allowed_modes = [{allowed_modes}]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
+[providers.mixed]
+type = "{provider_type}"
+base_url = "{provider_base_url}"
+default_model = "wire-protocol"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_PROTOCOL_DECISION_KEY" }}] }}
+[providers.mixed.models.wire-protocol]
+wire_name = "wire-protocol"
+aliases = ["client-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "mixed", model = "wire-protocol", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "mixed", model = "wire-protocol", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn responses_direct_binding_openai_chat_provider_manifest(
+    port_a: u16,
+    port_b: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_direct_binding_provider_protocol_manifest(
+        port_a,
+        port_b,
+        "openai_chat",
+        "http://127.0.0.1:9/v1",
+        r#""direct", "relay""#,
+    )
+}
+
+fn responses_direct_binding_anthropic_provider_manifest(
+    port_a: u16,
+    port_b: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_direct_binding_provider_protocol_manifest(
+        port_a,
+        port_b,
+        "anthropic",
+        "http://127.0.0.1:9",
+        r#""direct", "relay""#,
+    )
+}
+
+fn responses_direct_binding_openai_chat_provider_direct_only_manifest(
+    port_a: u16,
+    port_b: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_direct_binding_provider_protocol_manifest(
+        port_a,
+        port_b,
+        "openai_chat",
+        "http://127.0.0.1:9/v1",
+        r#""direct""#,
+    )
+}
+
 fn p6_remote_continuation_manifest(
     port_a: u16,
     port_b: u16,
@@ -1565,7 +1666,6 @@ async fn responses_relay_full_history_tool_pair_without_client_scope_reaches_pro
         .post(&endpoint)
         .json(&json!({
             "model":"client-test",
-            "previous_response_id":"1a3e546c-0a32-4667-933c-03f88aafc05c",
             "input":[
                 {"role":"user","content":"use lookup_weather"},
                 {
@@ -2011,7 +2111,8 @@ async fn responses_direct_server_replays_two_turn_remote_continuation_with_heade
         .to_str()
         .unwrap()
         .to_string();
-    assert!(first_trace.contains("V3Router07OpaqueTargetHitOnce"));
+    assert!(first_trace.contains("V3Target10ConcreteProviderSelected"));
+    assert!(first_trace.contains("V3Execution11ProtocolDecision"));
     assert!(first_trace.contains("V3HubRespContinuation04Committed"));
     let first_body: Value = first.json().await.unwrap();
     assert_eq!(first_body["id"], "resp_server_remote_1");
@@ -2118,7 +2219,8 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
         .to_str()
         .unwrap()
         .to_string();
-    assert!(first_trace.contains("V3Router07OpaqueTargetHitOnce"));
+    assert!(first_trace.contains("V3Target10ConcreteProviderSelected"));
+    assert!(first_trace.contains("V3Execution11ProtocolDecision"));
     assert!(first.text().await.unwrap().contains("resp_server_remote_1"));
 
     let second = client
@@ -3011,8 +3113,11 @@ async fn responses_direct_last_default_waits_twice_then_projects_on_third_failur
     let status = response.status();
     let body: Value = response.json().await.unwrap();
 
-    assert_eq!(status, 502);
-    assert_eq!(body["error"]["code"], "provider_transport_error");
+    assert_eq!(status, 503);
+    assert_eq!(body["error"]["code"], "provider_http_503");
+    assert_eq!(body["error"]["external_error"]["kind"], "provider");
+    assert_eq!(body["error"]["external_error"]["status"], 503);
+    assert!(body["error"].get("internal_code").is_none());
     assert_eq!(body["error"]["target_exhausted"], true);
     assert_eq!(body["error"]["candidates_remaining"], 0);
     assert_eq!(body["error"]["decision"], "project_client_error");
@@ -3181,6 +3286,155 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
         !response_body.contains("secret-key"),
         "dry-run projection must not leak auth secrets"
     );
+}
+
+#[tokio::test]
+async fn responses_direct_binding_uses_post_target_relay_for_openai_chat_provider_dry_run() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_openai_chat_provider_manifest(
+        free_port(),
+        free_port(),
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "route openai chat provider through relay",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(body["object"], "routecodex.pipeline_dry_run");
+    assert_eq!(body["kind"], "provider_request");
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert!(body["providerRequest"]["url"]
+        .as_str()
+        .unwrap()
+        .ends_with("/chat/completions"));
+    assert_eq!(body["providerRequest"]["body"]["model"], "wire-protocol");
+    assert!(body["providerRequest"]["body"].get("messages").is_some());
+    assert!(body["providerRequest"]["body"].get("input").is_none());
+    let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
+    assert!(node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3Target10ConcreteProviderSelected")));
+    assert!(node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision")));
+    assert!(!node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3ResponsesDirect11Policy")));
+    assert!(
+        !response_body.contains("secret-key"),
+        "dry-run projection must not leak auth secrets"
+    );
+}
+
+#[tokio::test]
+async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_dry_run() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_anthropic_provider_manifest(
+        free_port(),
+        free_port(),
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "route anthropic provider through relay",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(body["object"], "routecodex.pipeline_dry_run");
+    assert_eq!(body["kind"], "provider_request");
+    assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    assert!(body["providerRequest"]["url"]
+        .as_str()
+        .unwrap()
+        .ends_with("/v1/messages"));
+    assert_eq!(body["providerRequest"]["body"]["model"], "wire-protocol");
+    assert!(body["providerRequest"]["body"].get("messages").is_some());
+    assert!(body["providerRequest"]["body"].get("input").is_none());
+    let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
+    assert!(node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3Target10ConcreteProviderSelected")));
+    assert!(node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision")));
+    assert!(!node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3ResponsesDirect11Policy")));
+}
+
+#[tokio::test]
+async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_before_provider_send(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    let handle = spawn_v3_server_aggregate(
+        responses_direct_binding_openai_chat_provider_direct_only_manifest(
+            free_port(),
+            free_port(),
+        ),
+    )
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "relay disabled should fail before provider send",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let node_trace = response
+        .headers()
+        .get("x-routecodex-v3-node-trace")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body: Value = response.json().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+
+    assert_eq!(status, 500);
+    assert_eq!(body["error"]["code"], "protocol_mismatch_relay_not_allowed");
+    assert!(node_trace.contains("V3Target10ConcreteProviderSelected"));
+    assert!(node_trace.contains("V3Execution11ProtocolDecision"));
+    assert!(!node_trace.contains("V3ResponsesDirect11Policy"));
 }
 
 #[tokio::test]
@@ -3358,7 +3612,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
         .send()
         .await
         .unwrap();
-    assert_eq!(runtime_error.status(), 502);
+    assert_eq!(runtime_error.status(), 500);
 
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))

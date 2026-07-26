@@ -26,21 +26,31 @@ use routecodex_v3_runtime::{
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_responses_direct_dry_run_runtime,
+    execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
+    execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target,
     execute_v3_responses_relay_runtime_with_default_transport,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_initial_target,
     execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target,
+    plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
+    project_v3_protocol_execution_plan_failure,
+    project_v3_responses_previous_response_owner_resolution_error,
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
+    resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
     V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
-    V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3Execution11ProtocolDecisionMode, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
+    V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
@@ -71,6 +81,12 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
 const V3_PROTOCOL_PENDING_PROJECTION_RESOURCE: &str = "v3.protocol.pending_projection";
+
+struct V3ResponsesPreviousResponseOwnerResolutionContext {
+    direct_scope: V3ResponsesDirectContinuationScope,
+    relay_scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+}
 
 #[derive(Clone)]
 struct V3ListenerState {
@@ -696,7 +712,7 @@ async fn pending_endpoint(
         );
     };
     let entry_protocol = binding.entry_protocol.clone();
-    let execution_mode = binding.execution_mode;
+    let mut execution_mode = binding.execution_mode;
     let pending_owner_symbol = binding.pending_owner_symbol.clone();
     if !state
         .server
@@ -774,6 +790,16 @@ async fn pending_endpoint(
         Err(response) => return *response,
     };
     let execution_id = state.debug.next_execution_id(&state.server.id);
+    let responses_previous_response_id = if entry_protocol == "responses" {
+        payload
+            .get("previous_response_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
     let trace_scope = match state
         .debug
         .start_trace(&state.server.id, &request_id, &execution_id)
@@ -786,6 +812,174 @@ async fn pending_endpoint(
             ));
         }
     };
+    if entry_protocol == "responses" {
+        let owner_resolution_context =
+            match build_responses_previous_response_owner_resolution_context(
+                &request_headers,
+                &request_id,
+                &state.server,
+                &path,
+                &payload,
+            ) {
+                Ok(context) => context,
+                Err(message) => {
+                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    );
+                    if let Some(response) = record_and_emit_v3_error_projection(
+                        &state,
+                        &trace_scope,
+                        V3ErrorProjectionConsoleInput {
+                            endpoint: &path,
+                            request_id: &request_id,
+                            status: frame.status,
+                            error_chain: &frame.error_chain,
+                            body: match &frame.body {
+                                V3Server16Body::Json(value) => Some(value),
+                                V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                            },
+                            project_path: resolve_v3_console_project_path(
+                                &request_headers,
+                                &payload,
+                            )
+                            .as_deref(),
+                        },
+                    ) {
+                        return response;
+                    }
+                    let frame = project_v3_responses_error_frame_for_request_if_sse(
+                        frame,
+                        &request_headers,
+                        Some(&payload),
+                    );
+                    return responses_direct_output_response(frame);
+                }
+            };
+        match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
+            &payload,
+            execution_mode,
+            &state.responses_direct_continuation,
+            &state.responses_relay_local_continuation,
+            owner_resolution_context
+                .as_ref()
+                .map(|context| &context.direct_scope),
+            owner_resolution_context
+                .as_ref()
+                .map(|context| &context.relay_scope),
+            owner_resolution_context
+                .as_ref()
+                .map(|context| context.now_epoch_ms)
+                .unwrap_or(0),
+        ) {
+            Ok(resolved) => execution_mode = resolved,
+            Err(error) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_v3_responses_previous_response_owner_resolution_error(error),
+                );
+                if let Some(response) = record_and_emit_v3_error_projection(
+                    &state,
+                    &trace_scope,
+                    V3ErrorProjectionConsoleInput {
+                        endpoint: &path,
+                        request_id: &request_id,
+                        status: frame.status,
+                        error_chain: &frame.error_chain,
+                        body: match &frame.body {
+                            V3Server16Body::Json(value) => Some(value),
+                            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                        },
+                        project_path: resolve_v3_console_project_path(&request_headers, &payload)
+                            .as_deref(),
+                    },
+                ) {
+                    return response;
+                }
+                let frame = project_v3_responses_error_frame_for_request_if_sse(
+                    frame,
+                    &request_headers,
+                    Some(&payload),
+                );
+                return responses_direct_output_response(frame);
+            }
+        }
+    }
+    let mut responses_protocol_plan = None;
+    if entry_protocol == "responses"
+        && execution_mode == V3EntryProtocolExecutionMode::Direct
+        && responses_previous_response_id.is_none()
+    {
+        let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            Ok(duration) => duration.as_millis() as u64,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3Execution11ProtocolDecision",
+                    V3DebugError::MalformedFixture(format!(
+                        "system time precedes Unix epoch: {error}"
+                    )),
+                ));
+            }
+        };
+        let raw_for_plan = build_v3_server_03_http_request_raw(
+            state.server.id.clone(),
+            request_id.clone(),
+            execution_id.clone(),
+            method.clone(),
+            path.clone(),
+            payload.clone(),
+        );
+        match plan_v3_responses_protocol_execution_with_provider_health(
+            &state.manifest,
+            raw_for_plan,
+            state.provider_health.store(),
+            now_epoch_ms,
+        ) {
+            Ok(plan) => {
+                execution_mode = match plan.decision.mode {
+                    V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
+                        V3EntryProtocolExecutionMode::Direct
+                    }
+                    V3Execution11ProtocolDecisionMode::HubRelay => {
+                        V3EntryProtocolExecutionMode::Relay
+                    }
+                };
+                responses_protocol_plan = Some(plan);
+            }
+            Err(failure) => {
+                let mut frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_v3_protocol_execution_plan_failure(failure.clone()),
+                );
+                frame.node_trace = merge_v3_protocol_plan_trace(
+                    failure.node_trace,
+                    std::mem::take(&mut frame.node_trace),
+                );
+                if let Some(response) = record_and_emit_v3_error_projection(
+                    &state,
+                    &trace_scope,
+                    V3ErrorProjectionConsoleInput {
+                        endpoint: &path,
+                        request_id: &request_id,
+                        status: frame.status,
+                        error_chain: &frame.error_chain,
+                        body: match &frame.body {
+                            V3Server16Body::Json(value) => Some(value),
+                            V3Server16Body::Bytes(_) | V3Server16Body::Sse(_) => None,
+                        },
+                        project_path: resolve_v3_console_project_path(&request_headers, &payload)
+                            .as_deref(),
+                    },
+                ) {
+                    return response;
+                }
+                let frame = project_v3_responses_error_frame_for_request_if_sse(
+                    frame,
+                    &request_headers,
+                    Some(&payload),
+                );
+                return responses_direct_output_response(frame);
+            }
+        }
+    }
     if let Err(error) = state.debug.record_node_event(
         &trace_scope,
         "V3Server03HttpRequestRaw",
@@ -842,24 +1036,34 @@ async fn pending_endpoint(
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Direct
     {
-        let output = execute_v3_responses_direct_dry_run_runtime(
-            V3DryRunFixture {
-                fixture_id: request_id.clone(),
-                server_id: state.server.id.clone(),
-                method,
-                path: path.clone(),
-                request_payload: payload.clone(),
-                response_payload: json!({
-                    "id": format!("dry_run_{request_id}"),
-                    "object": "response",
-                    "status": "completed",
-                    "output_text": "routecodex provider-request dry-run stopped before provider send"
-                }),
-            },
-            &state.manifest,
-            &state.debug,
-        )
-        .await;
+        let fixture = V3DryRunFixture {
+            fixture_id: request_id.clone(),
+            server_id: state.server.id.clone(),
+            method,
+            path: path.clone(),
+            request_payload: payload.clone(),
+            response_payload: json!({
+                "id": format!("dry_run_{request_id}"),
+                "object": "response",
+                "status": "completed",
+                "output_text": "routecodex provider-request dry-run stopped before provider send"
+            }),
+        };
+        let output = match responses_protocol_plan.as_ref() {
+            Some(plan) => {
+                execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                    fixture,
+                    &state.manifest,
+                    &state.debug,
+                    plan.decision.target.clone(),
+                )
+                .await
+            }
+            None => {
+                execute_v3_responses_direct_dry_run_runtime(fixture, &state.manifest, &state.debug)
+                    .await
+            }
+        };
         let observability = build_v3_foundation_console_observability(&state, &output);
         let console_context = build_v3_console_emission_context(
             &state,
@@ -936,19 +1140,41 @@ async fn pending_endpoint(
                 ));
             }
         };
-        let output = execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
-            &state.manifest,
-            V3ResponsesRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                request_id: request_id.clone(),
-                payload: payload.clone(),
-            },
-            &state.responses_relay_local_continuation,
-            &state.responses_relay_stopless_control,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .await;
+        let output = match responses_protocol_plan.as_ref() {
+            Some(plan) => {
+                let mut output = execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target(
+                    &state.manifest,
+                    V3ResponsesRelayRuntimeInput {
+                        server_id: state.server.id.clone(),
+                        request_id: request_id.clone(),
+                        payload: payload.clone(),
+                    },
+                    &state.responses_relay_local_continuation,
+                    &state.responses_relay_stopless_control,
+                    continuation_scope,
+                    now_epoch_ms,
+                    plan.decision.target.clone(),
+                )
+                .await;
+                prepend_v3_protocol_plan_trace_to_foundation_output(&mut output, &plan.node_trace);
+                output
+            }
+            None => {
+                execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
+                    &state.manifest,
+                    V3ResponsesRelayRuntimeInput {
+                        server_id: state.server.id.clone(),
+                        request_id: request_id.clone(),
+                        payload: payload.clone(),
+                    },
+                    &state.responses_relay_local_continuation,
+                    &state.responses_relay_stopless_control,
+                    continuation_scope,
+                    now_epoch_ms,
+                )
+                .await
+            }
+        };
         let observability = build_v3_foundation_console_observability(&state, &output);
         let console_context = build_v3_console_emission_context(
             &state,
@@ -1186,40 +1412,92 @@ async fn pending_endpoint(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let mut output = if capture_provider_request || capture_provider_response {
-            match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
-                &state.manifest,
-                runtime_input,
-                &state.provider_health,
-                V3ResponsesRelayLocalStoplessControlInput::new(
+            match responses_protocol_plan.as_ref() {
+                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
+                    &state.manifest,
+                    runtime_input,
+                    &state.provider_health,
+                    V3ResponsesRelayLocalStoplessControlInput::new(
+                        &state.responses_relay_local_continuation,
+                        &state.responses_relay_stopless_control,
+                        continuation_scope.clone(),
+                        now_epoch_ms,
+                    ),
+                    V3ResponsesRelayProviderSnapshotCapture::new(
+                        capture_provider_request,
+                        capture_provider_response,
+                    ),
+                    plan.decision.target.clone(),
+                )
+                .await
+                {
+                    Ok(mut output) => {
+                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
+                            &mut output,
+                            &plan.node_trace,
+                        );
+                        output
+                    }
+                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                },
+                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
+                    &state.manifest,
+                    runtime_input,
+                    &state.provider_health,
+                    V3ResponsesRelayLocalStoplessControlInput::new(
+                        &state.responses_relay_local_continuation,
+                        &state.responses_relay_stopless_control,
+                        continuation_scope.clone(),
+                        now_epoch_ms,
+                    ),
+                    V3ResponsesRelayProviderSnapshotCapture::new(
+                        capture_provider_request,
+                        capture_provider_response,
+                    ),
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                },
+            }
+        } else {
+            match responses_protocol_plan.as_ref() {
+                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_initial_target(
+                    &state.manifest,
+                    runtime_input,
+                    &state.provider_health,
+                    &state.responses_relay_local_continuation,
+                    &state.responses_relay_stopless_control,
+                    continuation_scope.clone(),
+                    now_epoch_ms,
+                    plan.decision.target.clone(),
+                )
+                .await
+                {
+                    Ok(mut output) => {
+                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
+                            &mut output,
+                            &plan.node_trace,
+                        );
+                        output
+                    }
+                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                },
+                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
+                    &state.manifest,
+                    runtime_input,
+                    &state.provider_health,
                     &state.responses_relay_local_continuation,
                     &state.responses_relay_stopless_control,
                     continuation_scope,
                     now_epoch_ms,
-                ),
-                V3ResponsesRelayProviderSnapshotCapture::new(
-                    capture_provider_request,
-                    capture_provider_response,
-                ),
-            )
-            .await
-            {
-                Ok(output) => output,
-                Err(error) => project_v3_responses_relay_runtime_failure(error),
-            }
-        } else {
-            match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
-                &state.manifest,
-                runtime_input,
-                &state.provider_health,
-                &state.responses_relay_local_continuation,
-                &state.responses_relay_stopless_control,
-                continuation_scope,
-                now_epoch_ms,
-            )
-            .await
-            {
-                Ok(output) => output,
-                Err(error) => project_v3_responses_relay_runtime_failure(error),
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(error) => project_v3_responses_relay_runtime_failure(error),
+                },
             }
         };
         if let Some(response) = capture_v3_responses_relay_provider_snapshots(
@@ -1311,6 +1589,7 @@ async fn pending_endpoint(
             request_id.clone(),
             execution_id,
             payload,
+            responses_protocol_plan.as_ref(),
         )
         .await;
         if let Some(response) = record_v3_live_snapshot_projection(
@@ -1399,6 +1678,37 @@ fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
         .get("x-routecodex-dry-run")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
+}
+
+fn merge_v3_protocol_plan_trace(
+    mut plan_trace: Vec<&'static str>,
+    runtime_trace: Vec<&'static str>,
+) -> Vec<&'static str> {
+    plan_trace.extend(runtime_trace);
+    plan_trace
+}
+
+fn prepend_v3_protocol_plan_trace_to_foundation_output(
+    output: &mut V3FoundationRuntimeOutput,
+    plan_trace: &[&'static str],
+) {
+    let merged = merge_v3_protocol_plan_trace(plan_trace.to_vec(), output.node_trace.clone());
+    output.node_trace = merged.clone();
+    if let Some(dry_run) = output
+        .body
+        .get_mut("dry_run")
+        .and_then(Value::as_object_mut)
+    {
+        dry_run.insert("node_ids".to_string(), json!(merged));
+    }
+}
+
+fn prepend_v3_protocol_plan_trace_to_responses_relay_output(
+    output: &mut V3ResponsesRelayRuntimeOutput,
+    plan_trace: &[&'static str],
+) {
+    output.node_trace =
+        merge_v3_protocol_plan_trace(plan_trace.to_vec(), output.node_trace.clone());
 }
 
 fn allocate_v3_console_request_id(
@@ -1643,6 +1953,7 @@ async fn handle_responses_websocket_message_with_mode(
                 request_id,
                 execution_id,
                 payload,
+                None,
             )
             .await;
             send_responses_websocket_frame(socket, frame).await
@@ -2048,6 +2359,7 @@ async fn execute_responses_direct_server_frame(
     request_id: String,
     execution_id: String,
     payload: serde_json::Value,
+    responses_protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
 ) -> V3Server16HttpFrame {
     let requested_stream = v3_responses_request_wants_sse(request_headers, &payload);
     let continuation_scope = match build_responses_direct_continuation_scope(
@@ -2085,27 +2397,47 @@ async fn execute_responses_direct_server_frame(
             );
         }
     };
-    let output =
-        execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
-            V3ResponsesDirectRuntimeSharedState::new(
-                &state.responses_direct_continuation,
-                state.provider_health.store(),
-            ),
-            &state.manifest,
-            build_v3_server_03_http_request_raw(
-                state.server.id.clone(),
-                request_id.clone(),
-                execution_id.clone(),
-                method,
-                path,
-                payload,
-            ),
-            continuation_scope,
-            register_responses_direct_hooks(),
-            &state.debug,
-            now_epoch_ms,
-        )
-        .await;
+    let raw = build_v3_server_03_http_request_raw(
+        state.server.id.clone(),
+        request_id.clone(),
+        execution_id.clone(),
+        method,
+        path,
+        payload,
+    );
+    let output = match responses_protocol_plan {
+        Some(plan) => {
+            execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
+                V3ResponsesDirectRuntimeSharedState::new(
+                    &state.responses_direct_continuation,
+                    state.provider_health.store(),
+                ),
+                &state.manifest,
+                raw,
+                continuation_scope,
+                register_responses_direct_hooks(),
+                &state.debug,
+                now_epoch_ms,
+                plan.decision.target.clone(),
+            )
+            .await
+        }
+        None => {
+            execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
+                V3ResponsesDirectRuntimeSharedState::new(
+                    &state.responses_direct_continuation,
+                    state.provider_health.store(),
+                ),
+                &state.manifest,
+                raw,
+                continuation_scope,
+                register_responses_direct_hooks(),
+                &state.debug,
+                now_epoch_ms,
+            )
+            .await
+        }
+    };
     let scope = match state
         .debug
         .start_trace(&state.server.id, &request_id, &execution_id)
@@ -2648,6 +2980,10 @@ fn project_v3_runtime_provider_failure_event_debug(
         "model_id": &event.model_id,
         "status": event.status,
         "error_type": event.error_type.as_ref(),
+        "external_error_kind": event.external_error_kind.as_ref(),
+        "external_error_code": event.external_error_code.as_ref(),
+        "external_error_status": event.external_error_status,
+        "internal_code": event.internal_code.as_ref(),
         "message": &event.message,
         "failure_count": event.failure_count,
         "health_state": &event.health_state,
@@ -2954,6 +3290,18 @@ fn format_v3_provider_failure_console_content(
     }
     if let Some(error_type) = event.error_type.as_deref() {
         fields.push_str(&format!(" type={error_type}"));
+    }
+    if let Some(external_error_kind) = event.external_error_kind.as_deref() {
+        fields.push_str(&format!(" external={external_error_kind}"));
+    }
+    if let Some(external_error_code) = event.external_error_code.as_deref() {
+        fields.push_str(&format!(" externalCode={external_error_code}"));
+    }
+    if let Some(external_error_status) = event.external_error_status {
+        fields.push_str(&format!(" externalStatus={external_error_status}"));
+    }
+    if let Some(internal_code) = event.internal_code.as_deref() {
+        fields.push_str(&format!(" internalCode={internal_code}"));
     }
     fields.push_str(&format!(
         " message={}",
@@ -5111,6 +5459,38 @@ fn build_responses_relay_local_continuation_scope(
     ))
 }
 
+fn build_responses_previous_response_owner_resolution_context(
+    headers: &HeaderMap,
+    request_id: &str,
+    server: &V3ServerManifest,
+    endpoint: &str,
+    payload: &Value,
+) -> Result<Option<V3ResponsesPreviousResponseOwnerResolutionContext>, String> {
+    if payload
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let direct_scope =
+        build_responses_direct_continuation_scope(headers, request_id, server, endpoint, payload)?;
+    let relay_scope = build_responses_relay_local_continuation_scope(
+        headers, request_id, server, endpoint, payload,
+    )?;
+    let now_epoch_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("system time precedes Unix epoch: {error}"))?
+        .as_millis() as u64;
+    Ok(Some(V3ResponsesPreviousResponseOwnerResolutionContext {
+        direct_scope,
+        relay_scope,
+        now_epoch_ms,
+    }))
+}
+
 fn resolve_transparent_continuation_scope(
     session_id: Option<String>,
     conversation_id: Option<String>,
@@ -5136,7 +5516,8 @@ fn payload_needs_direct_continuation_scope(payload: &Value) -> bool {
 }
 
 fn payload_needs_relay_local_continuation_scope(payload: &Value) -> bool {
-    payload_input_has_unpaired_function_call_output(payload.get("input"))
+    payload.get("previous_response_id").is_some()
+        || payload_input_has_unpaired_function_call_output(payload.get("input"))
 }
 
 fn payload_input_has_function_call_output(input: Option<&Value>) -> bool {
@@ -7074,6 +7455,10 @@ mod tests {
             model_id: "gpt-5.5".to_string(),
             status: 502,
             error_type: Some("provider_error".to_string()),
+            external_error_kind: Some("transport".to_string()),
+            external_error_code: Some("TRANSPORT_ERROR".to_string()),
+            external_error_status: None,
+            internal_code: None,
             message: "provider response event codec failed".to_string(),
             failure_count: 3,
             health_state: "cooldown".to_string(),
@@ -7089,6 +7474,8 @@ mod tests {
         assert!(error_content.contains("failures=3"));
         assert!(error_content.contains("health=cooldown"));
         assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
+        assert!(error_content.contains("external=transport"));
+        assert!(error_content.contains("externalCode=TRANSPORT_ERROR"));
         let switch_content =
             format_v3_provider_switch_console_content("req-provider-switch", &event);
         assert!(switch_content.contains("[provider-switch]"));
@@ -7129,6 +7516,10 @@ mod tests {
             model_id: "gpt-5.5".to_string(),
             status: 502,
             error_type: Some("provider_error".to_string()),
+            external_error_kind: None,
+            external_error_code: None,
+            external_error_status: None,
+            internal_code: None,
             message: "upstream failed once".to_string(),
             failure_count: 1,
             health_state: "healthy".to_string(),
@@ -7706,6 +8097,7 @@ mod tests {
                 "previous_response_id":"never_committed",
                 "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
             }),
+            None,
         )
         .await;
         assert_eq!(frame.status, 400);

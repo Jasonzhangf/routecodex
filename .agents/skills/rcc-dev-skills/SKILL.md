@@ -85,6 +85,7 @@ description: RouteCodex 调试与架构路由入口
 - 禁止为绕过代码缺陷去修改 `~/.rcc` 或用户真实配置文件。若现有配置暴露兼容失败，必须回代码唯一 owner 修正；需要清理/迁移用户配置文件时必须先获得 Jason 明确授权。
 - 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
 - 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
+- RouteCodex 结案汇报必须短但完整：问题来源、验证根因、唯一 owner/节点、解决了什么、为什么符合 V3 架构、source gate、install/restart/live 证据、剩余风险。禁止只报“测试通过/已修复”。
 
 ## 全局安装 / release 验证硬规则
 

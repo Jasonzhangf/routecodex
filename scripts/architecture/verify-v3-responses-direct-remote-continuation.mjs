@@ -57,14 +57,14 @@ for (const [owner, text, phrases] of [
   ]],
   [responsePath, response, [
     'V3RemoteContinuationObservation',
-    'V3ProviderResponseBody::Sse(stream) => project_sse_stream(stream).await?',
+    'V3ProviderResponseBody::Sse(stream) => project_sse_stream(&provider_id, stream).await?',
     'SseIncrementalDecoder::new(SseTransportLimits::default())',
     'build_v3_sse_transport_in_01_raw_chunk(chunk)',
     'observe_sse_frame_remote_continuation(',
     'frame.frame().fields()',
     'response_id_candidate: None',
     'observation_state.record_pending_response_id(&response_id)',
-    'observe_json_remote_continuation(&parsed)',
+    'observe_json_remote_continuation(&provider_id, status, &parsed)?',
   ]],
   [targetPath, target, ['pub fn resolve_exact_provider_model_auth(']],
   [configTypesPath, configTypes, [
@@ -75,7 +75,7 @@ for (const [owner, text, phrases] of [
   [configValidatePath, configValidate, [
     'let responses = compile_provider_responses(&id, provider.responses, &models)?;',
     'fn compile_provider_responses(',
-    'remote_continuation requires responses websocket_v2 transport',
+    'fn apply_implicit_provider_model_capabilities(',
     'HTTP transport cannot declare websocket_v2_url',
     'websocket_v2_url is required for websocket_v2 transport',
   ]],
@@ -117,7 +117,9 @@ for (const [owner, text, phrases] of [
     'transport = "websocket_v2"',
   ]],
   [configTestPath, configTests, [
-    'remote_continuation_is_bound_to_responses_websocket_v2_transport',
+    'continuation_labels_do_not_block_http_responses_config',
+    'gpt_responses_models_do_not_publish_continuation_as_implicit_capability',
+    'v2_compat_projects_responses_websocket_v2_transport_without_implicit_continuation_capabilities',
     'HTTP transport cannot declare websocket_v2_url',
     'websocket_v2_url is required',
   ]],
@@ -151,7 +153,7 @@ if (projectSseStreamStart < 0 || projectSseStreamEnd < 0 || projectSseStreamEnd 
 } else {
   const projectSseStream = response.slice(projectSseStreamStart, projectSseStreamEnd);
   for (const phrase of [
-    'observed_sse_client_stream(stream, observation_state.clone())',
+    'observed_sse_client_stream(provider_id.to_string(), stream, observation_state.clone())',
     'V3ClientBody::Sse(client_stream)',
     'V3RemoteContinuationObservation::Streaming',
   ]) {
@@ -175,6 +177,7 @@ if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= obs
 }
 forbid(runtime, runtimePath, [
   /execute_selected_continuation/,
+  /\.load\(response_id\)/,
   /fallback/i,
   /require_remote_continuation_capabilities|remote_capability_error|lacks required remote_continuation/,
   /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,

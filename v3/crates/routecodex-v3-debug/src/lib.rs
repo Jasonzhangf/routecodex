@@ -224,10 +224,7 @@ struct V3SnapshotSession {
 impl V3DebugRuntime {
     pub fn new(config: V3DebugRuntimeConfig) -> V3DebugResult<Self> {
         if let Some(path) = config.log_file.as_deref() {
-            if let Some(parent) = std::path::Path::new(path).parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|error| V3DebugError::Sink(error.to_string()))?;
-            }
+            ensure_log_file_parent_dir(path)?;
             OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -299,6 +296,7 @@ impl V3DebugRuntime {
         let Some(path) = self.config.log_file.as_deref() else {
             return Ok(());
         };
+        ensure_log_file_parent_dir(path)?;
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -574,6 +572,7 @@ impl V3DebugRuntime {
             println!("{line}");
         }
         if let Some(path) = self.config.log_file.as_deref() {
+            ensure_log_file_parent_dir(path)?;
             let mut file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -583,6 +582,13 @@ impl V3DebugRuntime {
         }
         Ok(())
     }
+}
+
+fn ensure_log_file_parent_dir(path: &str) -> V3DebugResult<()> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        fs::create_dir_all(parent).map_err(|error| V3DebugError::Sink(error.to_string()))?;
+    }
+    Ok(())
 }
 
 pub fn effective_v3_snapshot_stage_selector(selector: Option<&str>) -> &str {

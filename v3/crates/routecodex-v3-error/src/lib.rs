@@ -1,6 +1,261 @@
 use routecodex_v3_debug::V3Debug01NodeEventRegistered;
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum V3InternalErrorLane {
+    Request,
+    Response,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3InternalErrorCode {
+    V3Server03HttpRequestRaw,
+    V3Req04StandardizedResponses,
+    V3Router05RequestClassified,
+    V3Router06RoutePoolResolved,
+    V3Router07OpaqueTargetHitOnce,
+    V3Target08KindClassified,
+    V3Target09CandidateSetExpanded,
+    V3Target10ConcreteProviderSelected,
+    V3ResponsesDirect11Policy,
+    V3Provider12ResponsesWirePayload,
+    V3Transport13ResponsesHttpRequest,
+    V3ProviderResp14Raw,
+    V3DirectResp14ProviderProjectionPrepared,
+    V3DirectResp15ClientPayloadReady,
+    V3Server16HttpFrame,
+    V3DebugArtifact,
+    V3ContinuationStore,
+    V3ConfigManifestRuntime,
+    V3StaticHookRegistry,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct V3InternalErrorRegistryEntry {
+    pub code: &'static str,
+    pub lane: V3InternalErrorLane,
+    pub node_id: &'static str,
+    pub owner_feature_id: &'static str,
+    pub module_block: &'static str,
+    pub title: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V3InternalErrorEnvelope {
+    pub internal_code: &'static str,
+    pub lane: V3InternalErrorLane,
+    pub node_id: &'static str,
+    pub owner_feature_id: &'static str,
+    pub module_block: &'static str,
+    pub stage: &'static str,
+}
+
+impl V3InternalErrorCode {
+    pub const fn registry_entry(self) -> V3InternalErrorRegistryEntry {
+        match self {
+            V3InternalErrorCode::V3Server03HttpRequestRaw => V3InternalErrorRegistryEntry {
+                code: "500-100",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Server03HttpRequestRaw",
+                owner_feature_id: "v3.config_server_full_function",
+                module_block: "500-10x",
+                title: "server request adapter internal failure",
+            },
+            V3InternalErrorCode::V3Req04StandardizedResponses => V3InternalErrorRegistryEntry {
+                code: "500-110",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Req04StandardizedResponses",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-11x",
+                title: "responses request standardization internal failure",
+            },
+            V3InternalErrorCode::V3Router05RequestClassified => V3InternalErrorRegistryEntry {
+                code: "500-120",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Router05RequestClassified",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-12x",
+                title: "router request classification internal failure",
+            },
+            V3InternalErrorCode::V3Router06RoutePoolResolved => V3InternalErrorRegistryEntry {
+                code: "500-130",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Router06RoutePoolResolved",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-13x",
+                title: "route pool resolution internal failure",
+            },
+            V3InternalErrorCode::V3Router07OpaqueTargetHitOnce => V3InternalErrorRegistryEntry {
+                code: "500-131",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Router07OpaqueTargetHitOnce",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-13x",
+                title: "opaque target hit internal failure",
+            },
+            V3InternalErrorCode::V3Target08KindClassified => V3InternalErrorRegistryEntry {
+                code: "500-140",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Target08KindClassified",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-14x",
+                title: "target kind classification internal failure",
+            },
+            V3InternalErrorCode::V3Target09CandidateSetExpanded => V3InternalErrorRegistryEntry {
+                code: "500-141",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Target09CandidateSetExpanded",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-14x",
+                title: "target candidate expansion internal failure",
+            },
+            V3InternalErrorCode::V3Target10ConcreteProviderSelected => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-142",
+                    lane: V3InternalErrorLane::Request,
+                    node_id: "V3Target10ConcreteProviderSelected",
+                    owner_feature_id: "v3.responses_direct_mvp_architecture",
+                    module_block: "500-14x",
+                    title: "concrete provider selection internal failure",
+                }
+            }
+            V3InternalErrorCode::V3ResponsesDirect11Policy => V3InternalErrorRegistryEntry {
+                code: "500-149",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3ResponsesDirect11Policy",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-14x",
+                title: "direct policy internal failure",
+            },
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload => V3InternalErrorRegistryEntry {
+                code: "500-150",
+                lane: V3InternalErrorLane::Request,
+                node_id: "V3Provider12ResponsesWirePayload",
+                owner_feature_id: "v3.debug_error_foundation",
+                module_block: "500-15x",
+                title: "provider wire payload internal failure",
+            },
+            V3InternalErrorCode::V3Transport13ResponsesHttpRequest => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-160",
+                    lane: V3InternalErrorLane::Request,
+                    node_id: "V3Transport13ResponsesHttpRequest",
+                    owner_feature_id: "v3.debug_error_foundation",
+                    module_block: "500-16x",
+                    title: "provider transport request internal failure",
+                }
+            }
+            V3InternalErrorCode::V3ProviderResp14Raw => V3InternalErrorRegistryEntry {
+                code: "500-200",
+                lane: V3InternalErrorLane::Response,
+                node_id: "V3ProviderResp14Raw",
+                owner_feature_id: "v3.debug_error_foundation",
+                module_block: "500-20x",
+                title: "provider raw response internal failure",
+            },
+            V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-210",
+                    lane: V3InternalErrorLane::Response,
+                    node_id: "V3DirectResp14ProviderProjectionPrepared",
+                    owner_feature_id: "v3.responses_direct_mvp_architecture",
+                    module_block: "500-21x",
+                    title: "direct provider projection internal failure",
+                }
+            }
+            V3InternalErrorCode::V3DirectResp15ClientPayloadReady => V3InternalErrorRegistryEntry {
+                code: "500-220",
+                lane: V3InternalErrorLane::Response,
+                node_id: "V3DirectResp15ClientPayloadReady",
+                owner_feature_id: "v3.responses_direct_mvp_architecture",
+                module_block: "500-22x",
+                title: "direct client payload projection internal failure",
+            },
+            V3InternalErrorCode::V3Server16HttpFrame => V3InternalErrorRegistryEntry {
+                code: "500-240",
+                lane: V3InternalErrorLane::Response,
+                node_id: "V3Server16HttpFrame",
+                owner_feature_id: "v3.config_server_full_function",
+                module_block: "500-24x",
+                title: "server HTTP frame internal failure",
+            },
+            V3InternalErrorCode::V3DebugArtifact => V3InternalErrorRegistryEntry {
+                code: "500-300",
+                lane: V3InternalErrorLane::Other,
+                node_id: "V3DebugArtifact",
+                owner_feature_id: "v3.debug_error_foundation",
+                module_block: "500-30x",
+                title: "debug artifact internal failure",
+            },
+            V3InternalErrorCode::V3ContinuationStore => V3InternalErrorRegistryEntry {
+                code: "500-310",
+                lane: V3InternalErrorLane::Other,
+                node_id: "V3HubRespContinuation04Committed",
+                owner_feature_id: "v3.responses_direct_remote_continuation_integration",
+                module_block: "500-31x",
+                title: "continuation store internal failure",
+            },
+            V3InternalErrorCode::V3ConfigManifestRuntime => V3InternalErrorRegistryEntry {
+                code: "500-320",
+                lane: V3InternalErrorLane::Other,
+                node_id: "V3Config05ManifestPublished",
+                owner_feature_id: "v3.config_server_full_function",
+                module_block: "500-32x",
+                title: "config manifest runtime internal failure",
+            },
+            V3InternalErrorCode::V3StaticHookRegistry => V3InternalErrorRegistryEntry {
+                code: "500-330",
+                lane: V3InternalErrorLane::Other,
+                node_id: "V3StaticHookRegistry",
+                owner_feature_id: "v3.debug_error_foundation",
+                module_block: "500-33x",
+                title: "static hook registry internal failure",
+            },
+        }
+    }
+}
+
+pub fn build_v3_internal_error_envelope(
+    code: V3InternalErrorCode,
+    stage: &'static str,
+) -> V3InternalErrorEnvelope {
+    let entry = code.registry_entry();
+    V3InternalErrorEnvelope {
+        internal_code: entry.code,
+        lane: entry.lane,
+        node_id: entry.node_id,
+        owner_feature_id: entry.owner_feature_id,
+        module_block: entry.module_block,
+        stage,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ExternalErrorKind {
+    Provider,
+    Upstream,
+    Client,
+    Transport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V3ExternalErrorLink {
+    pub kind: V3ExternalErrorKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum V3ErrorSourceKind {
@@ -23,6 +278,10 @@ pub struct V3Error01SourceRaised {
     pub source_stage: &'static str,
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub internal_error: Option<V3InternalErrorEnvelope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_error: Option<V3ExternalErrorLink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -98,12 +357,87 @@ pub fn build_v3_error_01_source_raised(
         source_stage,
         code: code.into(),
         message: message.into(),
+        internal_error: None,
+        external_error: None,
+    }
+}
+
+pub fn build_v3_error_01_source_raised_internal(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    internal_code: V3InternalErrorCode,
+) -> V3Error01SourceRaised {
+    validate_internal_error_source_kind(&source_kind);
+    V3Error01SourceRaised {
+        source_kind,
+        source_stage,
+        code: code.into(),
+        message: message.into(),
+        internal_error: Some(build_v3_internal_error_envelope(
+            internal_code,
+            source_stage,
+        )),
+        external_error: None,
+    }
+}
+
+pub fn build_v3_error_01_source_raised_external(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    external_error: V3ExternalErrorLink,
+) -> V3Error01SourceRaised {
+    validate_external_error_source_kind(&source_kind);
+    V3Error01SourceRaised {
+        source_kind,
+        source_stage,
+        code: code.into(),
+        message: message.into(),
+        internal_error: None,
+        external_error: Some(external_error),
+    }
+}
+
+fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
+    match source_kind {
+        V3ErrorSourceKind::RuntimeFailure | V3ErrorSourceKind::SuccessControl => {}
+        V3ErrorSourceKind::ProviderFailure => {
+            panic!("ProviderFailure cannot carry a RouteCodex internal error code")
+        }
+        V3ErrorSourceKind::InvalidRequest
+        | V3ErrorSourceKind::UnsupportedMediaType
+        | V3ErrorSourceKind::PayloadTooLarge
+        | V3ErrorSourceKind::MethodNotAllowed
+        | V3ErrorSourceKind::PathNotFound
+        | V3ErrorSourceKind::PendingEndpoint
+        | V3ErrorSourceKind::TargetPoolExhausted
+        | V3ErrorSourceKind::ClientDisconnect => {
+            panic!("client/route terminal errors cannot carry a RouteCodex internal error code")
+        }
+    }
+}
+
+fn validate_external_error_source_kind(source_kind: &V3ErrorSourceKind) {
+    if matches!(
+        source_kind,
+        V3ErrorSourceKind::RuntimeFailure | V3ErrorSourceKind::SuccessControl
+    ) {
+        panic!("RouteCodex internal failures must use an internal error code, not an external link")
     }
 }
 
 pub fn build_v3_error_02_classified_from_v3_error_01(
     source: V3Error01SourceRaised,
 ) -> V3Error02Classified {
+    if source.internal_error.is_some() {
+        validate_internal_error_source_kind(&source.source_kind);
+    }
+    if source.external_error.is_some() {
+        validate_external_error_source_kind(&source.source_kind);
+    }
     let (class, terminal_state) = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest
         | V3ErrorSourceKind::UnsupportedMediaType
@@ -230,20 +564,32 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         .action
         .health_affecting
         .then(|| execution.exhaustion.local_action.action.clone());
+    let mut error = serde_json::json!({
+        "code": source.code,
+        "message": source.message,
+        "stage": source.source_stage,
+        "class": execution.exhaustion.local_action.classified.class,
+        "decision": execution.decision,
+        "target_exhausted": execution.exhaustion.target_exhausted,
+        "candidates_remaining": execution.exhaustion.candidates_remaining,
+        "error_node": "V3Error06ClientProjected"
+    });
+    if let Some(internal_error) = &source.internal_error {
+        error["internal_code"] =
+            serde_json::Value::String(internal_error.internal_code.to_string());
+        error["internal_node"] = serde_json::Value::String(internal_error.node_id.to_string());
+        error["internal_owner_feature_id"] =
+            serde_json::Value::String(internal_error.owner_feature_id.to_string());
+        error["internal_module_block"] =
+            serde_json::Value::String(internal_error.module_block.to_string());
+    }
+    if let Some(external_error) = &source.external_error {
+        error["external_error"] =
+            serde_json::to_value(external_error).expect("V3ExternalErrorLink must serialize");
+    }
     V3Error06ClientProjected {
         status,
-        body: serde_json::json!({
-            "error": {
-                "code": source.code,
-                "message": source.message,
-                "stage": source.source_stage,
-                "class": execution.exhaustion.local_action.classified.class,
-                "decision": execution.decision,
-                "target_exhausted": execution.exhaustion.target_exhausted,
-                "candidates_remaining": execution.exhaustion.candidates_remaining,
-                "error_node": "V3Error06ClientProjected"
-            }
-        }),
+        body: serde_json::json!({ "error": error }),
         chain: V3_ERROR_CHAIN_NODE_IDS,
         health_action,
     }
@@ -282,7 +628,17 @@ impl V3ErrorHandlingCenter {
         );
         let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
         let mut projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
-        if let Some(status) = input.source_status.filter(|status| *status >= 400) {
+        let linked_status = projected
+            .body
+            .pointer("/error/external_error/status")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|status| u16::try_from(status).ok())
+            .filter(|status| *status >= 400);
+        if let Some(status) = input
+            .source_status
+            .filter(|status| *status >= 400)
+            .or(linked_status)
+        {
             projected.status = status;
         }
         debug_assert!(

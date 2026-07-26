@@ -18,6 +18,7 @@ const requiredFiles = [
   'docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md',
   'docs/goals/v3-hub-relay-four-worker-implementation-plan.md',
   'docs/goals/v3-hub-h2-p6-responses-direct-characterization.md',
+  'docs/goals/v3-vr-target-protocol-execution-decision-sop.md',
   'docs/goals/v3-config-server-full-function-plan.md',
   'docs/goals/v3-virtual-router-full-function-plan.md',
   'docs/architecture/v3-resource-operation-map.yml',
@@ -38,6 +39,7 @@ const requiredNodes = [
   'V3Router05RequestClassified', 'V3Router06RoutePoolResolved',
   'V3Router07OpaqueTargetHitOnce', 'V3Target08KindClassified',
   'V3Target09CandidateSetExpanded', 'V3Target10ConcreteProviderSelected',
+  'V3Execution11ProtocolDecision',
   'V3ResponsesDirect11Policy', 'V3Provider12ResponsesWirePayload',
   'V3Transport13ResponsesHttpRequest', 'V3ProviderResp14Raw',
   'V3DirectResp14ProviderProjectionPrepared', 'V3DirectResp15ClientPayloadReady',
@@ -74,10 +76,11 @@ const yaml = (file) => {
 };
 const array = (value) => Array.isArray(value) ? value : [];
 const p6AnchoredStepIds = new Set([
-  'v3-rd-09', 'v3-rd-10', 'v3-rd-11', 'v3-rd-12', 'v3-rd-13', 'v3-rd-14',
+  'v3-rd-09', 'v3-rd-09-direct-policy', 'v3-rd-10', 'v3-rd-11', 'v3-rd-12', 'v3-rd-13', 'v3-rd-14',
   'v3-rd-15', 'v3-rd-16',
 ]);
 const p6AnchoredResourceIds = new Set([
+  'v3.execution.protocol_decision',
   'v3.responses_direct.policy',
   'v3.response.client_payload',
   'v3.provider.responses_wire_payload',
@@ -306,6 +309,9 @@ for (const chainId of [
   if (!chains.some((chain) => chain.chain_id === chainId)) fail(`mainline: missing chain ${chainId}`);
 }
 const allEdges = chains.flatMap((chain) => array(chain.edges));
+if (allEdges.some((edge) => edge.from_node === 'V3Target10ConcreteProviderSelected' && edge.to_node === 'V3ResponsesDirect11Policy')) {
+  fail('mainline: forbidden Responses Direct shortcut V3Target10ConcreteProviderSelected -> V3ResponsesDirect11Policy; V3Execution11ProtocolDecision must own the adjacent decision edge');
+}
 for (const stepId of hubV1AnchoredStepIds) {
   const edge = allEdges.find((candidate) => candidate.step_id === stepId);
   if (!edge) fail(`mainline: missing Hub v1 edge ${stepId}`);
@@ -448,6 +454,10 @@ for (const gate of [
 const p6Feature = array(verificationMap.features)
   .find((entry) => entry.feature_id === 'v3.responses_direct_mvp_architecture');
 for (const gate of [
+  'npm run render:v3-mainline-caller-flow',
+  'npm run verify:v3-mainline-caller-flow',
+  'npm run test:v3-mainline-caller-flow-red-fixtures',
+  'npm run verify:architecture-wiki-html-sync',
   'npm run verify:v3-architecture-docs',
   'npm run verify:v3-module-boundaries',
   'npm run test:v3-source-gate-red-fixtures',

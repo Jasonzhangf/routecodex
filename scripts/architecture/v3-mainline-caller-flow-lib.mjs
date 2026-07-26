@@ -148,7 +148,7 @@ const MAIN_SKELETON_NOTES = new Map([
   }],
   ['v3.responses_direct.required_mainline', {
     title: '05A Responses Direct',
-    note: '同协议直通生命周期；Direct 也必须有自己的响应投影节点，禁止 raw 直投 client。',
+    note: 'VR/Target 选出具体 provider 后先做协议决策；同协议才进 Direct，mismatch 走 Relay/显式错误，且 Direct 投影禁止 raw 直投 client。',
   }],
   ['v3.hub_pipeline.v1.request', {
     title: '05B Hub Relay 请求链',
@@ -198,6 +198,7 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3Target08KindClassified', ['Target 类型', 'provider/model/auth 目标类型判定；进入 Target Interpreter']],
   ['V3Target09CandidateSetExpanded', ['候选展开', '从 target 展开具体 provider 候选']],
   ['V3Target10ConcreteProviderSelected', ['Provider 已选定', '唯一 provider/model/auth 进入 runtime']],
+  ['V3Execution11ProtocolDecision', ['协议执行决策', '比较入口协议与 selected provider protocol；同协议 Direct，mismatch Relay/显式错误']],
   ['V3ResponsesDirect11Policy', ['Direct 策略', 'Direct-only 生命周期策略节点']],
   ['V3Provider12ResponsesWirePayload', ['Provider wire payload', '发给上游的 Responses 请求体；不得含内部 metadata']],
   ['V3Transport13ResponsesHttpRequest', ['HTTP transport 请求', '认证/header/body 已组成，准备发送上游']],
@@ -256,6 +257,8 @@ const CONTRACT_NODE_NOTES = new Map([
 ]);
 
 const EDGE_STEP_NOTES = new Map([
+  ['v3-rd-09', 'Concrete provider selected 后先做 entry/provider protocol 决策'],
+  ['v3-rd-09-direct-policy', '只有协议决策允许 SameProtocolDirect 才能进入 Direct policy'],
   ['v3-rd-13', '解析 provider raw 后进入 Direct 专属投影准备'],
   ['v3-rd-14', 'Direct 投影准备完成，形成 client payload ready'],
   ['v3-rd-15', 'Direct ready payload 才能转成客户端 payload'],
@@ -457,6 +460,24 @@ function detectForbiddenDirectProjectionEdges(parsed) {
   return forbidden;
 }
 
+function detectForbiddenResponsesDirectProtocolShortcutEdges(parsed) {
+  const forbidden = [];
+  for (const { chain, edge } of chainEdges(parsed)) {
+    const from = String(edge?.from_node ?? '');
+    const to = String(edge?.to_node ?? '');
+    if (from === 'V3Target10ConcreteProviderSelected' && to === 'V3ResponsesDirect11Policy') {
+      forbidden.push({
+        chain_id: chain?.chain_id,
+        step_id: edge?.step_id,
+        from_node: from,
+        to_node: to,
+        reason: 'Responses Direct policy must be gated by V3Execution11ProtocolDecision',
+      });
+    }
+  }
+  return forbidden;
+}
+
 function detectInvalidAggregateEntryEdges(parsed) {
   const invalid = [];
   for (const { chain, edge } of chainEdges(parsed)) {
@@ -478,6 +499,7 @@ function detectBindingPendingEdges(parsed) {
 
 export function auditV3CallerFlowSourceText(source, source_path = V3_DIRECT_HOOKS_PATH) {
   const forbiddenRegisteredHooks = [];
+  const forbiddenProtocolDecisionHelpers = [];
   const registeredHookPattern = /V3RegisteredHook\s*\{[\s\S]*?input_node:\s*"V3ProviderResp14Raw"[\s\S]*?output_node:\s*"V3Resp15ClientPayload"[\s\S]*?\}/g;
   for (const match of source.matchAll(registeredHookPattern)) {
     forbiddenRegisteredHooks.push({
@@ -487,13 +509,38 @@ export function auditV3CallerFlowSourceText(source, source_path = V3_DIRECT_HOOK
       reason: 'registered hook maps provider raw directly to client payload',
     });
   }
-  return { forbiddenRegisteredHooks };
+  for (const helperName of [
+    'resolve_v3_responses_effective_execution_mode',
+    'v3_responses_direct_binding_requires_provider_protocol_relay',
+  ]) {
+    if (String(source ?? '').includes(helperName)) {
+      forbiddenProtocolDecisionHelpers.push({
+        source_path,
+        helper_name: helperName,
+        reason: 'server preplanning helper bypasses V3Execution11ProtocolDecision',
+      });
+    }
+  }
+  return { forbiddenRegisteredHooks, forbiddenProtocolDecisionHelpers };
 }
 
 export function auditV3CallerFlowSource(root) {
-  const sourcePath = path.join(root, V3_DIRECT_HOOKS_PATH);
-  if (!fs.existsSync(sourcePath)) return { forbiddenRegisteredHooks: [] };
-  return auditV3CallerFlowSourceText(fs.readFileSync(sourcePath, 'utf8'), V3_DIRECT_HOOKS_PATH);
+  const aggregate = {
+    forbiddenRegisteredHooks: [],
+    forbiddenProtocolDecisionHelpers: [],
+  };
+  for (const relPath of [
+    V3_DIRECT_HOOKS_PATH,
+    'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    'v3/crates/routecodex-v3-server/src/lib.rs',
+  ]) {
+    const sourcePath = path.join(root, relPath);
+    if (!fs.existsSync(sourcePath)) continue;
+    const audit = auditV3CallerFlowSourceText(fs.readFileSync(sourcePath, 'utf8'), relPath);
+    aggregate.forbiddenRegisteredHooks.push(...audit.forbiddenRegisteredHooks);
+    aggregate.forbiddenProtocolDecisionHelpers.push(...audit.forbiddenProtocolDecisionHelpers);
+  }
+  return aggregate;
 }
 
 
@@ -504,6 +551,7 @@ export function auditV3ReviewSurfaceHtmlText(html, source_path = V3_CALLER_FLOW_
     'Error resources / 错误处理资源',
     'V3HubReqInbound01ClientRaw',
     'V3HubReqChatProcess04Governed',
+    'V3Execution11ProtocolDecision',
     'ProviderReqCompat06ProviderCompat',
     'V3ProviderReqOutbound08WirePayload',
     'V3ProviderRespInbound01Raw',
@@ -519,6 +567,7 @@ export function auditV3ReviewSurfaceHtmlText(html, source_path = V3_CALLER_FLOW_
     'raw bytes 解码为 frame 字段；不解析 data JSON',
     'server closeout 只交给 Body::from_stream 并记录 EOF/error/drop',
     'v3.provider.health_state',
+    'v3.execution.protocol_decision',
     'v3.error.client_projection',
     'typed-test-only',
     'live-bound',
@@ -547,6 +596,7 @@ export function auditV3CallerFlow(parsed) {
     missing: detectMissingEdges(parsed),
     bindingPending: detectBindingPendingEdges(parsed),
     forbiddenDirectProjection: detectForbiddenDirectProjectionEdges(parsed),
+    forbiddenResponsesDirectProtocolShortcut: detectForbiddenResponsesDirectProtocolShortcutEdges(parsed),
     invalidAggregateEntry: detectInvalidAggregateEntryEdges(parsed),
   };
 }

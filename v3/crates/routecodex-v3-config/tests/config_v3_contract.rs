@@ -502,17 +502,12 @@ fn responses_websocket_v2_transport_options_are_validated() {
 }
 
 #[test]
-fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
+fn continuation_labels_do_not_block_http_responses_config() {
     let explicit_http = FULL_CONFIG.replace(
         "capabilities = [\"text\", \"reasoning\", \"tools\"]",
         "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
     );
-    let error =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap())
-            .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("remote_continuation requires responses websocket_v2 transport"));
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
 
     let websocket = explicit_http.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
@@ -522,7 +517,7 @@ fn remote_continuation_is_bound_to_responses_websocket_v2_transport() {
 }
 
 #[test]
-fn gpt_responses_models_publish_remote_continuation_without_explicit_capability_config() {
+fn gpt_responses_models_do_not_publish_continuation_as_implicit_capability() {
     let websocket = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
         "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
@@ -531,26 +526,23 @@ fn gpt_responses_models_publish_remote_continuation_without_explicit_capability_
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
     let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
     assert!(
-        capabilities
+        !capabilities
             .iter()
             .any(|capability| capability == "remote_continuation"),
-        "GPT Responses model must derive remote_continuation without explicit config: {capabilities:?}"
+        "continuation owner is resolved from previous_response_id records, not implicit model capability: {capabilities:?}"
     );
     assert!(
-        capabilities.iter().any(|capability| capability == "tool_outputs"),
-        "GPT Responses model remote_continuation must derive tool_outputs without explicit config: {capabilities:?}"
+        !capabilities
+            .iter()
+            .any(|capability| capability == "tool_outputs"),
+        "tool_outputs is request protocol data, not implicit model capability: {capabilities:?}"
     );
 
     let explicit_http = FULL_CONFIG.replace(
         "capabilities = [\"text\", \"reasoning\", \"tools\"]",
         "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
     );
-    let error =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap())
-            .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("remote_continuation requires responses websocket_v2 transport"));
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
 
     let non_responses = FULL_CONFIG.replacen("type = \"responses\"", "type = \"openai_chat\"", 1);
     let manifest =
@@ -916,15 +908,14 @@ fn rejects_invalid_pool_match_and_capability_combinations() {
             .unwrap_err();
     assert!(error.to_string().contains("token range is invalid"));
 
-    let incompatible = FULL_CONFIG.replace(
+    let legacy_continuation_label = FULL_CONFIG.replace(
         "capabilities = [\"text\", \"reasoning\", \"tools\"]",
         "capabilities = [\"text\", \"remote_continuation\"]",
     );
-    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&incompatible).unwrap())
-        .unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("remote_continuation requires tool_outputs"));
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&legacy_continuation_label).unwrap(),
+    )
+    .expect("legacy continuation labels are parsed for compatibility but no longer gate model capability");
 }
 
 #[test]
@@ -1297,7 +1288,8 @@ fn v2_compat_keeps_responses_endpoint_for_minimax_only_5555() {
 }
 
 #[test]
-fn v2_compat_projects_responses_websocket_v2_transport_and_remote_capabilities() {
+fn v2_compat_projects_responses_websocket_v2_transport_without_implicit_continuation_capabilities()
+{
     let root =
         std::env::temp_dir().join(format!("routecodex-v3-v2-compat-ws-{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
@@ -1332,13 +1324,8 @@ websocket_v2_url = "wss://provider.invalid/openai/v1/responses"
     );
     assert_eq!(
         provider.models["gpt-5.6-sol"].capabilities,
-        [
-            "reasoning",
-            "text",
-            "tools",
-            "remote_continuation",
-            "tool_outputs"
-        ]
+        ["reasoning", "text", "tools"],
+        "websocket_v2 is transport config; continuation owner is resolved from previous_response_id records, not an implicit model capability"
     );
 
     fs::remove_dir_all(root).unwrap();

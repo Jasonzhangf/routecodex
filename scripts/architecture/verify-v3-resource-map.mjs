@@ -14,6 +14,7 @@ const nodes = [
   'V3Router05RequestClassified', 'V3Router06RoutePoolResolved',
   'V3Router07OpaqueTargetHitOnce', 'V3Target08KindClassified',
   'V3Target09CandidateSetExpanded', 'V3Target10ConcreteProviderSelected',
+  'V3Execution11ProtocolDecision', 'v3.execution.protocol_decision',
   'V3ResponsesDirect11Policy', 'V3Provider12ResponsesWirePayload',
   'V3Transport13ResponsesHttpRequest', 'V3ProviderResp14Raw',
   'V3Resp15ClientPayload', 'V3Server16HttpFrame',

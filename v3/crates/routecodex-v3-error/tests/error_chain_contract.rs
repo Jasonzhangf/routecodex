@@ -1,10 +1,12 @@
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, build_v3_error_02_classified_from_v3_error_01,
+    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
+    build_v3_error_01_source_raised_internal, build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
     build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
     build_v3_error_05_execution_decision_from_v3_error_04,
     build_v3_error_06_client_projected_from_v3_error_05, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 
 #[test]
@@ -132,6 +134,106 @@ fn provider_failure_projects_only_after_selected_target_is_fully_exhausted() {
     let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
     assert_eq!(projected.status, 502);
     assert_eq!(projected.body["error"]["target_exhausted"], true);
+}
+
+#[test]
+fn external_provider_429_projects_external_link_without_internal_code() {
+    let source = build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_http_429",
+        "provider returned HTTP 429",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("HTTP_429".to_string()),
+            provider_id: Some("asxs-grok".to_string()),
+            upstream_request_id: None,
+            message: Some("provider returned HTTP 429".to_string()),
+        },
+    );
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::ProviderInstance {
+            provider_id: "asxs-grok".to_string(),
+        },
+        candidates_remaining: 0,
+        source_status: None,
+    });
+
+    assert_eq!(projected.status, 429);
+    assert_eq!(
+        projected.body["error"]["external_error"]["kind"],
+        "provider"
+    );
+    assert_eq!(projected.body["error"]["external_error"]["status"], 429);
+    assert_eq!(
+        projected.body["error"]["external_error"]["provider_id"],
+        "asxs-grok"
+    );
+    assert!(projected.body["error"].get("internal_code").is_none());
+    assert!(projected.body["error"].get("internal_node").is_none());
+}
+
+#[test]
+fn internal_runtime_failure_projects_numbered_internal_code_without_external_link() {
+    let source = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Provider12ResponsesWirePayload",
+        "provider_auth_handle_missing",
+        "selected provider has no auth handle",
+        V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+    );
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    });
+
+    assert_eq!(projected.status, 500);
+    assert_eq!(projected.body["error"]["internal_code"], "500-150");
+    assert_eq!(
+        projected.body["error"]["internal_node"],
+        "V3Provider12ResponsesWirePayload"
+    );
+    assert_eq!(
+        projected.body["error"]["internal_owner_feature_id"],
+        "v3.debug_error_foundation"
+    );
+    assert!(projected.body["error"].get("external_error").is_none());
+}
+
+#[test]
+#[should_panic(expected = "ProviderFailure cannot carry a RouteCodex internal error code")]
+fn provider_failure_cannot_be_wrapped_as_internal_error() {
+    let _ = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_http_429",
+        "provider returned HTTP 429",
+        V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+    );
+}
+
+#[test]
+fn malformed_client_request_has_no_internal_or_external_identity() {
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::InvalidRequest,
+        "V3Provider12ResponsesWirePayload",
+        "invalid_provider_request_payload",
+        "invalid data:image payload",
+    );
+    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: None,
+    });
+
+    assert_eq!(projected.status, 400);
+    assert!(projected.body["error"].get("internal_code").is_none());
+    assert!(projected.body["error"].get("external_error").is_none());
 }
 
 #[test]

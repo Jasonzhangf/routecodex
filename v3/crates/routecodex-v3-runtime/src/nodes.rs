@@ -1,5 +1,7 @@
 use futures_util::Stream;
-use routecodex_v3_error::V3Error01SourceRaised;
+use routecodex_v3_error::{
+    build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -53,6 +55,20 @@ pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
     pub request_body: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3Execution11ProtocolDecisionMode {
+    SameProtocolDirect,
+    HubRelay,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3Execution11ProtocolDecision {
+    pub mode: V3Execution11ProtocolDecisionMode,
+    pub entry_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    pub selected_provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
 }
 
 pub type V3ClientSseStream =
@@ -128,6 +144,7 @@ pub fn build_v3_router_request_facts_for_entry(
     }
     if body.get("reasoning").is_some() {
         capabilities.insert("reasoning".to_string());
+        capabilities.insert("thinking".to_string());
     }
     if value_has_v3_media_kind(body, "image") {
         capabilities.insert("multimodal".to_string());
@@ -361,6 +378,86 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
     }
 }
 
+pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    entry_protocol: &str,
+    allowed_modes: &[String],
+) -> Result<V3Execution11ProtocolDecision, V3Error01SourceRaised> {
+    let entry_protocol = entry_protocol_wire_protocol(entry_protocol)?;
+    let selected_provider_protocol = crate::hub_v1::provider_wire_protocol_for_provider_type(
+        &selected.candidate.provider_id,
+        &selected.candidate.provider_type,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Execution11ProtocolDecision",
+            "provider_protocol_unresolved",
+            error,
+        )
+    })?;
+    let direct_allowed = allowed_modes
+        .iter()
+        .any(|mode| mode.trim().eq_ignore_ascii_case("direct"));
+    let relay_allowed = allowed_modes
+        .iter()
+        .any(|mode| mode.trim().eq_ignore_ascii_case("relay"));
+    let mode = if entry_protocol == selected_provider_protocol {
+        if !direct_allowed {
+            return Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Execution11ProtocolDecision",
+                "protocol_same_direct_not_allowed",
+                "same protocol selected target requires direct mode but direct is not allowed",
+            ));
+        }
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect
+    } else if relay_allowed {
+        V3Execution11ProtocolDecisionMode::HubRelay
+    } else {
+        return Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Execution11ProtocolDecision",
+            "protocol_mismatch_relay_not_allowed",
+            format!(
+                "entry protocol {:?} selected provider protocol {:?} requires relay but relay is not allowed",
+                entry_protocol, selected_provider_protocol
+            ),
+        ));
+    };
+    Ok(V3Execution11ProtocolDecision {
+        mode,
+        entry_protocol,
+        selected_provider_protocol,
+        target: selected,
+    })
+}
+
+fn entry_protocol_wire_protocol(
+    entry_protocol: &str,
+) -> Result<crate::hub_v1::V3HubProviderWireProtocol, V3Error01SourceRaised> {
+    match entry_protocol.trim() {
+        "responses" | "openai_responses" | "openai-responses" => {
+            Ok(crate::hub_v1::V3HubProviderWireProtocol::Responses)
+        }
+        "anthropic" | "anthropic_messages" | "anthropic-messages" => {
+            Ok(crate::hub_v1::V3HubProviderWireProtocol::Anthropic)
+        }
+        "openai_chat" | "openai-chat" | "chat_completions" | "chat-completions" => {
+            Ok(crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat)
+        }
+        "gemini" | "gemini_chat" | "gemini-chat" => {
+            Ok(crate::hub_v1::V3HubProviderWireProtocol::Gemini)
+        }
+        other => Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Execution11ProtocolDecision",
+            "entry_protocol_unresolved",
+            format!("unsupported entry protocol for protocol decision: {other}"),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::build_v3_router_request_facts_for_entry;
@@ -452,6 +549,23 @@ mod tests {
         assert!(
             !facts.capabilities.contains("streaming"),
             "stream is a transport intent, not a routing/model capability"
+        );
+    }
+
+    #[test]
+    fn v3_routing_facts_alias_reasoning_to_thinking_for_route_match() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "reasoning": {"effort": "medium"},
+            "input": [{"role":"user","content":"think"}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+
+        assert!(facts.capabilities.contains("reasoning"));
+        assert!(
+            facts.capabilities.contains("thinking"),
+            "V3 config may use thinking while OpenAI Responses clients send reasoning; route facts must preserve both names"
         );
     }
 

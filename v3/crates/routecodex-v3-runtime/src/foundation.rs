@@ -425,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_runtime_surfaces_post_startup_debug_sink_failure_through_error_chain() {
+    fn pending_runtime_recreates_post_startup_debug_sink_parent_directory() {
         let directory =
             std::env::temp_dir().join(format!("routecodex-v3-runtime-sink-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
@@ -456,13 +456,9 @@ mod tests {
             },
             &debug,
         );
-        assert_eq!(output.status, 500);
-        assert_eq!(output.error_chain.len(), 6);
-        assert_eq!(output.body["error"]["code"], "v3_debug_failure");
-        assert!(output.body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("debug sink failed"));
+        assert_eq!(output.status, 501);
+        assert_eq!(output.body["error"]["code"], "not_implemented");
         assert!(output.stopped_before_provider_send);
+        assert!(log_file.exists());
     }
 }

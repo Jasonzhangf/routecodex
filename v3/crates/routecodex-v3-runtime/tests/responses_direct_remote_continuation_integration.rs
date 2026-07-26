@@ -461,7 +461,7 @@ async fn json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_with
         build_v3_server_03_http_request_raw(
             "s".into(), "req-1".into(), "exec-1".into(), "POST".into(),
             "/v1/responses".into(),
-            json!({"model":"client","input":"use tool","tools":[{"type":"function","name":"lookup"}]})
+            json!({"model":"gpt-5.5","input":"use tool","tools":[{"type":"function","name":"lookup"}]})
         ),
         scope.clone(),
         register_responses_direct_hooks(),
@@ -485,7 +485,7 @@ async fn json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_with
             "POST".into(),
             "/v1/responses".into(),
             json!({
-                "model":"client",
+                "model":"gpt-5.5",
                 "previous_response_id":"resp_remote_1",
                 "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
             }),
@@ -536,7 +536,7 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
         &manifest,
         request(
             "req-sse-1",
-            json!({"model":"client","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+            json!({"model":"gpt-5.5","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
         ),
         scope.clone(),
         register_responses_direct_hooks(),
@@ -570,7 +570,7 @@ async fn sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact
         request(
             "req-sse-2",
             json!({
-                "model":"client",
+                "model":"gpt-5.5",
                 "stream":true,
                 "previous_response_id":"resp_sse_1",
                 "input":[{"type":"function_call_output","call_id":"call_sse_1","output":"ok"}]
@@ -615,7 +615,7 @@ async fn http_only_sse_terminal_response_streams_without_remote_continuation_com
         &manifest,
         request(
             "req-http-sse-terminal",
-            json!({"model":"client","stream":true,"input":"say done"}),
+            json!({"model":"gpt-5.5","stream":true,"input":"say done"}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -646,7 +646,7 @@ async fn direct_provider_event_json_observation_records_usage_and_completed_term
         &manifest,
         request(
             "req-http-sse-terminal-observed",
-            json!({"model":"client","stream":true,"input":"say done"}),
+            json!({"model":"gpt-5.5","stream":true,"input":"say done"}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -690,7 +690,7 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
         &manifest,
         request(
             "req-http-sse-terminal-observed-failed",
-            json!({"model":"client","stream":true,"input":"fail"}),
+            json!({"model":"gpt-5.5","stream":true,"input":"fail"}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -723,7 +723,7 @@ async fn direct_provider_event_json_observation_infers_terminal_status_from_even
         &manifest,
         request(
             "req-http-sse-terminal-inferred",
-            json!({"model":"client","stream":true,"input":"turn"}),
+            json!({"model":"gpt-5.5","stream":true,"input":"turn"}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -762,7 +762,7 @@ async fn http_only_json_function_call_uses_v2_direct_http_continuation_without_r
         &manifest,
         request(
             "req-http-json-pending",
-            json!({"model":"client","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+            json!({"model":"gpt-5.5","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -787,7 +787,7 @@ async fn http_only_json_function_call_uses_v2_direct_http_continuation_without_r
         request(
             "req-http-json-submit",
             json!({
-                "model":"client",
+                "model":"gpt-5.5",
                 "previous_response_id":"resp_http_json_pending",
                 "input":[{"type":"function_call_output","call_id":"call_http_json_pending","output":"ok"}]
             }),
@@ -829,7 +829,7 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
         &manifest,
         request(
             "req-http-sse-pending",
-            json!({"model":"client","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+            json!({"model":"gpt-5.5","stream":true,"input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -860,7 +860,7 @@ async fn http_only_sse_function_call_uses_v2_direct_http_continuation_without_re
         request(
             "req-http-sse-submit",
             json!({
-                "model":"client",
+                "model":"gpt-5.5",
                 "stream":true,
                 "previous_response_id":"resp_http_sse_pending",
                 "input":[{"type":"function_call_output","call_id":"call_http_sse_pending","output":"ok"}]
@@ -1080,7 +1080,7 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
     let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
         &manifest,
-        request("req-duplicate-1", json!({"model":"client","input":"one"})),
+        request("req-duplicate-1", json!({"model":"gpt-5.5","input":"one"})),
         scope(),
         register_responses_direct_hooks(),
         &transport,
@@ -1092,7 +1092,7 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
     let duplicate = execute_v3_responses_direct_runtime_kernel_with_continuation(
         &state,
         &manifest,
-        request("req-duplicate-2", json!({"model":"client","input":"two"})),
+        request("req-duplicate-2", json!({"model":"gpt-5.5","input":"two"})),
         scope(),
         register_responses_direct_hooks(),
         &transport,
@@ -1109,7 +1109,7 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
         &manifest,
         request(
             "req-terminal-1",
-            json!({"model":"client","previous_response_id":"never_committed","input":[]}),
+            json!({"model":"gpt-5.5","previous_response_id":"never_committed","input":[]}),
         ),
         scope(),
         register_responses_direct_hooks(),
@@ -1305,7 +1305,7 @@ async fn prime_pending_with_id<T: ResponsesTransport>(
         manifest,
         request(
             request_id,
-            json!({"model":"client","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
+            json!({"model":"gpt-5.5","input":"use tool","tools":[{"type":"function","name":"lookup"}]}),
         ),
         scope,
         register_responses_direct_hooks(),
@@ -1332,7 +1332,7 @@ async fn continuation_turn<T: ResponsesTransport>(
         request(
             request_id,
             json!({
-                "model":"client",
+                "model":"gpt-5.5",
                 "previous_response_id":response_id,
                 "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
             }),

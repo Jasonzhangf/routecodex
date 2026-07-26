@@ -1,6 +1,6 @@
 # V3 VR Target Protocol Execution Decision SOP
 
-Status: draft for Jason review before runtime code changes.
+Status: source and installed 5555 live verified on 2026-07-26; exact old large sample not replayed, but forced tools-pool mismatch live probe reproduced the owner path and completed SSE.
 
 ## Goal
 
@@ -27,8 +27,8 @@ flowchart TD
   I --> J[V3Target09CandidateSetExpanded]
   J --> K[V3Target10ConcreteProviderSelected]
   K --> L[V3Execution11ProtocolDecision\nentry_protocol x selected_provider_protocol x allowed_modes]
-  L -->|same protocol + Direct allowed| M[V3SameProtocolDirect12Policy]
-  L -->|protocol mismatch + Relay allowed| N[V3HubRelay12Execution]
+  L -->|same protocol + Direct allowed| M[V3ResponsesDirect11Policy]
+  L -->|protocol mismatch + Relay allowed| N[Hub Relay runtime dispatch]
   L -->|protocol mismatch + Relay forbidden| O[V3Error06ClientProjected\nfail-fast config/execution error]
   M --> P[Provider wire same protocol]
   N --> Q[Provider-protocol dispatch\nResponses / Chat / Anthropic / Gemini]
@@ -68,15 +68,15 @@ Rules:
 - Provider-specific branches such as checking `glmrelay` names.
 - Failure-after-send fallback from Direct to Relay.
 
-## Required Map Changes After Approval
+## Required Map / Review Locks
 
-Add a new mainline edge and resource before implementation:
+The locked mainline/review surface must contain:
 
 - Resource: `v3.execution.protocol_decision`
 - Node: `V3Execution11ProtocolDecision`
 - Edge: `V3Target10ConcreteProviderSelected -> V3Execution11ProtocolDecision`
-- Edge: `V3Execution11ProtocolDecision -> V3SameProtocolDirect12Policy`
-- Edge: `V3Execution11ProtocolDecision -> V3HubRelay12Execution`
+- Edge: `V3Execution11ProtocolDecision -> V3ResponsesDirect11Policy`
+- Relay dispatch: `V3Execution11ProtocolDecision -> Hub Relay runtime dispatch`
 - Error edge: `V3Execution11ProtocolDecision -> V3Error06ClientProjected`
 
 Update:

@@ -7,6 +7,7 @@
 This is the human review surface for the RouteCodex V3 Rust foundation and first business lifecycle. The order is Config -> Server -> Debug -> Error/Provider health -> Virtual Router/Target -> Responses direct Pipeline/Provider.
 
 Virtual Router classification consumes typed `V3RouterRequestFacts`; pool-match planning and the non-empty default floor remain inside the Router owner before the one opaque target hit.
+After `V3Target10ConcreteProviderSelected`, Runtime immediately evaluates `V3Execution11ProtocolDecision`: same entry/provider protocol may enter Direct, protocol mismatch with Relay allowed must leave Direct and enter Hub Relay, and mismatch without Relay fails before provider send.
 
 Canonical documents:
 
@@ -37,7 +38,8 @@ flowchart LR
   VR7 --> T8[V3Target08KindClassified]
   T8 --> T9[V3Target09CandidateSetExpanded]
   T9 --> T10[V3Target10ConcreteProviderSelected]
-  T10 --> D11[V3ResponsesDirect11Policy]
+  T10 --> E11[V3Execution11ProtocolDecision]
+  E11 -->|same protocol + Direct allowed| D11[V3ResponsesDirect11Policy]
   D11 --> P12[V3Provider12ResponsesWirePayload]
   P12 --> P13[V3Transport13ResponsesHttpRequest]
   P13 --> PR14[V3ProviderResp14Raw]
@@ -49,7 +51,7 @@ flowchart LR
 ```
 
 P0-P5 are anchored through `V3Target10ConcreteProviderSelected`. P6 is source-bound through
-`V3Server16HttpFrame`, including generic Provider JSON/SSE transport, Target-local reselection,
+`V3Server16HttpFrame`, including the post-target `V3Execution11ProtocolDecision`, generic Provider JSON/SSE transport, Target-local reselection,
 full exhaustion, and same-kernel Dry Run with only Transport13 replaced by a no-network effect.
 The clean built-CLI controlled-upstream replay is recorded in the P6 local-live evidence section.
 
@@ -195,26 +197,25 @@ flowchart LR
   `build_v3_server_16_http_frame_from_v3_resp_15` and JSON/SSE emission. Final clean CLI replay is
   recorded below. Relay, continuation, and servertool remain outside P6.
 
-## Remote continuation transport-bound closeout
+## Responses continuation owner closeout
 
-- Remote continuation is no longer a model-only string claim. Config compile owns
-  `V3ResponsesTransportKind` and rejects `remote_continuation` unless the provider Responses
-  transport is `websocket_v2` with an explicit `websocket_v2_url`.
-- Provider Runtime owns the WebSocket v2 connection/cache resource. It sends exactly one
-  `response.create` per turn, strips HTTP-only `stream` and `background` fields from the WebSocket
-  event, preserves incremental `previous_response_id` input, and projects WebSocket server events
-  back into the existing JSON/SSE provider raw response node.
-- Server uses the shared default Provider transport instance so connection-local continuation state
-  can survive the two HTTP turns that belong to the same provider/model/auth/transport pin.
-- HTTP-only first-turn availability is not remote-continuation evidence. The current managed 5555
-  provider still needs a verified Responses WebSocket v2 endpoint before `live_5555_pending` can be
-  removed.
+- Continuation owner is no longer a model capability string. Req03 resolves
+  `previous_response_id` from the direct remote binding store and the relay local continuation store
+  with entry/scope isolation; only the resolved owner chooses Direct vs Relay.
+- Provider Runtime owns the optional WebSocket v2 connection/cache resource when a provider
+  explicitly publishes `transport = "websocket_v2"` and `websocket_v2_url`. HTTP Direct remains valid
+  for provider-owned response ids and must not require a model capability named
+  `remote_continuation`.
+- Server supplies request scope and dispatches according to the Runtime Req03 owner resolver; it does
+  not infer owner from route labels, model capability strings, SSE transport, or default route.
+- Unknown, expired, cross-scope, or ambiguous owners enter Error01-06; they must not fall through to
+  Virtual Router/default routing.
 
 ## V2 HTTP direct parity correction
 
 - V3 direct must align to V2 HTTP direct for any provider selected by the generic routing/target
   plan: HTTP-only JSON/SSE function-call continuation must not require a provider model capability
-  named `remote_continuation`.
+  named `remote_continuation`; owner truth comes from `previous_response_id` lookup.
 - On the V2 parity path, the first turn commits the direct locator from the provider response, and
   the next turn sends `previous_response_id` plus `function_call_output` to the exact same
   provider/model/auth pin with no Virtual Router re-entry.

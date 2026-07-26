@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 36 functional paths, 239 caller edges.
+Generated view: 36 functional paths, 242 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -41,7 +41,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|99 edges / 12 paths| module_v3_runtime__hub_v1
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_v3_server
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
-  module_v3_runtime -->|6 edges / 1 paths| module_v3_error
+  module_v3_runtime -->|8 edges / 1 paths| module_v3_error
   module_v3_runtime -->|5 edges / 3 paths| module_v3_provider_responses
   module_v3_runtime -->|14 edges / 4 paths| module_v3_runtime
   module_v3_runtime -->|41 edges / 8 paths| module_v3_runtime__hub_v1
@@ -50,7 +50,7 @@ flowchart TD
   module_v3_server -->|2 edges / 2 paths| module_v3_config
   module_v3_server -->|1 edges / 1 paths| module_v3_debug
   module_v3_server -->|2 edges / 1 paths| module_v3_error
-  module_v3_server -->|2 edges / 2 paths| module_v3_runtime
+  module_v3_server -->|3 edges / 3 paths| module_v3_runtime
   module_v3_server -->|5 edges / 4 paths| module_v3_runtime__hub_v1
   module_v3_server -->|13 edges / 8 paths| module_v3_server
 ```
@@ -70,7 +70,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 99 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.servertool_hook_skeleton_lifecycle` |
 | v3-runtime::hub_v1 | v3-server | 1 | `v3.responses_relay.source_server_entry` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
-| v3-runtime | v3-error | 6 | `v3.debug_error_foundation.mainline` |
+| v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-provider-responses | 5 | `v3.debug_error_foundation.mainline`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime | v3-runtime | 14 | `v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 41 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary` |
@@ -79,7 +79,7 @@ flowchart TD
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
 | v3-server | v3-debug | 1 | `v3.server.startup` |
 | v3-server | v3-error | 2 | `v3.server.startup` |
-| v3-server | v3-runtime | 2 | `v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
+| v3-server | v3-runtime | 3 | `v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-server | v3-server | 13 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 
@@ -294,32 +294,34 @@ flowchart TD
 
 ## v3.responses_direct.required_mainline
 
-Required no-shortcut lifecycle. P6 is source-bound from Server03 through Server16; Target-local reselection remains inside the single Runtime kernel without Router re-entry.
+Required no-shortcut lifecycle. P6 is source-bound from Server03 through Server16; after Target10 the runtime must decide direct-vs-relay before Direct policy, while target-local reselection stays inside the single Runtime kernel without Router re-entry.
 
 Owner feature: `v3.responses_direct_mvp_architecture`
 
 ```mermaid
 flowchart TD
   subgraph c_6_v3_responses_direct_required_mainline_m_v3_provider_responses["v3-provider-responses"]
-    c_6_v3_responses_direct_required_mainline_13["v3-provider-responses<br/>build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_15["v3-provider-responses<br/>build_v3_transport_13_responses_http_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_16["v3-provider-responses<br/>ReqwestResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_17["v3-provider-responses<br/>V3ProviderResp14Raw::from_json<br/><small>routecodex-v3-provider-responses/src/raw_response.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_15["v3-provider-responses<br/>build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_17["v3-provider-responses<br/>build_v3_transport_13_responses_http_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_18["v3-provider-responses<br/>ReqwestResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_19["v3-provider-responses<br/>V3ProviderResp14Raw::from_json<br/><small>routecodex-v3-provider-responses/src/raw_response.rs</small>"]
   end
   subgraph c_6_v3_responses_direct_required_mainline_m_v3_runtime["v3-runtime"]
     c_6_v3_responses_direct_required_mainline_1["v3-runtime<br/>build_v3_server_03_http_request_raw<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
     c_6_v3_responses_direct_required_mainline_2["v3-runtime<br/>execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
     c_6_v3_responses_direct_required_mainline_3["v3-runtime<br/>build_v3_req_04_standardized_responses_from_v3_server_03<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_10["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_11["v3-runtime<br/>responses_direct_route_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_12["v3-runtime<br/>responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_14["v3-runtime<br/>responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_18["v3-runtime<br/>responses_direct_response_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_19["v3-runtime<br/>V3ResponsesDirectRuntimeOutput<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_10["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_11["v3-runtime<br/>build_v3_execution_11_protocol_decision_from_v3_target_10<br/><small>routecodex-v3-runtime/src/nodes.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_12["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_13["v3-runtime<br/>responses_direct_route_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_14["v3-runtime<br/>responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_16["v3-runtime<br/>responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_20["v3-runtime<br/>responses_direct_response_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_21["v3-runtime<br/>V3ResponsesDirectRuntimeOutput<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
   end
   subgraph c_6_v3_responses_direct_required_mainline_m_v3_server["v3-server"]
     c_6_v3_responses_direct_required_mainline_0["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
-    c_6_v3_responses_direct_required_mainline_20["v3-server<br/>build_v3_server_16_http_frame_from_v3_resp_15<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_6_v3_responses_direct_required_mainline_22["v3-server<br/>build_v3_server_16_http_frame_from_v3_resp_15<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   subgraph c_6_v3_responses_direct_required_mainline_m_v3_target["v3-target"]
     c_6_v3_responses_direct_required_mainline_7["v3-target<br/>V3TargetInterpreter::classify_kind<br/><small>routecodex-v3-target/src/lib.rs</small>"]
@@ -339,14 +341,15 @@ flowchart TD
   c_6_v3_responses_direct_required_mainline_2 -->|v3-rd-06<br/>V3Router07OpaqueTargetHitOnce → V3Target08KindClassified| c_6_v3_responses_direct_required_mainline_7
   c_6_v3_responses_direct_required_mainline_2 -->|v3-rd-07<br/>V3Target08KindClassified → V3Target09CandidateSetExpanded| c_6_v3_responses_direct_required_mainline_8
   c_6_v3_responses_direct_required_mainline_2 -->|v3-rd-08<br/>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected| c_6_v3_responses_direct_required_mainline_9
-  c_6_v3_responses_direct_required_mainline_10 -->|v3-rd-09<br/>V3Target10ConcreteProviderSelected → V3ResponsesDirect11Policy| c_6_v3_responses_direct_required_mainline_11
-  c_6_v3_responses_direct_required_mainline_12 -->|v3-rd-10<br/>V3ResponsesDirect11Policy → V3Provider12ResponsesWirePayload| c_6_v3_responses_direct_required_mainline_13
-  c_6_v3_responses_direct_required_mainline_14 -->|v3-rd-11<br/>V3Provider12ResponsesWirePayload → V3Transport13ResponsesHttpRequest| c_6_v3_responses_direct_required_mainline_15
-  c_6_v3_responses_direct_required_mainline_16 -->|v3-rd-12<br/>V3Transport13ResponsesHttpRequest → V3ProviderResp14Raw| c_6_v3_responses_direct_required_mainline_17
-  c_6_v3_responses_direct_required_mainline_10 -->|v3-rd-13<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_6_v3_responses_direct_required_mainline_18
-  c_6_v3_responses_direct_required_mainline_10 -->|v3-rd-14<br/>V3DirectResp14ProviderProjectionPrepared → V3DirectResp15ClientPayloadReady| c_6_v3_responses_direct_required_mainline_19
-  c_6_v3_responses_direct_required_mainline_10 -->|v3-rd-15<br/>V3DirectResp15ClientPayloadReady → V3Resp15ClientPayload| c_6_v3_responses_direct_required_mainline_19
-  c_6_v3_responses_direct_required_mainline_0 -->|v3-rd-16<br/>V3Resp15ClientPayload → V3Server16HttpFrame| c_6_v3_responses_direct_required_mainline_20
+  c_6_v3_responses_direct_required_mainline_10 -->|v3-rd-09<br/>V3Target10ConcreteProviderSelected → V3Execution11ProtocolDecision| c_6_v3_responses_direct_required_mainline_11
+  c_6_v3_responses_direct_required_mainline_12 -->|v3-rd-09-direct-policy<br/>V3Execution11ProtocolDecision → V3ResponsesDirect11Policy| c_6_v3_responses_direct_required_mainline_13
+  c_6_v3_responses_direct_required_mainline_14 -->|v3-rd-10<br/>V3ResponsesDirect11Policy → V3Provider12ResponsesWirePayload| c_6_v3_responses_direct_required_mainline_15
+  c_6_v3_responses_direct_required_mainline_16 -->|v3-rd-11<br/>V3Provider12ResponsesWirePayload → V3Transport13ResponsesHttpRequest| c_6_v3_responses_direct_required_mainline_17
+  c_6_v3_responses_direct_required_mainline_18 -->|v3-rd-12<br/>V3Transport13ResponsesHttpRequest → V3ProviderResp14Raw| c_6_v3_responses_direct_required_mainline_19
+  c_6_v3_responses_direct_required_mainline_12 -->|v3-rd-13<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_6_v3_responses_direct_required_mainline_20
+  c_6_v3_responses_direct_required_mainline_12 -->|v3-rd-14<br/>V3DirectResp14ProviderProjectionPrepared → V3DirectResp15ClientPayloadReady| c_6_v3_responses_direct_required_mainline_21
+  c_6_v3_responses_direct_required_mainline_12 -->|v3-rd-15<br/>V3DirectResp15ClientPayloadReady → V3Resp15ClientPayload| c_6_v3_responses_direct_required_mainline_21
+  c_6_v3_responses_direct_required_mainline_0 -->|v3-rd-16<br/>V3Resp15ClientPayload → V3Server16HttpFrame| c_6_v3_responses_direct_required_mainline_22
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -359,7 +362,8 @@ flowchart TD
 | `v3-rd-06` | `V3Router07OpaqueTargetHitOnce` → `V3Target08KindClassified` | anchored | execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3TargetInterpreter::classify_kind<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-07` | `V3Target08KindClassified` → `V3Target09CandidateSetExpanded` | anchored | execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3TargetInterpreter::expand_candidates<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.virtual_router_target_interpreter` |
 | `v3-rd-08` | `V3Target09CandidateSetExpanded` → `V3Target10ConcreteProviderSelected` | anchored | execute_v3_p5_routing_runtime<br/><small>routecodex-v3-runtime/src/foundation.rs</small> | V3TargetInterpreter::select_available<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.virtual_router_target_interpreter` |
-| `v3-rd-09` | `V3Target10ConcreteProviderSelected` → `V3ResponsesDirect11Policy` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | responses_direct_route_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_direct_mvp_architecture` |
+| `v3-rd-09` | `V3Target10ConcreteProviderSelected` → `V3Execution11ProtocolDecision` | anchored | plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | build_v3_execution_11_protocol_decision_from_v3_target_10<br/><small>routecodex-v3-runtime/src/nodes.rs</small> | `v3.responses_direct_mvp_architecture` |
+| `v3-rd-09-direct-policy` | `V3Execution11ProtocolDecision` → `V3ResponsesDirect11Policy` | anchored | execute_v3_responses_direct_runtime_kernel<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | responses_direct_route_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_direct_mvp_architecture` |
 | `v3-rd-10` | `V3ResponsesDirect11Policy` → `V3Provider12ResponsesWirePayload` | anchored | responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small> | `v3.responses_provider_runtime` |
 | `v3-rd-11` | `V3Provider12ResponsesWirePayload` → `V3Transport13ResponsesHttpRequest` | anchored | responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_transport_13_responses_http_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.responses_provider_runtime` |
 | `v3-rd-12` | `V3Transport13ResponsesHttpRequest` → `V3ProviderResp14Raw` | anchored | ReqwestResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | V3ProviderResp14Raw::from_json<br/><small>routecodex-v3-provider-responses/src/raw_response.rs</small> | `v3.responses_provider_runtime` |
@@ -712,6 +716,8 @@ flowchart TD
     c_16_v3_debug_error_foundation_mainline_8["v3-error<br/>build_v3_error_04_target_exhaustion_decision_from_v3_error_03<br/><small>routecodex-v3-error/src/lib.rs</small>"]
     c_16_v3_debug_error_foundation_mainline_9["v3-error<br/>build_v3_error_05_execution_decision_from_v3_error_04<br/><small>routecodex-v3-error/src/lib.rs</small>"]
     c_16_v3_debug_error_foundation_mainline_10["v3-error<br/>build_v3_error_06_client_projected_from_v3_error_05<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_16_v3_debug_error_foundation_mainline_20["v3-error<br/>build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_16_v3_debug_error_foundation_mainline_21["v3-error<br/>build_v3_error_01_source_raised_internal<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_16_v3_debug_error_foundation_mainline_m_v3_provider_responses["v3-provider-responses"]
     c_16_v3_debug_error_foundation_mainline_14["v3-provider-responses<br/>V3ProviderHealthStore::apply_error_action<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
@@ -724,6 +730,7 @@ flowchart TD
     c_16_v3_debug_error_foundation_mainline_4["v3-runtime<br/>build_pending_projection<br/><small>routecodex-v3-runtime/src/foundation.rs</small>"]
     c_16_v3_debug_error_foundation_mainline_11["v3-runtime<br/>execute_v3_responses_direct_dry_run_runtime<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_16_v3_debug_error_foundation_mainline_16["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_16_v3_debug_error_foundation_mainline_19["v3-runtime<br/>build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
   end
   c_16_v3_debug_error_foundation_mainline_0 -->|v3-de-01<br/>V3Server03HttpRequestRaw → V3DebugTraceContextStarted| c_16_v3_debug_error_foundation_mainline_1
   c_16_v3_debug_error_foundation_mainline_0 -->|v3-de-02<br/>V3DebugTraceContextStarted → V3DebugRawCaptureStored| c_16_v3_debug_error_foundation_mainline_2
@@ -740,6 +747,8 @@ flowchart TD
   c_16_v3_debug_error_foundation_mainline_15 -->|v3-de-13<br/>V3ProviderHealthStateMutated → V3ProviderAvailabilityProjected| c_16_v3_debug_error_foundation_mainline_15
   c_16_v3_debug_error_foundation_mainline_16 -->|v3-de-14<br/>V3Transport13ResponsesHttpRequest → V3ProviderHealthStateMutated| c_16_v3_debug_error_foundation_mainline_17
   c_16_v3_debug_error_foundation_mainline_16 -->|v3-de-15<br/>V3ProviderResp14Raw → V3ProviderHealthStateMutated| c_16_v3_debug_error_foundation_mainline_18
+  c_16_v3_debug_error_foundation_mainline_19 -->|v3-de-16<br/>V3ProviderError → V3Error01SourceRaised| c_16_v3_debug_error_foundation_mainline_20
+  c_16_v3_debug_error_foundation_mainline_19 -->|v3-de-17<br/>V3ProviderError → V3Error01SourceRaised| c_16_v3_debug_error_foundation_mainline_21
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -759,6 +768,8 @@ flowchart TD
 | `v3-de-13` | `V3ProviderHealthStateMutated` → `V3ProviderAvailabilityProjected` | anchored | V3ProviderHealthStore::availability<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | V3ProviderHealthStore::availability<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-14` | `V3Transport13ResponsesHttpRequest` → `V3ProviderHealthStateMutated` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3ProviderHealthStore::record_provider_failure<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
 | `v3-de-15` | `V3ProviderResp14Raw` → `V3ProviderHealthStateMutated` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3ProviderHealthStore::record_provider_success<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-16` | `V3ProviderError` → `V3Error01SourceRaised` | anchored | build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
+| `v3-de-17` | `V3ProviderError` → `V3Error01SourceRaised` | anchored | build_v3_provider_error_source<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_error_01_source_raised_internal<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.debug_error_foundation` |
 
 ## v3.responses_continuation.remote_contract_store
 
@@ -806,38 +817,41 @@ flowchart TD
 
 ## v3.responses_direct.remote_continuation.integration
 
-Responses Direct remote continuation commits provider-owned identity at Resp04, loads direct scope at the next Req03, resolves the immutable exact provider/model/auth/transport pin at Req06, uses provider-owned Responses WebSocket v2 when remote continuation is configured, and rejoins the single Direct provider/response exit without Virtual Router re-entry.
+Responses Direct remote continuation commits provider-owned identity at Resp04; next Req03 first resolves previous_response_id owner from direct remote vs relay local stores, then direct-owned ids load scope and exact-pin provider/model/auth at Req06. Continuation owner selection is not a Target model capability.
 
 Owner feature: `v3.responses_direct_remote_continuation_integration`
 
 ```mermaid
 flowchart TD
   subgraph c_19_v3_responses_direct_remote_continuation_integration_m_v3_provider_responses["v3-provider-responses"]
-    c_19_v3_responses_direct_remote_continuation_integration_4["v3-provider-responses<br/>build_v3_transport_13_responses_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_5["v3-provider-responses<br/>build_v3_transport_13_responses_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
   end
   subgraph c_19_v3_responses_direct_remote_continuation_integration_m_v3_runtime["v3-runtime"]
-    c_19_v3_responses_direct_remote_continuation_integration_0["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_19_v3_responses_direct_remote_continuation_integration_1["v3-runtime<br/>V3RemoteContinuationStore::load_for_req03<br/><small>routecodex-v3-runtime/src/remote_continuation.rs</small>"]
-    c_19_v3_responses_direct_remote_continuation_integration_3["v3-runtime<br/>responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_19_v3_responses_direct_remote_continuation_integration_5["v3-runtime<br/>responses_direct_response_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
-    c_19_v3_responses_direct_remote_continuation_integration_6["v3-runtime<br/>V3RemoteContinuationStore::commit<br/><small>routecodex-v3-runtime/src/remote_continuation.rs</small>"]
-    c_19_v3_responses_direct_remote_continuation_integration_7["v3-runtime<br/>V3ResponsesDirectRuntimeOutput<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_1["v3-runtime<br/>resolve_v3_responses_previous_response_owner_execution_mode_at_req03<br/><small>routecodex-v3-runtime/src/responses_continuation_owner.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_2["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_4["v3-runtime<br/>responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_6["v3-runtime<br/>responses_direct_response_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_7["v3-runtime<br/>V3RemoteContinuationStore::commit<br/><small>routecodex-v3-runtime/src/remote_continuation.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_8["v3-runtime<br/>V3ResponsesDirectRuntimeOutput<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
+  end
+  subgraph c_19_v3_responses_direct_remote_continuation_integration_m_v3_server["v3-server"]
+    c_19_v3_responses_direct_remote_continuation_integration_0["v3-server<br/>pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   subgraph c_19_v3_responses_direct_remote_continuation_integration_m_v3_target["v3-target"]
-    c_19_v3_responses_direct_remote_continuation_integration_2["v3-target<br/>V3TargetInterpreter::resolve_exact_provider_model_auth<br/><small>routecodex-v3-target/src/lib.rs</small>"]
+    c_19_v3_responses_direct_remote_continuation_integration_3["v3-target<br/>V3TargetInterpreter::resolve_exact_provider_model_auth<br/><small>routecodex-v3-target/src/lib.rs</small>"]
   end
   c_19_v3_responses_direct_remote_continuation_integration_0 -->|v3-rci-01<br/>V3Server03HttpRequestRaw → V3HubReqContinuation03Classified| c_19_v3_responses_direct_remote_continuation_integration_1
-  c_19_v3_responses_direct_remote_continuation_integration_0 -->|v3-rci-02<br/>V3HubReqContinuation03Classified → V3HubReqTarget06Resolved| c_19_v3_responses_direct_remote_continuation_integration_2
-  c_19_v3_responses_direct_remote_continuation_integration_3 -->|v3-rci-ws-01<br/>V3HubReqTarget06Resolved → V3Transport13ResponsesHttpRequest| c_19_v3_responses_direct_remote_continuation_integration_4
-  c_19_v3_responses_direct_remote_continuation_integration_0 -->|v3-rci-03<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_19_v3_responses_direct_remote_continuation_integration_5
-  c_19_v3_responses_direct_remote_continuation_integration_0 -->|v3-rci-04<br/>V3DirectResp14ProviderProjectionPrepared → V3HubRespContinuation04Committed| c_19_v3_responses_direct_remote_continuation_integration_6
-  c_19_v3_responses_direct_remote_continuation_integration_0 -->|v3-rci-05<br/>V3HubRespContinuation04Committed → V3DirectResp15ClientPayloadReady| c_19_v3_responses_direct_remote_continuation_integration_7
-  c_19_v3_responses_direct_remote_continuation_integration_0 -->|v3-rci-06<br/>V3DirectResp15ClientPayloadReady → V3Resp15ClientPayload| c_19_v3_responses_direct_remote_continuation_integration_7
+  c_19_v3_responses_direct_remote_continuation_integration_2 -->|v3-rci-02<br/>V3HubReqContinuation03Classified → V3HubReqTarget06Resolved| c_19_v3_responses_direct_remote_continuation_integration_3
+  c_19_v3_responses_direct_remote_continuation_integration_4 -->|v3-rci-ws-01<br/>V3HubReqTarget06Resolved → V3Transport13ResponsesHttpRequest| c_19_v3_responses_direct_remote_continuation_integration_5
+  c_19_v3_responses_direct_remote_continuation_integration_2 -->|v3-rci-03<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_19_v3_responses_direct_remote_continuation_integration_6
+  c_19_v3_responses_direct_remote_continuation_integration_2 -->|v3-rci-04<br/>V3DirectResp14ProviderProjectionPrepared → V3HubRespContinuation04Committed| c_19_v3_responses_direct_remote_continuation_integration_7
+  c_19_v3_responses_direct_remote_continuation_integration_2 -->|v3-rci-05<br/>V3HubRespContinuation04Committed → V3DirectResp15ClientPayloadReady| c_19_v3_responses_direct_remote_continuation_integration_8
+  c_19_v3_responses_direct_remote_continuation_integration_2 -->|v3-rci-06<br/>V3DirectResp15ClientPayloadReady → V3Resp15ClientPayload| c_19_v3_responses_direct_remote_continuation_integration_8
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-rci-01` | `V3Server03HttpRequestRaw` → `V3HubReqContinuation03Classified` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3RemoteContinuationStore::load_for_req03<br/><small>routecodex-v3-runtime/src/remote_continuation.rs</small> | `v3.responses_direct_remote_continuation_integration` |
+| `v3-rci-01` | `V3Server03HttpRequestRaw` → `V3HubReqContinuation03Classified` | anchored | pending_endpoint<br/><small>routecodex-v3-server/src/lib.rs</small> | resolve_v3_responses_previous_response_owner_execution_mode_at_req03<br/><small>routecodex-v3-runtime/src/responses_continuation_owner.rs</small> | `v3.responses_direct_remote_continuation_integration` |
 | `v3-rci-02` | `V3HubReqContinuation03Classified` → `V3HubReqTarget06Resolved` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3TargetInterpreter::resolve_exact_provider_model_auth<br/><small>routecodex-v3-target/src/lib.rs</small> | `v3.responses_direct_remote_continuation_integration` |
 | `v3-rci-ws-01` | `V3HubReqTarget06Resolved` → `V3Transport13ResponsesHttpRequest` | anchored | responses_direct_provider_transport_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_transport_13_responses_request_from_v3_provider_12<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.responses_direct_remote_continuation_integration` |
 | `v3-rci-03` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | responses_direct_response_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | `v3.responses_direct_remote_continuation_integration` |
