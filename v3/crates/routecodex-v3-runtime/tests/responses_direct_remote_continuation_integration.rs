@@ -55,7 +55,8 @@ impl ResponsesTransport for TwoTurnTransport {
 }
 
 #[tokio::test]
-async fn direct_json_completed_without_summary_projects_noop_and_next_turn_continues_exact_pin() {
+async fn direct_json_completed_without_summary_passes_through_without_synthetic_stopless_continuation(
+) {
     let manifest = manifest();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = DirectStoplessNoSummaryThenSummaryTransport::default();
@@ -78,84 +79,37 @@ async fn direct_json_completed_without_summary_projects_noop_and_next_turn_conti
             "/v1/responses".into(),
             json!({"model":"gpt-5.5","input":"continue until summary","tools":[{"type":"function","name":"exec_command"}]}),
         ),
-        scope.clone(),
+        scope,
         register_responses_direct_hooks(),
         &transport,
         1_000,
     )
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
-    assert!(
-        first
-            .node_trace
-            .contains(&"V3HubRespContinuation04Committed"),
-        "{first:#?}"
+    assert_eq!(
+        state.len().unwrap(),
+        0,
+        "direct completed response must not commit a synthetic remote continuation locator"
     );
-    assert_eq!(state.len().unwrap(), 1);
     let V3ClientBody::Json(first_body) = &first.client_payload.body else {
-        panic!("first direct stopless response must be JSON: {first:#?}");
+        panic!("first direct response must be JSON: {first:#?}");
     };
-    assert_eq!(first_body["status"], "requires_action", "{first_body}");
+    assert_eq!(first_body["status"], "completed", "{first_body}");
     let first_serialized = serde_json::to_string(first_body).unwrap();
     assert!(first_serialized.contains("partial direct answer without summary"));
-    assert!(first_serialized.contains("call_stopless_reasoning"));
-    assert!(first_serialized.contains("routecodex hook run reasoningStop"));
-
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        build_v3_server_03_http_request_raw(
-            "s".into(),
-            "req-direct-stopless-2".into(),
-            "exec-direct-stopless-2".into(),
-            "POST".into(),
-            "/v1/responses".into(),
-            json!({
-                "model":"gpt-5.5",
-                "previous_response_id":"resp_direct_stopless_1",
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{}"}]
-            }),
-        ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
-    )
-    .await;
-    assert_eq!(second.client_payload.status, 200, "{:#?}", second);
-    assert_eq!(
-        count(&second.node_trace, "V3Router07OpaqueTargetHitOnce"),
-        0
-    );
-    assert!(second
-        .node_trace
-        .contains(&"V3HubReqContinuation03Classified"));
-    assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
-    assert_eq!(state.len().unwrap(), 0);
-    let V3ClientBody::Json(second_body) = &second.client_payload.body else {
-        panic!("second direct stopless response must be JSON: {second:#?}");
-    };
-    assert_eq!(second_body["status"], "completed", "{second_body}");
-    let second_serialized = serde_json::to_string(second_body).unwrap();
-    assert!(second_serialized.contains("Completed after direct stopless continuation."));
-    assert!(!second_serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!first_serialized.contains("call_stopless_reasoning"));
+    assert!(!first_serialized.contains("routecodex hook run reasoningStop"));
 
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1]["previous_response_id"],
-        "resp_direct_stopless_1"
-    );
-    let second_request = serde_json::to_string(&requests[1]).unwrap();
-    assert!(
-        second_request.contains("call_stopless_reasoning"),
-        "direct no-op shell output must stay as the exact continuation signal for provider continuation: {second_request}"
-    );
-    assert!(!second_request.contains("routecodex hook run reasoningStop"));
+    assert_eq!(requests.len(), 1);
+    let provider_request = serde_json::to_string(&requests[0]).unwrap();
+    assert!(!provider_request.contains("call_stopless_reasoning"));
+    assert!(!provider_request.contains("routecodex hook run reasoningStop"));
 }
 
 #[tokio::test]
-async fn direct_sse_completed_without_summary_projects_noop_and_next_turn_continues_exact_pin() {
+async fn direct_sse_completed_without_summary_passes_through_without_synthetic_stopless_continuation(
+) {
     let manifest = manifest();
     let state = V3ResponsesDirectContinuationState::default();
     let transport = DirectStoplessSseNoSummaryThenSummaryTransport::default();
@@ -178,7 +132,7 @@ async fn direct_sse_completed_without_summary_projects_noop_and_next_turn_contin
             "/v1/responses".into(),
             json!({"model":"gpt-5.5","stream":true,"input":"stream until summary","tools":[{"type":"function","name":"exec_command"}]}),
         ),
-        scope.clone(),
+        scope,
         register_responses_direct_hooks(),
         &transport,
         1_000,
@@ -186,72 +140,28 @@ async fn direct_sse_completed_without_summary_projects_noop_and_next_turn_contin
     .await;
     assert_eq!(first.client_payload.status, 200, "{:#?}", first);
     assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
-    assert_eq!(state.len().unwrap(), 0);
+    assert_eq!(
+        state.len().unwrap(),
+        0,
+        "direct completed SSE must not commit a synthetic remote continuation locator"
+    );
     let first_body = collect_sse_body_text(first.client_payload.body).await;
     assert!(first_body.contains("response.completed"), "{first_body}");
     assert!(first_body.contains("response.done"), "{first_body}");
     assert!(first_body.contains("data: [DONE]"), "{first_body}");
     assert!(
-        !first_body.contains("event: response.requires_action"),
-        "direct stopless SSE terminal must remain completed/done stream events: {first_body}"
+        first_body.contains("\"status\":\"completed\""),
+        "{first_body}"
     );
-    assert!(first_body.contains("\"status\":\"requires_action\""));
     assert!(first_body.contains("partial direct SSE answer without summary"));
-    assert!(first_body.contains("call_stopless_reasoning"));
-    assert!(first_body.contains("routecodex hook run reasoningStop"));
-    assert_eq!(state.len().unwrap(), 1);
-
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &state,
-        &manifest,
-        build_v3_server_03_http_request_raw(
-            "s".into(),
-            "req-direct-stopless-sse-2".into(),
-            "exec-direct-stopless-sse-2".into(),
-            "POST".into(),
-            "/v1/responses".into(),
-            json!({
-                "model":"gpt-5.5",
-                "previous_response_id":"resp_direct_stopless_sse_1",
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":"{}"}]
-            }),
-        ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
-    )
-    .await;
-    assert_eq!(second.client_payload.status, 200, "{:#?}", second);
-    assert_eq!(
-        count(&second.node_trace, "V3Router07OpaqueTargetHitOnce"),
-        0
-    );
-    assert!(second
-        .node_trace
-        .contains(&"V3HubReqContinuation03Classified"));
-    assert!(second.node_trace.contains(&"V3HubReqTarget06Resolved"));
-    assert_eq!(state.len().unwrap(), 0);
-    let V3ClientBody::Json(second_body) = &second.client_payload.body else {
-        panic!("second direct SSE stopless response must be JSON: {second:#?}");
-    };
-    assert_eq!(second_body["status"], "completed", "{second_body}");
-    let second_serialized = serde_json::to_string(second_body).unwrap();
-    assert!(second_serialized.contains("Completed after direct SSE stopless continuation."));
-    assert!(!second_serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!first_body.contains("call_stopless_reasoning"));
+    assert!(!first_body.contains("routecodex hook run reasoningStop"));
 
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1]["previous_response_id"],
-        "resp_direct_stopless_sse_1"
-    );
-    let second_request = serde_json::to_string(&requests[1]).unwrap();
-    assert!(
-        second_request.contains("call_stopless_reasoning"),
-        "direct SSE no-op shell output must stay as the exact continuation signal for provider continuation: {second_request}"
-    );
-    assert!(!second_request.contains("routecodex hook run reasoningStop"));
+    assert_eq!(requests.len(), 1);
+    let provider_request = serde_json::to_string(&requests[0]).unwrap();
+    assert!(!provider_request.contains("call_stopless_reasoning"));
+    assert!(!provider_request.contains("routecodex hook run reasoningStop"));
 }
 
 #[derive(Default)]

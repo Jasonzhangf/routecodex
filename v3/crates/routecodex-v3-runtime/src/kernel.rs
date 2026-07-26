@@ -1,11 +1,6 @@
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
-    apply_v3_responses_direct_stopless_request_hook, apply_v3_stop_servertool_hook_at_resp03,
-    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
-    build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw, V3HubContinuationOwnership, V3HubEntryProtocol,
-    V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayResponseHookProfile, V3HubTransportIntent, V3RuntimeObservability,
+    apply_v3_responses_direct_stopless_request_hook, V3RuntimeObservability,
     V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation,
 };
 use crate::nodes::*;
@@ -30,7 +25,6 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -41,9 +35,7 @@ use crate::remote_continuation::{
 };
 use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk,
-    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
-    SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
 };
 
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
@@ -1367,21 +1359,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
             };
         trace.push("V3DirectResp14ProviderProjectionPrepared");
-        if let Some(projected) = apply_v3_responses_direct_json_stopless_gate(
-            &response_projection.client_payload,
-            &standardized,
-            now_epoch_ms,
-        ) {
-            response_projection.client_payload.body = V3ClientBody::Json(projected.payload);
-            response_projection.client_payload.status = 200;
-            response_projection
-                .client_payload
-                .headers
-                .insert("content-type".to_string(), "application/json".to_string());
-            response_projection.remote_continuation = V3RemoteContinuationObservation::Pending {
-                response_id: projected.response_id,
-            };
-        }
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
@@ -1396,12 +1373,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         stream,
                         stream_observation.clone(),
                     );
-                    V3ClientBody::Sse(wrap_direct_sse_stopless_summary_gate_stream(
-                        stream,
-                        state.clone(),
-                        standardized.protocol_context.request_id.clone(),
-                        now_epoch_ms,
-                    ))
+                    V3ClientBody::Sse(stream)
                 }
                 other => other,
             };
@@ -1548,276 +1520,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             error_chain: None,
         };
     }
-}
-
-struct V3ResponsesDirectStoplessProjection {
-    payload: Value,
-    response_id: String,
-}
-
-fn apply_v3_responses_direct_json_stopless_gate(
-    client_payload: &V3Resp15ClientPayload,
-    standardized: &V3Req04StandardizedResponses,
-    now_epoch_ms: u64,
-) -> Option<V3ResponsesDirectStoplessProjection> {
-    if client_payload.status >= 400 {
-        return None;
-    }
-    let V3ClientBody::Json(payload) = &client_payload.body else {
-        return None;
-    };
-    apply_v3_responses_direct_stopless_gate_to_payload(
-        payload,
-        &standardized.protocol_context.request_id,
-        now_epoch_ms,
-    )
-}
-
-fn apply_v3_responses_direct_stopless_gate_to_payload(
-    payload: &Value,
-    transition_request_id: &str,
-    now_epoch_ms: u64,
-) -> Option<V3ResponsesDirectStoplessProjection> {
-    let response_id = payload
-        .get("id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?
-        .to_string();
-    let raw = build_v3_provider_resp_inbound_01_raw(
-        payload.clone(),
-        V3HubEntryProtocol::Responses,
-        V3HubProviderWireProtocol::Responses,
-        V3HubContinuationOwnership::RemoteProviderOwned,
-        V3HubExecutionMode::Direct,
-        V3HubInvocationSource::Client,
-        V3HubTransportIntent::Json,
-    );
-    let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(raw).ok()?;
-    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat);
-    let profile = V3HubRelayResponseHookProfile::empty()
-        .with_stopless_reasoning_stop()
-        .with_stopless_transition_context(transition_request_id.to_string(), now_epoch_ms);
-    let outcome = apply_v3_stop_servertool_hook_at_resp03(resp02, &profile).ok()?;
-    if !outcome.intercepted || outcome.center_state.is_none() {
-        return None;
-    }
-    Some(V3ResponsesDirectStoplessProjection {
-        payload: outcome.input.provider_payload().as_ref().clone(),
-        response_id,
-    })
-}
-
-struct V3DirectSseStoplessSummaryGateStreamState {
-    source: V3ClientSseStream,
-    decoder: SseIncrementalDecoder,
-    observation_state: V3SseRemoteContinuationObservationState,
-    transition_request_id: String,
-    now_epoch_ms: u64,
-    queued: VecDeque<Result<Vec<u8>, V3Error01SourceRaised>>,
-    done: bool,
-    intercepted: bool,
-}
-
-fn wrap_direct_sse_stopless_summary_gate_stream(
-    source: V3ClientSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
-    transition_request_id: String,
-    now_epoch_ms: u64,
-) -> V3ClientSseStream {
-    Box::pin(stream::unfold(
-        V3DirectSseStoplessSummaryGateStreamState {
-            source,
-            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
-            observation_state,
-            transition_request_id,
-            now_epoch_ms,
-            queued: VecDeque::new(),
-            done: false,
-            intercepted: false,
-        },
-        |mut state| async move {
-            loop {
-                if let Some(queued) = state.queued.pop_front() {
-                    return Some((queued, state));
-                }
-                if state.done {
-                    return None;
-                }
-                match state.source.next().await {
-                    Some(Ok(chunk)) => {
-                        if state.intercepted {
-                            continue;
-                        }
-                        if let Err(error) = state.process_chunk(chunk) {
-                            state.done = true;
-                            return Some((Err(error), state));
-                        }
-                    }
-                    Some(Err(error)) => {
-                        state.done = true;
-                        return Some((Err(error), state));
-                    }
-                    None => {
-                        let decoder = std::mem::replace(
-                            &mut state.decoder,
-                            SseIncrementalDecoder::new(SseTransportLimits::default()),
-                        );
-                        return match decoder
-                            .finish()
-                            .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
-                        {
-                            Ok(()) => None,
-                            Err(error) => {
-                                state.done = true;
-                                Some((Err(error), state))
-                            }
-                        };
-                    }
-                }
-            }
-        },
-    ))
-}
-
-impl V3DirectSseStoplessSummaryGateStreamState {
-    fn process_chunk(&mut self, chunk: Vec<u8>) -> Result<(), V3Error01SourceRaised> {
-        let frames = self
-            .decoder
-            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
-            .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
-        for frame in frames {
-            if let Some(response) =
-                direct_sse_terminal_response_for_stopless_gate(frame.frame().fields())?
-            {
-                if let Some(projected) = apply_v3_responses_direct_stopless_gate_to_payload(
-                    &response,
-                    &self.transition_request_id,
-                    self.now_epoch_ms,
-                ) {
-                    self.observation_state
-                        .record_pending_response_id(&projected.response_id)?;
-                    for projected_frame in
-                        build_direct_sse_stopless_projection_frames(&projected.payload)
-                    {
-                        self.queued.push_back(Ok(projected_frame));
-                    }
-                    self.intercepted = true;
-                    self.done = true;
-                    return Ok(());
-                }
-            }
-            self.queued.push_back(Ok(
-                build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn direct_sse_terminal_response_for_stopless_gate(
-    fields: &[SseField],
-) -> Result<Option<Value>, V3Error01SourceRaised> {
-    let mut event_type = None::<String>;
-    let mut data = String::new();
-    for field in fields {
-        let SseField::Named { name, value } = field else {
-            continue;
-        };
-        if name == "event" && event_type.is_none() {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                event_type = Some(trimmed.to_string());
-            }
-        } else if name == "data" {
-            if !data.is_empty() {
-                data.push('\n');
-            }
-            data.push_str(value);
-        }
-    }
-    let data = data.trim();
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(None);
-    }
-    let event: Value = serde_json::from_str(data).map_err(|error| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_event_invalid",
-            error.to_string(),
-        )
-    })?;
-    let semantic_event_type = event_type
-        .as_deref()
-        .or_else(|| event.get("type").and_then(Value::as_str))
-        .map(str::trim);
-    if !matches!(
-        semantic_event_type,
-        Some("response.completed" | "response.done")
-    ) {
-        return Ok(None);
-    }
-    if let Some(response) = event.get("response") {
-        Ok(Some(response.clone()))
-    } else {
-        Ok(Some(event))
-    }
-}
-
-fn build_direct_sse_stopless_projection_frames(response: &Value) -> Vec<Vec<u8>> {
-    let response_id = response
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or("resp_stopless_projected");
-    let mut frames = Vec::new();
-    if let Some(output) = response.get("output").and_then(Value::as_array) {
-        for (index, item) in output.iter().enumerate() {
-            frames.push(build_direct_sse_json_frame(
-                "response.output_item.done",
-                &json!({
-                    "type": "response.output_item.done",
-                    "response_id": response_id,
-                    "output_index": index,
-                    "item": item,
-                }),
-            ));
-        }
-    }
-    frames.push(build_direct_sse_json_frame(
-        "response.completed",
-        &json!({
-            "type": "response.completed",
-            "response": response,
-        }),
-    ));
-    frames.push(build_direct_sse_json_frame(
-        "response.done",
-        &json!({
-            "type": "response.done",
-            "response": response,
-        }),
-    ));
-    frames.push(b"data: [DONE]\n\n".to_vec());
-    frames
-}
-
-fn build_direct_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
-    let data = serde_json::to_string(payload).unwrap_or_else(|error| {
-        json!({
-            "type": "response.failed",
-            "response": {
-                "status": "failed",
-                "error": {
-                    "code": "direct_stopless_sse_projection_encode_failed",
-                    "message": error.to_string(),
-                    "type": "runtime_error"
-                }
-            }
-        })
-        .to_string()
-    });
-    format!("event: {event}\ndata: {data}\n\n").into_bytes()
 }
 
 enum V3DirectProviderFailureDecision {

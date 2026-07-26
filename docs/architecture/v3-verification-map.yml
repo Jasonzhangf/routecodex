@@ -1810,7 +1810,7 @@ features:
     status: controlled_runtime_slice_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_hook
-    owner_scope: "V3 StoplessCenter first built-in servertool hook. StoplessCenter is a Metadata Center control-signal state machine. Stopless state lives in MetadataCenter/runtime_control side-channel state owned by the Stopless Chat Process SOP; CLI is no-input no-op protocol tool-call completion only and must not carry scope/state/parameters. Continuation stores only protocol context; debug/snapshot metadata is diagnostic-only; tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
+    owner_scope: "V3 StoplessCenter first built-in servertool hook. StoplessCenter is a Metadata Center control-signal state machine. Stopless state lives in MetadataCenter/runtime_control side-channel state owned by the Stopless Chat Process SOP; response interception requires a same-turn schema guidance activation marker produced by Req04. CLI is no-input no-op protocol tool-call completion only and must not carry scope/state/parameters. Continuation stores only protocol context; debug/snapshot metadata is diagnostic-only; tool governance and hook payload logic are locked out of ReqInbound/RespInbound/ReqOutbound/RespOutbound normalization."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -1820,6 +1820,7 @@ features:
       - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
     design:
       - .agents/skills/rcc-dev-skills/references/22-servertool-hook-skeleton-workflow.md
+      - docs/design/v3-stopless-schema-guidance-activation-contract.md
       - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
       - docs/architecture/wiki/stopless-session-mainline-source.md
       - docs/architecture/wiki/html/stopless-session-mainline-source.html
@@ -1842,15 +1843,18 @@ features:
       - Req04 provider-facing continuation is a complete non-persistent guideline that is transparent to the model: it must not expose no-op/CLI/client bridge/finish_reason/counters/budget/guard, must cover restored-context continuation, tool-use progress, and completion/blocked evidence requirements; a single terse `继续。` prompt fails
       - Req04 provider-facing continuation text changes by StoplessCenter policy for default continue, stronger continue, needs-evidence, and blocked/wait-user states without exposing counters, guard, budget, CLI, no-op, or client bridge internals
       - guard exhaustion does not project another no-op and does not synthesize internal state diagnostics; it stops intercepting so the current provider finish_reason=stop response passes through
-      - stop/end_turn with no canonical reasoning summary projects no-op and can count toward guard
+      - response-side stopless intercept requires same-turn schema guidance activation marker from Req04; no marker means stop/end_turn passes through without CLI projection or StoplessCenter write
+      - stop/end_turn with same-turn activation and no accepted canonical reasoning summary or accepted stop_schema projects no-op and can count toward guard
+      - stop/end_turn with accepted canonical reasoning summary passes through when no unfinished accepted schema overrides it
       - stop/end_turn with canonical reasoning summary and `stop_schema.finished=true` passes through without no-op or counter increment
       - stop/end_turn with canonical reasoning summary and unfinished `stop_schema.nextStep` projects no-op, stores the nextStep only as scoped StoplessCenter `next_step_prompt`, and Req04 carries it into the next provider-facing continuation prompt
       - stop/end_turn with canonical reasoning summary and `stop_schema.blocked=true` plus blocked reason appends the blocked reason to canonical summary and passes through without no-op or counter increment
       - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
-      - Responses protocol direct stays zero provider-visible relay stopless injection/guidance on request, but uses the same response-side summary gate: no canonical reasoning summary projects no-input CLI and commits a direct continuation locator; canonical summary passes through; next-turn provider 4xx must be explicit and must not be swallowed as a successful continuation
+      - Responses protocol direct stays zero relay StoplessCenter write; response-side evidence gate may run only with same-turn schema guidance activation. Without activation, completed no-summary responses pass through unchanged; with activation, summary/schema decides pass-through vs continuation while direct owner remains direct
       - "`[features].stopless_center = false` disables relay stopless injection and projection"
       - architecture resource-control gate rejects StoplessCenter state modeled as CLI args/stdout, local continuation context/store, provider/client normal payload, debug/snapshot truth, generic Hub closeout, or server-entry aggregate ownership
       - normalization boundary gate rejects tool governance hook schema and tool-result payload logic in ReqInbound RespInbound ReqOutbound RespOutbound
+      - Anthropic provider validation exception disables schema guidance activation instead of forcing illegal request mutation
     required_gates:
       - npm run verify:v3-stopless-state-machine-docs
       - npm run test:v3-stopless-state-machine-docs-red-fixtures
@@ -1880,6 +1884,7 @@ features:
       servertool_followup_reenter: false
       global_install_restart: false
     notes:
+      - "Stopless response interception is gated by same-turn schema guidance activation: no marker means no CLI projection and no StoplessCenter write; accepted canonical summary or accepted_stop_schema is evidence; missing both continues only when activated. same-turn schema guidance activation means no marker, accepted canonical summary, accepted_stop_schema, and Anthropic exception handling are all explicit contract terms."
       - "Old V3 stop schema/fence/CLI JSON continuation is not an allowed runtime source. `<rcc_stop_schema>`, visible-text `schemaFeedback`, `repeatCount`, `maxRepeats`, `triggerHint`, `continuationPrompt`, and visible-text `next_step` must not appear in provider/client normal payload. The only schema exception is a canonical reasoning `summary` sibling `stop_schema` / `stopSchema` object inspected at Resp03; unfinished `nextStep` becomes scoped StoplessCenter `next_step_prompt`, not CLI/stdout/debug/continuation state."
       - "StoplessCenter state changes only at Resp03 and is read at Req04 from MetadataCenter/runtime_control side-channel state through `StoplessCenterMetadataControl`; `V3ResponsesRelayStoplessControlState` is only an adapter runtime handle."
       - "data/control lock: StoplessCenter is a Metadata Center control-signal; client/provider normal payload carries user/model data only."

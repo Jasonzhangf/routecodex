@@ -219,6 +219,10 @@ flowchart LR
 - On the V2 parity path, the first turn commits the direct locator from the provider response, and
   the next turn sends `previous_response_id` plus `function_call_output` to the exact same
   provider/model/auth pin with no Virtual Router re-entry.
+- This parity path applies only to provider-native pending/function_call responses. A local RouteCodex
+  stopless no-op (`call_stopless_reasoning`) is not part of the upstream provider response state;
+  Direct must pass completed no-summary responses through instead of inventing a remote tool output
+  continuation.
 - Provider Responses HTTP submit parity uses the native endpoint
   `/v1/responses/{response_id}/submit_tool_outputs`; `response_id` / `responseId` is removed from
   the provider body after it is encoded into the endpoint.
