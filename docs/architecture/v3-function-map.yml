@@ -2186,8 +2186,6 @@ features:
     entry_symbols:
       - execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile
       - execute_v3_responses_relay_runtime_with_default_transport
-      - execute_v3_responses_relay_runtime_with_default_transport_and_local_continuation
-      - execute_v3_responses_relay_runtime_with_default_transport_health_and_local_continuation
       - execute_v3_responses_relay_runtime
       - execute_v3_responses_relay_runtime_with_local_continuation
       - execute_v3_responses_relay_dry_run_runtime

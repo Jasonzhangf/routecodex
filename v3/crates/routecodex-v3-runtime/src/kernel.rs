@@ -271,36 +271,6 @@ pub fn project_v3_protocol_execution_plan_failure(
     })
 }
 
-pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel(
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    debug: &V3DebugRuntime,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_and_debug(
-        manifest,
-        raw,
-        hook_registry,
-        default_responses_transport(),
-        debug,
-    )
-    .await
-}
-
 pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(
     state: &V3ResponsesDirectContinuationState,
     manifest: &V3Config05ManifestPublished,
@@ -372,26 +342,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
         raw,
         hook_registry,
         default_responses_transport(),
-        debug,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_direct_runtime_kernel_with_transport_and_debug<
-    T: ResponsesTransport,
->(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    hook_registry: V3HookRegistry,
-    transport: &T,
-    debug: &V3DebugRuntime,
-) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation(),
-        manifest,
-        raw,
-        hook_registry,
-        transport,
         debug,
     )
     .await

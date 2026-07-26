@@ -52,13 +52,12 @@ for (const [label, pattern] of [
 const lifecycleExecutors = [...kernel.matchAll(/pub\s+async\s+fn\s+(execute_v3_[a-z0-9_]*responses_direct[a-z0-9_]*)/g)]
   .map((match) => match[1]);
 const allowedExecutors = new Set([
-  'execute_v3_responses_direct_runtime_kernel_with_default_transport',
-  'execute_v3_responses_direct_runtime_kernel_with_default_transport_and_debug',
-  'execute_v3_responses_direct_runtime_kernel_with_transport_and_debug',
   'execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation',
   'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug',
+  'execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target',
   'execute_v3_responses_direct_runtime_kernel_with_continuation',
   'execute_v3_responses_direct_dry_run_runtime',
+  'execute_v3_responses_direct_dry_run_runtime_with_initial_target',
   'execute_v3_responses_direct_runtime_kernel',
 ]);
 for (const executor of lifecycleExecutors) {
