@@ -367,6 +367,61 @@ pub(crate) fn resolve_v3_relay_target<R: V3ProviderAvailabilityReader + ?Sized>(
         .map_err(|error| format!("{error:?}"))
 }
 
+pub fn v3_responses_direct_binding_requires_provider_protocol_relay(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    endpoint_path: &str,
+    body: &Value,
+    deterministic_sample: u64,
+) -> Result<bool, String> {
+    let facts = crate::build_v3_router_request_facts_for_entry(body, "responses");
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(manifest, server_id, endpoint_path, facts)
+        .map_err(|error| {
+            format!(
+                "responses provider-protocol execution planning failed at V3Router05RequestClassified: {error}"
+            )
+        })?;
+    let plan = router.resolve_route_pool_plan(manifest, classified).map_err(|error| {
+        format!(
+            "responses provider-protocol execution planning failed at V3Router06RoutePoolResolved: {error}"
+        )
+    })?;
+    let hit = router
+        .hit_opaque_target_plan_once(plan, deterministic_sample)
+        .map_err(|error| {
+            format!(
+                "responses provider-protocol execution planning failed at V3Router07OpaqueTargetHitOnce: {error}"
+            )
+        })?;
+    let target = V3TargetInterpreter::default();
+    let classified_target = target.classify_kind(hit);
+    let expanded = target
+        .expand_candidates(manifest, classified_target, deterministic_sample)
+        .map_err(|error| {
+            format!(
+                "responses provider-protocol execution planning failed at V3Target09CandidateSetExpanded: {error}"
+            )
+        })?;
+    for candidate in expanded.candidates {
+        let provider_protocol = crate::hub_v1::provider_wire_protocol_for_provider_type(
+            &candidate.provider_id,
+            &candidate.provider_type,
+        )
+        .map_err(|error| {
+            format!(
+                "responses provider-protocol execution planning failed for {}[{}].{}: {error}",
+                candidate.provider_id, candidate.auth_alias, candidate.model_id
+            )
+        })?;
+        if provider_protocol != crate::V3HubProviderWireProtocol::Responses {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn v3_relay_provider_target_selection_sample(request_id: &str) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in request_id.as_bytes() {

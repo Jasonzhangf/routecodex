@@ -6,6 +6,7 @@ pub mod kernel;
 pub mod local_continuation;
 pub mod nodes;
 mod provider_failure_runtime_policy;
+pub use provider_failure_runtime_policy::v3_responses_direct_binding_requires_provider_protocol_relay;
 pub mod remote_continuation;
 mod shared;
 
