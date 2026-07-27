@@ -125,8 +125,6 @@ mod sse_runtime_dispatch;
 mod stop_message_auto_blocks;
 mod stopless_auto_handler_bridge;
 mod stopless_current_turn;
-mod streaming_tool_extractor;
-mod tool_harvester;
 mod virtual_router_engine;
 mod virtual_router_hit_log;
 mod virtual_router_stop_message_actions;
@@ -539,28 +537,6 @@ pub fn prune_chat_request_payload_json(input_json: String) -> NapiResult<String>
 }
 
 #[napi]
-pub fn extract_streaming_tool_calls_json(input_json: String) -> NapiResult<String> {
-    streaming_tool_extractor::extract_streaming_tool_calls_json(input_json)
-}
-
-#[napi(js_name = "createStreamingToolExtractorStateJson")]
-pub fn create_streaming_tool_extractor_state_json(
-    input_json: Option<String>,
-) -> NapiResult<String> {
-    streaming_tool_extractor::create_streaming_tool_extractor_state_json(input_json)
-}
-
-#[napi(js_name = "resetStreamingToolExtractorStateJson")]
-pub fn reset_streaming_tool_extractor_state_json(state_json: String) -> NapiResult<String> {
-    streaming_tool_extractor::reset_streaming_tool_extractor_state_json(state_json)
-}
-
-#[napi(js_name = "feedStreamingToolExtractorJson")]
-pub fn feed_streaming_tool_extractor_json(input_json: String) -> NapiResult<String> {
-    streaming_tool_extractor::feed_streaming_tool_extractor_json(input_json)
-}
-
-#[napi]
 pub fn map_bridge_tools_to_chat_with_options_json(input_json: String) -> NapiResult<String> {
     shared_tool_mapping::map_bridge_tools_to_chat_with_options_json(input_json)
 }
@@ -816,11 +792,6 @@ pub fn serialize_tool_output_json(input_json: String) -> NapiResult<String> {
 #[napi]
 pub fn serialize_tool_arguments_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::serialize_tool_arguments_json(input_json)
-}
-
-#[napi]
-pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
-    tool_harvester::harvest_tools_json(input_json)
 }
 
 #[napi]
@@ -3210,17 +3181,6 @@ pub fn augment_openai_tools_json(tools_json: String) -> NapiResult<String> {
 #[napi(js_name = "augmentAnthropicToolsJson")]
 pub fn augment_anthropic_tools_json(tools_json: String) -> NapiResult<String> {
     req_outbound_stage3_compat::augment_anthropic_tools_json(tools_json)
-}
-
-#[napi(js_name = "harvestToolCallsFromTextJson")]
-pub fn harvest_tool_calls_from_text_json_bridge(
-    payload_json: String,
-    options_json: Option<String>,
-) -> NapiResult<String> {
-    compat_harvest_tool_calls_from_text::harvest_tool_calls_from_text_json(
-        payload_json,
-        options_json,
-    )
 }
 
 #[napi(js_name = "normalizeServertoolFollowupPayloadShapeJson")]

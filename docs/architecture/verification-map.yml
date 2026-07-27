@@ -2067,6 +2067,9 @@ verification:
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/providers/core/runtime/mimoweb-provider.unit.test.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - scripts/tests/legacy-text-tool-harvest-napi-orphans-red-fixtures.mjs
+      - scripts/architecture/verify-legacy-text-tool-harvest-napi-binding.mjs
     integration:
       - tests/servertool/servertool-active-orchestration-audit.spec.ts
       - tests/sharedmodule/provider-response-rust-plan.spec.ts
@@ -2075,11 +2078,16 @@ verification:
       - npm run verify:servertool-rust-only
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
+      - npm run test:legacy-text-tool-harvest-napi-orphans-red-fixtures
+      - npm run verify:legacy-text-tool-harvest-napi-orphans
+      - npm run verify:legacy-text-tool-harvest-napi-binding
     build:
+      - npm run build:native-hotpath
       - npm run build:base
     notes:
       - "Response-side harvest, apply_patch reversal, and internal tool stripping must stay in resp_process_stage1_tool_governance Rust blocks."
       - "MiMo Web provider text-tool harvest must use the narrow `mimoweb-tool-harvest-host.ts` bridge and must not bind directly to the broad `native-exports.js` surface."
+      - "The legacy orphan gate only locks deletion of the zero-consumer `tool_harvester` and `streaming_tool_extractor` NAPI surfaces; it does not claim removal of the live compatibility harvest path."
 
   - feature_id: hub.chat_process_session_usage
     change_risk: medium

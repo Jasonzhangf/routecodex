@@ -8444,19 +8444,29 @@ owners:
     forbidden_paths:
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-governance-semantics.ts # deleted; forbidden
       - sharedmodule/llmswitch-core/src/native/router-hotpath/native-chat-process-servertool-orchestration-semantics.ts # deleted; forbidden
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/tool_harvester.rs # deleted zero-consumer NAPI module; forbidden
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/streaming_tool_extractor.rs # deleted zero-consumer NAPI module; forbidden
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance.rs
       - tests/sharedmodule/apply-patch-chat-process-contract.spec.ts
       - tests/sharedmodule/hub-pipeline-stage-residue-audit.spec.ts
       - tests/providers/core/runtime/mimoweb-provider.unit.test.ts
+      - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
+      - scripts/tests/legacy-text-tool-harvest-napi-orphans-red-fixtures.mjs
+      - scripts/architecture/verify-legacy-text-tool-harvest-napi-binding.mjs
     required_gates:
       - npm run verify:servertool-rust-only
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
+      - npm run build:native-hotpath
+      - npm run test:legacy-text-tool-harvest-napi-orphans-red-fixtures
+      - npm run verify:legacy-text-tool-harvest-napi-orphans
+      - npm run verify:legacy-text-tool-harvest-napi-binding
     migration_target: rust
     notes:
       - "Reverse patching and internal tool stripping must be in Rust per ARCH-HUB-3."
       - "MiMo Web provider text-tool harvest must use the narrow `mimoweb-tool-harvest-host.ts` bridge and must not import the broad `native-exports.js` surface directly."
+      - "The legacy `tool_harvester` and `streaming_tool_extractor` NAPI modules had no runtime consumers; their deleted modules, exports, and wrappers are locked by the legacy orphan gate without making claims about the still-live compatibility harvest path."
 
   - feature_id: hub.direct_runtime_metadata_projection
     status: active

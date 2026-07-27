@@ -263,32 +263,22 @@ fn crate_src_path(relative: &str) -> PathBuf {
 
 #[test]
 fn shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones() {
-    for relative in ["tool_harvester.rs", "hub_text_markup_normalizer.rs"] {
-        let path = crate_src_path(relative);
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-        assert!(
-            !source.contains("fn is_structured_apply_patch_payload("),
-            "local structured apply_patch detector still present in {}",
-            path.display()
-        );
-        assert!(
-            !source
-                .contains("fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {"),
-            "local structured apply_patch wrapper still present in {}",
-            path.display()
-        );
-    }
     let harvester_path = crate_src_path("tool_harvester.rs");
-    let harvester_source = fs::read_to_string(&harvester_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", harvester_path.display(), error));
     assert!(
-        harvester_source.contains("extract_structured_apply_patch_payloads_with("),
-        "tool_harvester.rs must use shared structured apply_patch extractor truth"
+        !harvester_path.exists(),
+        "orphan tool_harvester.rs must stay physically deleted"
     );
+
     let markup_path = crate_src_path("hub_text_markup_normalizer.rs");
     let markup_source = fs::read_to_string(&markup_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {}", markup_path.display(), error));
+    assert!(
+        !markup_source.contains("fn is_structured_apply_patch_payload(")
+            && !markup_source
+                .contains("fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {"),
+        "local structured apply_patch detector/wrapper still present in {}",
+        markup_path.display()
+    );
     assert!(
         markup_source.contains("extract_structured_apply_patch_payloads_with("),
         "hub_text_markup_normalizer.rs must route structured apply_patch extraction through shared truth"
@@ -298,16 +288,9 @@ fn shared_tooling_deletion_gate_removed_structured_apply_patch_local_clones() {
 #[test]
 fn shared_tooling_deletion_gate_removed_harvester_local_chunk_clone() {
     let path = crate_src_path("tool_harvester.rs");
-    let source = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
     assert!(
-        !source.contains("fn chunk_string(input: &str, size: usize) -> Vec<String>"),
-        "local chunk_string clone still present in {}",
-        path.display()
-    );
-    assert!(
-        source.contains("chunk_string_by_bytes("),
-        "tool_harvester.rs must use shared chunk helper truth"
+        !path.exists(),
+        "orphan tool_harvester.rs must stay physically deleted instead of retaining a chunk clone gate"
     );
 }
 
@@ -456,11 +439,7 @@ fn shared_tooling_deletion_gate_removed_reasoning_owned_repair_arguments_helper(
         "hub_reasoning_tool_normalizer.rs must consume shared repair_arguments_to_string truth"
     );
 
-    for relative in [
-        "tool_harvester.rs",
-        "streaming_tool_extractor.rs",
-        "hub_bridge_actions/bridge_input.rs",
-    ] {
+    for relative in ["hub_bridge_actions/bridge_input.rs"] {
         let path = crate_src_path(relative);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
@@ -484,17 +463,14 @@ fn shared_tooling_deletion_gate_removed_reasoning_owned_repair_arguments_helper(
 #[test]
 fn shared_tooling_deletion_gate_removed_argument_string_wrappers() {
     let harvester_path = crate_src_path("tool_harvester.rs");
-    let harvester_source = fs::read_to_string(&harvester_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {}", harvester_path.display(), error));
     assert!(
-        !harvester_source.contains("fn to_json_string(value: &Value) -> String {"),
-        "tool_harvester.rs still owns to_json_string wrapper instead of calling shared repair_arguments_to_string truth directly"
+        !harvester_path.exists(),
+        "orphan tool_harvester.rs must stay physically deleted instead of retaining argument string wrappers"
     );
+    let streaming_path = crate_src_path("streaming_tool_extractor.rs");
     assert!(
-        harvester_source.contains("repair_arguments_to_string(&args_value)")
-            || harvester_source.contains("repair_arguments_to_string(&payload)")
-            || harvester_source.contains("repair_arguments_to_string(&Value::Object(args_obj))"),
-        "tool_harvester.rs must call shared repair_arguments_to_string truth directly"
+        !streaming_path.exists(),
+        "orphan streaming_tool_extractor.rs must stay physically deleted"
     );
 
     let bridge_utils_path = crate_src_path("hub_bridge_actions/utils.rs");

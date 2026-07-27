@@ -1386,25 +1386,15 @@ mod tests {
     #[test]
     fn shared_tool_mapping_deletion_gate_removed_tool_harvester_local_canonical_clone() {
         let path = crate_src_path("tool_harvester.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn normalize_tool_name(name: &str) -> String"),
-            "local normalize_tool_name clone still present in {}",
-            path.display()
-        );
-        assert!(
-            source.contains("normalize_routecodex_tool_name("),
-            "tool_harvester.rs must use shared tool canonicalization truth"
+            !path.exists(),
+            "orphan tool_harvester.rs must stay physically deleted instead of retaining tool canonicalization clones"
         );
     }
 
     #[test]
     fn shared_tool_mapping_deletion_gate_removed_duplicate_tool_name_hint_scanners() {
-        for relative in [
-            "tool_harvester.rs",
-            "resp_process_stage1_tool_governance_blocks/tool_call_entry.rs",
-        ] {
+        for relative in ["resp_process_stage1_tool_governance_blocks/tool_call_entry.rs"] {
             let path = crate_src_path(relative);
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));

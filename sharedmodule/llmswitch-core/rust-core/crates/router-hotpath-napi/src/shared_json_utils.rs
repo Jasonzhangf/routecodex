@@ -634,16 +634,9 @@ mod tests {
     #[test]
     fn shared_split_command_deletion_gate_removed_tool_harvester_local_clone() {
         let path = crate_src_path("tool_harvester.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
         assert!(
-            !source.contains("fn split_command(input: &str) -> Vec<String>"),
-            "local split_command clone still present in {}",
-            path.display()
-        );
-        assert!(
-            source.contains("split_command_string("),
-            "tool_harvester.rs must use shared split_command_string truth"
+            !path.exists(),
+            "orphan tool_harvester.rs must stay physically deleted instead of retaining split_command clones"
         );
     }
 

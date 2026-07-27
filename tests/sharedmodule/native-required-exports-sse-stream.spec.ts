@@ -6,6 +6,14 @@ import { REQUIRED_NATIVE_HOTPATH_EXPORTS } from './helpers/native-router-hotpath
 import { captureReqInboundResponsesContextSnapshotWithNative } from './helpers/req-inbound-direct-native.js';
 
 const nodeRequire = createRequire(import.meta.url);
+const RETIRED_TEXT_TOOL_HARVEST_EXPORTS = [
+  'harvestToolCallsFromTextJson',
+  'harvestToolsJson',
+  'extractStreamingToolCallsJson',
+  'createStreamingToolExtractorStateJson',
+  'resetStreamingToolExtractorStateJson',
+  'feedStreamingToolExtractorJson',
+] as const;
 
 function executeResponsesStoreOperationForTest(operation: string, payload: unknown): unknown {
   const binding = nodeRequire(
@@ -32,6 +40,9 @@ describe('native required exports for sse stream helpers', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('resolveProviderResponsePostServertoolEffectJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runReqOutboundStage3CompatJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('runRespInboundStage3CompatJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('harvestToolCallsFromTextJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('harvestToolsJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).not.toContain('extractStreamingToolCallsJson');
     expect(new Set(REQUIRED_NATIVE_HOTPATH_EXPORTS).size).toBe(REQUIRED_NATIVE_HOTPATH_EXPORTS.length);
   });
 
@@ -47,6 +58,9 @@ describe('native required exports for sse stream helpers', () => {
     ) as Record<string, unknown>;
     const missing = REQUIRED_NATIVE_HOTPATH_EXPORTS.filter((key) => typeof binding[key] !== 'function');
     expect(missing).toEqual([]);
+    for (const retiredExport of RETIRED_TEXT_TOOL_HARVEST_EXPORTS) {
+      expect(binding[retiredExport]).toBeUndefined();
+    }
   });
 
   test('packaged native binding exports req_inbound context snapshot helper directly', () => {

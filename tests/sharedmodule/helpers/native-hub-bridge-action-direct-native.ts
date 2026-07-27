@@ -980,50 +980,6 @@ export interface NativeNormalizeMessageReasoningToolsOutput {
   cleanedReasoning?: string;
 }
 
-export interface NativeHarvestToolsInput {
-  signal: Record<string, unknown>;
-  context?: Record<string, unknown>;
-}
-
-export interface NativeHarvestToolsOutput {
-  deltaEvents: Array<Record<string, unknown>>;
-  normalized?: Record<string, unknown>;
-  stats?: Record<string, unknown>;
-}
-
-export function harvestToolsWithNative(input: NativeHarvestToolsInput): NativeHarvestToolsOutput {
-  const capability = 'harvestToolsJson';
-  const fail = (reason?: string) => failNativeRequired<NativeHarvestToolsOutput>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify({ signal: input.signal, context: input.context });
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = readNativeJsonResult(capability, fn(payloadJson));
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return fail('invalid payload');
-    }
-    const row = parsed as Record<string, unknown>;
-    if (!Array.isArray(row.deltaEvents)) {
-      return fail('invalid payload');
-    }
-    return row as unknown as NativeHarvestToolsOutput;
-  } catch (error) {
-    if (shouldRethrowNativeRawError(error)) {
-      throw error;
-    }
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
 
 export function ensureBridgeOutputFieldsWithNative(
   input: NativeEnsureBridgeOutputFieldsInput
