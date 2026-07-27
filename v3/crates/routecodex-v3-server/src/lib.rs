@@ -21,8 +21,10 @@ use routecodex_v3_error::{
     project_v3_http_boundary_error, V3HttpBoundaryErrorKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw, execute_v3_anthropic_relay_dry_run_runtime,
+    build_v3_server_03_http_request_raw,
+    execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
     execute_v3_anthropic_relay_runtime_with_default_transport,
+    execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers,
     execute_v3_foundation_pending_runtime, execute_v3_gemini_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_responses_direct_dry_run_runtime,
@@ -44,7 +46,8 @@ use routecodex_v3_runtime::{
     project_v3_responses_relay_runtime_failure, project_v3_virtual_router_dry_run,
     project_v3_virtual_router_status, register_responses_direct_hooks,
     resolve_v3_responses_previous_response_owner_execution_mode_at_req03,
-    V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput, V3ClientBody, V3ClientSseStream,
+    V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput, V3AnthropicRelayRuntimeOutput,
+    V3ClientBody, V3ClientSseStream,
     V3Execution11ProtocolDecisionMode, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
     V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput,
     V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
@@ -1219,13 +1222,26 @@ async fn pending_endpoint(
         && entry_protocol == "anthropic"
         && execution_mode == V3EntryProtocolExecutionMode::Relay
     {
-        let output = execute_v3_anthropic_relay_dry_run_runtime(
+        let client_headers = match collect_anthropic_relay_client_headers(&request_headers) {
+            Ok(headers) => headers,
+            Err(message) => {
+                return error_output_response_for_server_with_project_path(
+                    &state.server,
+                    &path,
+                    &request_id,
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    request_console_project_path.as_deref(),
+                );
+            }
+        };
+        let output = execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
             &state.manifest,
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(),
                 request_id: request_id.clone(),
                 payload: payload.clone(),
             },
+            client_headers,
         )
         .await;
         let observability = build_v3_foundation_console_observability(&state, &output);
@@ -1302,13 +1318,26 @@ async fn pending_endpoint(
     }
     if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let stream = payload.get("stream").and_then(serde_json::Value::as_bool) == Some(true);
-        let output = match execute_v3_anthropic_messages_request(
+        let client_headers = match collect_anthropic_relay_client_headers(&request_headers) {
+            Ok(headers) => headers,
+            Err(message) => {
+                return error_output_response_for_server_with_project_path(
+                    &state.server,
+                    &path,
+                    &request_id,
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    request_console_project_path.as_deref(),
+                );
+            }
+        };
+        let output = match execute_v3_anthropic_messages_request_with_client_headers(
             &state.manifest,
             V3AnthropicRelayRuntimeInput {
                 server_id: state.server.id.clone(),
                 request_id: request_id.clone(),
                 payload,
             },
+            client_headers,
         )
         .await
         {
@@ -5772,11 +5801,47 @@ fn header_text(headers: &HeaderMap, name: &str) -> Result<Option<String>, String
         .map(|value| value.filter(|value| !value.is_empty()))
 }
 
+fn collect_anthropic_relay_client_headers(
+    headers: &HeaderMap,
+) -> Result<Vec<V3AnthropicRelayClientHeader>, String> {
+    let mut provider_headers = Vec::new();
+    for (name, value) in headers {
+        let name = name.as_str();
+        if !V3AnthropicRelayClientHeader::is_provider_protocol_header_name(name) {
+            continue;
+        }
+        let value = value
+            .to_str()
+            .map(str::trim)
+            .map_err(|error| format!("{name} is not UTF-8: {error}"))?;
+        if value.is_empty() {
+            continue;
+        }
+        if let Some(header) = V3AnthropicRelayClientHeader::provider_protocol(name, value) {
+            provider_headers.push(header);
+        }
+    }
+    Ok(provider_headers)
+}
+
 pub async fn execute_v3_anthropic_messages_request(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
 ) -> Result<V3AnthropicRelayRuntimeOutput, routecodex_v3_runtime::V3AnthropicRelayRuntimeError> {
     execute_v3_anthropic_relay_runtime_with_default_transport(manifest, input).await
+}
+
+pub async fn execute_v3_anthropic_messages_request_with_client_headers(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
+) -> Result<V3AnthropicRelayRuntimeOutput, routecodex_v3_runtime::V3AnthropicRelayRuntimeError> {
+    execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers(
+        manifest,
+        input,
+        client_headers,
+    )
+    .await
 }
 
 pub async fn execute_v3_openai_chat_completions_request(

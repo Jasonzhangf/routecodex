@@ -4,6 +4,7 @@ use routecodex_v3_runtime::{
     characterize_v3_anthropic_hub_semantic_to_provider_wire,
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
     collect_v3_anthropic_request_shape_branch_semantics,
+    encode_v3_anthropic_request_as_responses_semantic,
     encode_v3_responses_semantic_as_anthropic_request,
     project_v3_anthropic_message_as_responses_response, V3AnthropicChatShapeBranchSemantic,
     V3AnthropicCodecError, V3AnthropicCodecStage, V3HubEntryProtocol, V3HubProviderWireProtocol,
@@ -232,6 +233,121 @@ fn responses_reasoning_request_config_projects_to_anthropic_thinking_wire() {
     assert!(
         provider_request["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
         "Responses reasoning summary must be compatibly projected as target-valid Anthropic system marker: {provider_request}"
+    );
+}
+
+#[test]
+fn responses_claude_provider_request_replaces_system_with_claude_code_prompt_blocks() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"claude-fable-5",
+        "stream": true,
+        "instructions":"replace this transient instruction",
+        "input":[
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"reply ok"}]
+            }
+        ]
+    }))
+    .expect("Claude model Anthropic wire must inject the Claude Code prompt");
+
+    let system = provider_request["system"]
+        .as_array()
+        .expect("Claude Code prompt must use Anthropic system content blocks");
+    assert_eq!(system.len(), 3);
+    assert_eq!(
+        system[0]["text"],
+        "x-anthropic-billing-header: cc_version=2.1.220.dae; cc_entrypoint=sdk-cli;"
+    );
+    assert_eq!(
+        system[1]["text"],
+        "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+    );
+    assert_eq!(system[1]["cache_control"], json!({"type":"ephemeral"}));
+    assert_eq!(system[2]["cache_control"], json!({"type":"ephemeral"}));
+    assert!(
+        system[2]["text"].as_str().is_some_and(|text| text.contains(
+            "You are an interactive agent that helps users with software engineering tasks."
+        )),
+        "full Claude Code prompt block must be present: {provider_request}"
+    );
+    assert!(system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("/tmp/claude-code-standard-capture-1785077403/work")));
+    assert!(!system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("claude-code-capture.kJhuye")));
+    assert_eq!(provider_request["messages"][0]["role"], "user");
+    assert_eq!(
+        provider_request["messages"][0]["content"][0]["text"],
+        "reply ok"
+    );
+    let serialized = serde_json::to_string(&provider_request).unwrap();
+    assert!(
+        !serialized.contains("replace this transient instruction"),
+        "Claude Code prompt is a replacement, not a merge: {provider_request}"
+    );
+}
+
+#[test]
+fn anthropic_entry_dynamic_claude_code_request_survives_anthropic_provider_roundtrip() {
+    let dynamic_system = json!([
+        {
+            "type":"text",
+            "text":"x-anthropic-billing-header: cc_version=2.1.220.297; cc_entrypoint=sdk-cli;"
+        },
+        {
+            "type":"text",
+            "text":"You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+            "cache_control":{"type":"ephemeral"}
+        },
+        {
+            "type":"text",
+            "text":"DYNAMIC_CLAUDE_CODE_SYSTEM_BLOCK_3",
+            "cache_control":{"type":"ephemeral"}
+        }
+    ]);
+    let context_management = json!({
+        "edits":[{"type":"clear_thinking_20251015","keep":"all"}]
+    });
+    let output_config = json!({"effort":"high"});
+    let thinking = json!({"type":"adaptive","display":"omitted"});
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-fable-5",
+        "max_tokens":32,
+        "stream":true,
+        "system":dynamic_system,
+        "messages":[{
+            "role":"user",
+            "content":[{"type":"text","text":"Reply with exactly: ok"}]
+        }],
+        "metadata":{
+            "user_id":"{\"device_id\":\"test-device\",\"account_uuid\":\"\",\"session_id\":\"test-session\"}"
+        },
+        "thinking":thinking,
+        "context_management":context_management,
+        "output_config":output_config,
+        "tools":[]
+    }))
+    .expect("Anthropic entry packet must normalize to Chat semantic");
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(semantic)
+        .expect("Anthropic semantic must project back to Anthropic provider wire");
+
+    assert_eq!(provider_request["system"], dynamic_system);
+    assert_eq!(provider_request["thinking"], thinking);
+    assert_eq!(provider_request["context_management"], context_management);
+    assert_eq!(provider_request["output_config"], output_config);
+    assert_eq!(provider_request["max_tokens"], 32);
+    assert_eq!(provider_request["stream"], true);
+    assert_eq!(
+        provider_request["messages"],
+        json!([{"role":"user","content":[{"type":"text","text":"Reply with exactly: ok"}]}])
+    );
+    let serialized = serde_json::to_string(&provider_request).unwrap();
+    assert!(
+        !serialized.contains("cc_version=2.1.220.dae"),
+        "Anthropic entry relay must not overwrite dynamic Claude Code system with static compat prompt: {provider_request}"
     );
 }
 

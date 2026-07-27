@@ -16,10 +16,13 @@ pub use raw_response::{
     V3ProviderResponseHeader, V3ProviderSseStream,
 };
 pub use transport::{
+    build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    build_v3_transport_13_responses_request_from_v3_provider_12, ProviderResponsesTransport,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation,
+    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
+    build_v3_transport_13_responses_request_from_v3_provider_12,
+    is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
     V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
 };
 pub use wire::{

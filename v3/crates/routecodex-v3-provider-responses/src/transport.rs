@@ -32,6 +32,20 @@ type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 
 const OPENAI_BETA_HEADER: &str = "openai-beta";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
+const CLAUDE_CODE_USER_AGENT: &str = "claude-cli/2.1.220 (external, sdk-cli)";
+const CLAUDE_CODE_ANTHROPIC_BETA: &str = "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24,fallback-credit-2026-06-01";
+const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
+    "user-agent",
+    "anthropic-version",
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+    "x-app",
+    "x-stainless-lang",
+    "x-stainless-package-version",
+    "x-stainless-runtime",
+    "x-stainless-retry-count",
+    "x-stainless-timeout",
+];
 const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
     "V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw";
 
@@ -87,6 +101,7 @@ enum V3Transport13ResponsesRequestKind {
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
+        provider_headers: Vec<V3ProviderRequestHeader>,
         cancellation: Option<V3ProviderCancellation>,
     },
     WebSocketV2 {
@@ -99,6 +114,51 @@ enum V3Transport13ResponsesRequestKind {
         event: Value,
         cancellation: Option<V3ProviderCancellation>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ProviderRequestHeader {
+    name: String,
+    value: String,
+}
+
+impl V3ProviderRequestHeader {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: normalize_provider_header_name(name.into()),
+            value: value.into(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+pub fn build_v3_anthropic_provider_request_header(
+    name: impl Into<String>,
+    value: impl Into<String>,
+) -> Option<V3ProviderRequestHeader> {
+    let name = normalize_provider_header_name(name.into());
+    is_v3_anthropic_provider_request_header_name(&name).then(|| V3ProviderRequestHeader {
+        name,
+        value: value.into(),
+    })
+}
+
+pub fn is_v3_anthropic_provider_request_header_name(name: impl AsRef<str>) -> bool {
+    let name = normalize_provider_header_name(name.as_ref().to_string());
+    ANTHROPIC_PROVIDER_HEADER_NAMES
+        .iter()
+        .any(|allowed| *allowed == name)
+}
+
+fn normalize_provider_header_name(name: String) -> String {
+    name.trim().to_ascii_lowercase()
 }
 
 #[derive(Debug)]
@@ -147,6 +207,15 @@ impl V3Transport13ResponsesRequest {
         }
     }
 
+    pub fn provider_headers(&self) -> &[V3ProviderRequestHeader] {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                provider_headers, ..
+            } => provider_headers,
+            V3Transport13ResponsesRequestKind::WebSocketV2 { .. } => &[],
+        }
+    }
+
     pub fn redacted_provider_request_projection(&self) -> Value {
         let stream_intent = match self.stream_intent() {
             V3ResponsesStreamIntent::Json => "json",
@@ -157,11 +226,7 @@ impl V3Transport13ResponsesRequest {
                 "method": "POST",
                 "providerId": self.provider_id(),
                 "url": self.url(),
-                "headers": {
-                    "accept": if self.stream_intent() == V3ResponsesStreamIntent::Sse { "text/event-stream" } else { "application/json" },
-                    "authorization": "[REDACTED]",
-                    "content-type": "application/json"
-                },
+                "headers": redacted_http_request_headers(self.url(), self.stream_intent(), self.provider_headers()),
                 "body": self.body(),
                 "streamIntent": stream_intent
             }),
@@ -188,6 +253,96 @@ impl V3Transport13ResponsesRequest {
         }
         self
     }
+}
+
+fn redacted_http_request_headers(
+    url: &str,
+    stream_intent: V3ResponsesStreamIntent,
+    provider_headers: &[V3ProviderRequestHeader],
+) -> Value {
+    let mut headers = serde_json::Map::new();
+    headers.insert(
+        "accept".to_string(),
+        Value::String(
+            if stream_intent == V3ResponsesStreamIntent::Sse {
+                "text/event-stream"
+            } else {
+                "application/json"
+            }
+            .to_string(),
+        ),
+    );
+    headers.insert(
+        "authorization".to_string(),
+        Value::String("[REDACTED]".to_string()),
+    );
+    headers.insert(
+        "content-type".to_string(),
+        Value::String("application/json".to_string()),
+    );
+    if is_anthropic_messages_url_text(url) {
+        headers.insert(
+            "x-api-key".to_string(),
+            Value::String("[REDACTED]".to_string()),
+        );
+        for header in default_anthropic_messages_compat_headers() {
+            headers.insert(header.name, Value::String(header.value));
+        }
+        for header in provider_headers {
+            headers.insert(
+                header.name().to_string(),
+                Value::String(redacted_provider_header_value(
+                    header.name(),
+                    header.value(),
+                )),
+            );
+        }
+    }
+    Value::Object(headers)
+}
+
+fn is_anthropic_messages_url_text(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .map(|url| is_anthropic_messages_url(&url))
+        .unwrap_or_else(|_| url.trim_end_matches('/').ends_with("/v1/messages"))
+}
+
+fn is_anthropic_messages_url(url: &reqwest::Url) -> bool {
+    url.path().trim_end_matches('/').ends_with("/v1/messages")
+}
+
+fn apply_anthropic_messages_compat_headers(
+    mut builder: reqwest::RequestBuilder,
+    secret: &str,
+    provider_headers: &[V3ProviderRequestHeader],
+) -> reqwest::RequestBuilder {
+    builder = builder.header("x-api-key", secret);
+    for header in default_anthropic_messages_compat_headers() {
+        builder = builder.header(header.name, header.value);
+    }
+    for header in provider_headers {
+        builder = builder.header(header.name(), header.value());
+    }
+    builder
+}
+
+fn default_anthropic_messages_compat_headers() -> Vec<V3ProviderRequestHeader> {
+    vec![
+        V3ProviderRequestHeader::new("anthropic-version", "2023-06-01"),
+        V3ProviderRequestHeader::new("anthropic-beta", CLAUDE_CODE_ANTHROPIC_BETA),
+        V3ProviderRequestHeader::new("anthropic-dangerous-direct-browser-access", "true"),
+        V3ProviderRequestHeader::new("x-app", "cli"),
+        V3ProviderRequestHeader::new("user-agent", CLAUDE_CODE_USER_AGENT),
+        V3ProviderRequestHeader::new("x-stainless-lang", "js"),
+        V3ProviderRequestHeader::new("x-stainless-package-version", "0.94.0"),
+        V3ProviderRequestHeader::new("x-stainless-runtime", "node"),
+        V3ProviderRequestHeader::new("x-stainless-retry-count", "0"),
+        V3ProviderRequestHeader::new("x-stainless-timeout", "300"),
+    ]
+}
+
+fn redacted_provider_header_value(_name: &str, value: &str) -> String {
+    value.to_string()
 }
 
 fn v3_transport_13_request(
@@ -311,6 +466,26 @@ pub fn build_v3_transport_13_responses_http_request_from_parts(
     stream_intent: V3ResponsesStreamIntent,
     body: Value,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
+    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
+        request_id,
+        provider_id,
+        url_text,
+        auth,
+        stream_intent,
+        body,
+        Vec::new(),
+    )
+}
+
+pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
+    request_id: impl Into<String>,
+    provider_id: impl Into<String>,
+    url_text: impl AsRef<str>,
+    auth: V3ProviderAuthHandle,
+    stream_intent: V3ResponsesStreamIntent,
+    body: Value,
+    provider_headers: Vec<V3ProviderRequestHeader>,
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let request_id = request_id.into();
     let provider_id = provider_id.into();
     let url = reqwest::Url::parse(url_text.as_ref()).map_err(|error| {
@@ -328,6 +503,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts(
             auth,
             stream_intent,
             body,
+            provider_headers,
             cancellation: None,
         },
     ))
@@ -386,6 +562,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 auth,
                 stream_intent,
                 body,
+                provider_headers,
                 cancellation,
             } => {
                 self.send_http(
@@ -395,6 +572,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     auth,
                     stream_intent,
                     body,
+                    provider_headers,
                     cancellation,
                 )
                 .await
@@ -435,6 +613,7 @@ impl ProviderResponsesTransport {
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
+        provider_headers: Vec<V3ProviderRequestHeader>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
@@ -443,13 +622,17 @@ impl ProviderResponsesTransport {
             V3ResponsesStreamIntent::Json => "application/json",
             V3ResponsesStreamIntent::Sse => "text/event-stream",
         };
-        let send = self
+        let anthropic_messages = is_anthropic_messages_url(&url);
+        let provider_headers = provider_headers.clone();
+        let mut request = self
             .client
             .post(url)
             .header(reqwest::header::ACCEPT, accept)
-            .bearer_auth(secret)
-            .json(&body)
-            .send();
+            .bearer_auth(&secret);
+        if anthropic_messages {
+            request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
+        }
+        let send = request.json(&body).send();
         let response = match cancellation.clone() {
             Some(cancellation) => {
                 tokio::select! {
@@ -1389,6 +1572,73 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("stopreason"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_http_transport_sends_claude_code_compat_headers() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_for_server = std::sync::Arc::clone(&captured);
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let n = stream.read(&mut buffer).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            *captured_for_server.lock().unwrap() = String::from_utf8_lossy(&request).into_owned();
+            let body = r#"{"id":"msg_test","type":"message","role":"assistant","content":[],"stop_reason":"end_turn"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let auth_env = "RCCV3_TEST_ANTHROPIC_HEADER_KEY";
+        std::env::set_var(auth_env, "sk-test-headers");
+        let request = build_v3_transport_13_responses_http_request_from_parts(
+            "req-anthropic-compat-headers",
+            "anthropic-test",
+            format!("http://{addr}/anthropic/v1/messages"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::Environment(auth_env.into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"claude-fable-5","messages":[],"stream":false}),
+        )
+        .unwrap();
+        let transport = ProviderResponsesTransport::default();
+        transport.send(request).await.unwrap();
+        std::env::remove_var(auth_env);
+        server.await.unwrap();
+
+        let raw_headers = captured.lock().unwrap().to_ascii_lowercase();
+        assert!(raw_headers.contains("authorization: bearer sk-test-headers"));
+        assert!(raw_headers.contains("x-api-key: sk-test-headers"));
+        assert!(raw_headers.contains("anthropic-version: 2023-06-01"));
+        assert!(raw_headers.contains("anthropic-beta: "));
+        assert!(raw_headers.contains("claude-code-20250219"));
+        assert!(raw_headers.contains("anthropic-dangerous-direct-browser-access: true"));
+        assert!(raw_headers.contains("x-app: cli"));
+        assert!(raw_headers.contains("user-agent: claude-cli/2.1.220 (external, sdk-cli)"));
+        assert!(raw_headers.contains("x-stainless-lang: js"));
+        assert!(raw_headers.contains("x-stainless-package-version: 0.94.0"));
+        assert!(raw_headers.contains("x-stainless-runtime: node"));
+        assert!(raw_headers.contains("x-stainless-retry-count: 0"));
+        assert!(raw_headers.contains("x-stainless-timeout: 300"));
     }
 
     #[test]

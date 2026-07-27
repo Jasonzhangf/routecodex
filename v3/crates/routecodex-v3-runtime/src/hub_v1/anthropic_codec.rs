@@ -1,6 +1,12 @@
 use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
+use std::sync::OnceLock;
+
+const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
+const ANTHROPIC_ENTRY_SYSTEM_EXTENSION: &str = "anthropic_entry_system";
+const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] =
+    &["context_management", "output_config"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3AnthropicCodecStage {
@@ -214,6 +220,12 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
         "model".to_string(),
         object.get("model").cloned().unwrap_or(Value::Null),
     );
+    if let Some(system) = object.get("system") {
+        output.insert(
+            ANTHROPIC_ENTRY_SYSTEM_EXTENSION.to_string(),
+            system.to_owned(),
+        );
+    }
     if let Some(instructions) = object
         .get("system")
         .and_then(system_as_responses_instructions)
@@ -249,6 +261,11 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
     }
     if let Some(thinking) = object.get("thinking") {
         output.insert("reasoning".to_string(), json!({"thinking":thinking}));
+    }
+    for key in ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS {
+        if let Some(value) = object.get(*key) {
+            output.insert((*key).to_string(), value.to_owned());
+        }
     }
     for key in [
         "metadata",
@@ -295,6 +312,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         "model".to_string(),
         object.get("model").cloned().unwrap_or(Value::Null),
     );
+    let anthropic_entry_system = object.get(ANTHROPIC_ENTRY_SYSTEM_EXTENSION);
+    let claude_code_system = object
+        .get("model")
+        .and_then(Value::as_str)
+        .and_then(claude_code_system_prompt_for_model);
     let mut system_parts = Vec::new();
     if let Some(system) = object
         .get("instructions")
@@ -311,7 +333,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     } else {
         responses_input_as_anthropic_messages(object.get("input"), &mut system_parts)?
     };
-    if !system_parts.is_empty() {
+    if let Some(system) = anthropic_entry_system {
+        output.insert("system".to_string(), system.to_owned());
+    } else if let Some(system) = claude_code_system {
+        output.insert("system".to_string(), system);
+    } else if !system_parts.is_empty() {
         output.insert(
             "system".to_string(),
             Value::String(system_parts.join("\n\n")),
@@ -330,6 +356,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     }
     if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {
         output.insert("thinking".to_string(), thinking);
+    }
+    for key in ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS {
+        if let Some(value) = object.get(*key) {
+            output.insert((*key).to_string(), value.to_owned());
+        }
     }
     for key in ["temperature", "top_p", "top_k"] {
         if let Some(value) = object.get(key) {
@@ -358,6 +389,60 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         ),
     );
     Ok(Value::Object(output))
+}
+
+fn claude_code_system_prompt_for_model(model: &str) -> Option<Value> {
+    if !model.trim().starts_with("claude-") {
+        return None;
+    }
+    Some(Value::Array(claude_code_system_prompt_blocks().to_vec()))
+}
+
+fn claude_code_system_prompt_blocks() -> &'static [Value] {
+    static BLOCKS: OnceLock<Vec<Value>> = OnceLock::new();
+    BLOCKS
+        .get_or_init(|| {
+            parse_claude_code_system_prompt_blocks(CLAUDE_CODE_SYSTEM_PROMPT_MD)
+                .expect("Claude Code Anthropic system prompt markdown must parse")
+        })
+        .as_slice()
+}
+
+fn parse_claude_code_system_prompt_blocks(content: &str) -> Result<Vec<Value>, String> {
+    let mut blocks = Vec::new();
+    let mut lines = content.lines();
+    while let Some(line) = lines.next() {
+        let marker = line.trim();
+        let Some(marker_tail) = marker.strip_prefix("<!-- routecodex-system-block:") else {
+            continue;
+        };
+        if !marker_tail.ends_with("-->") {
+            return Err("system block marker is unterminated".to_string());
+        }
+        let cache_control_ephemeral = marker_tail.contains("cache_control=ephemeral");
+        let mut text_lines = Vec::new();
+        loop {
+            let Some(next_line) = lines.next() else {
+                return Err("system block is missing closing marker".to_string());
+            };
+            if next_line.trim() == "<!-- /routecodex-system-block -->" {
+                break;
+            }
+            text_lines.push(next_line);
+        }
+        let text = text_lines.join("\n");
+        let mut entry = Map::new();
+        entry.insert("type".to_string(), Value::String("text".to_string()));
+        entry.insert("text".to_string(), Value::String(text));
+        if cache_control_ephemeral {
+            entry.insert("cache_control".to_string(), json!({"type":"ephemeral"}));
+        }
+        blocks.push(Value::Object(entry));
+    }
+    if blocks.is_empty() {
+        return Err("no routecodex-system-block entries found".to_string());
+    }
+    Ok(blocks)
 }
 
 fn responses_metadata_as_anthropic_metadata(

@@ -16,10 +16,11 @@ use routecodex_v3_error::{
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12, ReqwestResponsesTransport,
-    ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
-    V3ProviderResponseBody, V3ResponsesProviderTarget,
+    build_v3_anthropic_provider_request_header, build_v3_provider_12_responses_wire_payload,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12,
+    is_v3_anthropic_provider_request_header_name, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderResponseBody,
+    V3ResponsesProviderTarget,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -32,6 +33,32 @@ pub struct V3AnthropicRelayRuntimeInput {
     pub server_id: String,
     pub request_id: String,
     pub payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3AnthropicRelayClientHeader {
+    pub name: String,
+    pub value: String,
+}
+
+impl V3AnthropicRelayClientHeader {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+
+    pub fn is_provider_protocol_header_name(name: &str) -> bool {
+        is_v3_anthropic_provider_request_header_name(name)
+    }
+
+    pub fn provider_protocol(name: impl Into<String>, value: impl Into<String>) -> Option<Self> {
+        build_v3_anthropic_provider_request_header(name, value).map(|header| Self {
+            name: header.name().to_string(),
+            value: header.value().to_string(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,9 +178,32 @@ pub async fn execute_v3_anthropic_relay_runtime_with_default_transport(
     execute_v3_anthropic_relay_runtime(manifest, input, &ReqwestResponsesTransport::default()).await
 }
 
+pub async fn execute_v3_anthropic_relay_runtime_with_default_transport_and_client_headers(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
+) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    execute_v3_anthropic_relay_runtime_with_client_headers(
+        manifest,
+        input,
+        &ReqwestResponsesTransport::default(),
+        client_headers,
+    )
+    .await
+}
+
 pub async fn execute_v3_anthropic_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
+) -> crate::V3FoundationRuntimeOutput {
+    execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(manifest, input, Vec::new())
+        .await
+}
+
+pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
 ) -> crate::V3FoundationRuntimeOutput {
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
@@ -173,6 +223,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime(
         manifest,
         input,
         &transport,
+        client_headers,
         None,
         V3HubRelayResponseHookProfile::empty(),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
@@ -248,10 +299,21 @@ pub async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
+    execute_v3_anthropic_relay_runtime_with_client_headers(manifest, input, transport, Vec::new())
+        .await
+}
+
+pub async fn execute_v3_anthropic_relay_runtime_with_client_headers<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    transport: &T,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
+) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
     execute_v3_anthropic_relay_runtime_inner(
         manifest,
         input,
         transport,
+        client_headers,
         None,
         V3HubRelayResponseHookProfile::empty(),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
@@ -302,6 +364,7 @@ where
         manifest,
         input,
         transport,
+        Vec::new(),
         Some(V3AnthropicRelayLocalContinuationExecution {
             state,
             scope,
@@ -324,6 +387,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
+    client_headers: Vec<V3AnthropicRelayClientHeader>,
     local: Option<V3AnthropicRelayLocalContinuationExecution<'_>>,
     response_hook_profile: V3HubRelayResponseHookProfile,
     provider_health: V3ProviderFailureRuntimeHealth,
@@ -332,6 +396,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3AnthropicRelayRuntimeError::StaticRegistry(error.to_string()))?;
     let mut trace = Vec::with_capacity(17);
+    let provider_header_overrides =
+        anthropic_relay_client_headers_as_provider_request_headers(&client_headers);
     let transport_intent = if input.payload.get("stream").and_then(Value::as_bool) == Some(true) {
         V3HubTransportIntent::Sse
     } else {
@@ -472,8 +538,11 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 build_v3_transport_13_responses_http_request_from_v3_provider_12(wire)?
             }
             V3HubProviderWireProtocol::Anthropic => {
-                build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
-                    .map_err(V3AnthropicRelayRuntimeError::Target)?
+                build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
+                    wire,
+                    provider_header_overrides.clone(),
+                )
+                .map_err(V3AnthropicRelayRuntimeError::Target)?
             }
             other => {
                 return Err(V3AnthropicRelayRuntimeError::Target(format!(
@@ -896,6 +965,17 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             }
         }
     }
+}
+
+fn anthropic_relay_client_headers_as_provider_request_headers(
+    client_headers: &[V3AnthropicRelayClientHeader],
+) -> Vec<routecodex_v3_provider_responses::V3ProviderRequestHeader> {
+    client_headers
+        .iter()
+        .filter_map(|header| {
+            build_v3_anthropic_provider_request_header(&header.name, header.value.trim())
+        })
+        .collect()
 }
 
 fn find_anthropic_tool_result_ids(

@@ -1,7 +1,8 @@
 use super::{encode_v3_responses_semantic_as_anthropic_request, V3HubProviderWireProtocol};
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts, V3Provider12ResponsesWirePayload,
-    V3Transport13ResponsesHttpRequest,
+    build_v3_transport_13_responses_http_request_from_parts,
+    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
+    V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
 };
 
 pub(crate) fn provider_protocol_compat_id(protocol: V3HubProviderWireProtocol) -> String {
@@ -39,11 +40,21 @@ pub(crate) fn provider_wire_protocol_for_provider_type(
 }
 
 pub(crate) fn anthropic_messages_url(base_url: &str) -> String {
-    format!("{}/v1/messages", base_url.trim_end_matches('/'))
+    format!("{}/v1/messages?beta=true", base_url.trim_end_matches('/'))
 }
 
 pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08(
     wire: V3Provider12ResponsesWirePayload,
+) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
+        wire,
+        Vec::new(),
+    )
+}
+
+pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers(
+    wire: V3Provider12ResponsesWirePayload,
+    provider_headers: Vec<V3ProviderRequestHeader>,
 ) -> Result<V3Transport13ResponsesHttpRequest, String> {
     let request_id = wire.request_id().to_string();
     let target = wire.target().clone();
@@ -51,13 +62,25 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08(
     let body = encode_v3_responses_semantic_as_anthropic_request(wire.body().clone())
         .map_err(|error| format!("anthropic messages request codec failed: {error}"))?;
     let url_text = anthropic_messages_url(&target.base_url);
-    build_v3_transport_13_responses_http_request_from_parts(
+    if provider_headers.is_empty() {
+        return build_v3_transport_13_responses_http_request_from_parts(
+            request_id,
+            target.provider_id,
+            url_text,
+            target.auth,
+            stream_intent,
+            body,
+        )
+        .map_err(|error| error.to_string());
+    }
+    build_v3_transport_13_responses_http_request_with_provider_headers_from_parts(
         request_id,
         target.provider_id,
         url_text,
         target.auth,
         stream_intent,
         body,
+        provider_headers,
     )
     .map_err(|error| error.to_string())
 }

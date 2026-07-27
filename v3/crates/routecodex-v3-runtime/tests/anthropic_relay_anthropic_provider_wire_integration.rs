@@ -4,7 +4,10 @@ use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
 };
-use routecodex_v3_runtime::{execute_v3_anthropic_relay_runtime, V3AnthropicRelayRuntimeInput};
+use routecodex_v3_runtime::{
+    execute_v3_anthropic_relay_runtime, execute_v3_anthropic_relay_runtime_with_client_headers,
+    V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput,
+};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
@@ -43,6 +46,40 @@ impl ResponsesTransport for AnthropicProviderJsonTransport {
     }
 }
 
+struct AnthropicProviderProjectionTransport {
+    captured_projection: Mutex<Option<Value>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderProjectionTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.captured_projection.lock().unwrap() =
+            Some(request.redacted_provider_request_projection());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"msg_dynamic_relay_ok",
+                "type":"message",
+                "role":"assistant",
+                "model":"claude-fable-5",
+                "content":[{"type":"text","text":"ok"}],
+                "usage":{"input_tokens":7,"output_tokens":1},
+                "stop_reason":"end_turn"
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
 struct AnthropicProviderSseTextTransport;
 
 #[async_trait]
@@ -53,7 +90,7 @@ impl ResponsesTransport for AnthropicProviderSseTextTransport {
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         assert_eq!(
             request.url(),
-            "http://controlled.invalid/anthropic/v1/messages"
+            "http://controlled.invalid/anthropic/v1/messages?beta=true"
         );
         let stream = futures_util::stream::iter([
             Ok(br#"event: message_start
@@ -191,7 +228,7 @@ async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 
     assert_eq!(
         transport.captured_url.lock().unwrap().as_deref(),
-        Some("http://controlled.invalid/anthropic/v1/messages")
+        Some("http://controlled.invalid/anthropic/v1/messages?beta=true")
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert_eq!(captured["model"], "MiniMax-M3");
@@ -212,6 +249,116 @@ async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wir
         "RCC_V3_MINIMAX_BASIC_OK"
     );
     assert_eq!(output.client_response["stop_reason"], "end_turn");
+}
+
+#[tokio::test]
+async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_request() {
+    let dynamic_system = json!([
+        {
+            "type":"text",
+            "text":"x-anthropic-billing-header: cc_version=2.1.220.297; cc_entrypoint=sdk-cli;"
+        },
+        {
+            "type":"text",
+            "text":"You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+            "cache_control":{"type":"ephemeral"}
+        },
+        {
+            "type":"text",
+            "text":"DYNAMIC_CLAUDE_CODE_SYSTEM_BLOCK_3",
+            "cache_control":{"type":"ephemeral"}
+        }
+    ]);
+    let context_management = json!({
+        "edits":[{"type":"clear_thinking_20251015","keep":"all"}]
+    });
+    let output_config = json!({"effort":"high"});
+    let thinking = json!({"type":"adaptive","display":"omitted"});
+    let transport = AnthropicProviderProjectionTransport {
+        captured_projection: Mutex::new(None),
+    };
+
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers(
+        &manifest(),
+        V3AnthropicRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            request_id: "req-anthropic-dynamic-claude-code".into(),
+            payload: json!({
+                "model":"claude-fable-5",
+                "max_tokens":32,
+                "stream":true,
+                "system":dynamic_system,
+                "messages":[{
+                    "role":"user",
+                    "content":[{"type":"text","text":"Reply with exactly: ok"}]
+                }],
+                "metadata":{
+                    "user_id":"{\"device_id\":\"test-device\",\"account_uuid\":\"\",\"session_id\":\"test-session\"}"
+                },
+                "thinking":thinking,
+                "context_management":context_management,
+                "output_config":output_config,
+                "tools":[]
+            }),
+        },
+        &transport,
+        vec![
+            V3AnthropicRelayClientHeader::provider_protocol(
+                "user-agent",
+                "claude-cli/2.1.220 (external, sdk-cli)",
+            )
+            .unwrap(),
+            V3AnthropicRelayClientHeader::provider_protocol("anthropic-version", "2023-06-01")
+                .unwrap(),
+            V3AnthropicRelayClientHeader::provider_protocol(
+                "anthropic-beta",
+                "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,effort-2025-11-24,fallback-credit-2026-06-01",
+            )
+            .unwrap(),
+            V3AnthropicRelayClientHeader::provider_protocol(
+                "anthropic-dangerous-direct-browser-access",
+                "true",
+            )
+            .unwrap(),
+            V3AnthropicRelayClientHeader::provider_protocol("x-app", "cli").unwrap(),
+            V3AnthropicRelayClientHeader::provider_protocol("x-stainless-timeout", "600")
+                .unwrap(),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let projection = transport
+        .captured_projection
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider projection must be captured");
+    assert_eq!(
+        projection["url"],
+        "http://controlled.invalid/anthropic/v1/messages?beta=true"
+    );
+    assert_eq!(projection["body"]["system"], dynamic_system);
+    assert_eq!(projection["body"]["thinking"], thinking);
+    assert_eq!(projection["body"]["context_management"], context_management);
+    assert_eq!(projection["body"]["output_config"], output_config);
+    assert_eq!(projection["body"]["max_tokens"], 32);
+    assert_eq!(projection["body"]["stream"], true);
+    assert_eq!(
+        projection["body"]["messages"],
+        json!([{"role":"user","content":[{"type":"text","text":"Reply with exactly: ok"}]}])
+    );
+    assert_eq!(projection["headers"]["x-stainless-timeout"], "600");
+    assert!(projection["headers"]["anthropic-beta"]
+        .as_str()
+        .unwrap()
+        .contains("advisor-tool-2026-03-01"));
+    let serialized = serde_json::to_string(&projection).unwrap();
+    assert!(
+        !serialized.contains("cc_version=2.1.220.dae"),
+        "dynamic Anthropic entry relay must not be overwritten by static Claude Code compat prompt: {projection}"
+    );
 }
 
 #[tokio::test]
@@ -376,9 +523,17 @@ wire_name = "MiniMax-M3"
 supports_streaming = true
 capabilities = ["text", "tools", "reasoning", "vision", "longcontext"]
 
+[providers.minimax.models.claude-fable-5]
+wire_name = "claude-fable-5"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning", "vision", "longcontext"]
+
 [route_groups.gateway_priority_5555.pools.default]
 selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }]
+targets = [
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "minimax", model = "claude-fable-5", key = "key1", priority = 1 },
+]
 "#,
         )
         .unwrap(),

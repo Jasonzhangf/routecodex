@@ -23,8 +23,9 @@ mod provider_request_dry_run;
 pub(crate) use provider_request_dry_run::V3ProviderRequestDryRunNoNetworkTransport;
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
-    build_v3_anthropic_messages_transport_request_from_v3_provider_08, provider_protocol_compat_id,
-    provider_wire_protocol_for_provider_type,
+    build_v3_anthropic_messages_transport_request_from_v3_provider_08,
+    build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers,
+    provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
 };
 mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
