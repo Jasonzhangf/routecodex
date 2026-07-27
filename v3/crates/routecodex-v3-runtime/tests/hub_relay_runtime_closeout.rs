@@ -1389,7 +1389,17 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0].0, "limited");
+    assert_eq!(captures[0].1["model"], "gpt-5.5");
     assert_eq!(captures[1].0, "minimax");
+    assert_eq!(captures[1].1["model"], "MiniMax-M3");
+    assert_ne!(
+        captures[0].1["model"], captures[1].1["model"],
+        "target-local reselection must bind each attempt from its own selected target"
+    );
+    assert_ne!(
+        captures[1].1["model"], "client-responses",
+        "the client route model must not leak into the reselected provider attempt"
+    );
 }
 
 #[tokio::test]

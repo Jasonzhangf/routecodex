@@ -737,6 +737,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 request_id,
                 provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
+            V3ProviderError::ProviderModelBindingMismatch {
+                request_id,
+                provider_id,
+                ..
+            } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
             V3ProviderError::InvalidWireBody { request_id }
             | V3ProviderError::InvalidStreamIntent { request_id }
             | V3ProviderError::InvalidDataImage { request_id, .. }

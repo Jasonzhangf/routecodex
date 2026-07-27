@@ -1035,3 +1035,20 @@ resources:
     may_enter_client_body: false
     release_point: V3ServerRespOutbound06ClientFrame
     binding_status: anchored
+
+  - resource_id: v3.request.selected_provider_model_bound
+    resource_kind: provider_semantic_projection
+    lifecycle: v3.selected_provider_model_binding
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3SelectedProviderModelBindingBlock
+    identity: [requestId, providerId, canonicalModelId, wireModel]
+    semantic_contract:
+      client_model: route_input_observation_only
+      canonical_model_id: selected_target_configuration_key
+      wire_model: sole_upstream_model_truth
+    allowed_writers: [bind_v3_selected_provider_model]
+    allowed_readers: [responses_direct_request_projection_hook, ProviderReqCompat06ProviderCompat, V3Provider12ResponsesWirePayload]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server, routecodex-v3-provider-responses]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    binding_status: anchored

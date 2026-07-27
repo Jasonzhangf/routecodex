@@ -2076,3 +2076,42 @@ features:
       phase1_to_4: "Each phase must pass the required gates and commit separately before the next phase starts."
       live_closeout: "After Phase 0-4, global install, managed restart, health probes, provider-request dry-run, JSON/SSE smoke, and log scan are required before final completion."
       forbidden_claim: "Do not claim decomposition complete from Phase 0 gate alone; do not treat skipped gates or unrelated dirty-worktree blockers as pass evidence."
+
+  - feature_id: v3.route_selected_provider_model_binding
+    status: active
+    change_risk: high
+    owner_kind: rust_runtime_single_owner
+    owner_scope: "Bind the route-selected provider wire model once for Direct and Relay before Provider compatibility; Provider12 validates only."
+    design:
+      - docs/design/v3-selected-provider-model-binding.md
+      - docs/goals/v3-selected-provider-model-binding-test-design.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.selected_provider_model_binding.mainline.yml
+      - docs/architecture/wiki/v3-selected-provider-model-binding.md
+    required_positive:
+      - Direct client alias becomes the selected wire model before Provider12.
+      - Responses OpenAI Chat Anthropic and Gemini Relay compat receive the selected wire model.
+      - Target-local reselection binds each attempt from that attempt's selected target.
+    required_negative:
+      - Provider12 rejects stale or missing body.model instead of silently rewriting it.
+      - A binding mismatch is an internal runtime contract failure and never a provider health failure.
+      - Virtual Router remains payload-pure and Hub Router contains no provider-specific suffix mapping.
+      - A previous attempt's model cannot leak into a reselected attempt.
+    required_gates:
+      - npm run verify:v3-selected-provider-model-binding
+      - npm run test:v3-selected-provider-model-binding-red-fixtures
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test selected_model_binding_contract -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib selected_provider_model_binding -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_context_error_reselects_next_candidate_before_projection -- --nocapture
+      - npm run verify:v3-resource-map
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:v3-architecture-docs
+      - npm run build:v3-cli
+      - git diff --check
+    completion_rule:
+      source: "Positive/negative Rust tests, unique-writer red fixtures, architecture maps, and build gate pass."
+      runtime: "Installed V3 10000 dry-run and 5555 old-sample replay prove provider-request body.model equals the selected candidate wire_model for every attempt."
+      forbidden_claim: "Correct local provider-request model does not prove an upstream provider did not remap that model internally."

@@ -98,13 +98,18 @@ pub fn build_v3_provider_12_responses_wire_payload(
     }
     replace_historical_responses_tool_output_data_images(&mut current_request_body);
     validate_current_responses_data_images(&request_id, &current_request_body)?;
-    current_request_body
-        .as_object_mut()
-        .expect("wire body object was validated above")
-        .insert(
-            "model".to_string(),
-            Value::String(target.wire_model.clone()),
-        );
+    let actual_model = current_request_body
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if actual_model.as_deref() != Some(target.wire_model.as_str()) {
+        return Err(V3ProviderError::ProviderModelBindingMismatch {
+            request_id,
+            provider_id: target.provider_id.clone(),
+            expected_model: target.wire_model.clone(),
+            actual_model,
+        });
+    }
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
@@ -374,9 +379,9 @@ mod tests {
     const VALID_PNG_DATA_URL: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
     #[test]
-    fn wire_moves_request_and_changes_only_selected_model() {
+    fn wire_accepts_only_prebound_selected_model() {
         let body = json!({
-            "model":"client-model",
+            "model":"upstream-model",
             "input":"hello",
             "metadata":{"client":"kept"},
             "unknown_client_field":true
@@ -411,7 +416,7 @@ mod tests {
         let current_user_image = VALID_PNG_DATA_URL;
         let current_tool_image = VALID_PNG_DATA_URL;
         let body = json!({
-            "model": "client-model",
+            "model": "upstream-model",
             "stream": true,
             "input": [
                 {
@@ -474,7 +479,7 @@ mod tests {
     #[test]
     fn wire_does_not_broadly_replace_text_or_non_data_historical_tool_images() {
         let body = json!({
-            "model": "client-model",
+            "model": "upstream-model",
             "input": [
                 {
                     "type": "message",
@@ -512,7 +517,7 @@ mod tests {
     #[test]
     fn current_turn_invalid_png_data_image_is_rejected_before_provider_transport() {
         let body = json!({
-            "model": "client-model",
+            "model": "upstream-model",
             "input": [
                 {
                     "type": "message",
@@ -562,7 +567,7 @@ mod tests {
     #[test]
     fn wire_rejects_routecodex_control_keys_before_provider_transport() {
         let body = json!({
-            "model":"client-model",
+            "model":"upstream-model",
             "input":[{
                 "role":"user",
                 "content":"hello",
@@ -585,7 +590,7 @@ mod tests {
     #[test]
     fn wire_rejects_routing_capability_control_keys_before_provider_transport() {
         let body = json!({
-            "model":"client-model",
+            "model":"upstream-model",
             "input":"hello",
             "request_capabilities":["vision"]
         });

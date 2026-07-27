@@ -4797,3 +4797,9 @@ Tags: #routecodex #5520 #10000 #gpt56-routing-removed #encrypted-reasoning
 - Direct same-protocol Responses now has Direct-scoped StoplessCenter MetadataCenter control after SameProtocolDirect via V3ResponsesDirectStoplessControlState; semantic owner remains StoplessCenterMetadataControl; Direct does not write Relay StoplessCenter or re-enter Relay Chat Process.
 - Installed rccv3 sha256 `0bb04331dad8c5a1252d6965a34e3c14b6442850eb956cfc4bb58e7b71817651`; restart instance `v3-04f1f1b9a58efb01f5ff`; health 10000/4444/5555 version=3.
 - Live clean Direct JSON sid `direct-metadata-clean-c10fe4c5` completed with usage, retained client marker, no stopless internal echo. Forced-tool no-op projection works; second-turn no-op output still hits provider_http_400 and is not closed as full two-turn live proof.
+
+## 2026-07-27 - V3 selected Provider model binding truth
+- Client `request.model` is routing input only. After `V3Target10ConcreteProviderSelected`, the selected candidate's `wire_model` is the only Provider model truth for that attempt.
+- The only payload writer is Rust owner `v3.route_selected_provider_model_binding` / `selected_provider_model_binding.rs`, shared by Direct and Relay before Provider compatibility. Virtual Router selects opaque targets and never edits payload; Provider12 validates `body.model == target.wire_model` and must not silently overwrite.
+- Retry/reselection always binds from the new attempt's selected target. A mismatch is internal `provider_model_binding_mismatch`, not provider health/failure input.
+- Verified installed/live on 2026-07-27: old 5555 sample `652302-6819` dry-run emitted `glmrelay_openai` body `model=glm-5.2`; real sample `652291-6808` emitted per-provider models `glm-5.2`, `gpt-5.5`, and `MiniMax-M3` across eight attempts with no cross-attempt alias leak.

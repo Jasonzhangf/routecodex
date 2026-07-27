@@ -71,6 +71,22 @@ export const GENERATED_WIKI_PAGES = [
 
 export const MANUAL_WIKI_PAGES = [
   {
+    path: `${WIKI_ROOT}/v3-selected-provider-model-binding.md`,
+    title: '# V3 Selected Provider Model Binding',
+    minMermaidBlocks: 1,
+    requiredTokens: [
+      '## Purpose',
+      '## Architecture rule',
+      '## Mainline bindings',
+      '## Direct and Relay',
+      '## Forbidden paths',
+      '## Review checklist',
+      'V3SelectedProviderModelBindingBlock',
+      'v3-model-bind-01',
+      'v3-model-bind-04',
+    ],
+  },
+  {
     path: `${WIKI_ROOT}/v3-config-compact-hub-v1-defaults-sop.md`,
     title: '# V3 Config Compact Hub V1 Defaults SOP',
     minMermaidBlocks: 1,

@@ -264,7 +264,7 @@ async fn websocket_v2_reuses_one_connection_for_exact_incremental_continuation()
     let first_wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-1",
         target(&controlled.url),
-        json!({"model":"client","input":"use a tool","stream":false,"background":false}),
+        json!({"model":"model","input":"use a tool","stream":false,"background":false}),
     )
     .unwrap();
     let first = transport
@@ -280,7 +280,7 @@ async fn websocket_v2_reuses_one_connection_for_exact_incremental_continuation()
         "req-ws-2",
         target(&controlled.url),
         json!({
-            "model":"client",
+            "model":"model",
             "previous_response_id":"resp_ws_1",
             "input":[{"type":"function_call_output","call_id":"call_ws_1","output":"ok"}],
             "stream":false
@@ -318,7 +318,7 @@ async fn websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_f
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-sse",
         selected,
-        json!({"model":"client","input":"hello","stream":true}),
+        json!({"model":"model","input":"hello","stream":true}),
     )
     .unwrap();
     let raw = transport
@@ -338,7 +338,7 @@ async fn websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_f
     let bad = build_v3_provider_12_responses_wire_payload(
         "req-ws-connect-error",
         bad_target,
-        json!({"model":"client","input":"hello"}),
+        json!({"model":"model","input":"hello"}),
     )
     .unwrap();
     assert!(matches!(
@@ -364,7 +364,7 @@ async fn websocket_v2_json_aggregates_function_call_item_when_terminal_output_is
         "req-ws-asxs-shape",
         selected,
         json!({
-            "model":"client",
+            "model":"model",
             "input":"force lookup_v3_pin",
             "stream":false,
             "tools":[{"type":"function","name":"lookup_v3_pin","parameters":{"type":"object","properties":{}}}],
@@ -401,7 +401,7 @@ async fn websocket_v2_sse_returns_first_frame_before_terminal_event() {
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-incremental",
         selected,
-        json!({"model":"client","input":"hello","stream":true}),
+        json!({"model":"model","input":"hello","stream":true}),
     )
     .unwrap();
     let raw = tokio::time::timeout(
@@ -662,7 +662,7 @@ async fn send_json(
     let wire = build_v3_provider_12_responses_wire_payload(
         request_id,
         target_with_env(url, env),
-        json!({"model":"client","input":"hello","stream":false}),
+        json!({"model":"model","input":"hello","stream":false}),
     )
     .unwrap();
     let raw = transport
@@ -707,7 +707,7 @@ async fn websocket_v2_early_sse_drop_discards_connection_before_next_turn() {
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-early-drop",
         target_with_env(&controlled.url, "V3_WS_KEY_EARLY_DROP"),
-        json!({"model":"client","input":"hello","stream":true}),
+        json!({"model":"model","input":"hello","stream":true}),
     )
     .unwrap();
     let raw = transport
@@ -854,7 +854,7 @@ async fn websocket_v2_codex_error_event_discards_connection_and_allows_client_re
         &controlled.url,
         "V3_WS_KEY_RETRY_AFTER_ERROR",
         json!({
-            "model":"client",
+            "model":"model",
             "previous_response_id":"resp_anchor",
             "input":[{"type":"function_call_output","call_id":"call_ws_anchor","output":"retry"}],
             "stream":false
@@ -881,7 +881,7 @@ async fn websocket_v2_codex_error_event_discards_connection_and_allows_client_re
         &controlled.url,
         "V3_WS_KEY_RETRY_AFTER_ERROR",
         json!({
-            "model":"client",
+            "model":"model",
             "previous_response_id":"resp_anchor",
             "input":[{"type":"function_call_output","call_id":"call_ws_anchor","output":"retry"}],
             "stream":false
@@ -951,7 +951,7 @@ async fn websocket_v2_read_cancellation_discards_connection_before_reuse() {
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-read-cancel",
         target_with_env(&url, "V3_WS_KEY_READ_CANCEL"),
-        json!({"model":"client","input":"hello","stream":false}),
+        json!({"model":"model","input":"hello","stream":false}),
     )
     .unwrap();
     let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire)
@@ -1042,7 +1042,7 @@ async fn websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leak
     let first_wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-concurrent-1",
         target_with_env(&url, "V3_WS_KEY_CONCURRENT"),
-        json!({"model":"client","input":"first","stream":true}),
+        json!({"model":"model","input":"first","stream":true}),
     )
     .unwrap();
     let first_raw = transport
@@ -1170,7 +1170,7 @@ async fn websocket_v2_cancellation_before_connect_or_reused_send_is_client_disco
             "ws://127.0.0.1:1/v1/responses",
             "V3_WS_KEY_CANCEL_BEFORE_CONNECT",
         ),
-        json!({"model":"client","input":"hello","stream":false}),
+        json!({"model":"model","input":"hello","stream":false}),
     )
     .unwrap();
     let error = transport
@@ -1202,7 +1202,7 @@ async fn websocket_v2_cancellation_before_connect_or_reused_send_is_client_disco
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-cancel-before-send",
         target_with_env(&controlled.url, "V3_WS_KEY_CANCEL_BEFORE_SEND"),
-        json!({"model":"client","input":"must not send","stream":false}),
+        json!({"model":"model","input":"must not send","stream":false}),
     )
     .unwrap();
     let error = transport
@@ -1219,7 +1219,7 @@ async fn websocket_v2_cancellation_before_connect_or_reused_send_is_client_disco
         "req-ws-after-cancel-before-send",
         target_with_env(&controlled.url, "V3_WS_KEY_CANCEL_BEFORE_SEND"),
         json!({
-            "model":"client",
+            "model":"model",
             "previous_response_id":"resp_ws_1",
             "input":[{"type":"function_call_output","call_id":"call_ws_1","output":"ok"}],
             "stream":false

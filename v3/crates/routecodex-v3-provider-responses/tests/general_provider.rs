@@ -172,7 +172,7 @@ async fn one_generic_provider_serves_distinct_instances_and_preserves_wire_seman
         ),
     ] {
         let body = json!({
-            "model": "client-alias",
+            "model": wire_model,
             "input": [{"role":"user","content":[{"type":"input_text","text":"hello"}]}],
             "tools": [{"type":"function","name":"lookup","parameters":{"type":"object"}}],
             "metadata": {"client_field":"preserve"},
@@ -238,7 +238,7 @@ async fn token_file_auth_is_resolved_only_at_transport_boundary() {
             "file-primary",
             V3ProviderAuthSecretHandle::TokenFile(token_path.display().to_string()),
         ),
-        json!({"model":"client-alias","input":"hello","case":"json"}),
+        json!({"model":"model-token-file","input":"hello","case":"json"}),
     )
     .unwrap();
     assert!(!format!("{wire:?}").contains(secret));
@@ -273,7 +273,7 @@ async fn sse_is_streamed_as_validated_raw_events_and_invalid_sse_fails_explicitl
             "stream",
             "V3_GENERAL_SSE_KEY",
         ),
-        json!({"model":"client","input":"hello","stream":true,"case":"sse"}),
+        json!({"model":"model-stream","input":"hello","stream":true,"case":"sse"}),
     )
     .unwrap();
     let raw = transport
@@ -300,7 +300,7 @@ async fn sse_is_streamed_as_validated_raw_events_and_invalid_sse_fails_explicitl
             "stream",
             "V3_GENERAL_SSE_KEY",
         ),
-        json!({"model":"client","input":"hello","stream":true,"case":"malformed_sse"}),
+        json!({"model":"model-stream","input":"hello","stream":true,"case":"malformed_sse"}),
     )
     .unwrap();
     let raw = transport
@@ -322,7 +322,7 @@ async fn sse_is_streamed_as_validated_raw_events_and_invalid_sse_fails_explicitl
             "stream",
             "V3_GENERAL_SSE_KEY",
         ),
-        json!({"model":"client","input":"hello","stream":true,"case":"invalid_utf8_sse"}),
+        json!({"model":"model-stream","input":"hello","stream":true,"case":"invalid_utf8_sse"}),
     )
     .unwrap();
     let raw = transport
@@ -354,7 +354,7 @@ async fn sse_request_accepts_json_provider_response_as_json_raw_body() {
             "stream-json",
             "V3_GENERAL_SSE_JSON_KEY",
         ),
-        json!({"model":"client","input":"hello","stream":true,"case":"json"}),
+        json!({"model":"model-stream-json","input":"hello","stream":true,"case":"json"}),
     )
     .unwrap();
     let raw = transport
@@ -389,7 +389,7 @@ async fn json_request_rejects_sse_provider_response_without_switching_response_k
             "json-stream",
             "V3_GENERAL_JSON_SSE_KEY",
         ),
-        json!({"model":"client","input":"hello","case":"sse"}),
+        json!({"model":"model-json-stream","input":"hello","case":"sse"}),
     )
     .unwrap();
     let error = transport
@@ -425,7 +425,7 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
             "missing",
             "V3_GENERAL_MISSING_KEY",
         ),
-        json!({"model":"client","input":"hello"}),
+        json!({"model":"model","input":"hello"}),
     )
     .unwrap();
     assert!(matches!(
@@ -449,7 +449,7 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
                 "error",
                 "V3_GENERAL_ERROR_KEY",
             ),
-            json!({"model":"client","input":"hello","case":case_name}),
+            json!({"model":"model","input":"hello","case":case_name}),
         )
         .unwrap();
         match transport
@@ -478,7 +478,7 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
             "error",
             "V3_GENERAL_ERROR_KEY",
         ),
-        json!({"model":"client","input":"hello"}),
+        json!({"model":"model","input":"hello"}),
     )
     .unwrap();
     assert!(matches!(
@@ -503,7 +503,7 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
             "error",
             "V3_GENERAL_ERROR_KEY",
         ),
-        json!({"model":"client","input":"hello"}),
+        json!({"model":"model","input":"hello"}),
     )
     .unwrap();
     let cancelled_request =

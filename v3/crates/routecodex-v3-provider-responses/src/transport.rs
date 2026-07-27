@@ -1535,7 +1535,7 @@ mod tests {
             "req-responses-additional-tools",
             responses_http_target(),
             json!({
-                "model":"client-model",
+                "model":"glm-5.2",
                 "instructions":"stopreason reasoningStop <rcc_stop_schema>",
                 "input":[
                     {
@@ -1647,7 +1647,7 @@ mod tests {
             "req-responses-submit-tool-outputs",
             responses_http_target(),
             json!({
-                "model":"client-model",
+                "model":"glm-5.2",
                 "response_id":"resp_submit_http_v2_parity",
                 "tool_outputs":[{"call_id":"call_submit_http","output":"ok"}],
                 "stream":true

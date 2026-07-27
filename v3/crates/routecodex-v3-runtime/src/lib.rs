@@ -8,6 +8,7 @@ pub mod nodes;
 mod provider_failure_runtime_policy;
 pub mod remote_continuation;
 pub mod responses_continuation_owner;
+mod selected_provider_model_binding;
 mod shared;
 mod token_estimation;
 

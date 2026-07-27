@@ -14,6 +14,15 @@ pub enum V3ProviderError {
     #[error("Responses wire body for request {request_id} must be a JSON object")]
     InvalidWireBody { request_id: String },
     #[error(
+        "provider wire model binding mismatch for request {request_id}: expected {expected_model}, got {actual_model:?}"
+    )]
+    ProviderModelBindingMismatch {
+        request_id: String,
+        provider_id: String,
+        expected_model: String,
+        actual_model: Option<String>,
+    },
+    #[error(
         "Responses wire body for request {request_id} contains RouteCodex control field {field}"
     )]
     ControlFieldInWireBody {

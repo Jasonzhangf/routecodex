@@ -3105,3 +3105,59 @@ features:
       - npm run test:v3-workspace
       - npm run verify:v3-cargo-fmt
     runtime_status: phase0_gate_active_no_runtime_change
+
+  - feature_id: v3.route_selected_provider_model_binding
+    status: active
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+    design_truth: docs/design/v3-selected-provider-model-binding.md
+    test_design: docs/goals/v3-selected-provider-model-binding-test-design.md
+    sop: .agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md
+    resource_bindings:
+      - v3.route.opaque_target
+      - v3.target.concrete_provider
+      - v3.hub.resolved_target
+      - v3.request.provider_semantic
+      - v3.request.selected_provider_model_bound
+      - v3.hub.provider_wire_payload
+      - v3.provider.responses_wire_payload
+    mainline_bindings:
+      - v3-model-bind-01
+      - v3-model-bind-02
+      - v3-model-bind-03
+      - v3-model-bind-04
+    entry_symbols:
+      - bind_v3_selected_provider_model
+      - responses_direct_request_projection_hook
+      - build_v3_provider_standard_protocol_payload_from_req07
+      - build_v3_provider_12_responses_wire_payload
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
+      - v3/crates/routecodex-v3-runtime/src/hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-provider-responses/src/wire.rs
+      - v3/crates/routecodex-v3-provider-responses/src/error.rs
+      - docs/design/v3-selected-provider-model-binding.md
+      - docs/goals/v3-selected-provider-model-binding-test-design.md
+      - docs/architecture/manifests/v3.selected_provider_model_binding.mainline.yml
+      - docs/architecture/wiki/v3-selected-provider-model-binding.md
+      - scripts/architecture/verify-v3-selected-provider-model-binding.mjs
+      - scripts/tests/v3-selected-provider-model-binding-red-fixtures.mjs
+    forbidden_paths:
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-server
+      - src
+      - sharedmodule
+    required_gates:
+      - npm run verify:v3-selected-provider-model-binding
+      - npm run test:v3-selected-provider-model-binding-red-fixtures
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test selected_model_binding_contract -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib selected_provider_model_binding -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_context_error_reselects_next_candidate_before_projection -- --nocapture
+      - npm run verify:v3-resource-map
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:v3-architecture-docs
+      - npm run build:v3-cli
+      - git diff --check
+    runtime_status: source_active_live_verification_required

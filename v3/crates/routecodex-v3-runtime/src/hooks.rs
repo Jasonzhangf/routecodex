@@ -175,6 +175,20 @@ fn responses_direct_request_projection_hook(
     policy: &V3ResponsesDirect11Policy,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
     let candidate = &policy.target.candidate;
+    let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
+        policy.request_body.clone(),
+        candidate,
+    )
+    .map(crate::selected_provider_model_binding::V3SelectedProviderModelBinding::into_payload)
+    .map_err(|reason| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ResponsesDirect11Policy",
+            "selected_provider_model_binding_failed",
+            reason,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
     let secret = match (&candidate.env_name, &candidate.token_file) {
         (Some(name), None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
         (None, Some(path)) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
@@ -207,7 +221,7 @@ fn responses_direct_request_projection_hook(
             responses_transport: candidate.responses_transport,
             websocket_v2_url: candidate.websocket_v2_url.clone(),
         },
-        policy.request_body.clone(),
+        request_body,
     )
     .map_err(provider_error_source("V3Provider12ResponsesWirePayload"))
 }
@@ -243,6 +257,15 @@ pub(crate) fn build_v3_provider_error_source(
             "invalid_provider_request_payload",
             message,
         ),
+        V3ProviderError::ProviderModelBindingMismatch { .. } => {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                stage,
+                "provider_model_binding_mismatch",
+                message,
+                internal_error_code_for_stage(stage),
+            )
+        }
         V3ProviderError::ControlFieldInWireBody { .. } => build_v3_error_01_source_raised_internal(
             V3ErrorSourceKind::RuntimeFailure,
             stage,
@@ -298,6 +321,7 @@ fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
         V3ProviderError::ResponseBody { .. } => "provider_response_body_error".to_string(),
         V3ProviderError::MalformedSse { .. } => "provider_malformed_sse".to_string(),
         V3ProviderError::InvalidWireBody { .. }
+        | V3ProviderError::ProviderModelBindingMismatch { .. }
         | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
@@ -415,6 +439,7 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             message: Some(reason.clone()),
         },
         V3ProviderError::InvalidWireBody { .. }
+        | V3ProviderError::ProviderModelBindingMismatch { .. }
         | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
@@ -465,7 +490,59 @@ fn responses_direct_error_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use routecodex_v3_config::{V3ResponsesTransportKind, V3RouteTargetKind};
     use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
+    use routecodex_v3_target::{V3Target10ConcreteProviderSelected, V3TargetCandidate};
+    use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
+    use serde_json::json;
+    use std::collections::BTreeSet;
+
+    fn direct_policy_with_models(
+        client_model: &str,
+        canonical_model: &str,
+        wire_model: &str,
+    ) -> V3ResponsesDirect11Policy {
+        V3ResponsesDirect11Policy {
+            target: V3Target10ConcreteProviderSelected {
+                route: V3Router07OpaqueTargetHitOnce {
+                    server_id: "direct-model-binding".to_string(),
+                    routing_group_id: "direct-model-binding".to_string(),
+                    pool_id: "default".to_string(),
+                    target_index: 0,
+                    target_kind: V3RouteTargetKind::ProviderModel,
+                    target_id: None,
+                    target_plan: Vec::new(),
+                    request_client_model: Some(client_model.to_string()),
+                    request_capabilities: BTreeSet::from(["text".to_string()]),
+                    hit_count: 1,
+                },
+                candidate: V3TargetCandidate {
+                    provider_id: "selected-provider".to_string(),
+                    provider_type: "responses".to_string(),
+                    auth_alias: "primary".to_string(),
+                    model_id: canonical_model.to_string(),
+                    wire_model: wire_model.to_string(),
+                    visible_model_ids: vec![client_model.to_string()],
+                    model_capabilities: vec!["text".to_string()],
+                    base_url: "https://provider.invalid/v1".to_string(),
+                    responses_transport: V3ResponsesTransportKind::Http,
+                    websocket_v2_url: None,
+                    compatibility_profile: None,
+                    env_name: Some("TEST_KEY".to_string()),
+                    token_file: None,
+                    required_capabilities: Vec::new(),
+                    pool_ids: vec!["default".to_string()],
+                    default_pool_member: true,
+                    path: vec!["selected-provider".to_string()],
+                },
+                unavailable_candidates: Vec::new(),
+                attempts: 1,
+                default_floor_protected: false,
+            },
+            request_id: "req-direct-model-binding".to_string(),
+            request_body: json!({"model": client_model, "input": "hello"}),
+        }
+    }
 
     #[test]
     fn responses_direct_static_hooks_are_registered() {
@@ -479,6 +556,42 @@ mod tests {
         ] {
             assert!(registry.require_hook(hook), "{hook}");
         }
+    }
+
+    #[test]
+    fn direct_request_projection_binds_selected_wire_model_before_provider_wire() {
+        let registry = register_responses_direct_hooks();
+        let policy = direct_policy_with_models(
+            "client-route-alias",
+            "canonical-provider-model",
+            "provider-wire-model",
+        );
+
+        let wire = registry
+            .run_request_projection(&policy)
+            .expect("route-selected direct model must bind before Provider12");
+
+        assert_eq!(wire.body()["model"], "provider-wire-model");
+        assert_ne!(wire.body()["model"], "client-route-alias");
+    }
+
+    #[test]
+    fn provider_model_binding_mismatch_is_internal_not_provider_failure() {
+        let source = provider_error_source("V3Provider12ResponsesWirePayload")(
+            V3ProviderError::ProviderModelBindingMismatch {
+                request_id: "req-model-mismatch".to_string(),
+                provider_id: "selected-provider".to_string(),
+                expected_model: "provider-wire-model".to_string(),
+                actual_model: Some("client-route-alias".to_string()),
+            },
+        );
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(source.code, "provider_model_binding_mismatch");
+        assert!(source.external_error.is_none());
+        let internal = source.internal_error.expect("internal contract identity");
+        assert_eq!(internal.internal_code, "500-150");
+        assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
     }
 
     #[tokio::test]
