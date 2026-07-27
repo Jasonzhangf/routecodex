@@ -942,7 +942,7 @@ targets = [{ kind = "provider_model", provider = "route_search", model = "m", ke
     }
 
     #[test]
-    fn context_window_near_limit_candidate_is_skipped_when_safe_candidate_exists() {
+    fn configured_priority_is_not_overridden_by_context_near_limit_heuristic() {
         let source = r#"
 version = 3
 [servers.s]
@@ -1006,32 +1006,42 @@ targets = [
             )
             .unwrap();
 
-        assert_eq!(selected.candidate.provider_id, "long");
-        assert_eq!(
-            selected.unavailable_candidates,
-            vec!["short:key:m:context_near_limit"]
-        );
-    }
+        assert_eq!(selected.candidate.provider_id, "short");
+        assert!(selected.unavailable_candidates.is_empty());
 
-    #[test]
-    fn context_window_near_limit_candidate_remains_selectable_when_no_safe_candidate_exists() {
-        let mut expanded = expanded();
-        expanded.route.request_input_tokens = 950;
-        for candidate in &mut expanded.candidates {
-            candidate.max_context_tokens = Some(1000);
-        }
-
-        let selected = V3TargetInterpreter::default()
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: None,
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 950,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        let selected_after_explicit_failure = target
             .select_available(
                 expanded,
                 &Availability {
-                    blocked: BTreeSet::new(),
+                    blocked: BTreeSet::from(["short:key:m".into()]),
                 },
                 0,
             )
             .unwrap();
-
-        assert_eq!(selected.candidate.provider_id, "a");
+        assert_eq!(
+            selected_after_explicit_failure.candidate.provider_id,
+            "long"
+        );
     }
 
     #[test]
@@ -1319,31 +1329,10 @@ impl V3TargetInterpreter {
         // Explicit exclusions still block via the exhaustion path below.
         let direct_route = expanded.route.pool_id == "direct";
         let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
-        let context_safe_available = expanded.candidates.iter().any(|candidate| {
-            candidate_satisfies_required_capabilities(candidate)
-                && candidate_context_is_safe(candidate, expanded.route.request_input_tokens)
-                && availability
-                    .availability(
-                        &candidate.provider_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        now_ms,
-                    )
-                    .available
-        });
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
                     "{}:{}:{}:capability_mismatch",
-                    candidate.provider_id, candidate.auth_alias, candidate.model_id
-                ));
-                continue;
-            }
-            if context_safe_available
-                && candidate_context_is_risky(candidate, expanded.route.request_input_tokens)
-            {
-                unavailable.push(format!(
-                    "{}:{}:{}:context_near_limit",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
                 ));
                 continue;
@@ -1779,22 +1768,6 @@ fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> b
         .required_capabilities
         .iter()
         .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
-}
-
-fn candidate_context_is_safe(candidate: &V3TargetCandidate, input_tokens: u64) -> bool {
-    candidate
-        .max_context_tokens
-        .is_some_and(|max_context| input_tokens < context_warn_threshold(max_context))
-}
-
-fn candidate_context_is_risky(candidate: &V3TargetCandidate, input_tokens: u64) -> bool {
-    candidate
-        .max_context_tokens
-        .is_some_and(|max_context| input_tokens >= context_warn_threshold(max_context))
-}
-
-fn context_warn_threshold(max_context_tokens: u64) -> u64 {
-    max_context_tokens.saturating_mul(9) / 10
 }
 
 fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {

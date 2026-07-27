@@ -555,6 +555,7 @@ features:
       - v3/crates/routecodex-v3-runtime
       - v3/crates/routecodex-v3-server
       - docs/goals/v3-virtual-router-target-interpreter-plan.md
+      - docs/goals/v3-target-priority-context-heuristic-test-design.md
       - docs/design/v3-system-definition.md
       - docs/design/v3-routecodex-rust-module-boundaries.md
       - docs/design/v3-routecodex-runtime-resource-contract.md
@@ -575,6 +576,7 @@ features:
       - restart
     required_gates:
       - npm run test:v3-p5-router-target
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target configured_priority_is_not_overridden_by_context_near_limit_heuristic -- --nocapture
       - npm run test:v3-p5-server-blackbox
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:: -- --nocapture
       - npm run verify:v3-module-boundaries
@@ -589,6 +591,7 @@ features:
       - "Request tool facts include top-level tools and Responses additional_tools; Codex coding tools set coding, tool_search sets search, and web_search/web_search_preview set web_search before pool matching."
       - "V3Router07OpaqueTargetHitOnce carries request route facts to Target as route/pool selection signals; route selection is not model capability filtering."
       - "Target hard capability_mismatch is allowed only for capabilities the selected model/provider may genuinely lack: web_search/search and multimodal/vision."
+      - "After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order; max_context_tokens metadata cannot synthesize context_near_limit unavailability or preempt priority, while Provider availability/health and request-local provider-failure exclusion remain explicit switch inputs."
       - "Tools, tool_outputs, reasoning/thinking, coding, longcontext, remote_continuation, and local_materialization are route/protocol/continuation ownership signals; they may steer pool choice but must not mark a candidate as capability_mismatch."
       - "Continuation is resolved by previous_response_id owner: direct remote records exact-pin to the same GPT-family provider/model/auth, while relay/local records restore through the local continuation store. It is not a model capability."
       - "OpenAI Responses request.reasoning is also exposed as the thinking route fact so configs using either vocabulary route the same request."

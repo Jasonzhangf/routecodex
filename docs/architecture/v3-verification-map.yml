@@ -949,6 +949,7 @@ features:
       - v3/crates/routecodex-v3-server
     test_design:
       - docs/goals/v3-virtual-router-target-interpreter-plan.md
+      - docs/goals/v3-target-priority-context-heuristic-test-design.md
     required_contract:
       - Virtual Router resolves one explicit default pool and returns one opaque target only
       - Target expands nested forwarders and performs all internal availability reselection
@@ -957,11 +958,13 @@ features:
       - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
       - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools, tool_search, and web_search surfaces become routing capabilities before pool matching
       - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization never hard-reject a candidate
+      - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order; model context metadata cannot synthesize `context_near_limit` unavailability or preempt priority, while provider health and request-local provider-failure exclusion remain explicit switch inputs
       - Responses continuation is owner-routed by previous_response_id at V3HubReqContinuation03Classified: remote/direct records exact-pin to the same GPT-family provider/model/auth; local/relay records restore from the local continuation store; neither path is a Target model capability
       - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
       - Target dedupe retains optional/default provenance and protects the default floor's final compatible provider
     required_gates:
       - npm run test:v3-p5-router-target
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target configured_priority_is_not_overridden_by_context_near_limit_heuristic -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:: -- --nocapture
       - npm run test:v3-p5-server-blackbox
