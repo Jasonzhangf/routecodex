@@ -327,17 +327,29 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
                 forwarded.extend(chunk.expect("controlled SSE chunk must project"));
             }
             let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("event: response.output_item.added"));
+            assert!(text.contains("event: response.function_call_arguments.done"));
             assert!(text.contains("event: response.output_item.done"));
             assert!(text.contains("event: response.completed"));
             assert!(text.contains("event: response.done"));
             assert!(!text.contains("event: response.requires_action"));
             assert!(text.contains("\"status\":\"requires_action\""));
             assert!(
-                text.find("event: response.completed").unwrap()
+                text.find("event: response.output_item.added").unwrap()
+                    < text
+                        .find("event: response.function_call_arguments.done")
+                        .unwrap()
+                    && text
+                        .find("event: response.function_call_arguments.done")
+                        .unwrap()
+                        < text.find("event: response.output_item.done").unwrap()
+                    && text.find("event: response.output_item.done").unwrap()
+                        < text.find("event: response.completed").unwrap()
+                    && text.find("event: response.completed").unwrap()
                     < text.find("event: response.done").unwrap()
                     && text.find("event: response.done").unwrap()
                         < text.find("data: [DONE]").unwrap(),
-                "Responses Relay client terminal ordering must be response.completed -> response.done -> [DONE]: {text}"
+                "Responses Relay client tool-call SSE ordering must be output_item.added -> function_call_arguments.done -> output_item.done -> response.completed -> response.done -> [DONE]: {text}"
             );
             assert!(text.contains("\"input_tokens\":13"));
             assert!(

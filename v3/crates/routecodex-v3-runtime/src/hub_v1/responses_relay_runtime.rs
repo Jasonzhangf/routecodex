@@ -5634,6 +5634,15 @@ fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
                 for (index, item) in output.iter().enumerate() {
                     let projected_item =
                         project_v3_responses_client_event_output_item_done_item(item);
+                    if let Err(error) = append_v3_responses_client_function_call_progress_frames(
+                        &mut frames,
+                        response_id,
+                        index,
+                        &projected_item,
+                    ) {
+                        frames.push(Err(error));
+                        return Box::pin(stream::iter(frames));
+                    }
                     frames.push(Ok(build_v3_runtime_sse_json_frame(
                         "response.output_item.done",
                         &json!({
@@ -5673,6 +5682,65 @@ fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     }
     frames.push(Ok(b"data: [DONE]\n\n".to_vec()));
     Box::pin(stream::iter(frames))
+}
+
+fn append_v3_responses_client_function_call_progress_frames(
+    frames: &mut Vec<Result<Vec<u8>, String>>,
+    response_id: &str,
+    output_index: usize,
+    item: &Value,
+) -> Result<(), String> {
+    let item_type = item.get("type").and_then(Value::as_str);
+    if !matches!(
+        item_type,
+        Some("function_call" | "custom_tool_call" | "tool_call" | "tool_search_call")
+    ) {
+        return Ok(());
+    }
+    let mut added_item = item.clone();
+    if item_type == Some("function_call") {
+        if let Some(object) = added_item.as_object_mut() {
+            object.insert("arguments".to_string(), Value::String(String::new()));
+        }
+    }
+    frames.push(Ok(build_v3_runtime_sse_json_frame(
+        "response.output_item.added",
+        &json!({
+            "type": "response.output_item.added",
+            "response_id": response_id,
+            "output_index": output_index,
+            "item": added_item,
+        }),
+    )));
+    if item_type != Some("function_call") {
+        return Ok(());
+    }
+    let call_id = item
+        .get("call_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "V3 Responses Relay client SSE function_call item is missing call_id".to_string()
+        })?;
+    let arguments = item
+        .get("arguments")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "V3 Responses Relay client SSE function_call item {call_id} is missing string arguments"
+            )
+        })?;
+    frames.push(Ok(build_v3_runtime_sse_json_frame(
+        "response.function_call_arguments.done",
+        &json!({
+            "type": "response.function_call_arguments.done",
+            "response_id": response_id,
+            "output_index": output_index,
+            "call_id": call_id,
+            "arguments": arguments,
+        }),
+    )));
+    Ok(())
 }
 
 fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
@@ -6964,6 +7032,56 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert!(
             completed < done && done < marker,
             "Responses client SSE terminal ordering must be response.completed -> response.done -> [DONE]: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_sse_function_call_projection_missing_call_id_fails_explicitly() {
+        let projected = collect_projected_sse(
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+                "id": "resp_bad_call_id",
+                "status": "requires_action",
+                "output": [{
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"pwd\"}"
+                }]
+            })),
+        )
+        .await;
+        let error = projected
+            .into_iter()
+            .find_map(Result::err)
+            .expect("missing call_id must fail before terminal success");
+
+        assert!(
+            error.contains("missing call_id"),
+            "missing function_call call_id must be an explicit SSE projection error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_sse_function_call_projection_missing_arguments_fails_explicitly() {
+        let projected = collect_projected_sse(
+            build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
+                "id": "resp_bad_arguments",
+                "status": "requires_action",
+                "output": [{
+                    "type": "function_call",
+                    "call_id": "call_missing_args",
+                    "name": "exec_command"
+                }]
+            })),
+        )
+        .await;
+        let error = projected
+            .into_iter()
+            .find_map(Result::err)
+            .expect("missing arguments must fail before terminal success");
+
+        assert!(
+            error.contains("missing string arguments"),
+            "missing function_call arguments must be an explicit SSE projection error: {error}"
         );
     }
 

@@ -2157,6 +2157,10 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
             }
             let text = String::from_utf8(forwarded).unwrap();
             assert!(
+                text.contains("event: response.output_item.added"),
+                "Responses Relay client SSE must announce the finalized apply_patch tool item before output_item.done: {text}"
+            );
+            assert!(
                 text.contains("event: response.output_item.done"),
                 "Responses Relay client SSE must encode the Hub-finalized apply_patch tool item: {text}"
             );
@@ -2179,9 +2183,12 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
             assert!(text.contains("*** Begin Patch"));
             assert!(
                 !text.contains("event: response.function_call_arguments.done"),
-                "Relay client SSE transport must not raw-pass provider argument event payloads around Hub: {text}"
+                "custom apply_patch input must not be projected as a standard function_call arguments event: {text}"
             );
             assert!(text.contains("[DONE]"));
+            let output_item_added = text
+                .find("event: response.output_item.added")
+                .expect("output item added event");
             let output_item_done = text
                 .find("event: response.output_item.done")
                 .expect("output item done event");
@@ -2193,8 +2200,11 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
                 .expect("response done event");
             let marker = text.find("data: [DONE]").expect("DONE marker");
             assert!(
-                output_item_done < completed && completed < done && done < marker,
-                "Responses Relay tool-call SSE order must be output_item.done -> response.completed -> response.done -> [DONE]: {text}"
+                output_item_added < output_item_done
+                    && output_item_done < completed
+                    && completed < done
+                    && done < marker,
+                "Responses Relay custom tool SSE order must be output_item.added -> output_item.done -> response.completed -> response.done -> [DONE]: {text}"
             );
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("SSE request must project SSE stream"),
