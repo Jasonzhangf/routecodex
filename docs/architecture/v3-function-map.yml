@@ -2145,6 +2145,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
       - v3/crates/routecodex-v3-config/src/v2_compat.rs
       - v3/crates/routecodex-v3-config/src/validate.rs
       - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
@@ -2184,6 +2185,8 @@ features:
       - v3-hub-relay-closeout-14
       - v3-hub-relay-closeout-15
       - v3-hub-relay-closeout-16
+      - v3-openai-chat-event-codec-01
+      - v3-openai-chat-event-codec-02
       - v3-responses-relay-server-01
       - v3-responses-relay-server-02
       - v3-responses-relay-server-03
@@ -2199,6 +2202,9 @@ features:
       - V3ResponsesRelayLocalContinuationScope
       - execute_v3_responses_relay_request
       - responses_relay_output_response
+      - build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events
+      - collect_openai_chat_stream_event
+      - collect_openai_chat_stream_tool_call_deltas
       - hub_relay_runtime_closeout::controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit
       - hub_relay_runtime_closeout::responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes
       - hub_relay_runtime_closeout::responses_relay_client_sse_request_projects_sse_even_when_provider_returns_json
@@ -2232,6 +2238,7 @@ features:
       - scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs
       - scripts/tests/v3-hub-relay-runtime-closeout-red-fixtures.mjs
       - docs/goals/v3-hub-relay-runtime-closeout-plan.md
+      - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
       - docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml

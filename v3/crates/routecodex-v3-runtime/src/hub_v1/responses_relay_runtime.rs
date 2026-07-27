@@ -4643,7 +4643,9 @@ struct V3OpenAiChatStreamChoice {
     content: String,
     reasoning_content: String,
     finish_reason: Option<Value>,
-    tool_calls: BTreeMap<usize, V3OpenAiChatStreamToolCall>,
+    tool_calls: Vec<V3OpenAiChatStreamToolCall>,
+    active_tool_call_by_wire_index: BTreeMap<usize, usize>,
+    tool_call_by_wire_index_and_id: BTreeMap<(usize, String), usize>,
 }
 
 #[derive(Default)]
@@ -4852,12 +4854,54 @@ fn collect_openai_chat_stream_tool_call_deltas(
                 "OpenAI Chat provider event stream tool_call delta must be an object".to_string(),
             )
         })?;
-        let index = tool_call_object
+        let wire_index = tool_call_object
             .get("index")
             .and_then(Value::as_u64)
             .unwrap_or(0) as usize;
-        let tool_call = choice.tool_calls.entry(index).or_default();
-        tool_call.id = read_v3_trimmed_string(tool_call_object.get("id")).or(tool_call.id.take());
+        let incoming_id = read_v3_trimmed_string(tool_call_object.get("id"));
+        let active_index = choice
+            .active_tool_call_by_wire_index
+            .get(&wire_index)
+            .copied();
+        let materialized_index = if let Some(incoming) = incoming_id.as_deref() {
+            let identity = (wire_index, incoming.to_string());
+            if let Some(index) = choice
+                .tool_call_by_wire_index_and_id
+                .get(&identity)
+                .copied()
+            {
+                index
+            } else if let Some(index) =
+                active_index.filter(|index| choice.tool_calls[*index].id.as_deref().is_none())
+            {
+                choice
+                    .tool_call_by_wire_index_and_id
+                    .insert(identity, index);
+                index
+            } else {
+                let index = choice.tool_calls.len();
+                choice
+                    .tool_calls
+                    .push(V3OpenAiChatStreamToolCall::default());
+                choice
+                    .tool_call_by_wire_index_and_id
+                    .insert(identity, index);
+                index
+            }
+        } else if let Some(index) = active_index {
+            index
+        } else {
+            let index = choice.tool_calls.len();
+            choice
+                .tool_calls
+                .push(V3OpenAiChatStreamToolCall::default());
+            index
+        };
+        choice
+            .active_tool_call_by_wire_index
+            .insert(wire_index, materialized_index);
+        let tool_call = &mut choice.tool_calls[materialized_index];
+        tool_call.id = incoming_id.or(tool_call.id.take());
         tool_call.kind =
             read_v3_trimmed_string(tool_call_object.get("type")).or(tool_call.kind.take());
         if let Some(function) = tool_call_object.get("function").and_then(Value::as_object) {
@@ -4899,7 +4943,7 @@ fn build_openai_chat_completion_from_stream_state(
         }
         if !choice.tool_calls.is_empty() {
             let mut tool_calls = Vec::new();
-            for (tool_index, tool_call) in choice.tool_calls {
+            for (tool_index, tool_call) in choice.tool_calls.into_iter().enumerate() {
                 let id = tool_call.id.ok_or_else(|| {
                     V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
                         "OpenAI Chat provider event stream tool_call[{tool_index}] missing id"
@@ -6416,6 +6460,102 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
                 .contains("function_call"),
             "tool_search must not return to Codex as a generic function_call: {response}"
         );
+    }
+
+    #[tokio::test]
+    async fn openai_chat_stream_splits_reused_wire_index_when_tool_call_id_changes() {
+        let observation = V3RuntimeStreamObservation::default();
+        let raw_sse = concat!(
+            "data: {\"id\":\"chatcmpl_reused_index\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_first\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"fir\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_reused_index\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_second\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"second\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_reused_index\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_first\",\"function\":{\"arguments\":\"st\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_reused_index\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_third\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"third\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_reused_index\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+        let completion = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("reused wire index with a new id must materialize a distinct call");
+        let calls = completion["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool calls");
+
+        assert_eq!(
+            calls.len(),
+            3,
+            "every distinct provider id is semantic truth"
+        );
+        assert_eq!(calls[0]["id"], "call_first");
+        assert_eq!(calls[1]["id"], "call_second");
+        assert_eq!(calls[2]["id"], "call_third");
+        for (call, expected) in calls.iter().zip(["first", "second", "third"]) {
+            let arguments = call["function"]["arguments"]
+                .as_str()
+                .expect("arguments string");
+            let parsed: Value =
+                serde_json::from_str(arguments).expect("independent JSON arguments");
+            assert_eq!(parsed["cmd"], expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn openai_chat_stream_keeps_same_id_and_parallel_index_continuations_separate() {
+        let observation = V3RuntimeStreamObservation::default();
+        let raw_sse = concat!(
+            "data: {\"id\":\"chatcmpl_same_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_same\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_same_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_parallel\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_same_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_same\",\"function\":{\"arguments\":\"\\\"same\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_same_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"function\":{\"arguments\":\"\\\"parallel\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_same_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+        let completion = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("same-id continuation remains one call");
+        let calls = completion["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool calls");
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["id"], "call_same");
+        assert_eq!(calls[0]["function"]["arguments"], "{\"cmd\":\"same\"}");
+        assert_eq!(calls[1]["id"], "call_parallel");
+        assert_eq!(calls[1]["function"]["arguments"], "{\"cmd\":\"parallel\"}");
+    }
+
+    #[tokio::test]
+    async fn openai_chat_stream_preserves_cross_index_duplicate_ids_for_resp03_validation() {
+        let observation = V3RuntimeStreamObservation::default();
+        let raw_sse = concat!(
+            "data: {\"id\":\"chatcmpl_duplicate_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_duplicate\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"first\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_duplicate_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_duplicate\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"second\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl_duplicate_id\",\"object\":\"chat.completion.chunk\",\"model\":\"glm-5.2\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+        let completion = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("Resp01 preserves duplicate identities for Resp03 rejection");
+        let calls = completion["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool calls");
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["id"], "call_duplicate");
+        assert_eq!(calls[0]["function"]["arguments"], "{\"cmd\":\"first\"}");
+        assert_eq!(calls[1]["id"], "call_duplicate");
+        assert_eq!(calls[1]["function"]["arguments"], "{\"cmd\":\"second\"}");
     }
 
     #[test]
