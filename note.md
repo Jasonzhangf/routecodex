@@ -33516,6 +33516,45 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - 验证方法论：共享 worktree 被多 worker 持续改写，全量验证改在"git index → git archive 临时树 + 独立 CARGO_TARGET_DIR"上执行，staged `test:v3-workspace` EXIT=0（57 suites）。
 - 剩余：Phase 2（ExecutionEnv 收敛）触碰 `v3.responses_direct.required_mainline` locked 链，开工前需 Jason 授权记录；p6-freeze 既有 14 项红是独立缺口；`file_sink_recreates_parent_dir_after_runtime_start` 全量并行偶发（独立 20x 绿）未定位。
 
+## 2026-07-26T23:14+0800 V3 Anthropic Claude Code standard request wire closeout
+- Goal: 10000 Anthropic provider outbound must match standard Claude Code CLI request, not Codex UA/prompt.
+- Root gap: live request already used Claude Code UA name/version, but still mismatched standard capture on `x-stainless-timeout=600` vs `300`, Anthropic URL missing `?beta=true`, and system prompt block0 `cc_version=2.1.220.4aa` plus stale capture path `/tmp/claude-code-capture.kJhuye/...`.
+- Unique owners:
+  - URL: `provider_compat_shared.rs::anthropic_messages_url` now emits `/v1/messages?beta=true`.
+  - Headers/timeout/UA: `routecodex-v3-provider-responses/src/transport.rs` Claude Code compat header surface (`x-stainless-timeout=300`).
+  - System prompt: `hub_v1/claude_code_system_prompt.md` regenerated from `/tmp/claude-code-standard-capture-1785077403/request.json` (`cc_version=2.1.220.dae`, block2 sha256 `894420daba...`).
+- Verification: focused red->green tests for codec/integration/transport; `verify:v3-rust-only`; `npm run install:v3` sha256 `6b4dd399...`; `rccv3 restart` 10000/4444/5555 health ok; live 10000 sample `openai-responses-router-claude-fable-5-20260726T230657965-644810-12074` shows URL/headers/system blocks equal to standard capture.
+- Remaining risk: upstream still returns Anthropic cyber refusal (`ANTHROPIC_CYBER_REFUSAL`) on this provider path even with standard Claude Code wire; that is provider policy, not request-spec mismatch. No TS path was used.
+
+## 2026-07-26 rccv3 lifecycle console contract
+- top-level `rccv3 start` is foreground: print start line, stream server logs, Ctrl-C/SIGTERM clean exit 0.
+- hidden `server start` is managed background with visible success + final JSON.
+- restart remains same PID/console exec-in-place.
+- stop prints intent/completion, graceful control first, then scoped TERM/KILL only for target listener set.
+- install:v3 copies repo package.json into install/current so version truth matches 0.90.3985.
+
+## 2026-07-27T00:1x+0800 V3 拆解 Phase 2 构建完成（隔离 worktree，待 review PASS 后合入）
+- 工作区：/tmp/rcc-p2（detached at 10b7e23df），分支 codex/v3-phase2-relay-execution-env，两个提交：
+  - ed08e56d7 relay ExecutionEnv 收敛：V3ResponsesRelayExecutionEnv（retry/health/local_continuation/stopless_control/initial_target 五轴）+ V3ResponsesRelayDryRunEnv；唯一入口 execute_v3_responses_relay_runtime(manifest,input,transport,env)、_with_default_transport(...,env,Option<snapshot_capture>)、execute_v3_responses_relay_dry_run_runtime(manifest,input,env)。物理删除 14 个组合 wrapper；server 4 分支 live 块 + 2 分支 dry 块塌缩为单 env 调用；67 个测试调用点迁移。
+  - 8dd9f5c90 review 修复 + request_id 拆分：codex review round1 FAIL 的 P0-FALLBACK（health None=>from_manifest 隐式降级）改为 V3ResponsesRelayHealthSource::{Shared,ManifestLocal} 必填构造参数；server request_id.rs 拆出（lib.rs 8540→8201）。
+- kernel 侧决策（记入 plan）：Phase 1 后仅剩 3 个 wrapper 且全部是契约绑定命名入口（defaults.rs 注册表字符串 + entry_protocol manifest runtime_owner_symbol + p6-freeze 锚定），不做 ExecutionEnv 化——强行收敛要改 entry-protocol 绑定契约，超出行为零变化边界。
+- 踩坑记录：server lib.rs 顶部 `#[cfg(test)] use` 会让 module-boundaries gate 的 `#\[cfg\(test\)\][\s\S]*` 剥离正则吞掉整个文件——生产文件早段禁止放 cfg(test) item。
+- 验证（全部在 /tmp/rcc-p2 隔离 target）：workspace 57/57 EXIT=0、fmt --check、file-size+red fixtures、module-boundaries、rust-only、resource-map、caller-flow（re-render）、architecture-docs、compile-fail、hub-relay-closeout、stopless-resource-control、websocket-proxy 全 PASS。call map 仅 plain 链 3 条边改 symbol（v3-responses-relay-server-01/02/03），locked 链 fingerprint 未触碰，无需授权。
+- 待办：codex review round2 进行中；PASS 后走 merge-queue/cherry-pick 进 main（main 相应文件仍有其他 worker 脏改动，合入时只 pick 本分支两提交）。
+- merge-queue 已建：.agent-collab/merge-queue/20260726T161500Z-v3-phase2-relay-execution-env.json（branch codex/v3-phase2-relay-execution-env，base 10b7e23df，17 文件，status awaiting_checker；main 有其他 worker 脏改动重叠，合入必须 cherry-pick 两提交而非批量 add）。
+
+## 2026-07-26T23:37+0800 V3 stopless console activation color orange
+- Change: stopless activation console line fixed color purple -> ANSI 256 orange `\x1b[38;5;208m` (`ANSI_STOPLESS_ORANGE`) in `v3/crates/routecodex-v3-server/src/lib.rs`.
+- Scope: console projection only; no StoplessCenter/SSE/handler semantics change.
+- Test: `cargo test -p routecodex-v3-server stopless_console_activation_requires_action_stop_and_uses_fixed_orange --lib` PASS.
+- Skill: L93-245 color text updated; L93-247 added.
+- Install/live infra: `RUSTUP_TOOLCHAIN=stable npm run install:v3` installed sha256 `c116c157c595ace562f1e6563891241976efa0c24962be6a6e337abc370df4bd`; `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` completed; 10000/4444/5555 `/health` OK; installed binary contains `\x1b[38;5;208m`.
+- Remaining: no live stopless-trigger request replayed in this pass, so visual foreground activation sample not captured.
+
+## 2026-07-27T00:10+0800 V3 Anthropic relay dynamic Claude Code passthrough start
+- Goal: replace static Claude Code compat overwrite with dynamic Anthropic entry relay preservation for body fields (`system`, `context_management`, `output_config`) and provider protocol headers (`user-agent`, `anthropic-beta`, `x-stainless-timeout`, etc.) before upstream transport.
+- Minimal failing packet source: `/tmp/claude-code-rcc-forward-capture.7GFnoQ/req_002/client_body.json` + `client_headers.json`; reduce to model/max_tokens/stream/system/messages/metadata/thinking/context_management/output_config/tools and allowlisted Claude Code headers.
+- Owner locked: `v3.protocol_anthropic_codec_characterization` for Anthropic<->Responses semantic body mapping; `v3.anthropic_relay_runtime_integration` / `V3ProviderReqOutbound09TransportRequest` for entry header capture into provider transport request. No TS runtime logic; no MetadataCenter; no provider config workaround.
 
 ## 2026-07-27T08:22+0800 V3 Anthropic relay dynamic Claude Code passthrough closeout
 - Root cause: Anthropic entry relay normalized through Responses-like semantic but did not carry dynamic Anthropic entry `system` / `context_management` / `output_config` or provider protocol headers into Anthropic provider transport; static Claude Code compat prompt (`cc_version=2.1.220.dae`) and default headers (`x-stainless-timeout=300`, beta without `advisor-tool`) overwrote the live Claude Code packet.
@@ -33524,3 +33563,10 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Source gates: codec focused test PASS; Anthropic provider wire integration PASS 6/6; full `npm run test:v3-anthropic-codec-characterization` PASS 29/29; `cargo check` provider/server PASS; provider transport header test PASS; `verify:v3-anthropic-relay-runtime-integration`, red fixtures, `verify:v3-rust-only`, scoped `git diff --check` PASS. `npm run test:v3-anthropic-relay-runtime-integration` is blocked by missing default rustup toolchain, equivalent `RUSTUP_TOOLCHAIN=stable cargo test ... anthropic_relay_runtime_integration` PASS 9/9.
 - Install/live dry-run: `npm run install:v3` installed rccv3 sha256 `55541122ef9dc15693236d34e18774d09c5ac4b32a13e708777fb68a59e1bb18`; `rccv3 config check` PASS; `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` restarted aggregate `v3-04f1f1b9a58efb01f5ff`; health OK on 10000/4444/5555. Live 10000 provider-request dry-run replay of `/tmp/claude-code-rcc-forward-capture.7GFnoQ/req_002/client_body.raw` produced provider URL `https://api.modrouter.online/anthropic/v1/messages?beta=true`, dynamic system `cc_version=2.1.220.297`, `context_management`, `output_config`, `thinking`, header `x-stainless-timeout=600`, beta contains `advisor-tool-2026-03-01`, and no `cc_version=2.1.220.dae`.
 - Remaining risk: actual upstream can still return genuine 403/429/cyber policy errors; this closeout proves relay/provider-request mapping, not upstream acceptance. Worktree still contains unrelated dirty V3 lifecycle/stopless/phase changes from other tasks; not cleaned or reset.
+
+## 2026-07-27 V3 Responses direct reselect -> Relay handoff
+- Live symptom: 4444 `/v1/responses` could start in Responses Direct on a same-protocol target, then provider failure/reselect picked `openai_chat`/`anthropic`; Direct called `V3Execution11ProtocolDecision` with direct-only modes and projected `protocol_mismatch_relay_not_allowed` as 500.
+- Owner: `v3.responses_direct_mvp_architecture`, `V3Execution11ProtocolDecision` in `v3/crates/routecodex-v3-runtime/src/kernel.rs` / `nodes.rs`; server only consumes runtime handoff and invokes existing Responses Relay initial-target runtime.
+- Fix: Direct runtime now uses server `allowed_modes`; if target-local reselect chooses Relay mode on a non-continuation request it returns `V3ResponsesProtocolRelayHandoff` instead of Error06. Server direct entry consumes that handoff, runs Responses Relay with the selected target, prepends the direct trace, and preserves provider-failure observability.
+- Verification: focused runtime tests for normal reselect/decode reselect plus `direct_reselect_to_cross_protocol_returns_relay_handoff_not_error06` passed; server focused compile test passed; `cargo fmt --manifest-path v3/Cargo.toml --all -- --check`, `verify:v3-architecture-docs`, `git diff --check` passed. `RUSTUP_TOOLCHAIN=stable npm run install:v3` installed sha256 `ed7d88549f4e7ad9e548dd796eb539810966d975b4923f8648f96a5aab35e576`; `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` restarted 10000/4444/5555. Old 4444 sample `openai-responses-router-gpt-5.5-20260727T013045369-645383-112` replay returned 200 SSE with `response.completed`, `response.done`, `[DONE]`; post-restart log scan found zero `protocol_mismatch_relay_not_allowed` / `requires relay but relay is not allowed`.
+- Known unrelated gate: `RUSTUP_TOOLCHAIN=stable npm run test:v3-responses-direct-unit` currently fails in clean `foundation.rs` test `pending_runtime_recreates_post_startup_debug_sink_parent_directory` expecting 501 but got 500; focused owner tests pass.

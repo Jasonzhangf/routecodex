@@ -391,12 +391,14 @@ features:
       - V3Execution11ProtocolDecision
       - V3Execution11ProtocolDecisionMode
       - build_v3_execution_11_protocol_decision_from_v3_target_10
+      - V3ResponsesProtocolRelayHandoff
       - plan_v3_responses_protocol_execution_with_provider_health
       - project_v3_protocol_execution_plan_failure
       - V3ResponsesDirectRuntimeSharedState
       - responses_direct_route_hook
       - responses_direct_response_projection_hook
       - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
+      - kernel::tests::direct_reselect_to_cross_protocol_returns_relay_handoff_not_error06
       - build_v3_server_16_http_frame_from_v3_resp_15
       - pending_endpoint
       - multi_listener_server::responses_direct_shared_provider_health_cools_first_provider_after_three_failures

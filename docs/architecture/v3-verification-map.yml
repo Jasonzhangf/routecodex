@@ -792,6 +792,7 @@ features:
       - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport with a no-network effect
       - Direct provider errors enter the shared Error01-06/provider-health policy; success remains passthrough but error policy cannot passthrough
       - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
+      - Direct target-local reselection that selects a Relay-only provider protocol must return a Relay handoff before Error06 projection; protocol_mismatch_relay_not_allowed is valid only when Relay is not allowed
       - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
       - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; it does not mutate the JSON client body, parse SSE transport as semantic truth, or switch client protocol
       - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason

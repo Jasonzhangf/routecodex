@@ -30,7 +30,7 @@ pub use kernel::{
     project_v3_protocol_execution_plan_failure, V3ResponsesDirectContinuationScope,
     V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeOutput,
     V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
-    V3ResponsesProtocolExecutionPlanFailure,
+    V3ResponsesProtocolExecutionPlanFailure, V3ResponsesProtocolRelayHandoff,
 };
 pub use local_continuation::*;
 pub use nodes::*;

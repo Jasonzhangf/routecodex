@@ -227,6 +227,14 @@ pub struct V3ResponsesDirectRuntimeOutput {
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
+    pub protocol_relay_handoff: Option<V3ResponsesProtocolRelayHandoff>,
+}
+
+#[derive(Debug, Clone)]
+pub struct V3ResponsesProtocolRelayHandoff {
+    pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    pub node_trace: Vec<&'static str>,
+    pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
 }
 
 #[derive(Debug, Clone)]
@@ -1041,6 +1049,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
+    let allowed_modes =
+        direct_runtime_allowed_execution_modes(manifest, &standardized.protocol_context.server_id);
     loop {
         let attempt_availability = V3RuntimeAttemptAvailability {
             base: &availability,
@@ -1095,7 +1105,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         let decision = match build_v3_execution_11_protocol_decision_from_v3_target_10(
             selected.clone(),
             "responses",
-            &["direct".to_string()],
+            &allowed_modes,
         ) {
             Ok(decision) => decision,
             Err(source) => {
@@ -1108,14 +1118,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             decision.mode,
             V3Execution11ProtocolDecisionMode::SameProtocolDirect
         ) {
-            return error_output(
-                runtime_source(
-                    "V3Execution11ProtocolDecision",
-                    "Responses Direct can only consume same-protocol Responses providers",
-                ),
-                trace,
-                &hook_registry,
-            );
+            if previous_response_id.is_some() {
+                return error_output(
+                    runtime_source(
+                        "V3Execution11ProtocolDecision",
+                        "Responses direct continuation cannot hand off to Relay after Req03 owner selected direct",
+                    ),
+                    trace,
+                    &hook_registry,
+                );
+            }
+            return relay_handoff_output(decision.target, trace, provider_failure_events.clone());
         }
 
         let selected_pin = V3RemoteContinuationPin::new(
@@ -1411,6 +1424,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 client_payload: response_projection.client_payload,
                 node_trace: trace,
                 error_chain: None,
+                protocol_relay_handoff: None,
             };
         }
         if let (Some(state), Some(scope)) = (continuation_state, continuation_scope.as_ref()) {
@@ -1505,8 +1519,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             client_payload: response_projection.client_payload,
             node_trace: trace,
             error_chain: None,
+            protocol_relay_handoff: None,
         };
     }
+}
+
+fn direct_runtime_allowed_execution_modes(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> Vec<String> {
+    manifest
+        .servers
+        .get(server_id)
+        .and_then(|server| server.execution.as_ref())
+        .map(|execution| execution.allowed_modes.clone())
+        .filter(|modes| !modes.is_empty())
+        .unwrap_or_else(|| vec!["direct".to_string()])
 }
 
 enum V3DirectProviderFailureDecision {
@@ -2104,6 +2132,35 @@ fn projected_error_output_with_observability(
         },
         node_trace,
         error_chain: Some(projected.chain.to_vec()),
+        protocol_relay_handoff: None,
+    }
+}
+
+fn relay_handoff_output(
+    target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    node_trace: Vec<&'static str>,
+    provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+) -> V3ResponsesDirectRuntimeOutput {
+    V3ResponsesDirectRuntimeOutput {
+        observability: None,
+        stream_observation: None,
+        client_payload: V3Resp15ClientPayload {
+            status: 500,
+            headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
+            body: V3ClientBody::Json(json!({
+                "error": {
+                    "code": "protocol_relay_handoff_unconsumed",
+                    "message": "V3 Responses Direct selected a Relay-only provider; server must execute Hub Relay instead of projecting this internal handoff"
+                }
+            })),
+        },
+        node_trace: node_trace.clone(),
+        error_chain: None,
+        protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
+            target,
+            node_trace,
+            provider_failure_events,
+        }),
     }
 }
 
@@ -2565,6 +2622,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn direct_reselect_to_cross_protocol_returns_relay_handoff_not_error06() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FirstFailsSecondMustNotDirectSend {
+            sends: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl ResponsesTransport for FirstFailsSecondMustNotDirectSend {
+            async fn send(
+                &self,
+                request: V3Transport13ResponsesHttpRequest,
+            ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+                assert_eq!(request.provider_id(), "first");
+                self.sends.fetch_add(1, Ordering::SeqCst);
+                Err(V3ProviderError::Transport {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "first failed before relay-only candidate".to_string(),
+                })
+            }
+        }
+
+        let transport = FirstFailsSecondMustNotDirectSend {
+            sends: AtomicUsize::new(0),
+        };
+        let output = execute_v3_responses_direct_runtime_kernel(
+            &mixed_protocol_reselection_manifest(),
+            V3Server03HttpRequestRaw {
+                server_id: "test".to_string(),
+                request_id: "req".to_string(),
+                execution_id: "exec".to_string(),
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                body: json!({"model":"client-model","input":"hello"}),
+            },
+            crate::register_responses_direct_hooks(),
+            &transport,
+        )
+        .await;
+
+        assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+        assert_eq!(output.error_chain, None, "{output:?}");
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+        let handoff = output
+            .protocol_relay_handoff
+            .expect("cross-protocol reselect must hand off to Relay before Error06 projection");
+        assert_eq!(handoff.target.candidate.provider_id, "chat");
+        assert_eq!(handoff.target.candidate.provider_type, "openai_chat");
+        assert_eq!(handoff.provider_failure_events.len(), 1);
+        assert_eq!(
+            handoff.provider_failure_events[0]
+                .next_provider_key
+                .as_deref(),
+            Some("chat:key:test")
+        );
+        match output.client_payload.body {
+            V3ClientBody::Json(value) => {
+                assert_eq!(value["error"]["code"], "protocol_relay_handoff_unconsumed");
+            }
+            V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
+                panic!("internal handoff placeholder must be JSON")
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn provider_response_decode_failure_reselects_without_router_reentry() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2869,6 +2993,54 @@ targets = [
 [route_groups.default.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+        )
+        .unwrap();
+        compile_v3_config_05_manifest(authoring).unwrap()
+    }
+
+    fn mixed_protocol_reselection_manifest() -> V3Config05ManifestPublished {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "FIRST_KEY" }] }
+[providers.first.models.test]
+wire_name = "wire-first"
+
+[providers.chat]
+type = "openai_chat"
+base_url = "http://chat.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "CHAT_KEY" }] }
+[providers.chat.models.test]
+wire_name = "wire-chat"
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "chat", model = "test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
 "#,
         )
         .unwrap();
