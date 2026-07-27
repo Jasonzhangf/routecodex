@@ -135,7 +135,7 @@ mod tests {
         V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution,
         V3HubTransportIntent,
     };
-    use routecodex_v3_config::V3ResponsesTransportKind;
+    use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
     use routecodex_v3_target::V3TargetCandidate;
     use serde_json::json;
 
@@ -154,9 +154,11 @@ mod tests {
             wire_model: "provider-wire-model".to_string(),
             visible_model_ids: vec!["client-route-alias".to_string()],
             model_capabilities: vec!["text".to_string()],
+            max_context_tokens: None,
             base_url: "https://provider.invalid/v1".to_string(),
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
+            provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             compatibility_profile: None,
             env_name: Some("TEST_KEY".to_string()),
             token_file: None,

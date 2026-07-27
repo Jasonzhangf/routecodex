@@ -5,7 +5,8 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, execute_v3_responses_relay_runtime_with_retry_policy,
+    V3ResponsesRelayClientBody, V3ResponsesRelayRetryPolicy, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -41,6 +42,93 @@ impl ResponsesTransport for AnthropicProviderJsonTransport {
                     {"type":"text","text":"RCC_V3_MINIMAX_BASIC_OK"}
                 ],
                 "usage":{"input_tokens":7,"output_tokens":5},
+                "stop_reason":"end_turn"
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+struct AnthropicProviderProjectionTransport {
+    captured_projection: Mutex<Option<Value>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderProjectionTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.captured_projection.lock().unwrap() =
+            Some(request.redacted_provider_request_projection());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"msg_claude_code_compat",
+                "type":"message",
+                "role":"assistant",
+                "model":"claude-fable-5",
+                "content":[{"type":"text","text":"OK"}],
+                "usage":{"input_tokens":7,"output_tokens":1},
+                "stop_reason":"end_turn"
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+struct AnthropicCyberRefusalThenSuccessTransport {
+    attempts: Mutex<usize>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicCyberRefusalThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let attempt = {
+            let mut attempts = self.attempts.lock().unwrap();
+            *attempts += 1;
+            *attempts
+        };
+        if attempt == 1 {
+            let frames: Vec<Result<Vec<u8>, V3ProviderError>> = vec![
+                Ok("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".as_bytes().to_vec()),
+                Ok("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"policy\"}}}\n\n".as_bytes().to_vec()),
+            ];
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(futures_util::stream::iter(frames)),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"msg_after_cyber_retry",
+                "type":"message",
+                "role":"assistant",
+                "model":"claude-fable-5",
+                "content":[{"type":"text","text":"OK after retry"}],
+                "usage":{"input_tokens":7,"output_tokens":3},
                 "stop_reason":"end_turn"
             }))
             .unwrap(),
@@ -106,6 +194,135 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     assert_eq!(client["usage"]["input_tokens"], 7);
     assert_eq!(client["usage"]["output_tokens"], 5);
     assert_eq!(client["usage"]["total_tokens"], 12);
+}
+
+#[tokio::test]
+async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_headers() {
+    let transport = AnthropicProviderProjectionTransport {
+        captured_projection: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &claude_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "anthropic_v3_10000".into(),
+            request_id: "req-responses-claude-code-compat".into(),
+            payload: json!({
+                "model":"claude-fable-5",
+                "input":"Reply OK only.",
+                "instructions":"this request instruction must be replaced by Claude Code prompt",
+                "stream":false,
+                "max_output_tokens":16
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200);
+    let projection = transport
+        .captured_projection
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("provider request projection");
+    assert_eq!(
+        projection["url"],
+        "http://controlled.invalid/anthropic/v1/messages?beta=true"
+    );
+    let headers = &projection["headers"];
+    assert_eq!(headers["authorization"], "[REDACTED]");
+    assert_eq!(headers["x-api-key"], "[REDACTED]");
+    assert_eq!(headers["anthropic-version"], "2023-06-01");
+    assert_eq!(
+        headers["user-agent"],
+        "claude-cli/2.1.220 (external, sdk-cli)"
+    );
+    assert!(headers["anthropic-beta"]
+        .as_str()
+        .is_some_and(|value| value.contains("claude-code-20250219")));
+    assert_eq!(headers["anthropic-dangerous-direct-browser-access"], "true");
+    assert_eq!(headers["x-app"], "cli");
+    assert_eq!(headers["x-stainless-lang"], "js");
+    assert_eq!(headers["x-stainless-package-version"], "0.94.0");
+    assert_eq!(headers["x-stainless-runtime"], "node");
+    assert_eq!(headers["x-stainless-retry-count"], "0");
+    assert_eq!(headers["x-stainless-timeout"], "300");
+
+    let system = projection["body"]["system"]
+        .as_array()
+        .expect("Claude Code prompt system blocks");
+    assert_eq!(
+        system[0]["text"],
+        "x-anthropic-billing-header: cc_version=2.1.220.dae; cc_entrypoint=sdk-cli;"
+    );
+    assert_eq!(system[1]["cache_control"], json!({"type":"ephemeral"}));
+    assert_eq!(system[2]["cache_control"], json!({"type":"ephemeral"}));
+    assert!(system[2]["text"].as_str().is_some_and(|text| text.contains(
+        "You are an interactive agent that helps users with software engineering tasks."
+    )));
+    assert!(system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("/tmp/claude-code-standard-capture-1785077403/work")));
+    assert!(!system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("claude-code-capture.kJhuye")));
+    let serialized = serde_json::to_string(&projection["body"]).unwrap();
+    assert!(
+        !serialized.contains("this request instruction must be replaced"),
+        "Claude Code system prompt must replace the request system: {projection}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failure() {
+    let transport = AnthropicCyberRefusalThenSuccessTransport {
+        attempts: Mutex::new(0),
+    };
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &claude_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "anthropic_v3_10000".into(),
+            request_id: "req-responses-anthropic-cyber-refusal-retry".into(),
+            payload: json!({
+                "model":"claude-fable-5",
+                "input":"Reply OK only.",
+                "stream":true,
+                "max_output_tokens":16
+            }),
+        },
+        &transport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 1,
+            retry_delay_ms: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(*transport.attempts.lock().unwrap(), 2);
+    assert_eq!(output.status, 200);
+    let observability = output.observability.as_ref().expect("observability");
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let failure = &observability.provider_failure_events[0];
+    assert_eq!(failure.status, 429);
+    assert_eq!(failure.error_type.as_deref(), Some("rate_limit_error"));
+    assert!(failure
+        .message
+        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
+    match output.client_body {
+        V3ResponsesRelayClientBody::Sse(mut stream) => {
+            use futures_util::StreamExt;
+            let mut forwarded = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                forwarded.extend(chunk.expect("projected retry success SSE chunk"));
+            }
+            let text = String::from_utf8(forwarded).unwrap();
+            assert!(text.contains("OK after retry"));
+            assert!(!text.contains("ANTHROPIC_CYBER_REFUSAL"));
+        }
+        V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE body"),
+    }
 }
 
 #[tokio::test]
@@ -439,6 +656,40 @@ capabilities = ["text", "tools", "reasoning", "vision", "longcontext"]
 [route_groups.gateway_priority_5555.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn claude_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.anthropic_v3_10000]
+bind = "127.0.0.1"
+port = 10000
+routing_group = "anthropic_v3_10000"
+endpoints = ["responses"]
+
+[providers.modrouter_anthropic]
+type = "anthropic"
+base_url = "http://controlled.invalid/anthropic"
+default_model = "claude-fable-5"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MODROUTER_ANTHROPIC_TEST_KEY" }] }
+health = { enabled = false, failure_threshold = 3, cooldown_ms = 30000 }
+
+[providers.modrouter_anthropic.models."claude-fable-5"]
+wire_name = "claude-fable-5"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search", "longcontext", "multimodal", "vision"]
+
+[route_groups.anthropic_v3_10000.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "modrouter_anthropic", model = "claude-fable-5", key = "key1", priority = 1 }]
 "#,
         )
         .unwrap(),

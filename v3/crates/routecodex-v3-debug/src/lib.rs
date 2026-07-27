@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -225,11 +225,7 @@ impl V3DebugRuntime {
     pub fn new(config: V3DebugRuntimeConfig) -> V3DebugResult<Self> {
         if let Some(path) = config.log_file.as_deref() {
             ensure_log_file_parent_dir(path)?;
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+            open_log_file_for_append(path)?;
         }
         Ok(Self {
             config: Arc::new(config),
@@ -296,12 +292,7 @@ impl V3DebugRuntime {
         let Some(path) = self.config.log_file.as_deref() else {
             return Ok(());
         };
-        ensure_log_file_parent_dir(path)?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+        let mut file = open_log_file_for_append(path)?;
         writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
         Ok(())
     }
@@ -572,15 +563,26 @@ impl V3DebugRuntime {
             println!("{line}");
         }
         if let Some(path) = self.config.log_file.as_deref() {
-            ensure_log_file_parent_dir(path)?;
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|error| V3DebugError::Sink(error.to_string()))?;
+            let mut file = open_log_file_for_append(path)?;
             writeln!(file, "{line}").map_err(|error| V3DebugError::Sink(error.to_string()))?;
         }
         Ok(())
+    }
+}
+
+fn open_log_file_for_append(path: &str) -> V3DebugResult<File> {
+    ensure_log_file_parent_dir(path)?;
+    match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(file) => Ok(file),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            ensure_log_file_parent_dir(path)?;
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|error| V3DebugError::Sink(error.to_string()))
+        }
+        Err(error) => Err(V3DebugError::Sink(error.to_string())),
     }
 }
 

@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'v3', 'Cargo.toml');
+const packageJsonPath = path.join(repoRoot, 'package.json');
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
-const sourceBin = path.join(repoRoot, 'v3', 'target', 'debug', binaryName);
 const repoBin = path.join(repoRoot, 'dist', 'bin', binaryName);
 const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
 
@@ -48,6 +48,10 @@ function buildV3Cli() {
   if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
     env.CARGO_NET_OFFLINE = 'true';
   }
+  const cargoTargetDir = env.CARGO_TARGET_DIR
+    ? path.resolve(env.CARGO_TARGET_DIR)
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'));
+  env.CARGO_TARGET_DIR = cargoTargetDir;
   const result = spawnSync('cargo', [
     'build',
     '--manifest-path',
@@ -62,9 +66,11 @@ function buildV3Cli() {
   if ((result.status ?? 0) !== 0) {
     fail('cargo build failed for routecodex-v3-cli');
   }
+  const sourceBin = path.join(cargoTargetDir, 'debug', binaryName);
   if (!fs.existsSync(sourceBin)) {
     fail(`built V3 CLI binary not found: ${sourceBin}`);
   }
+  return sourceBin;
 }
 
 function copyExecutableAtomic(sourcePath, targetPath) {
@@ -80,6 +86,19 @@ function copyExecutableAtomic(sourcePath, targetPath) {
   if (process.platform !== 'win32') {
     fs.chmodSync(tempPath, 0o755);
   }
+  fs.renameSync(tempPath, targetPath);
+}
+
+function copyPackageJsonAtomic(targetPath) {
+  if (!fs.existsSync(packageJsonPath)) {
+    fail(`source package.json missing: ${packageJsonPath}`);
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const tempPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  fs.copyFileSync(packageJsonPath, tempPath);
   fs.renameSync(tempPath, targetPath);
 }
 
@@ -164,7 +183,7 @@ function resolveInstallTargets() {
 }
 
 function main() {
-  buildV3Cli();
+  const sourceBin = buildV3Cli();
   copyExecutableAtomic(sourceBin, repoBin);
   const expectedHash = sha256(repoBin);
   console.log(`[install-v3-cli] installed repo ${path.relative(repoRoot, repoBin)} sha256=${expectedHash}`);
@@ -172,6 +191,8 @@ function main() {
   const targets = resolveInstallTargets();
   for (const target of targets) {
     copyExecutableAtomic(repoBin, target.currentBin);
+    const targetPackageJson = path.join(target.home, 'install', 'current', 'package.json');
+    copyPackageJsonAtomic(targetPackageJson);
     const actualHash = sha256(target.currentBin);
     if (actualHash !== expectedHash) {
       fail(`hash mismatch after installing ${target.currentBin}`);

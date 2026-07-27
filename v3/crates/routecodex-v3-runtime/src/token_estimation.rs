@@ -243,12 +243,85 @@ fn count_v3_structured_tokens(value: &Value, encoder: &CoreBPE) -> usize {
                     .unwrap_or_else(|| count_v3_text_tokens("media", encoder));
                 return type_tokens + count_v3_text_tokens("[omitted_media]", encoder);
             }
+            if let Some(tokens) = count_v3_responses_item_tokens(map, encoder) {
+                return tokens;
+            }
             map.iter()
                 .map(|(key, entry)| {
                     count_v3_text_tokens(key, encoder) + count_v3_structured_tokens(entry, encoder)
                 })
                 .sum()
         }
+    }
+}
+
+fn count_v3_responses_item_tokens(
+    map: &serde_json::Map<String, Value>,
+    encoder: &CoreBPE,
+) -> Option<usize> {
+    let item_type = map.get("type").and_then(Value::as_str)?;
+    match item_type {
+        "message" => Some(
+            map.get("role")
+                .and_then(Value::as_str)
+                .map(|role| count_v3_text_tokens(role, encoder))
+                .unwrap_or(0)
+                + map
+                    .get("content")
+                    .map(|content| count_v3_content_tokens(content, encoder))
+                    .unwrap_or(0),
+        ),
+        "function_call" => Some(
+            map.get("name")
+                .and_then(Value::as_str)
+                .map(|name| count_v3_text_tokens(name, encoder))
+                .unwrap_or(0)
+                + map
+                    .get("arguments")
+                    .and_then(Value::as_str)
+                    .map(|arguments| count_v3_text_tokens(arguments, encoder))
+                    .unwrap_or(0),
+        ),
+        "function_call_output" | "tool_call_output" => Some(
+            map.get("output")
+                .map(|output| count_v3_content_tokens(output, encoder))
+                .unwrap_or(0),
+        ),
+        "custom_tool_call" => Some(
+            map.get("name")
+                .and_then(Value::as_str)
+                .map(|name| count_v3_text_tokens(name, encoder))
+                .unwrap_or(0)
+                + map
+                    .get("input")
+                    .map(|input| count_v3_content_tokens(input, encoder))
+                    .unwrap_or(0),
+        ),
+        "custom_tool_call_output" => Some(
+            map.get("output")
+                .map(|output| count_v3_content_tokens(output, encoder))
+                .unwrap_or(0),
+        ),
+        "reasoning" => Some(
+            map.get("summary")
+                .map(|summary| count_v3_content_tokens(summary, encoder))
+                .unwrap_or(0)
+                + map
+                    .get("content")
+                    .map(|content| count_v3_content_tokens(content, encoder))
+                    .unwrap_or(0),
+        ),
+        "web_search_call" => Some(
+            map.get("action")
+                .map(|action| count_v3_structured_tokens(action, encoder))
+                .unwrap_or(0)
+                + map
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(|status| count_v3_text_tokens(status, encoder))
+                    .unwrap_or(0),
+        ),
+        _ => None,
     }
 }
 
@@ -378,5 +451,46 @@ mod tests {
             "input": [{ "role": "user", "content": [{ "type": "input_text", "text": "hi" }] }]
         });
         assert!(estimate_v3_request_tokens(&with_instructions) > estimate_v3_request_tokens(&base));
+    }
+
+    #[test]
+    fn v3_token_estimate_counts_responses_semantic_content_not_protocol_wrapper_keys() {
+        let tool_output = "alpha beta gamma delta ".repeat(24_000);
+        let encrypted_content = "rsn_pollution_".repeat(8_000);
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "summary": [{ "type": "summary_text", "text": "small summary" }],
+                    "encrypted_content": encrypted_content
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_large",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"printf hi\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_large",
+                    "output": tool_output
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "name": "exec_command",
+                "parameters": { "type": "object" }
+            }]
+        });
+        let estimate = estimate_v3_request_tokens(&request);
+        assert!(
+            estimate < 120_000,
+            "Responses routing estimate must not count protocol wrapper keys or encrypted_content as context tokens; estimate={estimate}"
+        );
+        assert!(
+            estimate > 80_000,
+            "Responses routing estimate must still count real tool output text; estimate={estimate}"
+        );
     }
 }

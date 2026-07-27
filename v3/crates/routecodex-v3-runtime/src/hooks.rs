@@ -220,6 +220,7 @@ fn responses_direct_request_projection_hook(
             },
             responses_transport: candidate.responses_transport,
             websocket_v2_url: candidate.websocket_v2_url.clone(),
+            provider_request_cleanup: candidate.provider_request_cleanup.clone(),
         },
         request_body,
     )
@@ -490,7 +491,9 @@ fn responses_direct_error_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use routecodex_v3_config::{V3ResponsesTransportKind, V3RouteTargetKind};
+    use routecodex_v3_config::{
+        V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteTargetKind,
+    };
     use routecodex_v3_provider_responses::{V3ProviderHttpFailure, V3ProviderResponseHeader};
     use routecodex_v3_target::{V3Target10ConcreteProviderSelected, V3TargetCandidate};
     use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
@@ -514,6 +517,7 @@ mod tests {
                     target_plan: Vec::new(),
                     request_client_model: Some(client_model.to_string()),
                     request_capabilities: BTreeSet::from(["text".to_string()]),
+                    request_input_tokens: 1,
                     hit_count: 1,
                 },
                 candidate: V3TargetCandidate {
@@ -524,9 +528,11 @@ mod tests {
                     wire_model: wire_model.to_string(),
                     visible_model_ids: vec![client_model.to_string()],
                     model_capabilities: vec!["text".to_string()],
+                    max_context_tokens: None,
                     base_url: "https://provider.invalid/v1".to_string(),
                     responses_transport: V3ResponsesTransportKind::Http,
                     websocket_v2_url: None,
+                    provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
                     compatibility_profile: None,
                     env_name: Some("TEST_KEY".to_string()),
                     token_file: None,

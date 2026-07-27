@@ -7,6 +7,7 @@ use routecodex_v3_lifecycle::{
     V3ManagedLifecycle, V3ManagedLifecycleObservation, V3ManagedListenerDeclaration,
     V3ManagedStatusRecord,
 };
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -112,7 +113,14 @@ enum ServerCommand {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(error) = run_cli().await {
+        eprintln!("[RouteCodexV3] command failed: {error} ({error:?})");
+        std::process::exit(1);
+    }
+}
+
+async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     if should_print_version() {
         let executable = std::env::current_exe()?;
         println!(
@@ -183,11 +191,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await?;
             } else {
                 let executable = std::env::current_exe()?;
-                V3ManagedLifecycle::new(config)?
+                let manifest = load_manifest(&config)?;
+                emit_v3_cli_start_console_line(
+                    "server start",
+                    &config,
+                    &executable,
+                    snap,
+                    snap_stages.as_deref(),
+                );
+                let status = V3ManagedLifecycle::new(config)?
                     .with_snapshots_enabled(snap)
                     .with_snapshot_stages(snap_stages)
+                    .with_console_enabled(true)
                     .start(&executable, Duration::from_secs(15))
                     .await?;
+                emit_v3_cli_start_completed_console_line(&status);
+                emit_v3_cli_server_started_console_line(&manifest, &executable);
+                println!("{}", serde_json::to_string(&status)?);
             }
         }
         Command::Server {
@@ -259,9 +279,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | Command::Stop { config, timeout_ms } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            emit_v3_cli_stop_console_line(&config, &executable, timeout_ms);
             let status = V3ManagedLifecycle::new(config)?
                 .stop(&executable, Duration::from_millis(timeout_ms))
                 .await?;
+            emit_v3_cli_stop_completed_console_line(&status);
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Server {
@@ -330,6 +352,29 @@ fn emit_v3_cli_start_console_line(
         snap,
         snap_stages.unwrap_or("")
     );
+    flush_stdout_best_effort();
+}
+
+fn emit_v3_cli_start_completed_console_line(status: &V3ManagedStatusRecord) {
+    println!(
+        "[RouteCodexV3] Start completed state={} instance={}",
+        format!("{:?}", status.state).to_ascii_lowercase(),
+        status.instance_id
+    );
+    flush_stdout_best_effort();
+}
+
+fn emit_v3_cli_stop_console_line(config: &Path, executable: &Path, timeout_ms: u64) {
+    println!(
+        "[RouteCodexV3] rccv3 stop version={} crate={} binary={} config={} timeout_ms={}",
+        resolve_routecodex_package_version_from_executable(executable)
+            .unwrap_or_else(|| "unknown".to_string()),
+        env!("CARGO_PKG_VERSION"),
+        executable.display(),
+        config.display(),
+        timeout_ms
+    );
+    flush_stdout_best_effort();
 }
 
 fn emit_v3_cli_restart_completed_console_line(status: &V3ManagedStatusRecord) {
@@ -338,6 +383,16 @@ fn emit_v3_cli_restart_completed_console_line(status: &V3ManagedStatusRecord) {
         format!("{:?}", status.state).to_ascii_lowercase(),
         status.instance_id
     );
+    flush_stdout_best_effort();
+}
+
+fn emit_v3_cli_stop_completed_console_line(status: &V3ManagedStatusRecord) {
+    println!(
+        "[RouteCodexV3] Stop completed state={} instance={}",
+        format!("{:?}", status.state).to_ascii_lowercase(),
+        status.instance_id
+    );
+    flush_stdout_best_effort();
 }
 
 fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation) {
@@ -353,6 +408,7 @@ fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation)
                 control_instance_id,
                 format_v3_managed_listener_declarations(&listeners)
             );
+            flush_stdout_best_effort();
         }
         V3ManagedLifecycleObservation::RestartControlAccepted {
             instance_id,
@@ -365,6 +421,7 @@ fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation)
                 instance_id,
                 message
             );
+            flush_stdout_best_effort();
         }
         V3ManagedLifecycleObservation::RestartStatusObserved { status } => {
             let detail = status
@@ -379,6 +436,7 @@ fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation)
                 status.instance_id,
                 detail
             );
+            flush_stdout_best_effort();
         }
     }
 }
@@ -414,4 +472,9 @@ fn emit_v3_cli_server_started_console_line(
         env!("CARGO_PKG_VERSION"),
         executable.display()
     );
+    flush_stdout_best_effort();
+}
+
+fn flush_stdout_best_effort() {
+    let _ = io::stdout().flush();
 }

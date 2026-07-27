@@ -147,6 +147,7 @@ fn target_with_auth(
         },
         responses_transport: V3ResponsesTransportKind::Http,
         websocket_v2_url: None,
+        provider_request_cleanup: Default::default(),
     }
 }
 

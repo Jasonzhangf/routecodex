@@ -55,7 +55,8 @@ default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_API_KEY" }] }
 responses = { process = "chat", streaming = "always" }
 concurrency = { max_in_flight = 8, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
-health = { enabled = true, failure_threshold = 3, cooldown_ms = 30000 }
+health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000 }
+provider_request_cleanup = { historical_fields = ["reasoning.encrypted_content"] }
 
 [[providers.cc.semantic_error_policy]]
 policy_id = "cc_200_diagnostic_zero_usage"
@@ -162,6 +163,12 @@ fn parses_full_config_v3_without_interpreting_targets() {
             .expect("health declaration")
             .failure_threshold,
         3
+    );
+    assert_eq!(
+        manifest.providers["cc"]
+            .provider_request_cleanup
+            .historical_fields,
+        vec!["reasoning.encrypted_content"]
     );
 
     let forwarder = &manifest.forwarders["fwd.gpt-5.6"];
@@ -991,6 +998,40 @@ fn rejects_ambiguous_cross_provider_alias_invalid_health_and_unknown_endpoint() 
 }
 
 #[test]
+fn rejects_invalid_provider_request_cleanup_selectors() {
+    for (replacement, expected) in [
+        (
+            "provider_request_cleanup = { historical_fields = [\"\"] }",
+            "empty selector",
+        ),
+        (
+            "provider_request_cleanup = { historical_fields = [\"reasoning..encrypted_content\"] }",
+            "empty path segment",
+        ),
+        (
+            "provider_request_cleanup = { historical_fields = [\"reasoning.encrypted_content\", \" reasoning.encrypted_content \"] }",
+            "is duplicated",
+        ),
+        (
+            "provider_request_cleanup = { historical_fields = [\"reasoning.encrypted_content[]\"] }",
+            "unsupported selector characters",
+        ),
+    ] {
+        let invalid = FULL_CONFIG.replace(
+            "provider_request_cleanup = { historical_fields = [\"reasoning.encrypted_content\"] }",
+            replacement,
+        );
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap())
+                .unwrap_err();
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected}, got {error}"
+        );
+    }
+}
+
+#[test]
 fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
     let root = std::env::temp_dir().join(format!("routecodex-v3-v2-compat-{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
@@ -1117,6 +1158,34 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
     assert!(!format!("{manifest:?}").contains("secret-orangeai-key1"));
 
     let group = &manifest.route_groups["gateway_priority_5555"];
+    assert_eq!(
+        group.pools["multimodal"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .precedence,
+        10
+    );
+    assert_eq!(
+        group.pools["web_search"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .precedence,
+        20
+    );
+    assert_eq!(
+        group.pools["longcontext"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .precedence,
+        30
+    );
+    assert_eq!(
+        group.pools["tools"].match_rule.as_ref().unwrap().precedence,
+        70
+    );
     assert_route_targets(
         group.pools["thinking"]
             .targets

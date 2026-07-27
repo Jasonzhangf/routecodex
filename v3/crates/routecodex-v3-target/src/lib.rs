@@ -1,6 +1,7 @@
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3ForwarderTargetManifest, V3ResponsesTransportKind,
-    V3RouteGroupManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
+    V3Config05ManifestPublished, V3ForwarderTargetManifest,
+    V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteGroupManifest,
+    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
@@ -63,6 +64,7 @@ type = "responses"
 base_url = "http://a.invalid/v1"
 default_model = "m"
 compatibility_profile = "chat:minimax"
+provider_request_cleanup = { historical_fields = ["reasoning.encrypted_content"] }
 auth = { type = "api_key", entries = [{ alias = "ka", env = "KEY_A" }] }
 [providers.a.models.m]
 capabilities = ["text", "tools", "multimodal"]
@@ -186,7 +188,7 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
         assert_eq!(cooled.candidate.provider_id, "a");
         assert_eq!(
             cooled.unavailable_candidates,
-            vec!["a:ka:m"],
+            vec!["a:ka:m:availability(a:ka:m)"],
             "cooldown must still be reported even when bypassed"
         );
     }
@@ -237,7 +239,10 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
         let exhausted = target
             .select_available(expanded, &ExcludedAvailability, 0)
             .unwrap_err();
-        assert_eq!(exhausted.attempted_candidates, vec!["a:ka:m"]);
+        assert_eq!(
+            exhausted.attempted_candidates,
+            vec!["a:ka:m:availability(request_local_provider_failure)"]
+        );
     }
 
     #[test]
@@ -518,7 +523,17 @@ targets = [
             expanded.candidates[0].compatibility_profile.as_deref(),
             Some("chat:minimax")
         );
+        assert_eq!(
+            expanded.candidates[0]
+                .provider_request_cleanup
+                .historical_fields,
+            vec!["reasoning.encrypted_content"]
+        );
         assert_eq!(expanded.candidates[1].compatibility_profile, None);
+        assert!(expanded.candidates[1]
+            .provider_request_cleanup
+            .historical_fields
+            .is_empty());
         let selected = V3TargetInterpreter::default()
             .select_available(
                 expanded,
@@ -773,6 +788,253 @@ targets = [
     }
 
     #[test]
+    fn image_bearing_longcontext_route_keeps_request_multimodal_as_target_requirement() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.text]
+type = "responses"
+base_url = "http://text.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEXT_KEY" }] }
+[providers.text.models.m]
+capabilities = ["text", "longcontext"]
+max_context_tokens = 1000000
+[providers.vision]
+type = "responses"
+base_url = "http://vision.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "VISION_KEY" }] }
+[providers.vision.models.m]
+capabilities = ["text", "longcontext", "multimodal", "vision"]
+max_context_tokens = 1000000
+[forwarders.live_like]
+model = "m"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "text", model = "m", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "vision", model = "m", key = "key", priority = 2 }
+]
+[route_groups.g.pools.longcontext]
+selection = { strategy = "priority" }
+match = { precedence = 1, entry_protocol = "responses", min_input_tokens = 1000 }
+targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: None,
+                    capabilities: BTreeSet::from(["multimodal".into(), "vision".into()]),
+                    input_tokens: 1000,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        assert_eq!(hit.pool_id, "longcontext");
+        assert!(
+            hit.target_plan
+                .iter()
+                .all(|entry| entry.pool_id == "longcontext"),
+            "duplicated default targets are already deduped by Router07 and cannot repair candidate requirements"
+        );
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        let selected = target
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::new(),
+                },
+                0,
+            )
+            .expect("image-bearing longcontext request must skip text-only candidates");
+
+        assert_eq!(selected.candidate.provider_id, "vision");
+        assert_eq!(
+            selected.unavailable_candidates,
+            vec!["text:key:m:capability_mismatch"]
+        );
+    }
+
+    #[test]
+    fn route_owned_web_search_pool_does_not_require_model_web_search_capability() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.route_search]
+type = "responses"
+base_url = "http://route-search.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SEARCH_KEY" }] }
+[providers.route_search.models.m]
+capabilities = ["text"]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "route_search", model = "m", key = "key", priority = 1 }]
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+features = { route_owned_web_search = true }
+match = { precedence = 10, entry_protocol = "responses", required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "route_search", model = "m", key = "key", priority = 1 }]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: None,
+                    capabilities: BTreeSet::from(["web_search".into()]),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        assert_eq!(hit.pool_id, "web_search");
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        let selected = target
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::new(),
+                },
+                0,
+            )
+            .expect("route-owned web_search must be selected even when the model does not advertise native web_search");
+
+        assert_eq!(selected.candidate.provider_id, "route_search");
+        assert!(!selected
+            .candidate
+            .required_capabilities
+            .iter()
+            .any(|capability| capability == "web_search"));
+    }
+
+    #[test]
+    fn context_window_near_limit_candidate_is_skipped_when_safe_candidate_exists() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.short]
+type = "responses"
+base_url = "http://short.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SHORT_KEY" }] }
+[providers.short.models.m]
+capabilities = ["text"]
+max_context_tokens = 1000
+[providers.long]
+type = "responses"
+base_url = "http://long.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LONG_KEY" }] }
+[providers.long.models.m]
+capabilities = ["text"]
+max_context_tokens = 4000
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "short", model = "m", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "long", model = "m", key = "key", priority = 2 }
+]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: None,
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 950,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .unwrap();
+        let selected = target
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::new(),
+                },
+                0,
+            )
+            .unwrap();
+
+        assert_eq!(selected.candidate.provider_id, "long");
+        assert_eq!(
+            selected.unavailable_candidates,
+            vec!["short:key:m:context_near_limit"]
+        );
+    }
+
+    #[test]
+    fn context_window_near_limit_candidate_remains_selectable_when_no_safe_candidate_exists() {
+        let mut expanded = expanded();
+        expanded.route.request_input_tokens = 950;
+        for candidate in &mut expanded.candidates {
+            candidate.max_context_tokens = Some(1000);
+        }
+
+        let selected = V3TargetInterpreter::default()
+            .select_available(
+                expanded,
+                &Availability {
+                    blocked: BTreeSet::new(),
+                },
+                0,
+            )
+            .unwrap();
+
+        assert_eq!(selected.candidate.provider_id, "a");
+    }
+
+    #[test]
     fn forwarder_weighted_and_round_robin_order_are_deterministic() {
         let mut weighted = manifest();
         let inner = weighted.forwarders.get_mut("inner").unwrap();
@@ -823,9 +1085,11 @@ pub struct V3TargetCandidate {
     pub wire_model: String,
     pub visible_model_ids: Vec<String>,
     pub model_capabilities: Vec<String>,
+    pub max_context_tokens: Option<u64>,
     pub base_url: String,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
+    pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
@@ -1000,14 +1264,7 @@ impl V3TargetInterpreter {
                 last_error = Some(V3TargetError::OpaqueTargetMissing);
                 continue;
             };
-            let required_capabilities = if entry.pool_id == "default" {
-                route_required_capabilities.clone()
-            } else {
-                pool.match_rule
-                    .as_ref()
-                    .map(|rule| rule.required_capabilities.clone())
-                    .unwrap_or_default()
-            };
+            let required_capabilities = route_required_capabilities.clone();
             let mut visited = BTreeSet::new();
             match self.expand_route_target(
                 manifest,
@@ -1062,10 +1319,31 @@ impl V3TargetInterpreter {
         // Explicit exclusions still block via the exhaustion path below.
         let direct_route = expanded.route.pool_id == "direct";
         let mut direct_fallback: Option<(usize, V3TargetCandidate)> = None;
+        let context_safe_available = expanded.candidates.iter().any(|candidate| {
+            candidate_satisfies_required_capabilities(candidate)
+                && candidate_context_is_safe(candidate, expanded.route.request_input_tokens)
+                && availability
+                    .availability(
+                        &candidate.provider_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_ms,
+                    )
+                    .available
+        });
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
                     "{}:{}:{}:capability_mismatch",
+                    candidate.provider_id, candidate.auth_alias, candidate.model_id
+                ));
+                continue;
+            }
+            if context_safe_available
+                && candidate_context_is_risky(candidate, expanded.route.request_input_tokens)
+            {
+                unavailable.push(format!(
+                    "{}:{}:{}:context_near_limit",
                     candidate.provider_id, candidate.auth_alias, candidate.model_id
                 ));
                 continue;
@@ -1097,9 +1375,9 @@ impl V3TargetInterpreter {
             {
                 direct_fallback = Some((index, candidate.clone()));
             }
-            unavailable.push(format!(
-                "{}:{}:{}",
-                candidate.provider_id, candidate.auth_alias, candidate.model_id
+            unavailable.push(format_candidate_availability_unavailable(
+                candidate,
+                &projection,
             ));
         }
         if let Some((index, candidate)) = direct_fallback {
@@ -1285,6 +1563,7 @@ impl V3TargetInterpreter {
                 wire_model: model.wire_name.clone(),
                 visible_model_ids: visible_model_ids.clone(),
                 model_capabilities: model.capabilities.clone(),
+                max_context_tokens: model.max_context_tokens,
                 base_url: provider.base_url.clone(),
                 responses_transport: provider
                     .responses
@@ -1295,6 +1574,7 @@ impl V3TargetInterpreter {
                     .responses
                     .as_ref()
                     .and_then(|responses| responses.websocket_v2_url.clone()),
+                provider_request_cleanup: provider.provider_request_cleanup.clone(),
                 compatibility_profile: provider.compatibility_profile.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
@@ -1352,7 +1632,17 @@ fn selected_route_required_capabilities(
     route: &V3Router07OpaqueTargetHitOnce,
 ) -> Vec<String> {
     let mut capabilities = BTreeSet::new();
+    let route_owned_web_search = route.target_plan.iter().any(|entry| {
+        entry.pool_id != "default"
+            && group
+                .pools
+                .get(&entry.pool_id)
+                .is_some_and(route_pool_owns_web_search)
+    });
     for capability in &route.request_capabilities {
+        if route_owned_web_search && is_web_search_capability(capability) {
+            continue;
+        }
         capabilities.insert(capability.clone());
     }
     for entry in &route.target_plan {
@@ -1366,10 +1656,24 @@ fn selected_route_required_capabilities(
             continue;
         };
         for capability in &rule.required_capabilities {
+            if route_pool_owns_web_search(pool) && is_web_search_capability(capability) {
+                continue;
+            }
             capabilities.insert(capability.clone());
         }
     }
     capabilities.into_iter().collect()
+}
+
+fn route_pool_owns_web_search(pool: &routecodex_v3_config::V3RoutePoolManifest) -> bool {
+    pool.features
+        .get("route_owned_web_search")
+        .copied()
+        .unwrap_or(false)
+}
+
+fn is_web_search_capability(capability: &str) -> bool {
+    matches!(capability, "web_search" | "search")
 }
 
 fn selected_route_requested_model_filter(
@@ -1477,6 +1781,22 @@ fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> b
         .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
 }
 
+fn candidate_context_is_safe(candidate: &V3TargetCandidate, input_tokens: u64) -> bool {
+    candidate
+        .max_context_tokens
+        .is_some_and(|max_context| input_tokens < context_warn_threshold(max_context))
+}
+
+fn candidate_context_is_risky(candidate: &V3TargetCandidate, input_tokens: u64) -> bool {
+    candidate
+        .max_context_tokens
+        .is_some_and(|max_context| input_tokens >= context_warn_threshold(max_context))
+}
+
+fn context_warn_threshold(max_context_tokens: u64) -> u64 {
+    max_context_tokens.saturating_mul(9) / 10
+}
+
 fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
     let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
     match required {
@@ -1484,4 +1804,22 @@ fn candidate_has_required_capability(capabilities: &[String], required: &str) ->
         "multimodal" | "vision" => has("multimodal") || has("vision"),
         _ => true,
     }
+}
+
+fn format_candidate_availability_unavailable(
+    candidate: &V3TargetCandidate,
+    projection: &routecodex_v3_provider_responses::V3ProviderAvailabilityProjection,
+) -> String {
+    let key = format!(
+        "{}:{}:{}",
+        candidate.provider_id, candidate.auth_alias, candidate.model_id
+    );
+    if projection.blocked_scopes.is_empty() {
+        return key;
+    }
+    format!(
+        "{}:availability({})",
+        key,
+        projection.blocked_scopes.join("|")
+    )
 }

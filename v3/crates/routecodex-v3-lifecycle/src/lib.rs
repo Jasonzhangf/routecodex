@@ -462,8 +462,21 @@ impl V3ManagedLifecycle {
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
         let (declaration, _) = self.declaration(executable_path)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
+        ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "stop")?;
-        let response = send_control(&instance_dir, &declaration, ControlOperation::Stop).await?;
+        let response = match send_control(&instance_dir, &declaration, ControlOperation::Stop).await
+        {
+            Ok(response) => response,
+            Err(error @ (V3LifecycleError::NotRunning(_) | V3LifecycleError::Timeout(_))) => {
+                if listener_set_is_available(&declaration.listeners) {
+                    return Err(error);
+                }
+                return self
+                    .force_stop_after_graceful_timeout(&instance_dir, &declaration)
+                    .await;
+            }
+            Err(error) => return Err(error),
+        };
         if !response.accepted {
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
@@ -477,13 +490,52 @@ impl V3ManagedLifecycle {
                 }
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(V3LifecycleError::Timeout(format!(
-                    "stop {}",
-                    declaration.instance_id
-                )));
+                return self
+                    .force_stop_after_graceful_timeout(&instance_dir, &declaration)
+                    .await;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+
+    async fn force_stop_after_graceful_timeout(
+        &self,
+        instance_dir: &Path,
+        declaration: &V3ManagedInstanceDeclaration,
+    ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
+        let force_timeout = env_duration_ms(
+            &[
+                "ROUTECODEX_V3_KILL_TIMEOUT_MS",
+                "RCC_V3_KILL_TIMEOUT_MS",
+                "ROUTECODEX_KILL_TIMEOUT_MS",
+            ],
+            DEFAULT_START_FORCE_KILL_TIMEOUT,
+        );
+        write_status(
+            instance_dir,
+            &declaration.instance_id,
+            V3ManagedRunState::Stopping,
+            Some("graceful stop timed out; forcing scoped listener shutdown".to_string()),
+        )?;
+        force_release_scoped_listener_set_after_graceful_timeout(
+            &declaration.listeners,
+            force_timeout,
+        )
+        .await?;
+        cleanup_forced_stopped_runtime_state(instance_dir, declaration)?;
+        write_status(
+            instance_dir,
+            &declaration.instance_id,
+            V3ManagedRunState::Stopped,
+            Some("forced scoped listener shutdown after graceful stop timeout".to_string()),
+        )?;
+        Ok(V3ManagedStatusRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            state: V3ManagedRunState::Stopped,
+            updated_at_epoch_ms: epoch_ms(),
+            detail: Some("forced scoped listener shutdown after graceful stop timeout".to_string()),
+        })
     }
 
     pub async fn restart(
@@ -718,9 +770,33 @@ impl V3ManagedLifecycle {
             V3ManagedRunState::Running,
             None,
         )?;
+        #[cfg(unix)]
+        let mut interrupt_signal =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+        #[cfg(unix)]
+        let mut terminate_signal =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        #[cfg(not(unix))]
         let mut ctrl_c = Box::pin(tokio::signal::ctrl_c());
         loop {
-            let (mut stream, _) = tokio::select! {
+            #[cfg(unix)]
+            let accepted = tokio::select! {
+                _ = interrupt_signal.recv() => {
+                    let handle = handle.take().ok_or_else(|| {
+                        V3LifecycleError::Validation("managed runtime handle was already consumed".to_string())
+                    })?;
+                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle).await;
+                }
+                _ = terminate_signal.recv() => {
+                    let handle = handle.take().ok_or_else(|| {
+                        V3LifecycleError::Validation("managed runtime handle was already consumed".to_string())
+                    })?;
+                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle).await;
+                }
+                accepted = listener.accept() => accepted?,
+            };
+            #[cfg(not(unix))]
+            let accepted = tokio::select! {
                 signal = &mut ctrl_c => {
                     if let Err(error) = signal {
                         write_status(
@@ -738,6 +814,7 @@ impl V3ManagedLifecycle {
                 }
                 accepted = listener.accept() => accepted?,
             };
+            let (mut stream, _) = accepted;
             let mut line = String::new();
             BufReader::new(&mut stream).read_line(&mut line).await?;
             let request: ControlRequest = serde_json::from_str(&line)?;
@@ -1695,6 +1772,68 @@ async fn release_listener_set_for_start(
         declaration.instance_id,
         format_pid_list(&remaining)
     )))
+}
+
+async fn force_release_scoped_listener_set_after_graceful_timeout(
+    listeners: &[V3ManagedListenerDeclaration],
+    timeout: Duration,
+) -> Result<(), V3LifecycleError> {
+    let occupied_ports = occupied_listener_ports(listeners);
+    let terminate_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
+    guard_explicit_listener_pids_are_scoped_to_target_ports(&terminate_pids, &occupied_ports)?;
+    signal_explicit_listener_pids(&terminate_pids, V3LifecycleSignal::Terminate)?;
+    if wait_for_listener_set_available(listeners, timeout).await {
+        return Ok(());
+    }
+
+    let occupied_ports = occupied_listener_ports(listeners);
+    let kill_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
+    guard_explicit_listener_pids_are_scoped_to_target_ports(&kill_pids, &occupied_ports)?;
+    signal_explicit_listener_pids(&kill_pids, V3LifecycleSignal::Kill)?;
+    if wait_for_listener_set_available(listeners, timeout).await {
+        return Ok(());
+    }
+
+    let occupied_ports = occupied_listener_ports(listeners);
+    let remaining = explicit_listener_pids_for_ports(&occupied_ports)?;
+    Err(V3LifecycleError::Timeout(format!(
+        "force stop listener set remaining_pids={}",
+        format_pid_list(&remaining)
+    )))
+}
+
+fn cleanup_forced_stopped_runtime_state(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    let control_path = instance_dir.join("control.json");
+    if control_path.exists() {
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != declaration.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to cleanup forced-stop control for a different instance".to_string(),
+            ));
+        }
+        let socket_path = PathBuf::from(&control.socket_path);
+        if socket_path != managed_control_socket_path(&declaration.instance_id) {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to cleanup non-canonical forced-stop control socket".to_string(),
+            ));
+        }
+        let _ = fs::remove_file(socket_path);
+        fs::remove_file(control_path)?;
+    }
+    let pid_path = instance_dir.join("pid.cache");
+    if pid_path.exists() {
+        let pid: V3ManagedPidCache = read_json(&pid_path)?;
+        if pid.instance_id != declaration.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to cleanup forced-stop pid cache for a different instance".to_string(),
+            ));
+        }
+        fs::remove_file(pid_path)?;
+    }
+    Ok(())
 }
 
 async fn release_foreign_managed_listener_ports_for_start(

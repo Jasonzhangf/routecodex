@@ -47,6 +47,7 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE: &str =
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str = "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
+const V3_ANTHROPIC_CYBER_REFUSAL_CODE: &str = "ANTHROPIC_CYBER_REFUSAL";
 const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_COUNT: usize =
     V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET;
 const V3_RESPONSES_RELAY_PROVIDER_FAILURE_RETRY_DELAY_MS: u64 =
@@ -1034,6 +1035,12 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
     ProviderResponseEventCodec(String),
+    #[error("V3 Responses Relay provider semantic failure {code} status {status}: {message}")]
+    ProviderResponseSemanticFailure {
+        status: u16,
+        code: String,
+        message: String,
+    },
     #[error(transparent)]
     LocalContinuation(#[from] V3LocalContinuationError),
     #[error("V3 Responses Relay local continuation scope routing group does not match server")]
@@ -1380,10 +1387,14 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         server_routing_group(manifest, &input.server_id)?,
         &input.request_id,
     );
-    let request_stopless_control_state =
-        load_v3_responses_relay_stopless_control_state(manifest, stopless_control.as_ref())?;
+    let request_stopless_control_state = load_v3_responses_relay_stopless_control_state(
+        manifest,
+        &input.server_id,
+        stopless_control.as_ref(),
+    )?;
     let request_hook_profile = responses_relay_request_hook_profile(
         manifest,
+        &input.server_id,
         request_stopless_control_state.as_ref(),
         stopless_control_has_client_session_scope,
         &transition_request_id,
@@ -1429,6 +1440,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let stopless_state = request_outcome.stopless_state().cloned();
     apply_v3_responses_relay_stopless_control_request_transition(
         manifest,
+        &input.server_id,
         stopless_control.as_ref(),
         request_stopless_control_state.is_some(),
         stopless_state.as_ref(),
@@ -1440,6 +1452,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 Err(error) => {
                     clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                         manifest,
+                        &input.server_id,
                         stopless_control.as_ref(),
                         stopless_state.as_ref(),
                     )?;
@@ -1503,6 +1516,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     if let Some(failure) = pending_provider_failure.take() {
                         clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                             manifest,
+                            &input.server_id,
                             stopless_control.as_ref(),
                             stopless_state.as_ref(),
                         )?;
@@ -1510,6 +1524,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     }
                     clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                         manifest,
+                        &input.server_id,
                         stopless_control.as_ref(),
                         stopless_state.as_ref(),
                     )?;
@@ -1589,6 +1604,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 if let Some(failure) = terminal_failure {
                     clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                         manifest,
+                        &input.server_id,
                         stopless_control.as_ref(),
                         stopless_state.as_ref(),
                     )?;
@@ -1621,6 +1637,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 if let Some(failure) = terminal_failure {
                     clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                         manifest,
+                        &input.server_id,
                         stopless_control.as_ref(),
                         stopless_state.as_ref(),
                     )?;
@@ -1664,6 +1681,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         if let Some(failure) = terminal_failure {
                             clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                                 manifest,
+                                &input.server_id,
                                 stopless_control.as_ref(),
                                 stopless_state.as_ref(),
                             )?;
@@ -1672,6 +1690,44 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         continue;
                     }
                 };
+                if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
+                    if let Some(semantic_error) =
+                        anthropic_cyber_refusal_error_from_payload(&provider_value)
+                    {
+                        let failure = provider_semantic_failure(
+                            429,
+                            semantic_error,
+                            &selected_target_provider_id,
+                            Some(selected_observability),
+                        );
+                        let terminal_failure = try_before_resp03!(
+                            handle_v3_responses_relay_provider_failure(
+                                &failure_context,
+                                selected,
+                                failure,
+                                &mut V3ResponsesRelayProviderRetryState {
+                                    failed_candidates: &mut failed_candidates,
+                                    same_candidate_retries: &mut same_candidate_retries,
+                                    retry_selected: &mut retry_selected,
+                                    pending_provider_failure: &mut pending_provider_failure,
+                                    provider_failure_events: &mut provider_failure_events,
+                                    trace: &mut trace,
+                                },
+                            )
+                            .await
+                        );
+                        if let Some(failure) = terminal_failure {
+                            clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                                manifest,
+                                &input.server_id,
+                                stopless_control.as_ref(),
+                                stopless_state.as_ref(),
+                            )?;
+                            return Ok(provider_failure_output(failure, trace, 0));
+                        }
+                        continue;
+                    }
+                }
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                         try_before_resp03!(project_v3_anthropic_message_as_responses_response(
@@ -1720,6 +1776,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         if let Some(failure) = terminal_failure {
                             clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                                 manifest,
+                                &input.server_id,
                                 stopless_control.as_ref(),
                                 stopless_state.as_ref(),
                             )?;
@@ -1734,6 +1791,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             provider_value: &hook_provider_value,
                             provider_semantic_body: &provider_semantic_body,
                             manifest,
+                            server_id: &input.server_id,
                             provider_id: Some(&selected_target_provider_id),
                             provider_protocol: hook_provider_protocol,
                             provider_response_transport_intent: V3HubTransportIntent::Json,
@@ -1778,6 +1836,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             if let Some(failure) = terminal_failure {
                                 clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                                     manifest,
+                                    &input.server_id,
                                     stopless_control.as_ref(),
                                     stopless_state.as_ref(),
                                 )?;
@@ -1789,6 +1848,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     };
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
+                    &input.server_id,
                     stopless_control.as_ref(),
                     response_stopless_state,
                 )?;
@@ -1853,12 +1913,9 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     {
                         Ok(value) => value,
                         Err(error) => {
-                            let failure = provider_runtime_failure(
-                                provider_response_stream_failure(
-                                    error,
-                                    &input.request_id,
-                                    &selected_target_provider_id,
-                                ),
+                            let failure = provider_response_stream_relay_failure(
+                                error,
+                                &input.request_id,
                                 &selected_target_provider_id,
                                 Some(selected_observability),
                             );
@@ -1881,6 +1938,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             if let Some(failure) = terminal_failure {
                                 clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                                     manifest,
+                                    &input.server_id,
                                     stopless_control.as_ref(),
                                     stopless_state.as_ref(),
                                 )?;
@@ -1926,6 +1984,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         if let Some(failure) = terminal_failure {
                             clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                                 manifest,
+                                &input.server_id,
                                 stopless_control.as_ref(),
                                 stopless_state.as_ref(),
                             )?;
@@ -1940,6 +1999,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             provider_value: &provider_value,
                             provider_semantic_body: &provider_semantic_body,
                             manifest,
+                            server_id: &input.server_id,
                             provider_id: Some(&selected_target_provider_id),
                             provider_protocol: hook_provider_protocol,
                             provider_response_transport_intent: V3HubTransportIntent::Sse,
@@ -1984,6 +2044,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             if let Some(failure) = terminal_failure {
                                 clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                                     manifest,
+                                    &input.server_id,
                                     stopless_control.as_ref(),
                                     stopless_state.as_ref(),
                                 )?;
@@ -1995,6 +2056,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     };
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
+                    &input.server_id,
                     stopless_control.as_ref(),
                     response_stopless_state,
                 )?;
@@ -2585,6 +2647,7 @@ struct V3ResponsesRelayJsonResponseHookInput<'a> {
     provider_value: &'a Value,
     provider_semantic_body: &'a Value,
     manifest: &'a V3Config05ManifestPublished,
+    server_id: &'a str,
     provider_id: Option<&'a str>,
     provider_protocol: V3HubProviderWireProtocol,
     provider_response_transport_intent: V3HubTransportIntent,
@@ -2636,6 +2699,7 @@ fn run_json_response_hooks(
     trace.push("V3HubRespInbound02Normalized");
     let response_hook_profile = responses_relay_response_hook_profile(
         input.manifest,
+        input.server_id,
         input.stopless_state,
         input.stopless_control_has_client_session_scope,
         input.transition_request_id,
@@ -2657,12 +2721,15 @@ fn run_json_response_hooks(
 
 fn responses_relay_request_hook_profile(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_state: Option<&V3StoplessCenterState>,
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &str,
     transition_updated_at: u64,
 ) -> V3HubServertoolRequestProfile {
-    if !v3_stopless_center_enabled(manifest) || !stopless_control_has_client_session_scope {
+    if !v3_stopless_center_enabled_for_server(manifest, server_id)
+        || !stopless_control_has_client_session_scope
+    {
         return V3HubServertoolRequestProfile::disabled();
     }
     let profile = V3HubServertoolRequestProfile::stopless_reasoning_stop()
@@ -2675,12 +2742,15 @@ fn responses_relay_request_hook_profile(
 
 fn responses_relay_response_hook_profile(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_state: Option<&V3StoplessCenterState>,
     stopless_control_has_client_session_scope: bool,
     transition_request_id: &str,
     transition_updated_at: u64,
 ) -> V3HubRelayResponseHookProfile {
-    if !v3_stopless_center_enabled(manifest) || !stopless_control_has_client_session_scope {
+    if !v3_stopless_center_enabled_for_server(manifest, server_id)
+        || !stopless_control_has_client_session_scope
+    {
         return V3HubRelayResponseHookProfile::empty();
     }
     let profile = V3HubRelayResponseHookProfile::empty()
@@ -2692,19 +2762,12 @@ fn responses_relay_response_hook_profile(
     }
 }
 
-fn v3_stopless_center_enabled(manifest: &V3Config05ManifestPublished) -> bool {
-    manifest
-        .features
-        .get("stopless_center")
-        .copied()
-        .unwrap_or(true)
-}
-
 fn load_v3_responses_relay_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
 ) -> Result<Option<V3StoplessCenterState>, V3ResponsesRelayRuntimeError> {
-    if !v3_stopless_center_enabled(manifest) {
+    if !v3_stopless_center_enabled_for_server(manifest, server_id) {
         return Ok(None);
     }
     let Some(stopless_control) = stopless_control else {
@@ -2720,10 +2783,11 @@ fn load_v3_responses_relay_stopless_control_state(
 
 fn store_v3_responses_relay_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
     state: V3StoplessCenterState,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
-    if !v3_stopless_center_enabled(manifest) {
+    if !v3_stopless_center_enabled_for_server(manifest, server_id) {
         return Ok(());
     }
     let Some(stopless_control) = stopless_control else {
@@ -2742,9 +2806,10 @@ fn store_v3_responses_relay_stopless_control_state(
 
 fn clear_v3_responses_relay_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
-    if !v3_stopless_center_enabled(manifest) {
+    if !v3_stopless_center_enabled_for_server(manifest, server_id) {
         return Ok(());
     }
     let Some(stopless_control) = stopless_control else {
@@ -2763,19 +2828,26 @@ fn clear_v3_responses_relay_stopless_control_state(
 
 fn apply_v3_responses_relay_stopless_control_transition(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
     response_stopless_state: Option<V3StoplessCenterState>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     match response_stopless_state {
-        Some(state) => {
-            store_v3_responses_relay_stopless_control_state(manifest, stopless_control, state)
+        Some(state) => store_v3_responses_relay_stopless_control_state(
+            manifest,
+            server_id,
+            stopless_control,
+            state,
+        ),
+        None => {
+            clear_v3_responses_relay_stopless_control_state(manifest, server_id, stopless_control)
         }
-        None => clear_v3_responses_relay_stopless_control_state(manifest, stopless_control),
     }
 }
 
 fn apply_v3_responses_relay_stopless_control_request_transition(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
     restored_state_loaded: bool,
     request_stopless_state: Option<&V3StoplessCenterState>,
@@ -2783,11 +2855,12 @@ fn apply_v3_responses_relay_stopless_control_request_transition(
     match request_stopless_state {
         Some(state) => store_v3_responses_relay_stopless_control_state(
             manifest,
+            server_id,
             stopless_control,
             state.clone(),
         ),
         None if restored_state_loaded => {
-            clear_v3_responses_relay_stopless_control_state(manifest, stopless_control)
+            clear_v3_responses_relay_stopless_control_state(manifest, server_id, stopless_control)
         }
         None => Ok(()),
     }
@@ -2795,13 +2868,14 @@ fn apply_v3_responses_relay_stopless_control_request_transition(
 
 fn clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
     request_stopless_state: Option<&V3StoplessCenterState>,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
     if request_stopless_state.is_none() {
         return Ok(());
     }
-    clear_v3_responses_relay_stopless_control_state(manifest, stopless_control)
+    clear_v3_responses_relay_stopless_control_state(manifest, server_id, stopless_control)
 }
 
 #[cfg(test)]
@@ -2963,6 +3037,51 @@ fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option<String> {
 struct V3ProviderSemanticErrorProjection {
     code: String,
     message: String,
+}
+
+fn anthropic_cyber_refusal_error_from_payload(
+    payload: &Value,
+) -> Option<V3ProviderSemanticErrorProjection> {
+    let direct = payload.as_object();
+    let delta = payload.get("delta").and_then(Value::as_object);
+    let candidate = [direct, delta]
+        .into_iter()
+        .flatten()
+        .find(|object| anthropic_cyber_refusal_object_matches(object))?;
+    let explanation = candidate
+        .get("stop_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("explanation"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Anthropic returned a cyber-category refusal.");
+    Some(V3ProviderSemanticErrorProjection {
+        code: V3_ANTHROPIC_CYBER_REFUSAL_CODE.to_string(),
+        message: format!(
+            "Anthropic cyber refusal is treated as retryable provider saturation: {explanation}"
+        ),
+    })
+}
+
+fn anthropic_cyber_refusal_object_matches(object: &Map<String, Value>) -> bool {
+    let stop_reason = object
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+    if stop_reason.as_deref() != Some("refusal") {
+        return false;
+    }
+    object
+        .get("stop_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("category"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+        == Some("cyber")
 }
 
 fn provider_response_semantic_error_message_from_manifest(
@@ -3998,6 +4117,15 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                     message,
                 ));
             }
+            if let Some(error) = anthropic_cyber_refusal_error_from_payload(&event) {
+                return Err(
+                    V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                        status: 429,
+                        code: error.code,
+                        message: error.message,
+                    },
+                );
+            }
             characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
                 event.clone(),
                 V3HubProviderWireProtocol::Anthropic,
@@ -4046,11 +4174,6 @@ fn collect_v3_anthropic_provider_stream_event(
         })?;
     match event_type {
         "message_start" => {
-            if state.message_start_seen {
-                return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                    "Anthropic provider event stream emitted duplicate message_start".to_string(),
-                ));
-            }
             let message = event_object
                 .get("message")
                 .and_then(Value::as_object)
@@ -4060,20 +4183,8 @@ fn collect_v3_anthropic_provider_stream_event(
                             .to_string(),
                     )
                 })?;
-            for key in [
-                "id",
-                "type",
-                "role",
-                "model",
-                "stop_reason",
-                "stop_sequence",
-            ] {
-                if let Some(value) = message.get(key) {
-                    state.message.insert(key.to_string(), value.clone());
-                }
-            }
+            collect_v3_anthropic_provider_message_start(state, message)?;
             merge_v3_anthropic_provider_stream_usage(&mut state.usage, message.get("usage"))?;
-            state.message_start_seen = true;
         }
         "content_block_start" => {
             require_v3_anthropic_provider_message_start(state, event_type)?;
@@ -4283,6 +4394,91 @@ fn close_v3_anthropic_provider_textual_stream_blocks_at_message_stop(
             block.stopped = true;
         }
     }
+}
+
+fn collect_v3_anthropic_provider_message_start(
+    state: &mut V3AnthropicProviderStreamState,
+    message: &Map<String, Value>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    if state.message_start_seen {
+        merge_v3_anthropic_provider_duplicate_message_start(state, message)?;
+        return Ok(());
+    }
+    for key in [
+        "id",
+        "type",
+        "role",
+        "model",
+        "stop_reason",
+        "stop_sequence",
+        "stop_details",
+    ] {
+        if let Some(value) = message.get(key) {
+            state.message.insert(key.to_string(), value.clone());
+        }
+    }
+    state.message_start_seen = true;
+    Ok(())
+}
+
+fn merge_v3_anthropic_provider_duplicate_message_start(
+    state: &mut V3AnthropicProviderStreamState,
+    message: &Map<String, Value>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    if state.message_stop_seen {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider event stream emitted duplicate message_start after message_stop"
+                .to_string(),
+        ));
+    }
+    if !state.content_blocks.is_empty() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider event stream emitted duplicate message_start after content_block_start"
+                .to_string(),
+        ));
+    }
+    ensure_v3_anthropic_duplicate_message_start_field_matches(state, message, "id")?;
+    ensure_v3_anthropic_duplicate_message_start_field_matches(state, message, "type")?;
+    ensure_v3_anthropic_duplicate_message_start_field_matches(state, message, "role")?;
+    for key in [
+        "id",
+        "type",
+        "role",
+        "model",
+        "stop_reason",
+        "stop_sequence",
+        "stop_details",
+    ] {
+        let Some(value) = message.get(key) else {
+            continue;
+        };
+        if value.is_null() && state.message.contains_key(key) {
+            continue;
+        }
+        state.message.insert(key.to_string(), value.clone());
+    }
+    Ok(())
+}
+
+fn ensure_v3_anthropic_duplicate_message_start_field_matches(
+    state: &V3AnthropicProviderStreamState,
+    message: &Map<String, Value>,
+    key: &str,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(existing) = state.message.get(key).filter(|value| !value.is_null()) else {
+        return Ok(());
+    };
+    let Some(incoming) = message.get(key).filter(|value| !value.is_null()) else {
+        return Ok(());
+    };
+    if existing == incoming {
+        return Ok(());
+    }
+    Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+        format!(
+            "Anthropic provider event stream emitted duplicate message_start with different {key}"
+        ),
+    ))
 }
 
 fn require_v3_anthropic_provider_message_start(
@@ -5806,6 +6002,7 @@ fn provider_target(
         },
         responses_transport: selected.responses_transport,
         websocket_v2_url: selected.websocket_v2_url.clone(),
+        provider_request_cleanup: selected.provider_request_cleanup.clone(),
     })
 }
 
@@ -5869,6 +6066,38 @@ fn provider_semantic_failure(
     }
 }
 
+fn provider_response_stream_relay_failure(
+    error: V3ResponsesRelayRuntimeError,
+    request_id: &str,
+    provider_id: &str,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayProviderFailure {
+    match error {
+        V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+            status,
+            code,
+            message,
+        } => V3ResponsesRelayProviderFailure {
+            status,
+            client_response: json!({
+                "error": {
+                    "type": "rate_limit_error",
+                    "code": code,
+                    "message": message,
+                    "status": status
+                }
+            }),
+            provider_id: provider_id.to_string(),
+            observability,
+        },
+        other => provider_runtime_failure(
+            provider_response_stream_failure(other, request_id, provider_id),
+            provider_id,
+            observability,
+        ),
+    }
+}
+
 fn provider_response_stream_failure(
     error: V3ResponsesRelayRuntimeError,
     request_id: &str,
@@ -5898,6 +6127,7 @@ fn is_v3_responses_provider_response_failure(error: &V3ResponsesRelayRuntimeErro
             | V3ResponsesRelayRuntimeError::ProviderJson(_)
             | V3ResponsesRelayRuntimeError::ProviderSseTransport(_)
             | V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(_)
+            | V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure { .. }
     )
 }
 
@@ -7119,6 +7349,138 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         let snapshot = observation.snapshot().expect("stream observation");
         assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
         assert_eq!(snapshot.finish_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_duplicate_message_start_before_content_merges_metadata() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup","type":"message","role":"assistant","content":[],"model":"claude-fable-5","usage":{"input_tokens":7}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"cache_read_input_tokens":5,"output_tokens":0,"service_tier":"standard"}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"duplicate start tolerated"}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#
+            .to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .expect("compatible duplicate message_start must be provider codec compatible");
+
+        assert_eq!(response["id"], "msg_dup");
+        assert_eq!(response["model"], "claude-fable-5");
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["finish_reason"], "end_turn");
+        assert_eq!(
+            response["output"][0]["content"][0]["text"],
+            "duplicate start tolerated"
+        );
+        assert_eq!(response["usage"]["input_tokens"], 7);
+        assert_eq!(response["usage"]["output_tokens"], 3);
+        assert_eq!(response["usage"]["total_tokens"], 10);
+        assert_eq!(response["usage"]["cache_read_input_tokens"], 5);
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_duplicate_message_start_eof_without_stop_still_fails() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup_eof","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":7}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_eof","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"output_tokens":0}}}
+
+"#
+            .to_vec()),
+        ]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Anthropic provider event stream ended without message_stop"));
+        assert!(!error.to_string().contains("duplicate message_start"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_duplicate_message_start_different_id_fails() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_one\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_two\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+        ]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("duplicate message_start with different id"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_duplicate_message_start_after_content_start_fails() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+        ]));
+        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("duplicate message_start after content_block_start"));
     }
 
     #[tokio::test]

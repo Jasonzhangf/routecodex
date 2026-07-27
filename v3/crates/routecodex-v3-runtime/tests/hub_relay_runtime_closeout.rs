@@ -1385,6 +1385,11 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
             .and_then(|usage| usage.input_tokens),
         Some(206624)
     );
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let provider_event = &observability.provider_failure_events[0];
+    assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
+    assert_eq!(provider_event.status, 400);
+    assert_eq!(provider_event.action, "switch_provider");
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);

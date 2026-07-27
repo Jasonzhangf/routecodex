@@ -1,4 +1,5 @@
 mod defaults;
+mod provider_directory;
 mod store;
 mod types;
 mod v2_compat;
@@ -37,7 +38,7 @@ pub fn parse_v3_config_02_authoring(raw: &str) -> Result<V3Config02AuthoringPars
 pub(crate) fn try_compile_v2_config_02_authoring_from_file(
     config_path: impl AsRef<Path>,
     raw: &str,
-) -> Result<Option<V3Config02AuthoringParsed>, V3ConfigError> {
+) -> Result<Option<provider_directory::V3Config02AuthoringResolved>, V3ConfigError> {
     v2_compat::compile_v2_config_02_authoring_from_file(config_path.as_ref(), raw)
 }
 
@@ -229,6 +230,51 @@ fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
     trimmed == "gpt-5.6" || trimmed.starts_with("gpt-5.6-")
 }
 
+pub fn looks_like_secret_literal(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.starts_with("sk-")
+        || trimmed.starts_with("Bearer ")
+        || trimmed.contains("api_key=")
+        || trimmed.contains("OPENAI_API_KEY=")
+        || trimmed.len() > 128
+}
+
+pub fn resolve_routecodex_package_version_from_executable(executable: &Path) -> Option<String> {
+    std::env::var("ROUTECODEX_VERSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| read_nearest_routecodex_package_version(executable))
+}
+
+fn read_nearest_routecodex_package_version(executable: &Path) -> Option<String> {
+    for ancestor in executable.ancestors() {
+        let package_json = ancestor.join("package.json");
+        let Ok(raw) = std::fs::read_to_string(package_json) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if parsed
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(|value| value == "routecodex")
+            .unwrap_or(false)
+        {
+            return parsed
+                .get("version")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+        }
+    }
+    None
+}
+
+pub(crate) fn validation(message: impl Into<String>) -> V3ConfigError {
+    V3ConfigError::Validation(message.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,49 +397,4 @@ targets = [{ kind = "forwarder", id = "fwd.secondary", priority = 1 }]
         assert!(!refs.contains_key("offroute-alias"));
         assert!(!refs.contains_key("gpt-5.6-sol"));
     }
-}
-
-pub fn looks_like_secret_literal(value: &str) -> bool {
-    let trimmed = value.trim();
-    trimmed.starts_with("sk-")
-        || trimmed.starts_with("Bearer ")
-        || trimmed.contains("api_key=")
-        || trimmed.contains("OPENAI_API_KEY=")
-        || trimmed.len() > 128
-}
-
-pub fn resolve_routecodex_package_version_from_executable(executable: &Path) -> Option<String> {
-    std::env::var("ROUTECODEX_VERSION")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| read_nearest_routecodex_package_version(executable))
-}
-
-fn read_nearest_routecodex_package_version(executable: &Path) -> Option<String> {
-    for ancestor in executable.ancestors() {
-        let package_json = ancestor.join("package.json");
-        let Ok(raw) = std::fs::read_to_string(package_json) else {
-            continue;
-        };
-        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
-            continue;
-        };
-        if parsed
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .map(|value| value == "routecodex")
-            .unwrap_or(false)
-        {
-            return parsed
-                .get("version")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-        }
-    }
-    None
-}
-
-pub(crate) fn validation(message: impl Into<String>) -> V3ConfigError {
-    V3ConfigError::Validation(message.into())
 }

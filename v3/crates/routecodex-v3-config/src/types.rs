@@ -14,6 +14,7 @@ pub struct V3Config02AuthoringParsed {
     #[serde(default)]
     pub pipelines: V3PipelinesAuthoringConfig,
     pub servers: BTreeMap<String, V3ServerAuthoringConfig>,
+    #[serde(default)]
     pub providers: BTreeMap<String, V3ProviderAuthoringConfig>,
     #[serde(default)]
     pub forwarders: BTreeMap<String, V3ForwarderAuthoringConfig>,
@@ -479,10 +480,19 @@ pub struct V3ProviderAuthoringConfig {
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     #[serde(default)]
     pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
+    #[serde(default)]
+    pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     #[serde(default, alias = "compatibilityProfile")]
     pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderRequestCleanupAuthoringConfig {
+    #[serde(default)]
+    pub historical_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -895,6 +905,7 @@ pub struct V3ProviderManifest {
     pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
+    pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
 }

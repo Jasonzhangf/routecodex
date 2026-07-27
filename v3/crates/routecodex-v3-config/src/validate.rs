@@ -638,6 +638,8 @@ fn compile_providers(
         let responses = compile_provider_responses(&id, provider.responses, &models)?;
         apply_implicit_provider_model_capabilities(&provider_type, &mut models);
         let health = compile_provider_health(&id, provider.health)?;
+        let provider_request_cleanup =
+            compile_provider_request_cleanup(&id, provider.provider_request_cleanup)?;
         let compatibility_profile =
             normalize_v3_provider_compatibility_profile(provider.compatibility_profile);
         let semantic_error_policy = provider.semantic_error_policy;
@@ -667,6 +669,7 @@ fn compile_providers(
                 responses,
                 concurrency: provider.concurrency,
                 health,
+                provider_request_cleanup,
                 compatibility_profile,
                 features: provider.features,
             },
@@ -779,6 +782,42 @@ fn compile_provider_health(
         )));
     }
     Ok(Some(health))
+}
+
+fn compile_provider_request_cleanup(
+    provider_id: &str,
+    cleanup: V3ProviderRequestCleanupAuthoringConfig,
+) -> Result<V3ProviderRequestCleanupAuthoringConfig, V3ConfigError> {
+    let mut historical_fields = Vec::new();
+    let mut seen = BTreeSet::new();
+    for raw_field in cleanup.historical_fields {
+        let field = raw_field.trim();
+        if field.is_empty() {
+            return Err(validation(format!(
+                "provider {provider_id} provider_request_cleanup historical_fields contains empty selector"
+            )));
+        }
+        if field.split('.').any(|part| part.trim().is_empty()) {
+            return Err(validation(format!(
+                "provider {provider_id} provider_request_cleanup historical field {field} contains an empty path segment"
+            )));
+        }
+        if !field
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.')
+        {
+            return Err(validation(format!(
+                "provider {provider_id} provider_request_cleanup historical field {field} contains unsupported selector characters"
+            )));
+        }
+        if !seen.insert(field.to_string()) {
+            return Err(validation(format!(
+                "provider {provider_id} provider_request_cleanup historical field {field} is duplicated"
+            )));
+        }
+        historical_fields.push(field.to_string());
+    }
+    Ok(V3ProviderRequestCleanupAuthoringConfig { historical_fields })
 }
 
 fn compile_auth(

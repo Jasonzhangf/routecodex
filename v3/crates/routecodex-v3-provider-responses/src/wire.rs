@@ -1,6 +1,6 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use routecodex_v3_config::V3ResponsesTransportKind;
+use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::Value;
 
 const V3_HISTORICAL_TOOL_IMAGE_PLACEHOLDER_TEXT: &str = "[Image omitted]";
@@ -27,6 +27,7 @@ pub struct V3ResponsesProviderTarget {
     pub auth: V3ProviderAuthHandle,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
+    pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +98,10 @@ pub fn build_v3_provider_12_responses_wire_payload(
         return Err(V3ProviderError::ControlFieldInWireBody { request_id, field });
     }
     replace_historical_responses_tool_output_data_images(&mut current_request_body);
+    remove_configured_historical_response_fields(
+        &mut current_request_body,
+        &target.provider_request_cleanup.historical_fields,
+    );
     validate_current_responses_data_images(&request_id, &current_request_body)?;
     let actual_model = current_request_body
         .get("model")
@@ -176,6 +181,109 @@ fn historical_tool_image_placeholder_part() -> Value {
         Value::String(V3_HISTORICAL_TOOL_IMAGE_PLACEHOLDER_TEXT.to_string()),
     );
     Value::Object(object)
+}
+
+fn remove_configured_historical_response_fields(body: &mut Value, fields: &[String]) {
+    if fields.is_empty() {
+        return;
+    }
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let Some(latest_user_index) = input.iter().rposition(is_responses_user_input_item) else {
+        return;
+    };
+    let selectors = fields
+        .iter()
+        .filter_map(|field| V3HistoricalFieldCleanupSelector::parse(field))
+        .collect::<Vec<_>>();
+    if selectors.is_empty() {
+        return;
+    }
+    for item in input.iter_mut().take(latest_user_index) {
+        remove_configured_fields_from_value(item, &selectors);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3HistoricalFieldCleanupSelector {
+    type_name: Option<String>,
+    field_path: Vec<String>,
+}
+
+impl V3HistoricalFieldCleanupSelector {
+    fn parse(field: &str) -> Option<Self> {
+        let parts = field
+            .split('.')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if parts.is_empty() {
+            return None;
+        }
+        if parts.len() >= 2 {
+            return Some(Self {
+                type_name: Some(parts[0].clone()),
+                field_path: parts[1..].to_vec(),
+            });
+        }
+        Some(Self {
+            type_name: None,
+            field_path: parts,
+        })
+    }
+}
+
+fn remove_configured_fields_from_value(
+    value: &mut Value,
+    selectors: &[V3HistoricalFieldCleanupSelector],
+) {
+    match value {
+        Value::Object(object) => {
+            for selector in selectors {
+                if selector.type_name.as_deref().is_none_or(|type_name| {
+                    object.get("type").and_then(Value::as_str) == Some(type_name)
+                }) {
+                    remove_field_path_from_object(object, &selector.field_path);
+                }
+            }
+            for child in object.values_mut() {
+                remove_configured_fields_from_value(child, selectors);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                remove_configured_fields_from_value(item, selectors);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn remove_field_path_from_object(object: &mut serde_json::Map<String, Value>, path: &[String]) {
+    let Some((head, tail)) = path.split_first() else {
+        return;
+    };
+    if tail.is_empty() {
+        object.remove(head);
+        return;
+    }
+    if let Some(child) = object.get_mut(head) {
+        remove_field_path_from_value(child, tail);
+    }
+}
+
+fn remove_field_path_from_value(value: &mut Value, path: &[String]) {
+    match value {
+        Value::Object(object) => remove_field_path_from_object(object, path),
+        Value::Array(items) => {
+            for item in items {
+                remove_field_path_from_value(item, path);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn validate_current_responses_data_images(
@@ -400,6 +508,7 @@ mod tests {
                 },
                 responses_transport: V3ResponsesTransportKind::Http,
                 websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
             },
             body,
         )
@@ -515,6 +624,61 @@ mod tests {
     }
 
     #[test]
+    fn wire_removes_configured_historical_reasoning_encrypted_content_only_before_latest_user() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type": "message", "role": "user", "content": "old turn"},
+                {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "old summary"}],
+                    "encrypted_content": "rsn_old_foreign"
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "literal rsn_text_stays"}]
+                },
+                {"type": "message", "role": "user", "content": "latest turn"},
+                {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "current summary"}],
+                    "encrypted_content": "rsn_current_same_turn"
+                }
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-encrypted-history",
+            cleanup_target(&["reasoning.encrypted_content"]),
+            body,
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert!(input[1].get("encrypted_content").is_none());
+        assert_eq!(input[1]["summary"][0]["text"], "old summary");
+        assert_eq!(input[2]["content"][0]["text"], "literal rsn_text_stays");
+        assert_eq!(input[4]["encrypted_content"], "rsn_current_same_turn");
+    }
+
+    #[test]
+    fn wire_preserves_historical_encrypted_content_when_cleanup_is_not_configured() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type": "message", "role": "user", "content": "old turn"},
+                {"type": "reasoning", "encrypted_content": "rsn_old_same_provider"},
+                {"type": "message", "role": "user", "content": "latest turn"}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-no-cleanup", target(), body).unwrap();
+        assert_eq!(
+            wire.body()["input"][1]["encrypted_content"],
+            "rsn_old_same_provider"
+        );
+    }
+
+    #[test]
     fn current_turn_invalid_png_data_image_is_rejected_before_provider_transport() {
         let body = json!({
             "model": "upstream-model",
@@ -549,6 +713,7 @@ mod tests {
             },
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
         };
         assert!(matches!(
             build_v3_provider_12_responses_wire_payload("req-array", target.clone(), json!([])),
@@ -645,6 +810,14 @@ mod tests {
             },
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
         }
+    }
+
+    fn cleanup_target(fields: &[&str]) -> V3ResponsesProviderTarget {
+        let mut target = target();
+        target.provider_request_cleanup.historical_fields =
+            fields.iter().map(|field| field.to_string()).collect();
+        target
     }
 }

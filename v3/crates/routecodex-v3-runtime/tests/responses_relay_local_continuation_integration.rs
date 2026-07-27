@@ -1476,7 +1476,8 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             json!({"id":"resp_guard_1","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard first"}]}),
             json!({"id":"resp_guard_2","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard second"}]}),
             json!({"id":"resp_guard_3","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard third projected"}]}),
-            json!({"id":"resp_guard_4","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard fourth visible"}]}),
+            json!({"id":"resp_guard_4","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard fourth projected"}]}),
+            json!({"id":"resp_guard_5","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard fifth visible"}]}),
         ])),
     };
     let state = V3ResponsesRelayLocalContinuationState::default();
@@ -1490,7 +1491,7 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         "controlled",
     );
 
-    for round in 1..=3 {
+    for round in 1..=4 {
         let body = if round == 1 {
             json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard"}],"stream":false})
         } else {
@@ -1520,12 +1521,12 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         }
     }
     assert_eq!(stopless_control.len().unwrap(), 1);
-    let fourth = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+    let fifth = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
-            request_id: "req-stopless-guard-4".into(),
-            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+            request_id: "req-stopless-guard-5".into(),
+            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_4","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
         },
         &transport,
         &provider_health,
@@ -1533,27 +1534,27 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             &state,
             &stopless_control,
             scope,
-            40_004,
+            40_005,
         ),
     ).await.unwrap();
-    match fourth.client_body {
+    match fifth.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "completed");
             let serialized = serde_json::to_string(&body).unwrap();
-            assert!(serialized.contains("guard fourth visible"));
+            assert!(serialized.contains("guard fifth visible"));
             assert!(!serialized.contains("call_stopless_reasoning"));
             assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("guard terminal must be JSON"),
     }
     let captures = transport.captures.lock().unwrap();
-    let fourth_input = captures[3]["input"]
+    let fifth_input = captures[4]["input"]
         .as_array()
-        .expect("fourth guard provider input");
+        .expect("fifth guard provider input");
     assert_eq!(
-        count_stopless_continuation_items(fourth_input),
+        count_stopless_continuation_items(fifth_input),
         1,
-        "stopless continuation guideline is a current-turn prompt and must not accumulate in restored provider history: {fourth_input:?}"
+        "stopless continuation guideline is a current-turn prompt and must not accumulate in restored provider history: {fifth_input:?}"
     );
     assert!(stopless_control.is_empty().unwrap());
 }
@@ -1699,7 +1700,8 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
             json!({"id":"resp_guard_diag_1","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard first"}]}),
             json!({"id":"resp_guard_diag_2","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard second"}]}),
             json!({"id":"resp_guard_diag_3","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard third"}]}),
-            json!({"id":"resp_guard_diag_4","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":control_only_text}],"output_text":control_only_text}),
+            json!({"id":"resp_guard_diag_4","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":"guard fourth"}]}),
+            json!({"id":"resp_guard_diag_5","status":"completed","finish_reason":"stop","output":[{"type":"output_text","text":control_only_text}],"output_text":control_only_text}),
         ])),
     };
     let state = V3ResponsesRelayLocalContinuationState::default();
@@ -1713,7 +1715,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
         "controlled",
     );
 
-    for round in 1..=3 {
+    for round in 1..=4 {
         let body = if round == 1 {
             json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard pass through"}],"stream":false})
         } else {
@@ -1743,12 +1745,12 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
         }
     }
 
-    let fourth = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+    let fifth = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
-            request_id: "req-stopless-guard-pass-through-4".into(),
-            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_diag_3","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+            request_id: "req-stopless-guard-pass-through-5".into(),
+            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_diag_4","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
         },
         &transport,
         &provider_health,
@@ -1756,10 +1758,10 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
             &state,
             &stopless_control,
             scope,
-            41_004,
+            41_005,
         ),
     ).await.unwrap();
-    match fourth.client_body {
+    match fifth.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "completed");
             assert_eq!(body["finish_reason"], "stop");
@@ -3481,6 +3483,183 @@ async fn responses_openai_chat_field_parity_request_matrix() {
             assert_eq!(body["output"][0]["call_id"], "call_lookup_matrix");
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("field parity request matrix must be JSON"),
+    }
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_web_search_call_history_projects_tool_pair() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"chatcmpl-web-search-history",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{"role":"assistant","content":"continued"},
+                "finish_reason":"stop"
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-responses-openai-chat-web-search-history",
+        "conversation-responses-openai-chat-web-search-history",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            request_id: "req-responses-openai-chat-web-search-history".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[
+                    {
+                        "type":"web_search_call",
+                        "status":"failed",
+                        "action":{
+                            "type":"search",
+                            "query":"微信小程序 发布流程",
+                            "queries":["微信小程序 发布流程"]
+                        }
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"继续"}]
+                    }
+                ]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("Responses web_search_call history must reach OpenAI Chat provider wire");
+
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
+    let body = provider_projection_body(&captures[0]);
+    assert!(
+        body.get("input").is_none(),
+        "OpenAI Chat provider wire must not receive raw Responses input: {body}"
+    );
+    let messages = body["messages"]
+        .as_array()
+        .expect("OpenAI Chat provider messages");
+    assert!(
+        messages.len() >= 3,
+        "provider body must contain web_search history pair and final user message: {body}"
+    );
+    let pair_start = messages
+        .iter()
+        .position(|message| {
+            message.get("role").and_then(Value::as_str) == Some("assistant")
+                && message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .any(|call| {
+                        call.pointer("/function/name").and_then(Value::as_str) == Some("web_search")
+                    })
+        })
+        .expect("provider messages must include assistant web_search tool_call");
+    assert!(
+        pair_start + 1 < messages.len(),
+        "assistant web_search tool_call must be followed by tool result: {body}"
+    );
+    assert_eq!(messages[pair_start]["role"], "assistant");
+    assert_eq!(
+        messages[pair_start]["tool_calls"][0]["id"],
+        "call_routecodex_web_search_0"
+    );
+    assert_eq!(
+        messages[pair_start]["tool_calls"][0]["function"]["name"],
+        "web_search"
+    );
+    let arguments: Value = serde_json::from_str(
+        messages[pair_start]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("web_search arguments string"),
+    )
+    .expect("web_search arguments JSON");
+    assert_eq!(
+        arguments,
+        json!({
+            "type":"search",
+            "query":"微信小程序 发布流程",
+            "queries":["微信小程序 发布流程"]
+        })
+    );
+    assert_eq!(messages[pair_start + 1]["role"], "tool");
+    assert_eq!(
+        messages[pair_start + 1]["tool_call_id"],
+        messages[pair_start]["tool_calls"][0]["id"],
+        "web_search tool result must immediately pair with the assistant tool_call"
+    );
+    let result_event: Value = serde_json::from_str(
+        messages[pair_start + 1]["content"]
+            .as_str()
+            .expect("tool result content string"),
+    )
+    .expect("tool result content JSON");
+    assert_eq!(result_event["type"], "web_search_call");
+    assert_eq!(result_event["status"], "failed");
+    assert_eq!(result_event["action"], arguments);
+    assert_eq!(
+        messages.last().cloned().unwrap_or(Value::Null),
+        json!({"role":"user","content":"继续"})
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.get("type").and_then(Value::as_str) != Some("web_search_call")),
+        "OpenAI Chat messages must not embed a native Responses web_search_call item: {body}"
+    );
+
+    match result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => {
+            let output_text = body
+                .get("output")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find_map(|item| {
+                    if item.get("type").and_then(Value::as_str) != Some("message") {
+                        return None;
+                    }
+                    item.get("content")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .find_map(|part| {
+                            if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                                part.get("text").and_then(Value::as_str).map(str::to_string)
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .or_else(|| {
+                    body.get("output_text")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            assert_eq!(
+                output_text, "continued",
+                "provider Chat response text must still project to client Responses text: {body}"
+            );
+        }
+        V3ResponsesRelayClientBody::Sse(_) => panic!("web_search history parity must be JSON"),
     }
 }
 

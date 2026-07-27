@@ -3394,10 +3394,15 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
     assert_eq!(body["object"], "routecodex.pipeline_dry_run");
     assert_eq!(body["kind"], "provider_request");
     assert_eq!(body["evidence"]["providerNetworkSend"], false);
-    assert!(body["providerRequest"]["url"]
-        .as_str()
-        .unwrap()
-        .ends_with("/v1/messages"));
+    let provider_url = body["providerRequest"]["url"].as_str().unwrap();
+    assert!(
+        provider_url
+            .split('?')
+            .next()
+            .unwrap_or(provider_url)
+            .ends_with("/v1/messages"),
+        "unexpected Anthropic provider dry-run URL: {provider_url}; body: {response_body}"
+    );
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-protocol");
     assert!(body["providerRequest"]["body"].get("messages").is_some());
     assert!(body["providerRequest"]["body"].get("input").is_none());

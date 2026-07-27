@@ -1,13 +1,15 @@
 // feature_id: v3.v2_config_toml_compat_5555
 use crate::{
+    provider_directory::{V3Config02AuthoringResolved, V3ProviderDirectorySource},
     validation, V3Config02AuthoringParsed, V3ConfigError, V3ForwarderAuthoringConfig,
     V3ForwarderTargetAuthoringConfig, V3PipelinesAuthoringConfig, V3ProviderAuthAuthoringConfig,
     V3ProviderAuthEntryAuthoringConfig, V3ProviderAuthType, V3ProviderAuthoringConfig,
-    V3ProviderConcurrencyAuthoringConfig, V3ProviderModelAuthoringConfig,
-    V3ProviderResponsesAuthoringConfig, V3ResponsesTransportKind, V3RouteGroupAuthoringConfig,
-    V3RoutePoolAuthoringConfig, V3RoutePoolMatchAuthoringConfig, V3RoutePoolTargetAuthoringConfig,
-    V3RouteTargetKind, V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig,
-    V3StreamingPolicy,
+    V3ProviderConcurrencyAuthoringConfig, V3ProviderHealthAuthoringConfig,
+    V3ProviderModelAuthoringConfig, V3ProviderRequestCleanupAuthoringConfig,
+    V3ProviderResponsesAuthoringConfig, V3ProviderSemanticErrorPolicyAuthoringConfig,
+    V3ResponsesTransportKind, V3RouteGroupAuthoringConfig, V3RoutePoolAuthoringConfig,
+    V3RoutePoolMatchAuthoringConfig, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
+    V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig, V3StreamingPolicy,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -21,7 +23,7 @@ const V2_SECRET_HANDLE_DIR: &str = ".routecodex-v3-secret-handles";
 pub(crate) fn compile_v2_config_02_authoring_from_file(
     config_path: &Path,
     raw: &str,
-) -> Result<Option<V3Config02AuthoringParsed>, V3ConfigError> {
+) -> Result<Option<V3Config02AuthoringResolved>, V3ConfigError> {
     if !looks_like_v2_root(raw) {
         return Ok(None);
     }
@@ -58,7 +60,7 @@ fn looks_like_v2_root(raw: &str) -> bool {
 fn compile_v2_root(
     config_dir: &Path,
     root: V2RootConfig,
-) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
+) -> Result<V3Config02AuthoringResolved, V3ConfigError> {
     let router_ports = root
         .httpserver
         .ports
@@ -97,26 +99,29 @@ fn compile_v2_root(
     }
 
     let forwarders = compile_v2_forwarders(&root.virtualrouter.forwarders, &referenced_forwarders)?;
-    let providers = compile_v2_providers(config_dir, &forwarders)?;
+    let (providers, provider_sources) = compile_v2_providers(config_dir, &forwarders)?;
     let available_protocols = available_entry_protocols(&providers);
     let servers = compile_v2_servers(router_ports, &available_protocols)?;
     let route_groups = compile_v2_route_groups(root.virtualrouter.routing_policy_groups)?;
 
-    Ok(V3Config02AuthoringParsed {
-        version: 3,
-        pipelines: V3PipelinesAuthoringConfig {
-            hub_v1: Some(crate::defaults::default_hub_v1_authoring()),
+    Ok(V3Config02AuthoringResolved {
+        authoring: V3Config02AuthoringParsed {
+            version: 3,
+            pipelines: V3PipelinesAuthoringConfig {
+                hub_v1: Some(crate::defaults::default_hub_v1_authoring()),
+            },
+            servers,
+            providers,
+            forwarders,
+            route_groups,
+            features: BTreeMap::from([
+                ("responses_direct".to_string(), true),
+                ("debug_events".to_string(), true),
+            ]),
+            debug: Default::default(),
+            error: Default::default(),
         },
-        servers,
-        providers,
-        forwarders,
-        route_groups,
-        features: BTreeMap::from([
-            ("responses_direct".to_string(), true),
-            ("debug_events".to_string(), true),
-        ]),
-        debug: Default::default(),
-        error: Default::default(),
+        provider_sources,
     })
 }
 
@@ -322,14 +327,13 @@ fn compile_v2_route_groups(
 
 fn route_precedence(route_id: &str) -> i32 {
     match route_id {
-        "thinking" => 10,
-        "coding" => 11,
-        "longcontext" => 12,
-        "tools" => 20,
-        "search" => 21,
-        "web_search" => 22,
-        "multimodal" => 30,
-        "vision" => 31,
+        "multimodal" | "vision" => 10,
+        "web_search" => 20,
+        "longcontext" => 30,
+        "thinking" => 40,
+        "coding" => 50,
+        "search" => 60,
+        "tools" => 70,
         _ => 100,
     }
 }
@@ -337,107 +341,128 @@ fn route_precedence(route_id: &str) -> i32 {
 fn compile_v2_providers(
     config_dir: &Path,
     forwarders: &BTreeMap<String, V3ForwarderAuthoringConfig>,
-) -> Result<BTreeMap<String, V3ProviderAuthoringConfig>, V3ConfigError> {
-    let mut referenced = BTreeSet::new();
+) -> Result<
+    (
+        BTreeMap<String, V3ProviderAuthoringConfig>,
+        Vec<V3ProviderDirectorySource>,
+    ),
+    V3ConfigError,
+> {
     let mut referenced_models = BTreeMap::<String, BTreeSet<String>>::new();
     for forwarder in forwarders.values() {
         for target in &forwarder.targets {
             if let Some(provider) = &target.provider {
-                referenced.insert(provider.clone());
+                let models = referenced_models.entry(provider.clone()).or_default();
                 if let Some(model) = &target.model {
-                    referenced_models
-                        .entry(provider.clone())
-                        .or_default()
-                        .insert(model.clone());
+                    models.insert(model.clone());
                 }
             }
         }
     }
-    referenced
-        .into_iter()
-        .map(|provider_id| {
-            let path = config_dir
-                .join("provider")
-                .join(&provider_id)
-                .join("config.v2.toml");
-            let raw = fs::read_to_string(&path).map_err(|error| {
-                validation(format!(
-                    "v2 provider config {} read failed: {error}",
-                    path.display()
-                ))
-            })?;
-            let source_hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
-            let parsed: V2ProviderConfigFile = toml::from_str(&raw)?;
-            let provider = parsed.provider;
-            let provider_id_from_file = parsed.provider_id.unwrap_or_else(|| provider.id.clone());
-            if provider_id_from_file != provider_id || provider.id != provider_id {
-                return Err(validation(format!(
-                    "v2 provider config {} identity mismatch for {provider_id}",
-                    path.display()
-                )));
-            }
-            let auth = compile_v2_auth(config_dir, &provider_id, source_hash, provider.auth)?;
-            let provider_type = match provider.provider_type.as_str() {
-                "openai" => "openai_chat",
-                "responses" => "responses",
-                "anthropic" => "anthropic",
-                "gemini" => "gemini",
-                value => {
-                    return Err(validation(format!(
-                        "v2 provider {provider_id} declares unknown type {value}"
-                    )))
-                }
-            }
-            .to_string();
-            let v2_responses = provider.responses.as_ref();
-            let compatibility_profile = provider
-                .compatibility_profile
-                .or_else(|| resolve_v2_provider_default_compatibility_profile(&provider_id));
-            let responses = if provider_type == "responses" {
-                Some(V3ProviderResponsesAuthoringConfig {
-                    process: v2_responses
-                        .map(|responses| responses.process.clone())
-                        .unwrap_or_else(|| "chat".to_string()),
-                    streaming: v2_responses
-                        .and_then(|responses| streaming_policy(responses.streaming.as_deref()))
-                        .unwrap_or(V3StreamingPolicy::Always),
-                    transport: v2_responses
-                        .and_then(|responses| responses.transport)
-                        .unwrap_or(V3ResponsesTransportKind::Http),
-                    websocket_v2_url: v2_responses
-                        .and_then(|responses| responses.websocket_v2_url.clone()),
-                })
-            } else {
-                None
-            };
-            Ok((
-                provider_id.clone(),
-                V3ProviderAuthoringConfig {
-                    enabled: provider.enabled.unwrap_or(true),
-                    provider_type,
-                    base_url: provider.base_url,
-                    default_model: provider.default_model,
-                    auth,
-                    models: compile_v2_provider_models(
-                        provider.models,
-                        referenced_models.get(&provider_id),
-                    ),
-                    responses,
-                    concurrency: provider.concurrency.map(|concurrency| {
-                        V3ProviderConcurrencyAuthoringConfig {
-                            max_in_flight: concurrency.max_in_flight.unwrap_or(8),
-                            acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
-                            stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
-                        }
-                    }),
-                    health: None,
-                    semantic_error_policy: Vec::new(),
-                    compatibility_profile,
-                    features: BTreeMap::new(),
-                },
+    compile_v2_provider_directory(config_dir, &referenced_models)
+}
+
+pub(crate) fn compile_v2_provider_directory(
+    config_dir: &Path,
+    referenced_models: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<
+    (
+        BTreeMap<String, V3ProviderAuthoringConfig>,
+        Vec<V3ProviderDirectorySource>,
+    ),
+    V3ConfigError,
+> {
+    let mut providers = BTreeMap::new();
+    let mut provider_sources = Vec::new();
+    for (provider_id, selected_models) in referenced_models {
+        let path = config_dir
+            .join("provider")
+            .join(provider_id)
+            .join("config.v2.toml");
+        let raw = fs::read_to_string(&path).map_err(|error| {
+            validation(format!(
+                "v3 referenced provider config {} read failed: {error}",
+                path.display()
             ))
-        })
-        .collect()
+        })?;
+        let canonical_path = fs::canonicalize(&path)?;
+        let source_hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
+        let parsed: V2ProviderConfigFile = toml::from_str(&raw)?;
+        let provider = parsed.provider;
+        let provider_id_from_file = parsed.provider_id.unwrap_or_else(|| provider.id.clone());
+        if provider_id_from_file != *provider_id || provider.id != *provider_id {
+            return Err(validation(format!(
+                "v2 provider config {} identity mismatch for {provider_id}",
+                path.display()
+            )));
+        }
+        let auth = compile_v2_auth(config_dir, provider_id, source_hash, provider.auth)?;
+        let provider_type = match provider.provider_type.as_str() {
+            "openai" | "openai-standard" | "openai_chat" => "openai_chat",
+            "responses" => "responses",
+            "anthropic" => "anthropic",
+            "gemini" => "gemini",
+            value => {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} declares unknown type {value}"
+                )))
+            }
+        }
+        .to_string();
+        let v2_responses = provider.responses.as_ref();
+        let compatibility_profile = provider
+            .compatibility_profile
+            .or_else(|| resolve_v2_provider_default_compatibility_profile(provider_id));
+        let responses = if provider_type == "responses" {
+            Some(V3ProviderResponsesAuthoringConfig {
+                process: v2_responses
+                    .map(|responses| responses.process.clone())
+                    .unwrap_or_else(|| "chat".to_string()),
+                streaming: v2_responses
+                    .and_then(|responses| streaming_policy(responses.streaming.as_deref()))
+                    .unwrap_or(V3StreamingPolicy::Always),
+                transport: v2_responses
+                    .and_then(|responses| responses.transport)
+                    .unwrap_or(V3ResponsesTransportKind::Http),
+                websocket_v2_url: v2_responses
+                    .and_then(|responses| responses.websocket_v2_url.clone()),
+            })
+        } else {
+            None
+        };
+        let v3 = provider.v3.unwrap_or_default();
+        let models = compile_v2_provider_models(provider.models, Some(selected_models));
+        providers.insert(
+            provider_id.clone(),
+            V3ProviderAuthoringConfig {
+                enabled: provider.enabled.unwrap_or(true),
+                provider_type,
+                base_url: provider.base_url,
+                default_model: provider.default_model,
+                auth,
+                models,
+                responses,
+                concurrency: provider.concurrency.map(|concurrency| {
+                    V3ProviderConcurrencyAuthoringConfig {
+                        max_in_flight: concurrency.max_in_flight.unwrap_or(8),
+                        acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
+                        stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
+                    }
+                }),
+                health: v3.health,
+                semantic_error_policy: v3.semantic_error_policy,
+                provider_request_cleanup: v3.provider_request_cleanup,
+                compatibility_profile,
+                features: v3.features,
+            },
+        );
+        provider_sources.push(V3ProviderDirectorySource {
+            provider_id: provider_id.clone(),
+            canonical_path,
+            raw_toml: raw,
+        });
+    }
+    Ok((providers, provider_sources))
 }
 
 #[derive(Debug, Deserialize)]
@@ -483,11 +508,17 @@ fn compile_v2_auth(
             alias: Some("key1".to_string()),
             api_key: auth.api_key,
             env: auth.env,
+            token_file: auth.token_file,
         }]
     };
     let mut v3_entries = Vec::new();
     for entry in entries {
         let alias = entry.alias.unwrap_or_else(|| "key1".to_string());
+        if entry.env.is_some() && entry.token_file.is_some() {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth {alias} cannot declare both env and tokenFile"
+            )));
+        }
         if let Some(env) = entry.env {
             v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
                 alias,
@@ -496,9 +527,23 @@ fn compile_v2_auth(
             });
             continue;
         }
+        if let Some(token_file) = entry.token_file {
+            let token_file = token_file.trim();
+            if token_file.is_empty() {
+                return Err(validation(format!(
+                    "v2 provider {provider_id} auth {alias} tokenFile is empty"
+                )));
+            }
+            v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
+                alias,
+                env: None,
+                token_file: Some(token_file.to_string()),
+            });
+            continue;
+        }
         let api_key = entry.api_key.ok_or_else(|| {
             validation(format!(
-                "v2 provider {provider_id} auth {alias} missing apiKey or env"
+                "v2 provider {provider_id} auth {alias} missing apiKey, env, or tokenFile"
             ))
         })?;
         let token_file = materialize_v2_secret_token_file(
@@ -555,8 +600,8 @@ fn compile_v2_provider_models(
             (
                 id.clone(),
                 V3ProviderModelAuthoringConfig {
-                    wire_name: Some(id),
-                    aliases: Vec::new(),
+                    wire_name: model.wire_name.or_else(|| Some(id)),
+                    aliases: model.aliases,
                     capabilities: normalize_v2_capabilities(model.capabilities),
                     supports_streaming: model.supports_streaming.unwrap_or(false),
                     supports_thinking: model.supports_thinking.unwrap_or(false),
@@ -566,7 +611,7 @@ fn compile_v2_provider_models(
                         .max_context_tokens
                         .or(model.context_window)
                         .or(model.max_context),
-                    features: BTreeMap::new(),
+                    features: model.features,
                 },
             )
         })
@@ -702,6 +747,21 @@ struct V2ProviderConfig {
     compatibility_profile: Option<String>,
     #[serde(default)]
     models: BTreeMap<String, V2ProviderModelConfig>,
+    #[serde(default)]
+    v3: Option<V2ProviderV3Config>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ProviderV3Config {
+    #[serde(default)]
+    health: Option<V3ProviderHealthAuthoringConfig>,
+    #[serde(default, alias = "semantic_error_policy")]
+    semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
+    #[serde(default, alias = "provider_request_cleanup")]
+    provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    #[serde(default)]
+    features: BTreeMap<String, bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -709,6 +769,7 @@ struct V2ProviderConfig {
 struct V2ProviderAuthConfig {
     api_key: Option<String>,
     env: Option<String>,
+    token_file: Option<String>,
     entries: Option<Vec<V2ProviderAuthEntry>>,
 }
 
@@ -718,6 +779,7 @@ struct V2ProviderAuthEntry {
     alias: Option<String>,
     api_key: Option<String>,
     env: Option<String>,
+    token_file: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -743,6 +805,10 @@ struct V2ProviderConcurrencyConfig {
 #[serde(rename_all = "camelCase")]
 struct V2ProviderModelConfig {
     #[serde(default)]
+    wire_name: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
     capabilities: Vec<String>,
     supports_streaming: Option<bool>,
     supports_thinking: Option<bool>,
@@ -751,4 +817,6 @@ struct V2ProviderModelConfig {
     max_context: Option<u64>,
     max_context_tokens: Option<u64>,
     context_window: Option<u64>,
+    #[serde(default)]
+    features: BTreeMap<String, bool>,
 }

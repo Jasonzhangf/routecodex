@@ -260,21 +260,39 @@ fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) 
         .unwrap()
 }
 
-fn terminate_explicit_pid(pid: u64) {
-    let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+fn kill_explicit_pid(pid: u64) {
+    let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
     assert_eq!(
         result,
         0,
-        "explicit test PID {pid} must accept SIGTERM: {}",
+        "explicit test PID {pid} must accept SIGKILL: {}",
         std::io::Error::last_os_error()
     );
 }
 
-fn assert_empty_stdout(output: &Output, label: &str) {
+fn assert_start_stdout(output: &Output, label: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.trim().is_empty(),
-        "{label} must stay background-compatible and not print success JSON/stdout, got:\n{stdout}"
+        stdout.contains("[RouteCodexV3] rccv3 server start version=")
+            && stdout.contains(" crate=")
+            && stdout.contains(" binary=")
+            && stdout.contains(" config=")
+            && stdout.contains(" snap=")
+            && stdout.contains("[RouteCodexV3] Start completed state=running")
+            && stdout.contains("[RouteCodexV3] Server started version=")
+            && last_json(output)["state"] == "running",
+        "{label} must print visible start success and final status JSON, got:\n{stdout}"
+    );
+}
+
+fn assert_stop_stdout(output: &Output, label: &str) {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("[RouteCodexV3] rccv3 stop version=")
+            && stdout.contains(" timeout_ms=")
+            && stdout.contains("[RouteCodexV3] Stop completed state=stopped")
+            && last_json(output)["state"] == "stopped",
+        "{label} must print visible stop success and final status JSON, got:\n{stdout}"
     );
 }
 
@@ -516,27 +534,6 @@ fn wait_port(port: u16, open: bool) {
     }
 }
 
-fn spawn_sigterm_resistant_listener(port: u16) -> Child {
-    let script = format!(
-        r#"
-const net = require('net');
-process.on('SIGTERM', () => {{}});
-const server = net.createServer((socket) => socket.end());
-server.listen({{ host: '127.0.0.1', port: {} }});
-setInterval(() => {{}}, 1000);
-"#,
-        port
-    );
-    let child = Command::new("node")
-        .args(["-e", &script])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    wait_port(port, true);
-    child
-}
-
 fn spawn_sigterm_resistant_multi_listener(ports: [u16; 2]) -> Child {
     let script = format!(
         r#"
@@ -619,7 +616,7 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
         "{}",
         String::from_utf8_lossy(&start.stderr)
     );
-    assert_empty_stdout(&start, "server start");
+    assert_start_stdout(&start, "server start");
     let started = status_json(binary, &state_root, &config);
     assert_eq!(started["state"], "running");
     for port in ports {
@@ -653,7 +650,7 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
             String::from_utf8_lossy(&duplicate.stderr)
         );
     }
-    assert_empty_stdout(&duplicate, "duplicate server start");
+    assert_start_stdout(&duplicate, "duplicate server start");
     assert_eq!(
         status_json(binary, &state_root, &config)["instance_id"],
         started["instance_id"]
@@ -693,6 +690,7 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
         "{}",
         String::from_utf8_lossy(&stop.stderr)
     );
+    assert_stop_stdout(&stop, "server stop");
     assert_eq!(last_json(&stop)["state"], "stopped");
     for port in ports {
         wait_port(port, false);
@@ -1162,7 +1160,7 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
         "{}",
         String::from_utf8_lossy(&start.stderr)
     );
-    assert_empty_stdout(&start, "server start");
+    assert_start_stdout(&start, "server start");
     let started = status_json(binary, &state_root, &config);
     assert_eq!(started["state"], "running");
     for port in ports {
@@ -1229,6 +1227,7 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
         "{}",
         String::from_utf8_lossy(&stop_from_new_cli.stderr)
     );
+    assert_stop_stdout(&stop_from_new_cli, "stop from new cli");
     for port in ports {
         wait_port(port, false);
     }
@@ -1257,7 +1256,7 @@ fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
     let first_pid: Value =
         serde_json::from_slice(&fs::read(instance_dir.join("pid.cache")).unwrap()).unwrap();
     let stale_pid = first_pid["pid"].as_u64().unwrap();
-    terminate_explicit_pid(stale_pid);
+    kill_explicit_pid(stale_pid);
     for port in ports {
         wait_port(port, false);
     }
@@ -1313,7 +1312,7 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
         "{}",
         String::from_utf8_lossy(&first_start.stderr)
     );
-    assert_empty_stdout(&first_start, "first release start");
+    assert_start_stdout(&first_start, "first release start");
     let first_instance_id =
         status_json(first_release.to_str().unwrap(), &state_root, &config)["instance_id"].clone();
     let first_stop = run(
@@ -1342,7 +1341,7 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
         "{}",
         String::from_utf8_lossy(&second_start.stderr)
     );
-    assert_empty_stdout(&second_start, "second release start");
+    assert_start_stdout(&second_start, "second release start");
     assert_eq!(
         status_json(second_release.to_str().unwrap(), &state_root, &config)["instance_id"],
         first_instance_id
@@ -1373,6 +1372,7 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
         "{}",
         String::from_utf8_lossy(&second_stop.stderr)
     );
+    assert_stop_stdout(&second_stop, "second release stop");
     for port in ports {
         wait_port(port, false);
     }
@@ -1480,9 +1480,9 @@ fn running_instance_restart_execs_next_release_snapshot_in_place() {
 fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
-    let occupied_port = free_port();
-    let mut occupied = spawn_sigterm_resistant_listener(occupied_port);
-    let config = write_config(&root, [occupied_port, free_port()]);
+    let ports = [free_port(), free_port()];
+    let mut occupied = spawn_sigterm_resistant_multi_listener(ports);
+    let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
     let mut start = Command::new(binary)
         .args(["start", "--config"])
@@ -1514,7 +1514,9 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
         !killed.success(),
         "SIGTERM-resistant listener must be force-killed"
     );
-    wait_port(occupied_port, true);
+    for port in ports {
+        wait_port(port, true);
+    }
     let instance_dir = single_instance_dir(&state_root);
     assert_eq!(
         wait_status_file_state(&instance_dir, "running")["state"],
@@ -1526,13 +1528,54 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
         "{}",
         String::from_utf8_lossy(&stop.stderr)
     );
-    wait_port(occupied_port, false);
+    for port in ports {
+        wait_port(port, false);
+    }
     let start_output = start.wait_with_output().unwrap();
     assert!(
         start_output.status.success(),
         "{}",
         String::from_utf8_lossy(&start_output.stderr)
     );
+}
+
+#[test]
+fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let mut occupied = spawn_sigterm_resistant_multi_listener(ports);
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let stop = Command::new(binary)
+        .args(["server", "stop", "--config"])
+        .arg(&config)
+        .arg("--timeout-ms")
+        .arg("200")
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_V3_KILL_TIMEOUT_MS", "800")
+        .output()
+        .unwrap();
+    if !stop.status.success() {
+        let _ = occupied.kill();
+        let _ = occupied.wait();
+    }
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_stop_stdout(&stop, "forced server stop");
+    let killed = occupied.wait().unwrap();
+    assert!(
+        !killed.success(),
+        "SIGTERM-resistant listener must be force-killed by stop"
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
 }
 
 #[test]

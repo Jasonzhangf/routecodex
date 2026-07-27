@@ -40,7 +40,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    for item in input.iter() {
+    for (input_index, item) in input.iter().enumerate() {
         let item = item.as_object().ok_or_else(|| {
             "Responses input item must be an object before OpenAI Chat encoding".to_string()
         })?;
@@ -83,6 +83,15 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     build_v3_openai_chat_tool_result_message(item)?,
+                )?;
+            }
+            "web_search_call" => {
+                append_v3_openai_chat_web_search_call_history_pair(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &mut pending_tool_call_ids,
+                    item,
+                    input_index,
                 )?;
             }
             other => {
@@ -450,7 +459,8 @@ fn responses_input_item_needs_req04_original_surface(item: &Value) -> bool {
         | "tool_call_output"
         | "custom_tool_call_output"
         | "tool_result"
-        | "tool_message" => return true,
+        | "tool_message"
+        | "web_search_call" => return true,
         _ => {}
     }
     item.get("content")
@@ -585,6 +595,151 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
     Ok(json!({"role":"tool","tool_call_id":call_id,"content":content}))
 }
 
+fn append_v3_openai_chat_web_search_call_history_pair(
+    messages: &mut Vec<Value>,
+    pending_tool_message_index: &mut Option<usize>,
+    pending_tool_call_ids: &mut Vec<String>,
+    item: &Map<String, Value>,
+    input_index: usize,
+) -> Result<(), String> {
+    ensure_v3_openai_chat_web_search_event_has_no_side_channel(item)?;
+    let call_id = build_v3_openai_chat_web_search_history_call_id(item, input_index);
+    let assistant =
+        build_v3_openai_chat_web_search_assistant_tool_call_message(item, call_id.as_str())?;
+    let tool_result = build_v3_openai_chat_web_search_tool_result_message(item, call_id.as_str())?;
+    append_v3_openai_chat_tool_call_message(
+        messages,
+        pending_tool_message_index,
+        pending_tool_call_ids,
+        assistant,
+    )?;
+    append_v3_openai_chat_tool_result_message(
+        messages,
+        pending_tool_message_index,
+        pending_tool_call_ids,
+        tool_result,
+    )
+}
+
+fn ensure_v3_openai_chat_web_search_event_has_no_side_channel(
+    item: &Map<String, Value>,
+) -> Result<(), String> {
+    let event = Value::Object(item.clone());
+    if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
+        return Err(format!(
+            "Responses web_search_call contains RouteCodex side-channel field before OpenAI Chat provider encoding: {key}"
+        ));
+    }
+    if let Some(key) = find_v3_openai_chat_web_search_private_payload_key(&event) {
+        return Err(format!(
+            "Responses web_search_call contains private debug field before OpenAI Chat provider encoding: {key}"
+        ));
+    }
+    Ok(())
+}
+
+fn find_v3_openai_chat_web_search_private_payload_key(value: &Value) -> Option<String> {
+    match value {
+        Value::Object(object) => {
+            for key in object.keys() {
+                if key.starts_with('_') {
+                    return Some(key.clone());
+                }
+            }
+            object
+                .values()
+                .find_map(find_v3_openai_chat_web_search_private_payload_key)
+        }
+        Value::Array(items) => items
+            .iter()
+            .find_map(find_v3_openai_chat_web_search_private_payload_key),
+        _ => None,
+    }
+}
+
+fn build_v3_openai_chat_web_search_history_call_id(
+    item: &Map<String, Value>,
+    input_index: usize,
+) -> String {
+    read_v3_non_empty_str(item.get("call_id"))
+        .or_else(|| read_v3_non_empty_str(item.get("tool_call_id")))
+        .or_else(|| read_v3_non_empty_str(item.get("id")))
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("call_routecodex_web_search_{input_index}"))
+}
+
+fn build_v3_openai_chat_web_search_assistant_tool_call_message(
+    item: &Map<String, Value>,
+    call_id: &str,
+) -> Result<Value, String> {
+    let arguments_value = build_v3_openai_chat_web_search_arguments_value(item.get("action"));
+    let arguments = serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?;
+    Ok(json!({
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "arguments": arguments
+            }
+        }]
+    }))
+}
+
+fn build_v3_openai_chat_web_search_arguments_value(action: Option<&Value>) -> Value {
+    match action {
+        Some(Value::Object(object)) => Value::Object(object.clone()),
+        Some(value) => json!({ "action": value }),
+        None => Value::Object(Map::new()),
+    }
+}
+
+fn build_v3_openai_chat_web_search_tool_result_message(
+    item: &Map<String, Value>,
+    call_id: &str,
+) -> Result<Value, String> {
+    let event = build_v3_openai_chat_web_search_tool_result_event(item);
+    let content = serde_json::to_string(&event).map_err(|error| error.to_string())?;
+    Ok(json!({"role":"tool","tool_call_id":call_id,"content":content}))
+}
+
+fn build_v3_openai_chat_web_search_tool_result_event(item: &Map<String, Value>) -> Value {
+    let mut event = Map::new();
+    for key in [
+        "type",
+        "id",
+        "call_id",
+        "tool_call_id",
+        "status",
+        "action",
+        "result",
+        "result_items",
+        "results",
+        "output",
+        "error",
+        "errors",
+    ] {
+        if let Some(value) = item.get(key) {
+            event.insert(key.to_string(), value.clone());
+        }
+    }
+    for (key, value) in item {
+        if event.contains_key(key) {
+            continue;
+        }
+        event.insert(key.clone(), value.clone());
+    }
+    if !event.contains_key("type") {
+        event.insert(
+            "type".to_string(),
+            Value::String("web_search_call".to_string()),
+        );
+    }
+    Value::Object(event)
+}
+
 fn build_v3_openai_chat_content_from_responses_content(
     content: Option<&Value>,
 ) -> Result<(Value, Vec<String>), String> {
@@ -704,4 +859,276 @@ fn read_v3_non_empty_str(value: Option<&Value>) -> Option<&str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "web_search_call",
+                    "status": "failed",
+                    "action": {
+                        "type": "search",
+                        "query": "微信小程序 发布流程",
+                        "queries": ["微信小程序 发布流程", "微信小程序 request 合法域名"]
+                    }
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "继续"}]
+                }
+            ]
+        }))
+        .expect("web_search_call history must project to legal OpenAI Chat tool pair");
+
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(
+            messages.len(),
+            3,
+            "must emit pair plus following user: {request}"
+        );
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(messages[0]["content"], json!(""));
+        assert_eq!(
+            messages[0]["tool_calls"][0]["id"],
+            json!("call_routecodex_web_search_0")
+        );
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["name"],
+            json!("web_search")
+        );
+        let arguments: Value = serde_json::from_str(
+            messages[0]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .expect("arguments string"),
+        )
+        .expect("web_search arguments must be JSON");
+        assert_eq!(
+            arguments,
+            json!({
+                "type": "search",
+                "query": "微信小程序 发布流程",
+                "queries": ["微信小程序 发布流程", "微信小程序 request 合法域名"]
+            })
+        );
+        assert_eq!(messages[1]["role"], json!("tool"));
+        assert_eq!(
+            messages[1]["tool_call_id"],
+            json!("call_routecodex_web_search_0"),
+            "tool result must pair with assistant tool_call"
+        );
+        let result: Value = serde_json::from_str(
+            messages[1]["content"]
+                .as_str()
+                .expect("tool result content string"),
+        )
+        .expect("tool result content must preserve web_search event as JSON");
+        assert_eq!(result["type"], json!("web_search_call"));
+        assert_eq!(result["status"], json!("failed"));
+        assert_eq!(result["action"], arguments);
+        assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+    }
+
+    #[test]
+    fn responses_web_search_call_preserves_existing_id_for_tool_pair() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "web_search_call",
+                "id": "ws_123",
+                "status": "completed",
+                "action": {"type": "open_page", "url": "https://example.com"},
+                "result": {"title": "Example"},
+                "result_items": [{"url": "https://example.com", "title": "Example"}],
+                "output": "opened"
+            }]
+        }))
+        .expect("web_search_call with id must project");
+
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 2, "web_search_call must be atomic pair");
+        assert_eq!(messages[0]["tool_calls"][0]["id"], json!("ws_123"));
+        assert_eq!(messages[1]["tool_call_id"], json!("ws_123"));
+        let result: Value = serde_json::from_str(messages[1]["content"].as_str().unwrap())
+            .expect("tool result content JSON");
+        assert_eq!(result["id"], json!("ws_123"));
+        assert_eq!(result["result"], json!({"title": "Example"}));
+        assert_eq!(
+            result["result_items"],
+            json!([{"url": "https://example.com", "title": "Example"}])
+        );
+        assert_eq!(result["output"], json!("opened"));
+    }
+
+    #[test]
+    fn responses_web_search_call_never_emits_unpaired_tool_call_or_native_item() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "web_search_call",
+                "status": "failed"
+            }]
+        }))
+        .expect("web_search_call without action still projects as empty-argument pair");
+
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 2, "must not emit only assistant tool_call");
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(messages[1]["role"], json!("tool"));
+        let call_id = messages[0]["tool_calls"][0]["id"].as_str().unwrap();
+        assert_eq!(messages[1]["tool_call_id"], json!(call_id));
+        let arguments: Value = serde_json::from_str(
+            messages[0]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap(),
+        )
+        .expect("empty action arguments JSON");
+        assert_eq!(arguments, json!({}));
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.get("type").and_then(Value::as_str) != Some("web_search_call")),
+            "provider Chat messages must not contain a native Responses input item object: {request}"
+        );
+    }
+
+    #[test]
+    fn responses_web_search_call_stays_original_surface_until_req_outbound_projection() {
+        let payload = json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "web_search_call",
+                "status": "failed",
+                "action": {"type": "search", "query": "RouteCodex"}
+            }]
+        });
+        assert!(
+            build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(&payload)
+                .is_err(),
+            "ReqInbound must not synthesize web_search tool history; projection belongs to the provider-wire codec"
+        );
+        let request = build_v3_chat_canonical_request_from_responses_payload(&payload)
+            .expect("ReqOutbound OpenAI Chat projection must support web_search_call history");
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 2, "{request}");
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["name"],
+            "web_search"
+        );
+        assert_eq!(
+            messages[1]["tool_call_id"],
+            messages[0]["tool_calls"][0]["id"]
+        );
+    }
+
+    #[test]
+    fn responses_web_search_call_rejects_side_channel_before_tool_result_stringification() {
+        let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "web_search_call",
+                "status": "failed",
+                "action": {"type": "search", "query": "RouteCodex"},
+                "routeHint": "debug-control"
+            }]
+        }))
+        .expect_err(
+            "RouteCodex control fields must fail before provider tool-result JSON stringification",
+        );
+        assert!(
+            error.contains("side-channel field") && error.contains("routeHint"),
+            "unexpected error: {error}"
+        );
+
+        let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "web_search_call",
+                "status": "failed",
+                "action": {"type": "search", "query": "RouteCodex", "_debug": true}
+            }]
+        }))
+        .expect_err(
+            "private debug fields must fail before provider tool-result JSON stringification",
+        );
+        assert!(
+            error.contains("private debug field") && error.contains("_debug"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn live_5555_web_search_call_history_indexes_project_to_stable_tool_pairs() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "prefix"}]
+                },
+                {
+                    "type": "web_search_call",
+                    "status": "failed",
+                    "action": {
+                        "type": "search",
+                        "query": "微信小程序 发布 流程 上传 审核 发布 官方 文档",
+                        "queries": [
+                            "微信小程序 发布 流程 上传 审核 发布 官方 文档",
+                            "微信小程序 服务器域名 request合法域名 官方 文档"
+                        ]
+                    }
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}]
+                },
+                {
+                    "type": "web_search_call",
+                    "status": "failed",
+                    "action": {
+                        "type": "search",
+                        "query": "site:developers.weixin.qq.com miniprogram 发布 审核 上传"
+                    }
+                }
+            ]
+        }))
+        .expect("live 5555-like web_search_call history must project");
+
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(messages.len(), 6, "user + pair + user + pair: {request}");
+        assert_eq!(
+            messages[1]["tool_calls"][0]["id"],
+            json!("call_routecodex_web_search_1")
+        );
+        assert_eq!(
+            messages[2]["tool_call_id"],
+            json!("call_routecodex_web_search_1")
+        );
+        assert_eq!(
+            messages[4]["tool_calls"][0]["id"],
+            json!("call_routecodex_web_search_3")
+        );
+        assert_eq!(
+            messages[5]["tool_call_id"],
+            json!("call_routecodex_web_search_3")
+        );
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["name"],
+            json!("web_search")
+        );
+        assert_eq!(
+            messages[4]["tool_calls"][0]["function"]["name"],
+            json!("web_search")
+        );
+    }
 }

@@ -1181,6 +1181,7 @@ fn provider_target(
         },
         responses_transport: selected.responses_transport,
         websocket_v2_url: selected.websocket_v2_url.clone(),
+        provider_request_cleanup: selected.provider_request_cleanup.clone(),
     })
 }
 

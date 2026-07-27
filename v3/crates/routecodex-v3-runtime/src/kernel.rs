@@ -4,7 +4,8 @@ use crate::hub_v1::{
     apply_v3_stopless_request_hook_at_req04, apply_v3_tool_call_servertool_hook_at_resp03,
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw_with_compat_profile, V3HubContinuationOwnership,
+    build_v3_provider_resp_inbound_01_raw_with_compat_profile,
+    v3_responses_direct_stopless_center_enabled_for_server, V3HubContinuationOwnership,
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
     V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
     V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureObservation,
@@ -1148,6 +1149,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 target_plan: Vec::new(),
                 request_client_model: None,
                 request_capabilities: BTreeSet::new(),
+                request_input_tokens: build_v3_router_request_facts_from_v3_req_04(&standardized)
+                    .input_tokens,
                 hit_count: 1,
             },
             candidate,
@@ -1308,6 +1311,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             }
             if let Err(source) = clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
                 manifest,
+                &standardized.protocol_context.server_id,
                 stopless_control,
                 stopless_scope.as_ref(),
                 direct_stopless_request_state.as_ref(),
@@ -1319,6 +1323,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         if !direct_stopless_control_prepared {
             match prepare_v3_responses_direct_stopless_control_request(
                 manifest,
+                &standardized.protocol_context.server_id,
                 stopless_control,
                 stopless_scope.as_ref(),
                 &mut standardized.body,
@@ -1569,25 +1574,28 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             match apply_v3_responses_direct_stopless_json_response_control(
                 V3ResponsesDirectStoplessJsonResponseControlInput {
                     manifest,
+                    server_id: &standardized.protocol_context.server_id,
                     stopless_control,
                     stopless_scope: stopless_scope.as_ref(),
                     request_stopless_state: direct_stopless_request_state.as_ref(),
                     transition_request_id: &standardized.protocol_context.request_id,
                     transition_updated_at: now_epoch_ms,
                     payload: body,
-                    previous_response_id: previous_response_id.as_deref(),
-                    continuation_state,
-                    continuation_scope: continuation_scope.as_ref(),
-                    selected_pin: &selected_pin,
-                    selected_capability_revision: &selected_capability_revision,
                 },
                 &mut trace,
             ) {
                 Ok(outcome) => {
                     direct_stopless_projected = outcome.intercepted;
-                    if outcome.override_remote_continuation_terminal {
-                        response_projection.remote_continuation =
-                            V3RemoteContinuationObservation::Terminal;
+                    match outcome.continuation_transition {
+                        V3DirectStoplessContinuationTransition::PassThrough => {}
+                        V3DirectStoplessContinuationTransition::Continue { response_id } => {
+                            response_projection.remote_continuation =
+                                V3RemoteContinuationObservation::Pending { response_id };
+                        }
+                        V3DirectStoplessContinuationTransition::Terminal => {
+                            response_projection.remote_continuation =
+                                V3RemoteContinuationObservation::Terminal;
+                        }
                     }
                 }
                 Err(source) => return error_output(source, trace, &hook_registry),
@@ -1610,7 +1618,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     let stream = wrap_direct_sse_stopless_control_stream(
                         stream,
                         V3DirectSseStoplessControlPolicy {
-                            stopless_center_enabled: v3_direct_stopless_center_enabled(manifest),
+                            stopless_center_enabled:
+                                v3_responses_direct_stopless_center_enabled_for_server(
+                                    manifest,
+                                    &standardized.protocol_context.server_id,
+                                ),
                             stopless_control: stopless_control.cloned(),
                             stopless_scope: stopless_scope.clone(),
                             request_stopless_state: direct_stopless_request_state.clone(),
@@ -1778,27 +1790,34 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
 
 struct V3ResponsesDirectStoplessJsonResponseControlInput<'a> {
     manifest: &'a V3Config05ManifestPublished,
+    server_id: &'a str,
     stopless_control: Option<&'a V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&'a V3ResponsesDirectStoplessControlScope>,
     request_stopless_state: Option<&'a V3StoplessCenterState>,
     transition_request_id: &'a str,
     transition_updated_at: u64,
     payload: &'a mut Value,
-    previous_response_id: Option<&'a str>,
-    continuation_state: Option<&'a V3ResponsesDirectContinuationState>,
-    continuation_scope: Option<&'a V3ResponsesDirectContinuationScope>,
-    selected_pin: &'a V3RemoteContinuationPin,
-    selected_capability_revision: &'a str,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct V3ResponsesDirectStoplessJsonResponseControlOutcome {
     intercepted: bool,
-    override_remote_continuation_terminal: bool,
+    continuation_transition: V3DirectStoplessContinuationTransition,
+}
+
+#[derive(Debug, Clone, Default)]
+enum V3DirectStoplessContinuationTransition {
+    #[default]
+    PassThrough,
+    Continue {
+        response_id: String,
+    },
+    Terminal,
 }
 
 fn prepare_v3_responses_direct_stopless_control_request(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
     payload: &mut Value,
@@ -1806,7 +1825,7 @@ fn prepare_v3_responses_direct_stopless_control_request(
     transition_updated_at: u64,
     trace: &mut Vec<&'static str>,
 ) -> Result<Option<V3StoplessCenterState>, V3Error01SourceRaised> {
-    if !v3_direct_stopless_center_enabled(manifest) {
+    if !v3_responses_direct_stopless_center_enabled_for_server(manifest, server_id) {
         return Ok(None);
     }
     let (Some(stopless_control), Some(stopless_scope)) = (stopless_control, stopless_scope) else {
@@ -1836,18 +1855,64 @@ fn prepare_v3_responses_direct_stopless_control_request(
         )
     }) {
         trace.push("V3DirectStoplessReq02NoopCliConsumed");
+        project_v3_direct_stopless_native_reasoning_stop_output(payload, restored_state.as_ref())?;
     }
     if request_state.is_some() {
         trace.push("V3DirectStoplessReq03GuidanceToolInjected");
     }
     apply_v3_responses_direct_stopless_control_request_transition(
         manifest,
+        server_id,
         Some(stopless_control),
         Some(stopless_scope),
         restored_state_loaded,
         request_state.as_ref(),
     )?;
     Ok(request_state)
+}
+
+fn project_v3_direct_stopless_native_reasoning_stop_output(
+    payload: &mut Value,
+    restored_state: Option<&V3StoplessCenterState>,
+) -> Result<(), V3Error01SourceRaised> {
+    let Some(call_id) = restored_state
+        .and_then(V3StoplessCenterState::last_provider_stopless_call_id)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+    let input = payload
+        .get_mut("input")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| {
+            runtime_source(
+                "V3DirectStoplessReq02NoopCliConsumed",
+                "Direct stopless native reasoningStop continuation requires Responses input array",
+            )
+        })?;
+    let already_projected = input.iter().any(|item| {
+        matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("function_call_output" | "tool_call_output")
+        ) && item
+            .get("call_id")
+            .or_else(|| item.get("tool_call_id"))
+            .and_then(Value::as_str)
+            .is_some_and(|existing| existing == call_id)
+    });
+    if already_projected {
+        return Ok(());
+    }
+    input.insert(
+        0,
+        json!({
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": ""
+        }),
+    );
+    Ok(())
 }
 
 fn apply_v3_responses_direct_stopless_json_response_control(
@@ -1857,7 +1922,7 @@ fn apply_v3_responses_direct_stopless_json_response_control(
     let Some(request_stopless_state) = input.request_stopless_state else {
         return Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome::default());
     };
-    if !v3_direct_stopless_center_enabled(input.manifest) {
+    if !v3_responses_direct_stopless_center_enabled_for_server(input.manifest, input.server_id) {
         return Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome::default());
     }
     let (Some(stopless_control), Some(stopless_scope)) =
@@ -1877,8 +1942,26 @@ fn apply_v3_responses_direct_stopless_json_response_control(
         V3HubTransportIntent::Json,
     )?;
     *input.payload = outcome.payload;
+    let continuation_transition = if !outcome.intercepted {
+        V3DirectStoplessContinuationTransition::PassThrough
+    } else if outcome
+        .center_state
+        .as_ref()
+        .is_some_and(V3StoplessCenterState::need_continue)
+    {
+        let response_id = direct_response_id(input.payload).ok_or_else(|| {
+            runtime_source(
+                "V3HubRespContinuation04Committed",
+                "Direct stopless continue transition requires provider-native response id",
+            )
+        })?;
+        V3DirectStoplessContinuationTransition::Continue { response_id }
+    } else {
+        V3DirectStoplessContinuationTransition::Terminal
+    };
     apply_v3_responses_direct_stopless_control_response_transition(
         input.manifest,
+        input.server_id,
         Some(stopless_control),
         Some(stopless_scope),
         outcome.center_state,
@@ -1887,20 +1970,9 @@ fn apply_v3_responses_direct_stopless_json_response_control(
     if outcome.intercepted {
         trace.push("V3DirectStoplessResp03NoopCliOrTerminalProjected");
     }
-    if outcome.intercepted && direct_stopless_payload_has_cli_noop(input.payload) {
-        commit_v3_direct_stopless_remote_locator_for_payload(
-            input.payload,
-            input.previous_response_id,
-            input.continuation_state,
-            input.continuation_scope,
-            input.selected_pin,
-            input.selected_capability_revision,
-            input.transition_updated_at,
-        )?;
-    }
     Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome {
         intercepted: outcome.intercepted,
-        override_remote_continuation_terminal: outcome.intercepted,
+        continuation_transition,
     })
 }
 
@@ -1966,16 +2038,9 @@ fn run_v3_responses_direct_stopless_response_hooks(
     })
 }
 
-fn v3_direct_stopless_center_enabled(manifest: &V3Config05ManifestPublished) -> bool {
-    manifest
-        .features
-        .get("stopless_center")
-        .copied()
-        .unwrap_or(true)
-}
-
 fn apply_v3_responses_direct_stopless_control_request_transition(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
     restored_state_loaded: bool,
@@ -1984,12 +2049,14 @@ fn apply_v3_responses_direct_stopless_control_request_transition(
     match request_stopless_state {
         Some(state) => store_v3_responses_direct_stopless_control_state(
             manifest,
+            server_id,
             stopless_control,
             stopless_scope,
             state.clone(),
         ),
         None if restored_state_loaded => clear_v3_responses_direct_stopless_control_state(
             manifest,
+            server_id,
             stopless_control,
             stopless_scope,
         ),
@@ -1999,6 +2066,7 @@ fn apply_v3_responses_direct_stopless_control_request_transition(
 
 fn apply_v3_responses_direct_stopless_control_response_transition(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
     response_stopless_state: Option<V3StoplessCenterState>,
@@ -2006,12 +2074,14 @@ fn apply_v3_responses_direct_stopless_control_response_transition(
     match response_stopless_state {
         Some(state) => store_v3_responses_direct_stopless_control_state(
             manifest,
+            server_id,
             stopless_control,
             stopless_scope,
             state,
         ),
         None => clear_v3_responses_direct_stopless_control_state(
             manifest,
+            server_id,
             stopless_control,
             stopless_scope,
         ),
@@ -2020,11 +2090,12 @@ fn apply_v3_responses_direct_stopless_control_response_transition(
 
 fn store_v3_responses_direct_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
     state: V3StoplessCenterState,
 ) -> Result<(), V3Error01SourceRaised> {
-    if !v3_direct_stopless_center_enabled(manifest) {
+    if !v3_responses_direct_stopless_center_enabled_for_server(manifest, server_id) {
         return Ok(());
     }
     let (Some(stopless_control), Some(stopless_scope)) = (stopless_control, stopless_scope) else {
@@ -2040,10 +2111,11 @@ fn store_v3_responses_direct_stopless_control_state(
 
 fn clear_v3_responses_direct_stopless_control_state(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
 ) -> Result<(), V3Error01SourceRaised> {
-    if !v3_direct_stopless_center_enabled(manifest) {
+    if !v3_responses_direct_stopless_center_enabled_for_server(manifest, server_id) {
         return Ok(());
     }
     let (Some(stopless_control), Some(stopless_scope)) = (stopless_control, stopless_scope) else {
@@ -2059,6 +2131,7 @@ fn clear_v3_responses_direct_stopless_control_state(
 
 fn clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
     manifest: &V3Config05ManifestPublished,
+    server_id: &str,
     stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
     stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
     request_stopless_state: Option<&V3StoplessCenterState>,
@@ -2066,7 +2139,12 @@ fn clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
     if request_stopless_state.is_none() {
         return Ok(());
     }
-    clear_v3_responses_direct_stopless_control_state(manifest, stopless_control, stopless_scope)
+    clear_v3_responses_direct_stopless_control_state(
+        manifest,
+        server_id,
+        stopless_control,
+        stopless_scope,
+    )
 }
 
 fn commit_v3_direct_stopless_remote_locator_for_payload(
@@ -2120,25 +2198,6 @@ fn direct_response_id(payload: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn direct_stopless_payload_has_cli_noop(payload: &Value) -> bool {
-    let semantic = payload.get("response").unwrap_or(payload);
-    semantic
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("call_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|call_id| call_id == "call_stopless_reasoning")
-                    || item
-                        .get("arguments")
-                        .or_else(|| item.get("input"))
-                        .and_then(Value::as_str)
-                        .is_some_and(|value| value.contains("routecodex hook run reasoningStop"))
-            })
-        })
 }
 
 fn direct_response_has_provider_tool_call(payload: &Value) -> bool {
@@ -2356,12 +2415,18 @@ fn build_v3_direct_provider_failure_observation(
     next_provider_key: Option<String>,
     wait_ms: Option<u64>,
 ) -> V3RuntimeProviderFailureObservation {
+    let observed_status = source
+        .external_error
+        .as_ref()
+        .and_then(|external| external.status)
+        .filter(|external_status| *external_status >= 400)
+        .unwrap_or(status);
     V3RuntimeProviderFailureObservation {
         provider_key: candidate_key(&selected.candidate),
         provider_id: selected.candidate.provider_id.clone(),
         auth_alias: Some(selected.candidate.auth_alias.clone()),
         model_id: selected.candidate.model_id.clone(),
-        status,
+        status: observed_status,
         error_type: Some(source.code.clone()),
         external_error_kind: source
             .external_error
@@ -2841,10 +2906,13 @@ fn transform_direct_sse_stopless_control_frame(
         V3HubTransportIntent::Sse,
     )?;
     let intercepted = outcome.intercepted;
-    let projected_noop = direct_stopless_payload_has_cli_noop(&outcome.payload);
+    let continue_remote = outcome
+        .center_state
+        .as_ref()
+        .is_some_and(V3StoplessCenterState::need_continue);
     policy.apply_response_transition(outcome.center_state)?;
     *state_transition_done = true;
-    if intercepted && projected_noop && !*committed_stopless_locator {
+    if intercepted && continue_remote && !*committed_stopless_locator {
         policy.commit_stopless_remote_locator_for_payload(&outcome.payload)?;
         *committed_stopless_locator = true;
     }
@@ -3252,7 +3320,7 @@ mod tests {
     use async_trait::async_trait;
     use routecodex_v3_config::*;
     use routecodex_v3_provider_responses::{
-        V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
+        V3ProviderError, V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
         V3Transport13ResponsesHttpRequest,
     };
     use serde_json::json;
@@ -3487,10 +3555,14 @@ mod tests {
                 request: V3Transport13ResponsesHttpRequest,
             ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
                 if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
-                    return Err(V3ProviderError::Transport {
+                    return Err(V3ProviderError::HttpStatus {
+                        response: Box::new(V3ProviderHttpFailure {
                         request_id: request.request_id().to_string(),
                         provider_id: request.provider_id().to_string(),
-                        reason: "first failed".to_string(),
+                            status: 400,
+                            headers: Vec::new(),
+                            body: br#"{"error":{"code":"HTTP_400","message":"first provider rejected request"}}"#.to_vec(),
+                        }),
                     });
                 }
                 assert_eq!(request.provider_id(), "second");
@@ -3543,17 +3615,22 @@ mod tests {
             .expect("Responses Direct must expose provider failure observability for V3 console");
         assert_eq!(observability.provider_id.as_deref(), Some("second"));
         assert_eq!(observability.provider_failure_events.len(), 1);
+        assert_eq!(observability.provider_failure_events[0].status, 400);
         assert_eq!(
             observability.provider_failure_events[0]
                 .external_error_kind
                 .as_deref(),
-            Some("transport")
+            Some("provider")
         );
         assert_eq!(
             observability.provider_failure_events[0]
                 .external_error_code
                 .as_deref(),
-            Some("TRANSPORT_ERROR")
+            Some("HTTP_400")
+        );
+        assert_eq!(
+            observability.provider_failure_events[0].external_error_status,
+            Some(400)
         );
         assert_eq!(observability.provider_failure_events[0].internal_code, None);
         assert_eq!(

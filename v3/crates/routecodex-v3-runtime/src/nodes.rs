@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::pin::Pin;
 
+const DEFAULT_V3_LONGCONTEXT_THRESHOLD_TOKENS: u64 = 180_000;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
     pub server_id: String,
@@ -126,6 +128,7 @@ pub fn build_v3_router_request_facts_for_entry(
     entry_protocol: &str,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
+    let input_tokens = estimate_v3_routing_input_tokens(body);
     let tool_names = collect_v3_request_tool_names(body);
     if !tool_names.is_empty() {
         capabilities.insert("tools".to_string());
@@ -145,6 +148,12 @@ pub fn build_v3_router_request_facts_for_entry(
     if body.get("reasoning").is_some() {
         capabilities.insert("reasoning".to_string());
         capabilities.insert("thinking".to_string());
+    }
+    if value_has_current_user_input(body) {
+        capabilities.insert("thinking".to_string());
+    }
+    if input_tokens >= DEFAULT_V3_LONGCONTEXT_THRESHOLD_TOKENS {
+        capabilities.insert("longcontext".to_string());
     }
     if value_has_v3_media_kind(body, "image") {
         capabilities.insert("multimodal".to_string());
@@ -173,7 +182,7 @@ pub fn build_v3_router_request_facts_for_entry(
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned),
         capabilities,
-        input_tokens: estimate_v3_routing_input_tokens(body),
+        input_tokens,
     }
 }
 
@@ -256,6 +265,51 @@ fn is_v3_coding_tool_name(name: &str) -> bool {
             | "request_user_input"
             | "view_image"
     )
+}
+
+fn value_has_current_user_input(body: &Value) -> bool {
+    body.get("input")
+        .is_some_and(value_has_current_user_input_value)
+        || body
+            .get("messages")
+            .is_some_and(value_has_current_user_input_value)
+        || body
+            .get("prompt")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn value_has_current_user_input_value(value: &Value) -> bool {
+    match value {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+            if likely_json {
+                return serde_json::from_str::<Value>(trimmed)
+                    .ok()
+                    .is_some_and(|parsed| value_has_current_user_input_value(&parsed));
+            }
+            true
+        }
+        Value::Array(items) => items.iter().any(value_has_current_user_input_value),
+        Value::Object(object) => {
+            let role_is_user = object
+                .get("role")
+                .and_then(Value::as_str)
+                .is_some_and(|role| role.trim().eq_ignore_ascii_case("user"));
+            if role_is_user {
+                return true;
+            }
+            object
+                .get("content")
+                .is_some_and(value_has_current_user_input_value)
+        }
+        _ => false,
+    }
 }
 
 fn estimate_v3_routing_input_tokens(body: &Value) -> u64 {
@@ -519,6 +573,22 @@ mod tests {
         assert!(
             facts.capabilities.contains("thinking"),
             "V3 config may use thinking while OpenAI Responses clients send reasoning; route facts must preserve both names"
+        );
+    }
+
+    #[test]
+    fn v3_routing_facts_mark_current_user_input_as_thinking() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [{"role":"user","content":"继续按照合同进行修复"}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+
+        assert!(
+            facts.capabilities.contains("thinking"),
+            "current user input must enter the thinking route fact without requiring a reasoning field: {:?}",
+            facts.capabilities
         );
     }
 

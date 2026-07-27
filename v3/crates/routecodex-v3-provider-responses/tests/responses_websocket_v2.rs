@@ -252,6 +252,7 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
         },
         responses_transport: V3ResponsesTransportKind::WebsocketV2,
         websocket_v2_url: Some(url.into()),
+        provider_request_cleanup: Default::default(),
     }
 }
 

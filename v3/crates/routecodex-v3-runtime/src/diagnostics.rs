@@ -62,6 +62,8 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
     let endpoint = read_dry_run_endpoint(input, metadata).unwrap_or("/v1/responses");
     let entry_protocol = entry_protocol_from_endpoint(endpoint);
     let facts = crate::build_v3_router_request_facts_for_entry(request, entry_protocol);
+    let request_input_tokens = facts.input_tokens;
+    let request_capabilities = facts.capabilities.iter().cloned().collect::<Vec<_>>();
     // Reflects the live process-wide selection state without advancing it, so a
     // dry-run probe never perturbs round-robin/SWRR rotation.
     let router = V3VirtualRouter::process_shared();
@@ -167,6 +169,8 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
             "entryEndpoint": endpoint,
             "entryProtocol": entry_protocol,
             "requestModel": request.get("model").and_then(Value::as_str),
+            "requestInputTokens": request_input_tokens,
+            "requestCapabilities": request_capabilities,
             "metadataRequestId": metadata.get("requestId").and_then(Value::as_str)
         },
         "decision": decision

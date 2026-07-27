@@ -58,11 +58,7 @@ fn provider_request_dry_run_response_payload_for_request(
     responses_payload: &Value,
 ) -> Value {
     let text = "routecodex provider-request dry-run stopped before provider send";
-    if request
-        .url()
-        .trim_end_matches('/')
-        .ends_with("/v1/messages")
-    {
+    if provider_request_url_path_ends_with(request.url(), "/v1/messages") {
         return json!({
             "id": format!("dry_run_{}", request.request_id()),
             "type": "message",
@@ -72,11 +68,7 @@ fn provider_request_dry_run_response_payload_for_request(
             "stop_reason": "end_turn"
         });
     }
-    if request
-        .url()
-        .trim_end_matches('/')
-        .ends_with("/chat/completions")
-    {
+    if provider_request_url_path_ends_with(request.url(), "/chat/completions") {
         return json!({
             "id": format!("dry_run_{}", request.request_id()),
             "object": "chat.completion",
@@ -89,6 +81,11 @@ fn provider_request_dry_run_response_payload_for_request(
         });
     }
     responses_payload.clone()
+}
+
+fn provider_request_url_path_ends_with(url: &str, suffix: &str) -> bool {
+    let path = url.split('?').next().unwrap_or(url);
+    path.trim_end_matches('/').ends_with(suffix)
 }
 
 #[cfg(test)]
@@ -104,7 +101,7 @@ mod tests {
         let request = build_v3_transport_13_responses_http_request_from_parts(
             "req-dry-run",
             "anthropic_provider",
-            "http://provider.invalid/anthropic/v1/messages",
+            "http://provider.invalid/anthropic/v1/messages?beta=true",
             V3ProviderAuthHandle {
                 alias: "key".to_string(),
                 secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".to_string()),

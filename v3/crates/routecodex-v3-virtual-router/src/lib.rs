@@ -73,6 +73,7 @@ pub struct V3Router07OpaqueTargetHitOnce {
     pub target_plan: Vec<V3Router07OpaqueTargetPlanEntry>,
     pub request_client_model: Option<String>,
     pub request_capabilities: BTreeSet<String>,
+    pub request_input_tokens: u64,
     pub hit_count: u8,
 }
 
@@ -223,15 +224,22 @@ impl V3VirtualRouter {
                         pool_id: pool_id.clone(),
                     })?;
             if pool_matches(match_rule, &classified.facts) {
-                matched_pools.push((match_rule.precedence, pool_id.clone()));
+                matched_pools.push((
+                    route_contract_priority(pool_id, match_rule, &classified.facts),
+                    match_rule.precedence,
+                    pool_id.clone(),
+                ));
             }
         }
         matched_pools.sort();
-        let best_precedence = matched_pools.first().map(|(precedence, _)| *precedence);
+        let best_priority = matched_pools.first().map(|(priority, _, _)| *priority);
+        let best_precedence = matched_pools.first().map(|(_, precedence, _)| *precedence);
         let best_pool_ids = matched_pools
             .iter()
-            .take_while(|(precedence, _)| Some(*precedence) == best_precedence)
-            .map(|(_, pool_id)| pool_id.clone())
+            .take_while(|(priority, precedence, _)| {
+                Some(*priority) == best_priority && Some(*precedence) == best_precedence
+            })
+            .map(|(_, _, pool_id)| pool_id.clone())
             .collect::<Vec<_>>();
         if best_pool_ids.len() > 1 {
             return Err(V3VirtualRouterError::AmbiguousPoolMatches {
@@ -339,6 +347,7 @@ impl V3VirtualRouter {
             target_plan,
             request_client_model: plan.facts.client_model,
             request_capabilities: plan.facts.capabilities,
+            request_input_tokens: plan.facts.input_tokens,
             hit_count: 1,
         })
     }
@@ -440,6 +449,64 @@ fn pool_matches(rule: &V3RoutePoolMatchManifest, facts: &V3RouterRequestFacts) -
         && rule
             .max_input_tokens
             .is_none_or(|maximum| facts.input_tokens <= maximum)
+}
+
+fn route_contract_priority(
+    pool_id: &str,
+    rule: &V3RoutePoolMatchManifest,
+    facts: &V3RouterRequestFacts,
+) -> i32 {
+    if pool_route_signal_matches(pool_id, rule, &["longcontext"])
+        && rule
+            .min_input_tokens
+            .is_some_and(|minimum| facts.input_tokens >= minimum)
+    {
+        return 0;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["multimodal", "vision"]) {
+        return 10;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["web_search"]) {
+        return 20;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["longcontext"]) {
+        return 30;
+    }
+    if rule.models.iter().any(|model| {
+        facts
+            .client_model
+            .as_ref()
+            .is_some_and(|client_model| client_model == model)
+    }) {
+        return 35;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["thinking", "reasoning"]) {
+        return 40;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["coding"]) {
+        return 50;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["search"]) {
+        return 60;
+    }
+    if pool_route_signal_matches(pool_id, rule, &["tools"]) {
+        return 70;
+    }
+    100
+}
+
+fn pool_route_signal_matches(
+    pool_id: &str,
+    rule: &V3RoutePoolMatchManifest,
+    signals: &[&str],
+) -> bool {
+    signals.iter().any(|signal| {
+        pool_id == *signal
+            || rule
+                .required_capabilities
+                .iter()
+                .any(|capability| capability == signal)
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -680,6 +747,7 @@ mod tests {
                 responses: None,
                 concurrency: None,
                 health: None,
+                provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
                 compatibility_profile: None,
                 features: BTreeMap::new(),
             },
@@ -886,6 +954,197 @@ mod tests {
                 pool_ids: vec!["tools".into(), "tools-copy".into()],
             })
         );
+    }
+
+    fn add_match_pool(
+        manifest: &mut V3Config05ManifestPublished,
+        pool_id: &str,
+        precedence: i32,
+        required_capabilities: Vec<&str>,
+        min_input_tokens: Option<u64>,
+    ) {
+        manifest.route_groups.get_mut("g").unwrap().pools.insert(
+            pool_id.into(),
+            V3RoutePoolManifest {
+                id: pool_id.into(),
+                selection: V3SelectionPolicy {
+                    strategy: V3SelectionStrategy::Priority,
+                },
+                match_rule: Some(V3RoutePoolMatchManifest {
+                    precedence,
+                    entry_protocol: Some("responses".into()),
+                    models: Vec::new(),
+                    required_capabilities: required_capabilities
+                        .into_iter()
+                        .map(ToOwned::to_owned)
+                        .collect(),
+                    min_input_tokens,
+                    max_input_tokens: None,
+                }),
+                features: BTreeMap::new(),
+                targets: vec![target(pool_id, 1, 1)],
+            },
+        );
+    }
+
+    fn add_model_match_pool(
+        manifest: &mut V3Config05ManifestPublished,
+        pool_id: &str,
+        precedence: i32,
+        model: &str,
+    ) {
+        manifest.route_groups.get_mut("g").unwrap().pools.insert(
+            pool_id.into(),
+            V3RoutePoolManifest {
+                id: pool_id.into(),
+                selection: V3SelectionPolicy {
+                    strategy: V3SelectionStrategy::Priority,
+                },
+                match_rule: Some(V3RoutePoolMatchManifest {
+                    precedence,
+                    entry_protocol: Some("responses".into()),
+                    models: vec![model.into()],
+                    required_capabilities: Vec::new(),
+                    min_input_tokens: None,
+                    max_input_tokens: None,
+                }),
+                features: BTreeMap::new(),
+                targets: vec![target(pool_id, 1, 1)],
+            },
+        );
+    }
+
+    #[test]
+    fn route_contract_prefers_web_search_over_generic_tools_even_when_precedence_is_lower() {
+        let router = V3VirtualRouter::default();
+        let mut manifest = manifest(V3SelectionStrategy::Priority);
+        manifest
+            .route_groups
+            .get_mut("g")
+            .unwrap()
+            .pools
+            .get_mut("tools")
+            .unwrap()
+            .match_rule
+            .as_mut()
+            .unwrap()
+            .precedence = 20;
+        add_match_pool(&mut manifest, "web_search", 22, vec!["web_search"], None);
+
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client-model".into()),
+                    capabilities: BTreeSet::from(["tools".into(), "web_search".into()]),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+        assert_eq!(hit.pool_id, "web_search");
+    }
+
+    #[test]
+    fn route_contract_prefers_multimodal_over_all_non_context_route_signals() {
+        let router = V3VirtualRouter::default();
+        let mut manifest = manifest(V3SelectionStrategy::Priority);
+        add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
+        add_match_pool(&mut manifest, "coding", 2, vec!["coding"], None);
+        add_match_pool(&mut manifest, "search", 3, vec!["search"], None);
+        add_match_pool(&mut manifest, "web_search", 4, vec!["web_search"], None);
+        add_match_pool(&mut manifest, "multimodal", 99, vec!["multimodal"], None);
+
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client-model".into()),
+                    capabilities: BTreeSet::from([
+                        "tools".into(),
+                        "coding".into(),
+                        "search".into(),
+                        "web_search".into(),
+                        "thinking".into(),
+                        "multimodal".into(),
+                    ]),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+        assert_eq!(hit.pool_id, "multimodal");
+    }
+
+    #[test]
+    fn route_contract_treats_min_token_longcontext_as_context_safety_first() {
+        let router = V3VirtualRouter::default();
+        let mut manifest = manifest(V3SelectionStrategy::Priority);
+        add_match_pool(&mut manifest, "multimodal", 1, vec!["multimodal"], None);
+        add_match_pool(&mut manifest, "web_search", 2, vec!["web_search"], None);
+        add_match_pool(&mut manifest, "longcontext", 100, Vec::new(), Some(1_000));
+
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client-model".into()),
+                    capabilities: BTreeSet::from(["multimodal".into(), "web_search".into()]),
+                    input_tokens: 1_000,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+        assert_eq!(hit.pool_id, "longcontext");
+    }
+
+    #[test]
+    fn route_contract_prefers_explicit_model_pool_over_generic_thinking() {
+        let router = V3VirtualRouter::default();
+        let mut manifest = manifest(V3SelectionStrategy::Priority);
+        add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
+        add_model_match_pool(&mut manifest, "client_test", 99, "client-test");
+
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client-test".into()),
+                    capabilities: BTreeSet::from(["thinking".into()]),
+                    input_tokens: 10,
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+        assert_eq!(hit.pool_id, "client_test");
     }
 
     #[test]

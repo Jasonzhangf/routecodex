@@ -488,7 +488,11 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         action: V3ErrorActionPlan {
             scope,
             reason: classified.source.code.clone(),
-            duration_ms: if health_affecting { Some(30_000) } else { None },
+            duration_ms: if health_affecting {
+                Some(15 * 60_000)
+            } else {
+                None
+            },
             retry_eligible,
             health_affecting,
             exhaustion_effect: exhaustion_effect.to_string(),
