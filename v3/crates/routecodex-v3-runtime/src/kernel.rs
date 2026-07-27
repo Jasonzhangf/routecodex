@@ -1,7 +1,14 @@
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
-    apply_v3_responses_direct_stopless_request_hook, V3RuntimeObservability,
-    V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation,
+    apply_v3_responses_direct_stopless_request_hook, apply_v3_stop_servertool_hook_at_resp03,
+    apply_v3_stopless_request_hook_at_req04, apply_v3_tool_call_servertool_hook_at_resp03,
+    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
+    build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
+    build_v3_provider_resp_inbound_01_raw_with_compat_profile, V3HubContinuationOwnership,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
+    V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
+    V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureObservation,
+    V3RuntimeStreamObservation, V3StoplessCenterState,
 };
 use crate::nodes::*;
 use crate::provider_failure_runtime_policy::{
@@ -25,7 +32,7 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -35,7 +42,10 @@ use crate::remote_continuation::{
 };
 use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
+    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
+    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
+    SseTransportLimits,
 };
 
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
@@ -68,6 +78,116 @@ impl V3ResponsesDirectContinuationScope {
                 routing_group,
             ),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ResponsesDirectStoplessControlScope {
+    key: V3RemoteContinuationScopeKey,
+}
+
+impl V3ResponsesDirectStoplessControlScope {
+    pub fn responses(
+        endpoint: impl Into<String>,
+        session_id: impl Into<String>,
+        conversation_id: impl Into<String>,
+        port: u16,
+        routing_group: impl Into<String>,
+    ) -> Self {
+        Self {
+            key: V3RemoteContinuationScopeKey::responses(
+                endpoint,
+                session_id,
+                conversation_id,
+                port,
+                routing_group,
+            ),
+        }
+    }
+
+    fn has_client_session_scope(&self) -> bool {
+        let session_id = self.key.session_id.trim();
+        let conversation_id = self.key.conversation_id.trim();
+        if session_id.is_empty() || conversation_id.is_empty() {
+            return false;
+        }
+        !(session_id == conversation_id && session_id.starts_with("request:"))
+    }
+}
+
+impl From<&V3ResponsesDirectContinuationScope> for V3ResponsesDirectStoplessControlScope {
+    fn from(scope: &V3ResponsesDirectContinuationScope) -> Self {
+        Self {
+            key: scope.key.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct V3ResponsesDirectStoplessControlKey {
+    key: V3RemoteContinuationScopeKey,
+}
+
+impl From<&V3ResponsesDirectStoplessControlScope> for V3ResponsesDirectStoplessControlKey {
+    fn from(scope: &V3ResponsesDirectStoplessControlScope) -> Self {
+        Self {
+            key: scope.key.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct V3ResponsesDirectStoplessControlState {
+    store: Arc<Mutex<BTreeMap<V3ResponsesDirectStoplessControlKey, V3StoplessCenterState>>>,
+}
+
+impl V3ResponsesDirectStoplessControlState {
+    pub fn load_for_scope(
+        &self,
+        scope: &V3ResponsesDirectStoplessControlScope,
+    ) -> Result<Option<V3StoplessCenterState>, String> {
+        self.store
+            .lock()
+            .map_err(|error| error.to_string())
+            .map(|store| {
+                store
+                    .get(&V3ResponsesDirectStoplessControlKey::from(scope))
+                    .cloned()
+            })
+    }
+
+    pub fn store_for_scope(
+        &self,
+        scope: &V3ResponsesDirectStoplessControlScope,
+        state: V3StoplessCenterState,
+    ) -> Result<(), String> {
+        self.store
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(V3ResponsesDirectStoplessControlKey::from(scope), state);
+        Ok(())
+    }
+
+    pub fn clear_for_scope(
+        &self,
+        scope: &V3ResponsesDirectStoplessControlScope,
+    ) -> Result<(), String> {
+        self.store
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(&V3ResponsesDirectStoplessControlKey::from(scope));
+        Ok(())
+    }
+
+    pub fn len(&self) -> Result<usize, String> {
+        self.store
+            .lock()
+            .map(|store| store.len())
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn is_empty(&self) -> Result<bool, String> {
+        self.len().map(|len| len == 0)
     }
 }
 
@@ -144,12 +264,14 @@ impl V3ResponsesDirectContinuationState {
 
 pub struct V3ResponsesDirectRuntimeSharedState<'a> {
     pub continuation_state: &'a V3ResponsesDirectContinuationState,
+    pub stopless_control: &'a V3ResponsesDirectStoplessControlState,
     provider_health: V3ProviderFailureRuntimeHealth,
 }
 
 impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
     pub fn new<H>(
         continuation_state: &'a V3ResponsesDirectContinuationState,
+        stopless_control: &'a V3ResponsesDirectStoplessControlState,
         provider_health: H,
     ) -> Self
     where
@@ -157,6 +279,7 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
     {
         Self {
             continuation_state,
+            stopless_control,
             provider_health: provider_health.into(),
         }
     }
@@ -166,6 +289,8 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
 struct V3ResponsesDirectRuntimeCoreState<'a> {
     continuation_state: Option<&'a V3ResponsesDirectContinuationState>,
     continuation_scope: Option<V3ResponsesDirectContinuationScope>,
+    stopless_control: Option<&'a V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<V3ResponsesDirectStoplessControlScope>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
@@ -183,6 +308,8 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
         Self {
             continuation_state: None,
             continuation_scope: None,
+            stopless_control: None,
+            stopless_scope: None,
             now_epoch_ms: 0,
             provider_health: None,
             initial_selected_target: None,
@@ -199,12 +326,24 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
         Self {
             continuation_state: Some(state),
             continuation_scope: Some(scope),
+            stopless_control: None,
+            stopless_scope: None,
             now_epoch_ms,
             provider_health: None,
             initial_selected_target: None,
             initial_expanded: None,
             initial_plan_trace: None,
         }
+    }
+
+    fn with_stopless_control(
+        mut self,
+        stopless_control: &'a V3ResponsesDirectStoplessControlState,
+        stopless_scope: V3ResponsesDirectStoplessControlScope,
+    ) -> Self {
+        self.stopless_control = Some(stopless_control);
+        self.stopless_scope = Some(stopless_scope);
+        self
     }
 
     fn with_provider_health(mut self, provider_health: V3ProviderFailureRuntimeHealth) -> Self {
@@ -288,12 +427,15 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_d
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
             state,
             continuation_scope,
             now_epoch_ms,
-        ),
+        )
+        .with_stopless_control(&stopless_control, stopless_scope),
         manifest,
         raw,
         hook_registry,
@@ -312,12 +454,14 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_de
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
             shared_state.continuation_state,
             continuation_scope,
             now_epoch_ms,
         )
+        .with_stopless_control(shared_state.stopless_control, stopless_scope)
         .with_provider_health(shared_state.provider_health),
         manifest,
         raw,
@@ -338,12 +482,14 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     now_epoch_ms: u64,
     initial_plan: &V3ResponsesProtocolExecutionPlan,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
             shared_state.continuation_state,
             continuation_scope,
             now_epoch_ms,
         )
+        .with_stopless_control(shared_state.stopless_control, stopless_scope)
         .with_provider_health(shared_state.provider_health)
         .with_initial_plan(initial_plan),
         manifest,
@@ -778,8 +924,36 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: Res
     transport: &T,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+        state,
+        &stopless_control,
+        manifest,
+        raw,
+        scope,
+        hook_registry,
+        transport,
+        now_epoch_ms,
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control<
+    T: ResponsesTransport,
+>(
+    state: &V3ResponsesDirectContinuationState,
+    stopless_control: &V3ResponsesDirectStoplessControlState,
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    scope: V3ResponsesDirectContinuationScope,
+    hook_registry: V3HookRegistry,
+    transport: &T,
+    now_epoch_ms: u64,
+) -> V3ResponsesDirectRuntimeOutput {
+    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&scope);
     execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms),
+        V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms)
+            .with_stopless_control(stopless_control, stopless_scope),
         manifest,
         raw,
         hook_registry,
@@ -800,6 +974,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     let V3ResponsesDirectRuntimeCoreState {
         continuation_state,
         continuation_scope,
+        stopless_control,
+        stopless_scope,
         now_epoch_ms,
         provider_health,
         initial_selected_target,
@@ -832,6 +1008,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             &hook_registry,
         );
     }
+    let mut direct_stopless_control_prepared = false;
+    let mut direct_stopless_request_state: Option<V3StoplessCenterState> = None;
     let previous_response_id = standardized
         .body
         .get("previous_response_id")
@@ -1128,7 +1306,32 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     &hook_registry,
                 );
             }
+            if let Err(source) = clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
+                manifest,
+                stopless_control,
+                stopless_scope.as_ref(),
+                direct_stopless_request_state.as_ref(),
+            ) {
+                return error_output(source, trace, &hook_registry);
+            }
             return relay_handoff_output(decision.target, trace, provider_failure_events.clone());
+        }
+        if !direct_stopless_control_prepared {
+            match prepare_v3_responses_direct_stopless_control_request(
+                manifest,
+                stopless_control,
+                stopless_scope.as_ref(),
+                &mut standardized.body,
+                &standardized.protocol_context.request_id,
+                now_epoch_ms,
+                &mut trace,
+            ) {
+                Ok(state) => {
+                    direct_stopless_request_state = state;
+                    direct_stopless_control_prepared = true;
+                }
+                Err(source) => return error_output(source, trace, &hook_registry),
+            }
         }
 
         let selected_pin = V3RemoteContinuationPin::new(
@@ -1255,6 +1458,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             Some(policy_result.event.status),
                             "failed",
                             provider_failure_events.clone(),
+                            false,
                         );
                         return projected_error_output_with_observability(
                             *projected,
@@ -1348,6 +1552,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 Some(policy_result.event.status),
                                 "failed",
                                 provider_failure_events.clone(),
+                                false,
                             );
                             return projected_error_output_with_observability(
                                 *projected,
@@ -1359,6 +1564,35 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 }
             };
         trace.push("V3DirectResp14ProviderProjectionPrepared");
+        let mut direct_stopless_projected = false;
+        if let V3ClientBody::Json(body) = &mut response_projection.client_payload.body {
+            match apply_v3_responses_direct_stopless_json_response_control(
+                V3ResponsesDirectStoplessJsonResponseControlInput {
+                    manifest,
+                    stopless_control,
+                    stopless_scope: stopless_scope.as_ref(),
+                    request_stopless_state: direct_stopless_request_state.as_ref(),
+                    transition_request_id: &standardized.protocol_context.request_id,
+                    transition_updated_at: now_epoch_ms,
+                    payload: body,
+                    previous_response_id: previous_response_id.as_deref(),
+                    continuation_state,
+                    continuation_scope: continuation_scope.as_ref(),
+                    selected_pin: &selected_pin,
+                    selected_capability_revision: &selected_capability_revision,
+                },
+                &mut trace,
+            ) {
+                Ok(outcome) => {
+                    direct_stopless_projected = outcome.intercepted;
+                    if outcome.override_remote_continuation_terminal {
+                        response_projection.remote_continuation =
+                            V3RemoteContinuationObservation::Terminal;
+                    }
+                }
+                Err(source) => return error_output(source, trace, &hook_registry),
+            }
+        }
         if let V3RemoteContinuationObservation::Streaming { state } =
             &response_projection.remote_continuation
         {
@@ -1372,6 +1606,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     let stream = wrap_direct_sse_provider_event_json_observation_stream(
                         stream,
                         stream_observation.clone(),
+                    );
+                    let stream = wrap_direct_sse_stopless_control_stream(
+                        stream,
+                        V3DirectSseStoplessControlPolicy {
+                            stopless_center_enabled: v3_direct_stopless_center_enabled(manifest),
+                            stopless_control: stopless_control.cloned(),
+                            stopless_scope: stopless_scope.clone(),
+                            request_stopless_state: direct_stopless_request_state.clone(),
+                            transition_request_id: standardized.protocol_context.request_id.clone(),
+                            transition_updated_at: now_epoch_ms,
+                            previous_response_id: previous_response_id.clone(),
+                            continuation_state: continuation_state.cloned(),
+                            continuation_scope: continuation_scope.clone(),
+                            selected_pin: selected_pin.clone(),
+                            selected_capability_revision: selected_capability_revision.clone(),
+                        },
                     );
                     V3ClientBody::Sse(stream)
                 }
@@ -1419,6 +1669,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     Some(provider_status),
                     "streaming",
                     provider_failure_events.clone(),
+                    direct_stopless_request_state.is_some(),
                 )),
                 stream_observation: Some(stream_observation),
                 client_payload: response_projection.client_payload,
@@ -1514,6 +1765,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 Some(provider_status),
                 "completed",
                 provider_failure_events.clone(),
+                direct_stopless_projected,
             )),
             stream_observation: None,
             client_payload: response_projection.client_payload,
@@ -1522,6 +1774,396 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             protocol_relay_handoff: None,
         };
     }
+}
+
+struct V3ResponsesDirectStoplessJsonResponseControlInput<'a> {
+    manifest: &'a V3Config05ManifestPublished,
+    stopless_control: Option<&'a V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&'a V3ResponsesDirectStoplessControlScope>,
+    request_stopless_state: Option<&'a V3StoplessCenterState>,
+    transition_request_id: &'a str,
+    transition_updated_at: u64,
+    payload: &'a mut Value,
+    previous_response_id: Option<&'a str>,
+    continuation_state: Option<&'a V3ResponsesDirectContinuationState>,
+    continuation_scope: Option<&'a V3ResponsesDirectContinuationScope>,
+    selected_pin: &'a V3RemoteContinuationPin,
+    selected_capability_revision: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct V3ResponsesDirectStoplessJsonResponseControlOutcome {
+    intercepted: bool,
+    override_remote_continuation_terminal: bool,
+}
+
+fn prepare_v3_responses_direct_stopless_control_request(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
+    payload: &mut Value,
+    transition_request_id: &str,
+    transition_updated_at: u64,
+    trace: &mut Vec<&'static str>,
+) -> Result<Option<V3StoplessCenterState>, V3Error01SourceRaised> {
+    if !v3_direct_stopless_center_enabled(manifest) {
+        return Ok(None);
+    }
+    let (Some(stopless_control), Some(stopless_scope)) = (stopless_control, stopless_scope) else {
+        return Ok(None);
+    };
+    if !stopless_scope.has_client_session_scope() {
+        return Ok(None);
+    }
+    trace.push("V3DirectStoplessReq01RuntimeControlLoaded");
+    let restored_state = stopless_control
+        .load_for_scope(stopless_scope)
+        .map_err(|error| runtime_source("V3DirectStoplessReq01RuntimeControlLoaded", error))?;
+    let restored_state_loaded = restored_state.is_some();
+    let mut events = Vec::<V3HubRelayRequestHookEvent>::new();
+    let request_state = apply_v3_stopless_request_hook_at_req04(
+        payload,
+        &mut events,
+        restored_state.as_ref(),
+        Some(transition_request_id),
+        Some(transition_updated_at),
+    )
+    .map_err(|error| runtime_source("V3DirectStoplessReq03GuidanceToolInjected", error))?;
+    if events.iter().any(|event| {
+        matches!(
+            event,
+            V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved
+        )
+    }) {
+        trace.push("V3DirectStoplessReq02NoopCliConsumed");
+    }
+    if request_state.is_some() {
+        trace.push("V3DirectStoplessReq03GuidanceToolInjected");
+    }
+    apply_v3_responses_direct_stopless_control_request_transition(
+        manifest,
+        Some(stopless_control),
+        Some(stopless_scope),
+        restored_state_loaded,
+        request_state.as_ref(),
+    )?;
+    Ok(request_state)
+}
+
+fn apply_v3_responses_direct_stopless_json_response_control(
+    input: V3ResponsesDirectStoplessJsonResponseControlInput<'_>,
+    trace: &mut Vec<&'static str>,
+) -> Result<V3ResponsesDirectStoplessJsonResponseControlOutcome, V3Error01SourceRaised> {
+    let Some(request_stopless_state) = input.request_stopless_state else {
+        return Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome::default());
+    };
+    if !v3_direct_stopless_center_enabled(input.manifest) {
+        return Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome::default());
+    }
+    let (Some(stopless_control), Some(stopless_scope)) =
+        (input.stopless_control, input.stopless_scope)
+    else {
+        return Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome::default());
+    };
+    if !stopless_scope.has_client_session_scope() {
+        return Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome::default());
+    }
+    trace.push("V3DirectStoplessResp01EvidenceObserved");
+    let outcome = run_v3_responses_direct_stopless_response_hooks(
+        input.payload.clone(),
+        request_stopless_state,
+        input.transition_request_id,
+        input.transition_updated_at,
+        V3HubTransportIntent::Json,
+    )?;
+    *input.payload = outcome.payload;
+    apply_v3_responses_direct_stopless_control_response_transition(
+        input.manifest,
+        Some(stopless_control),
+        Some(stopless_scope),
+        outcome.center_state,
+    )?;
+    trace.push("V3DirectStoplessResp02RuntimeControlUpdated");
+    if outcome.intercepted {
+        trace.push("V3DirectStoplessResp03NoopCliOrTerminalProjected");
+    }
+    if outcome.intercepted && direct_stopless_payload_has_cli_noop(input.payload) {
+        commit_v3_direct_stopless_remote_locator_for_payload(
+            input.payload,
+            input.previous_response_id,
+            input.continuation_state,
+            input.continuation_scope,
+            input.selected_pin,
+            input.selected_capability_revision,
+            input.transition_updated_at,
+        )?;
+    }
+    Ok(V3ResponsesDirectStoplessJsonResponseControlOutcome {
+        intercepted: outcome.intercepted,
+        override_remote_continuation_terminal: outcome.intercepted,
+    })
+}
+
+struct V3DirectStoplessResponseHookOutcome {
+    payload: Value,
+    center_state: Option<V3StoplessCenterState>,
+    intercepted: bool,
+}
+
+fn run_v3_responses_direct_stopless_response_hooks(
+    payload: Value,
+    request_stopless_state: &V3StoplessCenterState,
+    transition_request_id: &str,
+    transition_updated_at: u64,
+    transport_intent: V3HubTransportIntent,
+) -> Result<V3DirectStoplessResponseHookOutcome, V3Error01SourceRaised> {
+    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&payload) {
+        return Err(runtime_source(
+            "V3DirectStoplessResp01EvidenceObserved",
+            format!("provider response leaked RouteCodex side-channel field: {key}"),
+        ));
+    }
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        payload,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubContinuationOwnership::RemoteProviderOwned,
+            V3HubExecutionMode::Direct,
+            V3HubInvocationSource::Client,
+            transport_intent,
+        ),
+    );
+    let resp02 = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)
+        .map_err(|error| runtime_source("V3DirectStoplessResp01EvidenceObserved", error))?;
+    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(resp02);
+    let profile = V3HubRelayResponseHookProfile::empty()
+        .with_stopless_reasoning_stop()
+        .with_stopless_center_state(request_stopless_state.clone())
+        .with_stopless_transition_context(transition_request_id, transition_updated_at);
+    let tool_outcome = apply_v3_tool_call_servertool_hook_at_resp03(resp02, &profile)
+        .map_err(|error| runtime_source("V3DirectStoplessResp01EvidenceObserved", error))?;
+    if tool_outcome.intercepted {
+        return Ok(V3DirectStoplessResponseHookOutcome {
+            payload: tool_outcome.input.provider_payload().as_ref().clone(),
+            center_state: tool_outcome.center_state,
+            intercepted: true,
+        });
+    }
+    if direct_response_has_provider_tool_call(tool_outcome.input.provider_payload().as_ref()) {
+        return Ok(V3DirectStoplessResponseHookOutcome {
+            payload: tool_outcome.input.provider_payload().as_ref().clone(),
+            center_state: None,
+            intercepted: false,
+        });
+    }
+    let stop_outcome = apply_v3_stop_servertool_hook_at_resp03(tool_outcome.input, &profile)
+        .map_err(|error| runtime_source("V3DirectStoplessResp01EvidenceObserved", error))?;
+    Ok(V3DirectStoplessResponseHookOutcome {
+        payload: stop_outcome.input.provider_payload().as_ref().clone(),
+        center_state: stop_outcome.center_state,
+        intercepted: stop_outcome.intercepted,
+    })
+}
+
+fn v3_direct_stopless_center_enabled(manifest: &V3Config05ManifestPublished) -> bool {
+    manifest
+        .features
+        .get("stopless_center")
+        .copied()
+        .unwrap_or(true)
+}
+
+fn apply_v3_responses_direct_stopless_control_request_transition(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
+    restored_state_loaded: bool,
+    request_stopless_state: Option<&V3StoplessCenterState>,
+) -> Result<(), V3Error01SourceRaised> {
+    match request_stopless_state {
+        Some(state) => store_v3_responses_direct_stopless_control_state(
+            manifest,
+            stopless_control,
+            stopless_scope,
+            state.clone(),
+        ),
+        None if restored_state_loaded => clear_v3_responses_direct_stopless_control_state(
+            manifest,
+            stopless_control,
+            stopless_scope,
+        ),
+        None => Ok(()),
+    }
+}
+
+fn apply_v3_responses_direct_stopless_control_response_transition(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
+    response_stopless_state: Option<V3StoplessCenterState>,
+) -> Result<(), V3Error01SourceRaised> {
+    match response_stopless_state {
+        Some(state) => store_v3_responses_direct_stopless_control_state(
+            manifest,
+            stopless_control,
+            stopless_scope,
+            state,
+        ),
+        None => clear_v3_responses_direct_stopless_control_state(
+            manifest,
+            stopless_control,
+            stopless_scope,
+        ),
+    }
+}
+
+fn store_v3_responses_direct_stopless_control_state(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
+    state: V3StoplessCenterState,
+) -> Result<(), V3Error01SourceRaised> {
+    if !v3_direct_stopless_center_enabled(manifest) {
+        return Ok(());
+    }
+    let (Some(stopless_control), Some(stopless_scope)) = (stopless_control, stopless_scope) else {
+        return Ok(());
+    };
+    if !stopless_scope.has_client_session_scope() {
+        return Ok(());
+    }
+    stopless_control
+        .store_for_scope(stopless_scope, state)
+        .map_err(|error| runtime_source("V3DirectStoplessResp02RuntimeControlUpdated", error))
+}
+
+fn clear_v3_responses_direct_stopless_control_state(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
+) -> Result<(), V3Error01SourceRaised> {
+    if !v3_direct_stopless_center_enabled(manifest) {
+        return Ok(());
+    }
+    let (Some(stopless_control), Some(stopless_scope)) = (stopless_control, stopless_scope) else {
+        return Ok(());
+    };
+    if !stopless_scope.has_client_session_scope() {
+        return Ok(());
+    }
+    stopless_control
+        .clear_for_scope(stopless_scope)
+        .map_err(|error| runtime_source("V3DirectStoplessResp02RuntimeControlUpdated", error))
+}
+
+fn clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
+    manifest: &V3Config05ManifestPublished,
+    stopless_control: Option<&V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<&V3ResponsesDirectStoplessControlScope>,
+    request_stopless_state: Option<&V3StoplessCenterState>,
+) -> Result<(), V3Error01SourceRaised> {
+    if request_stopless_state.is_none() {
+        return Ok(());
+    }
+    clear_v3_responses_direct_stopless_control_state(manifest, stopless_control, stopless_scope)
+}
+
+fn commit_v3_direct_stopless_remote_locator_for_payload(
+    payload: &Value,
+    previous_response_id: Option<&str>,
+    continuation_state: Option<&V3ResponsesDirectContinuationState>,
+    continuation_scope: Option<&V3ResponsesDirectContinuationScope>,
+    selected_pin: &V3RemoteContinuationPin,
+    selected_capability_revision: &str,
+    now_epoch_ms: u64,
+) -> Result<(), V3Error01SourceRaised> {
+    let Some(response_id) = direct_response_id(payload) else {
+        return Err(runtime_source(
+            "V3HubRespContinuation04Committed",
+            "Direct stopless no-op projection requires native response id for remote continuation",
+        ));
+    };
+    let (Some(continuation_state), Some(continuation_scope)) =
+        (continuation_state, continuation_scope)
+    else {
+        return Err(runtime_source(
+            "V3HubRespContinuation04Committed",
+            "Direct stopless no-op projection requires direct continuation state/scope",
+        ));
+    };
+    let locator = V3RemoteContinuationLocator::new_direct(
+        response_id,
+        continuation_scope.key.clone(),
+        selected_pin.clone(),
+        selected_capability_revision.to_string(),
+        now_epoch_ms,
+        now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
+    );
+    let input = V3RemoteContinuationCommitInput::locator_only(locator);
+    let mut store = continuation_state
+        .store
+        .lock()
+        .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
+    let commit = match previous_response_id {
+        Some(previous_response_id) => store.rebind_for_resp04(previous_response_id, input),
+        None => store.commit(input),
+    };
+    commit.map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))
+}
+
+fn direct_response_id(payload: &Value) -> Option<String> {
+    payload
+        .get("id")
+        .and_then(Value::as_str)
+        .or_else(|| payload.pointer("/response/id").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn direct_stopless_payload_has_cli_noop(payload: &Value) -> bool {
+    let semantic = payload.get("response").unwrap_or(payload);
+    semantic
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("call_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|call_id| call_id == "call_stopless_reasoning")
+                    || item
+                        .get("arguments")
+                        .or_else(|| item.get("input"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value.contains("routecodex hook run reasoningStop"))
+            })
+        })
+}
+
+fn direct_response_has_provider_tool_call(payload: &Value) -> bool {
+    let semantic = payload.get("response").unwrap_or(payload);
+    if matches!(
+        semantic.get("status").and_then(Value::as_str),
+        Some("requires_action" | "in_progress")
+    ) {
+        return true;
+    }
+    semantic
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call" | "custom_tool_call" | "tool_call")
+                )
+            })
+        })
+        || matches!(
+            payload.pointer("/item/type").and_then(Value::as_str),
+            Some("function_call" | "custom_tool_call" | "tool_call")
+        )
 }
 
 fn direct_runtime_allowed_execution_modes(
@@ -1762,6 +2404,7 @@ fn build_v3_direct_runtime_observability(
     provider_status: Option<u16>,
     response_status: &str,
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+    stopless_activation: bool,
 ) -> V3RuntimeObservability {
     V3RuntimeObservability {
         entry_protocol: "responses".to_string(),
@@ -1778,7 +2421,7 @@ fn build_v3_direct_runtime_observability(
         provider_status,
         response_status: Some(response_status.to_string()),
         finish_reason: None,
-        stopless_activation: false,
+        stopless_activation,
         attempts: Some(selected.attempts),
         unavailable_candidates: selected.unavailable_candidates.clone(),
         provider_failure_events,
@@ -1995,6 +2638,306 @@ fn record_direct_sse_provider_event_json_frame(
     stream_observation
         .record_provider_event_json(&event)
         .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
+}
+
+#[derive(Clone)]
+struct V3DirectSseStoplessControlPolicy {
+    stopless_center_enabled: bool,
+    stopless_control: Option<V3ResponsesDirectStoplessControlState>,
+    stopless_scope: Option<V3ResponsesDirectStoplessControlScope>,
+    request_stopless_state: Option<V3StoplessCenterState>,
+    transition_request_id: String,
+    transition_updated_at: u64,
+    previous_response_id: Option<String>,
+    continuation_state: Option<V3ResponsesDirectContinuationState>,
+    continuation_scope: Option<V3ResponsesDirectContinuationScope>,
+    selected_pin: V3RemoteContinuationPin,
+    selected_capability_revision: String,
+}
+
+fn wrap_direct_sse_stopless_control_stream(
+    source: V3ClientSseStream,
+    policy: V3DirectSseStoplessControlPolicy,
+) -> V3ClientSseStream {
+    struct StreamState {
+        source: V3ClientSseStream,
+        decoder: SseIncrementalDecoder,
+        policy: V3DirectSseStoplessControlPolicy,
+        pending: VecDeque<Result<Vec<u8>, V3Error01SourceRaised>>,
+        committed_stopless_locator: bool,
+        state_transition_done: bool,
+        done: bool,
+    }
+
+    Box::pin(stream::unfold(
+        StreamState {
+            source,
+            decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
+            policy,
+            pending: VecDeque::new(),
+            committed_stopless_locator: false,
+            state_transition_done: false,
+            done: false,
+        },
+        |mut state| async move {
+            loop {
+                if let Some(item) = state.pending.pop_front() {
+                    return Some((item, state));
+                }
+                if state.done {
+                    return None;
+                }
+                match state.source.next().await {
+                    Some(Ok(chunk)) => {
+                        match transform_direct_sse_stopless_control_chunk(
+                            &chunk,
+                            &mut state.decoder,
+                            &state.policy,
+                            &mut state.committed_stopless_locator,
+                            &mut state.state_transition_done,
+                        ) {
+                            Ok(chunks) => {
+                                state.pending.extend(chunks.into_iter().map(Ok));
+                            }
+                            Err(error) => {
+                                state.done = true;
+                                return Some((Err(error), state));
+                            }
+                        }
+                    }
+                    Some(Err(error)) => {
+                        if let Err(clear_error) =
+                            state.policy.clear_active_control_on_stream_terminal()
+                        {
+                            state.done = true;
+                            return Some((Err(clear_error), state));
+                        }
+                        state.done = true;
+                        return Some((Err(error), state));
+                    }
+                    None => {
+                        let decoder = std::mem::replace(
+                            &mut state.decoder,
+                            SseIncrementalDecoder::new(SseTransportLimits::default()),
+                        );
+                        if let Err(error) = decoder
+                            .finish()
+                            .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
+                        {
+                            state.done = true;
+                            return Some((Err(error), state));
+                        }
+                        if !state.state_transition_done {
+                            if let Err(error) =
+                                state.policy.clear_active_control_on_stream_terminal()
+                            {
+                                state.done = true;
+                                return Some((Err(error), state));
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
+        },
+    ))
+}
+
+fn transform_direct_sse_stopless_control_chunk(
+    chunk: &[u8],
+    decoder: &mut SseIncrementalDecoder,
+    policy: &V3DirectSseStoplessControlPolicy,
+    committed_stopless_locator: &mut bool,
+    state_transition_done: &mut bool,
+) -> Result<Vec<Vec<u8>>, V3Error01SourceRaised> {
+    let frames = decoder
+        .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
+        .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
+    let mut output = Vec::with_capacity(frames.len());
+    for frame in frames {
+        let fields = transform_direct_sse_stopless_control_frame(
+            frame.frame().fields(),
+            policy,
+            committed_stopless_locator,
+            state_transition_done,
+        )?;
+        let decoded = build_v3_sse_transport_in_02_from_fields(fields)
+            .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
+        let validated = build_v3_sse_transport_in_03_from_v3_sse_transport_in_02(decoded)
+            .map_err(|error| runtime_source("V3ProviderResp14Raw", error))?;
+        output.push(
+            build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&validated).into_bytes(),
+        );
+    }
+    Ok(output)
+}
+
+fn transform_direct_sse_stopless_control_frame(
+    fields: &[SseField],
+    policy: &V3DirectSseStoplessControlPolicy,
+    committed_stopless_locator: &mut bool,
+    state_transition_done: &mut bool,
+) -> Result<Vec<SseField>, V3Error01SourceRaised> {
+    let Some(request_state) = policy.request_stopless_state.as_ref() else {
+        return Ok(fields.to_vec());
+    };
+    if !policy.stopless_center_enabled {
+        return Ok(fields.to_vec());
+    }
+    let Some(scope) = policy.stopless_scope.as_ref() else {
+        return Ok(fields.to_vec());
+    };
+    if !scope.has_client_session_scope() {
+        return Ok(fields.to_vec());
+    }
+    let mut event_name = None::<String>;
+    let mut data = String::new();
+    for field in fields {
+        let SseField::Named { name, value } = field else {
+            continue;
+        };
+        if name == "event" && event_name.is_none() {
+            event_name = Some(value.trim().to_string());
+        } else if name == "data" {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value);
+        }
+    }
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return Ok(fields.to_vec());
+    }
+    let mut event: Value = serde_json::from_str(data).map_err(|error| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_event_invalid",
+            error.to_string(),
+        )
+    })?;
+    let semantic_event = event_name
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or_else(|| event.get("type").and_then(Value::as_str))
+        .unwrap_or_default();
+    if direct_response_has_provider_tool_call(&event) {
+        policy.clear_active_control_on_stream_terminal()?;
+        *state_transition_done = true;
+        return Ok(fields.to_vec());
+    }
+    if !matches!(semantic_event, "response.completed" | "response.done") {
+        return Ok(fields.to_vec());
+    }
+    let Some(response_payload) = event.get("response").cloned() else {
+        return Ok(fields.to_vec());
+    };
+    let outcome = run_v3_responses_direct_stopless_response_hooks(
+        response_payload,
+        request_state,
+        &policy.transition_request_id,
+        policy.transition_updated_at,
+        V3HubTransportIntent::Sse,
+    )?;
+    let intercepted = outcome.intercepted;
+    let projected_noop = direct_stopless_payload_has_cli_noop(&outcome.payload);
+    policy.apply_response_transition(outcome.center_state)?;
+    *state_transition_done = true;
+    if intercepted && projected_noop && !*committed_stopless_locator {
+        policy.commit_stopless_remote_locator_for_payload(&outcome.payload)?;
+        *committed_stopless_locator = true;
+    }
+    if !intercepted {
+        return Ok(fields.to_vec());
+    }
+    if let Some(object) = event.as_object_mut() {
+        object.insert("response".to_string(), outcome.payload);
+    }
+    let encoded_data = serde_json::to_string(&event).map_err(|error| {
+        runtime_source("V3DirectStoplessResp03NoopCliOrTerminalProjected", error)
+    })?;
+    Ok(replace_sse_data_fields(fields, encoded_data))
+}
+
+fn replace_sse_data_fields(fields: &[SseField], data: String) -> Vec<SseField> {
+    let mut replaced = false;
+    let mut output = Vec::with_capacity(fields.len().max(1));
+    for field in fields {
+        match field {
+            SseField::Named { name, .. } if name == "data" => {
+                if !replaced {
+                    output.push(SseField::Named {
+                        name: "data".to_string(),
+                        value: data.clone(),
+                    });
+                    replaced = true;
+                }
+            }
+            other => output.push(other.clone()),
+        }
+    }
+    if !replaced {
+        output.push(SseField::Named {
+            name: "data".to_string(),
+            value: data,
+        });
+    }
+    output
+}
+
+impl V3DirectSseStoplessControlPolicy {
+    fn apply_response_transition(
+        &self,
+        response_state: Option<V3StoplessCenterState>,
+    ) -> Result<(), V3Error01SourceRaised> {
+        match response_state {
+            Some(state) => {
+                let Some(control) = self.stopless_control.as_ref() else {
+                    return Ok(());
+                };
+                let Some(scope) = self.stopless_scope.as_ref() else {
+                    return Ok(());
+                };
+                control.store_for_scope(scope, state).map_err(|error| {
+                    runtime_source("V3DirectStoplessResp02RuntimeControlUpdated", error)
+                })
+            }
+            None => self.clear_active_control_on_stream_terminal(),
+        }
+    }
+
+    fn clear_active_control_on_stream_terminal(&self) -> Result<(), V3Error01SourceRaised> {
+        if self.request_stopless_state.is_none() || !self.stopless_center_enabled {
+            return Ok(());
+        }
+        let (Some(control), Some(scope)) =
+            (self.stopless_control.as_ref(), self.stopless_scope.as_ref())
+        else {
+            return Ok(());
+        };
+        if !scope.has_client_session_scope() {
+            return Ok(());
+        }
+        control
+            .clear_for_scope(scope)
+            .map_err(|error| runtime_source("V3DirectStoplessResp02RuntimeControlUpdated", error))
+    }
+
+    fn commit_stopless_remote_locator_for_payload(
+        &self,
+        payload: &Value,
+    ) -> Result<(), V3Error01SourceRaised> {
+        commit_v3_direct_stopless_remote_locator_for_payload(
+            payload,
+            self.previous_response_id.as_deref(),
+            self.continuation_state.as_ref(),
+            self.continuation_scope.as_ref(),
+            &self.selected_pin,
+            &self.selected_capability_revision,
+            self.transition_updated_at,
+        )
+    }
 }
 
 impl V3DirectSseRemoteContinuationPolicy {

@@ -1,4 +1,13 @@
 
+# 2026-07-27T11:10:09+08:00 V3 Direct Stopless MetadataCenter lifecycle closeout
+- Scope: feature_id:v3.direct_stopless_metadata_center; Direct-scoped MetadataCenter/StoplessCenter control after SameProtocolDirect.
+- Root: Direct had remote continuation/hooks but no Direct StoplessCenter adapter handle, so control lifecycle was incomplete and inactive Direct was either pass-through only or leaked provider echo of internal guidance.
+- Fix: V3ResponsesDirectStoplessControlScope/State + request/response control after SameProtocolDirect; SSE transport wrapper reuses same helper; strip provider echo of stopless instructions/tools/tool_choice; maps/gates/SOP/docs updated.
+- Source gates: targeted runtime tests 19/18/5/12, verify:v3-stopless-resource-control, red fixtures 41, resource/mainline/architecture/module/rust-only/fmt/diff-check PASS in isolated staged worktree.
+- Install/restart: RUSTUP_TOOLCHAIN=stable npm run install:v3 sha256=0bb04331dad8c5a1252d6965a34e3c14b6442850eb956cfc4bb58e7b71817651; rccv3 config check/restart ok; 10000/4444/5555 health version=3.
+- Live: clean completed request sid=direct-metadata-clean-c10fe4c5 retained CLIENT_KEEP_MARKER_344148, evidence direct-metadata-center-clean, no internal leak; forced-tool first turn projected no-op requires_action; second-turn no-op output still provider_http_400 on cc after Direct remote locator path, so two-turn no-op live still open.
+
+
 # 2026-07-25T18:35+08:00 V3 Responses Relay reasoning summary SSE codec fix
 
 - Live 4444 failed on `response.reasoning_summary_part.added is unsupported`, then VR switched providers and cooled 55ai.

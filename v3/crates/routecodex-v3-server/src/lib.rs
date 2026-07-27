@@ -52,11 +52,12 @@ use routecodex_v3_runtime::{
     V3GeminiRelayRuntimeOutput, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
     V3OpenAiChatRelayRuntimeOutput, V3Resp15ClientPayload, V3ResponsesDirectContinuationScope,
     V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeSharedState,
-    V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolRelayHandoff, V3ResponsesRelayClientBody,
-    V3ResponsesRelayClientStream, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
-    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesDirectStoplessControlState, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesProtocolRelayHandoff, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
+    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
+    V3ResponsesRelayLocalStoplessControlInput, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
     V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
     V3RuntimeProviderFailureObservation, V3RuntimeStreamObservation, V3RuntimeUsageSummary,
 };
@@ -99,6 +100,7 @@ struct V3ListenerState {
     console_enabled: bool,
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
+    responses_direct_stopless_control: Arc<V3ResponsesDirectStoplessControlState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
     responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
@@ -466,6 +468,8 @@ pub async fn spawn_v3_server_aggregate(
     let debug =
         build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
+    let responses_direct_stopless_control =
+        Arc::new(V3ResponsesDirectStoplessControlState::default());
     let responses_relay_local_continuation =
         Arc::new(V3ResponsesRelayLocalContinuationState::default());
     let responses_relay_stopless_control =
@@ -494,6 +498,7 @@ pub async fn spawn_v3_server_aggregate(
             console_enabled,
             request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
             responses_direct_continuation: responses_direct_continuation.clone(),
+            responses_direct_stopless_control: responses_direct_stopless_control.clone(),
             responses_relay_local_continuation: responses_relay_local_continuation.clone(),
             responses_relay_stopless_control: responses_relay_stopless_control.clone(),
             provider_health: provider_health.clone(),
@@ -2539,6 +2544,7 @@ async fn execute_responses_direct_server_outcome(
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(
                     &state.responses_direct_continuation,
+                    &state.responses_direct_stopless_control,
                     state.provider_health.store(),
                 ),
                 &state.manifest,
@@ -2555,6 +2561,7 @@ async fn execute_responses_direct_server_outcome(
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
                 V3ResponsesDirectRuntimeSharedState::new(
                     &state.responses_direct_continuation,
+                    &state.responses_direct_stopless_control,
                     state.provider_health.store(),
                 ),
                 &state.manifest,
@@ -7379,6 +7386,9 @@ mod tests {
             console_enabled: true,
             request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
             responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
+            responses_direct_stopless_control: Arc::new(
+                V3ResponsesDirectStoplessControlState::default(),
+            ),
             responses_relay_local_continuation: Arc::new(
                 V3ResponsesRelayLocalContinuationState::default(),
             ),
@@ -8558,6 +8568,9 @@ mod tests {
             console_enabled: true,
             request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),
             responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
+            responses_direct_stopless_control: Arc::new(
+                V3ResponsesDirectStoplessControlState::default(),
+            ),
             responses_relay_local_continuation: Arc::new(
                 V3ResponsesRelayLocalContinuationState::default(),
             ),

@@ -50,7 +50,7 @@ activation_contract:
     - responses_direct
     - responses_relay
   relay_stopless_center_write: relay_only
-  direct_stopless_center_write: forbidden
+  direct_stopless_center_write: direct_scoped_only
   owner_nodes:
     request_activation: V3StoplessReq03GuidanceToolInjected
     response_intercept: V3StoplessResp01ReasoningStopInspected
@@ -110,6 +110,8 @@ control_owner:
   implementation_handles:
     - V3ResponsesRelayStoplessControlState
     - V3ResponsesRelayStoplessControlScope
+    - V3ResponsesDirectStoplessControlState
+    - V3ResponsesDirectStoplessControlScope
   signal_kind: control_signal
   state_machine_required: true
   state_fields: [phase, consecutive_stop_count, max_stop_budget, last_stop_kind, need_continue, blocked, terminal, guard_exhausted, next_request_policy, next_step_prompt, last_request_id, last_response_id, last_transition_reason, updated_at]

@@ -23,13 +23,15 @@ pub use kernel::{
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel,
     execute_v3_responses_direct_runtime_kernel_with_continuation,
+    execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control,
     execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_protocol_execution_plan_failure, V3ResponsesDirectContinuationScope,
     V3ResponsesDirectContinuationState, V3ResponsesDirectRuntimeOutput,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlScope,
+    V3ResponsesDirectStoplessControlState, V3ResponsesProtocolExecutionPlan,
     V3ResponsesProtocolExecutionPlanFailure, V3ResponsesProtocolRelayHandoff,
 };
 pub use local_continuation::*;

@@ -127,6 +127,8 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
             }
         };
     }
+    let cleaned = build_stopless_control_echo_cleaned_payload(input.provider_payload());
+    *input.provider_payload_mut() = Arc::new(cleaned);
     Ok(V3StoplessResponseHookOutcome {
         input,
         center_state: None,
@@ -152,7 +154,10 @@ pub fn apply_v3_stop_servertool_hook_at_resp03(
     let status = object
         .get("status")
         .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
         .unwrap_or_default();
+    let cleaned = build_stopless_control_echo_cleaned_payload(input.provider_payload());
+    *input.provider_payload_mut() = Arc::new(cleaned);
     if status != "completed" {
         return Ok(V3StoplessResponseHookOutcome {
             input,
@@ -742,6 +747,22 @@ fn build_stopless_terminal_visible_payload_from_reasoning_stop_prefix(
     payload
 }
 
+fn build_stopless_control_echo_cleaned_payload(payload: &Value) -> Value {
+    let mut payload = payload.clone();
+    strip_stopless_internal_control_echo_from_payload(&mut payload);
+    payload
+}
+
+fn strip_stopless_internal_control_echo_from_payload(payload: &mut Value) {
+    if let Some(response) = payload.get_mut("response") {
+        strip_stopless_internal_control_echo_from_payload(response);
+    }
+    if let Some(object) = payload.as_object_mut() {
+        strip_stopless_internal_control_echo_from_object(object);
+        strip_stopless_internal_tools_from_object(object);
+    }
+}
+
 fn finalize_stopless_terminal_responses_payload(payload: &mut Value) {
     let Some(object) = payload.as_object_mut() else {
         return;
@@ -759,6 +780,7 @@ fn finalize_stopless_terminal_responses_payload(payload: &mut Value) {
     object
         .entry("finishReason".to_string())
         .or_insert_with(|| Value::String("stop".to_string()));
+    strip_stopless_internal_control_echo_from_object(object);
     strip_stopless_internal_tools_from_object(object);
     if let Some(output) = object.get_mut("output").and_then(Value::as_array_mut) {
         for item in output {
@@ -771,6 +793,38 @@ fn finalize_stopless_terminal_responses_payload(payload: &mut Value) {
                 }
             }
         }
+    }
+}
+
+fn strip_stopless_internal_control_echo_from_object(object: &mut Map<String, Value>) {
+    if let Some(cleaned) = object
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(strip_legacy_stopless_instruction)
+    {
+        if cleaned.trim().is_empty() {
+            object.remove("instructions");
+        } else {
+            object.insert("instructions".to_string(), Value::String(cleaned));
+        }
+    }
+    let only_stopless_tools = object
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty() && tools.iter().all(tool_name_is_stopless_internal));
+    let stopless_required_choice = matches!(
+        object.get("tool_choice"),
+        Some(Value::String(choice)) if choice.trim().eq_ignore_ascii_case("required")
+    ) || matches!(
+        object.get("tool_choice"),
+        Some(Value::Object(choice))
+            if choice
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("required"))
+    );
+    if only_stopless_tools && stopless_required_choice {
+        object.remove("tool_choice");
     }
 }
 

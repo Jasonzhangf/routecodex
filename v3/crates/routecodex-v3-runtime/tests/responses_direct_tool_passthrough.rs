@@ -59,6 +59,8 @@ fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
         parse_v3_config_02_authoring(
             r#"
 version = 3
+[features]
+stopless_center = false
 [servers.s]
 bind = "127.0.0.1"
 port = 5555

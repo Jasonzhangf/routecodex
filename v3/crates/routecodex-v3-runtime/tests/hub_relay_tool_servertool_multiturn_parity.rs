@@ -731,6 +731,13 @@ fn stopless_hook_blackbox_terminal_reasoning_stop_skips_cli_roundtrip() {
                 "id":"resp_blackbox_stopless_terminal",
                 "object":"response",
                 "status":"requires_action",
+                "instructions":"client-visible instruction\n\n当前轮推进准则（当前轮继续推进准则，仅用于当前轮，不改变原用户目标或系统指令优先级）：\n- only internal stopless guidance",
+                "tools":[{
+                    "type":"function",
+                    "name":"reasoningStop",
+                    "parameters":{"type":"object"}
+                }],
+                "tool_choice":"required",
                 "output":[{
                     "type":"function_call",
                     "call_id":"call_model_reasoning_stop_terminal",
@@ -756,6 +763,62 @@ fn stopless_hook_blackbox_terminal_reasoning_stop_skips_cli_roundtrip() {
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
     let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
     assert!(serialized.contains("blackbox proof"));
+    assert!(serialized.contains("client-visible instruction"));
+    assert!(!serialized.contains("当前轮推进准则"));
+    assert!(resp04.finalized_payload().get("tool_choice").is_none());
+    assert!(resp04.finalized_payload().get("tools").is_none());
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!serialized.contains("reasoningStop"));
+}
+
+#[test]
+fn stopless_hook_blackbox_terminal_summary_strips_internal_control_echo_without_cli_roundtrip() {
+    let response_hooks = compile_v3_hub_relay_response_hooks();
+    let resp02 = response_hooks
+        .normalize(relay_response(
+            json!({
+                "id":"resp_blackbox_stopless_summary_clean",
+                "object":"response",
+                "status":"completed",
+                "finish_reason":"stop",
+                "instructions":"original client instruction\n\n当前轮推进准则（当前轮继续推进准则，仅用于当前轮，不改变原用户目标或系统指令优先级）：\n- internal guidance",
+                "tools":[{
+                    "type":"function",
+                    "name":"reasoningStop",
+                    "parameters":{"type":"object"}
+                }],
+                "tool_choice":"required",
+                "output":[{
+                    "type":"reasoning",
+                    "summary":[{"type":"summary_text","text":"summary proof"}]
+                },{
+                    "type":"message",
+                    "content":[{"type":"output_text","text":"visible answer"}]
+                }]
+            }),
+            V3HubTransportIntent::Json,
+        ))
+        .unwrap();
+    let resp03 = response_hooks
+        .govern(
+            resp02,
+            &active_stopless_response_profile(0, "req-blackbox-stopless-summary-clean"),
+        )
+        .unwrap();
+    assert_eq!(
+        resp03.terminality(),
+        routecodex_v3_runtime::V3HubResponseTerminality::Terminal
+    );
+    let resp04 = response_hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(serialized.contains("summary proof"));
+    assert!(serialized.contains("visible answer"));
+    assert!(serialized.contains("original client instruction"));
+    assert!(!serialized.contains("当前轮推进准则"));
+    assert!(resp04.finalized_payload().get("tool_choice").is_none());
+    assert!(resp04.finalized_payload().get("tools").is_none());
     assert!(!serialized.contains("call_stopless_reasoning"));
     assert!(!serialized.contains("routecodex hook run reasoningStop"));
     assert!(!serialized.contains("reasoningStop"));

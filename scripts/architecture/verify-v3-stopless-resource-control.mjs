@@ -17,12 +17,15 @@ const paths = {
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   runtime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  directRuntime: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   packageJson: 'package.json',
 };
 
 const resourceId = 'v3.metadata.runtime_control_stopless';
 const featureId = 'v3.servertool_hook_skeleton_lifecycle';
+const directFeatureId = 'v3.direct_stopless_metadata_center';
+const allowedStoplessChainIds = new Set([featureId, directFeatureId]);
 const verifyGate = 'npm run verify:v3-stopless-resource-control';
 const redGate = 'npm run test:v3-stopless-resource-control-red-fixtures';
 const cliGate = 'npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts';
@@ -37,6 +40,7 @@ const designContract = readText(paths.designContract);
 const stoplessSop = readText(paths.stoplessSop);
 const hubSource = [readText(paths.hub), readText(paths.hubCommon)].join('\n');
 const runtimeSource = readText(paths.runtime);
+const directRuntimeSource = readText(paths.directRuntime);
 const hookSource = readText(paths.hooks);
 const packageJson = readJson(paths.packageJson);
 
@@ -46,6 +50,7 @@ verifyLifecycleManifest();
 verifyFunctionAndVerificationMaps();
 verifyMainlineOwnership();
 verifyRuntimeSeparation();
+verifyDirectRuntimeSeparation();
 verifyStoplessStateMachineShape();
 verifyCliProjection();
 verifyStoplessGuideline();
@@ -61,7 +66,8 @@ if (failures.length > 0) {
 console.log('[verify:v3-stopless-resource-control] ok');
 console.log('- StoplessCenter semantic owner: Metadata Center / StoplessCenterMetadataControl');
 console.log('- CLI projection: no-input no-op, no scope/state/envelope');
-console.log('- resource access: declared Stopless SOP edges only');
+console.log('- resource access: declared Relay/Direct Stopless SOP edges only');
+console.log('- Direct adapter: V3ResponsesDirectStoplessControlState (direct_scoped_only)');
 
 function abs(rel) {
   return path.resolve(root, rel);
@@ -172,6 +178,26 @@ function verifyResourceOwner() {
   const handles = Array.isArray(resource.implementation_handles) ? resource.implementation_handles : [];
   if (!handles.some((handle) => String(handle).startsWith('V3ResponsesRelayStoplessControlState'))) {
     fail(`${resourceId}.implementation_handles must classify V3ResponsesRelayStoplessControlState as an adapter handle`);
+  }
+  if (!handles.some((handle) => String(handle).startsWith('V3ResponsesDirectStoplessControlState'))) {
+    fail(`${resourceId}.implementation_handles must classify V3ResponsesDirectStoplessControlState as an adapter handle`);
+  }
+  for (const writer of [
+    'V3ResponsesDirectStoplessControlState::store_for_scope',
+    'V3ResponsesDirectStoplessControlState::clear_for_scope',
+    'prepare_v3_responses_direct_stopless_control_request',
+    'apply_v3_responses_direct_stopless_json_response_control',
+    'wrap_direct_sse_stopless_control_stream',
+    'V3DirectStoplessResp02RuntimeControlUpdated',
+  ]) {
+    requireArrayIncludes(resource.allowed_writers, writer, `${resourceId}.allowed_writers`);
+  }
+  for (const reader of [
+    'V3ResponsesDirectStoplessControlState::load_for_scope',
+    'prepare_v3_responses_direct_stopless_control_request',
+    'V3DirectStoplessReq01RuntimeControlLoaded',
+  ]) {
+    requireArrayIncludes(resource.allowed_readers, reader, `${resourceId}.allowed_readers`);
   }
   requireEqual(resource.cli_contract?.carries_scope, false, `${resourceId}.cli_contract.carries_scope`);
   requireEqual(resource.cli_contract?.carries_state, false, `${resourceId}.cli_contract.carries_state`);
@@ -333,7 +359,7 @@ function verifyLifecycleManifest() {
   requireEqual(activation.visible_or_fenced_schema_truth, 'forbidden', `${paths.manifest}.activation_contract.visible_or_fenced_schema_truth`);
   requireEqual(activation.provider_validation_exception, 'disable_activation_when_guidance_injection_is_provider_invalid', `${paths.manifest}.activation_contract.provider_validation_exception`);
   requireEqual(activation.relay_stopless_center_write, 'relay_only', `${paths.manifest}.activation_contract.relay_stopless_center_write`);
-  requireEqual(activation.direct_stopless_center_write, 'forbidden', `${paths.manifest}.activation_contract.direct_stopless_center_write`);
+  requireEqual(activation.direct_stopless_center_write, 'direct_scoped_only', `${paths.manifest}.activation_contract.direct_stopless_center_write`);
   requireArrayIncludes(activation.terminal_reasons_only, 'stop', `${paths.manifest}.activation_contract.terminal_reasons_only`);
   requireArrayIncludes(activation.terminal_reasons_only, 'end_turn', `${paths.manifest}.activation_contract.terminal_reasons_only`);
   requireArrayIncludes(activation.accepted_stop_evidence, 'canonical_reasoning_summary', `${paths.manifest}.activation_contract.accepted_stop_evidence`);
@@ -346,8 +372,23 @@ function verifyLifecycleManifest() {
 function verifyFunctionAndVerificationMaps() {
   const functionFeature = (functionMap.features ?? []).find((candidate) => candidate?.feature_id === featureId);
   const verificationFeature = (verificationMap.features ?? []).find((candidate) => candidate?.feature_id === featureId);
+  const directFunctionFeature = (functionMap.features ?? []).find((candidate) => candidate?.feature_id === directFeatureId);
+  const directVerificationFeature = (verificationMap.features ?? []).find((candidate) => candidate?.feature_id === directFeatureId);
   if (!functionFeature) fail(`${paths.functionMap}: missing feature ${featureId}`);
   if (!verificationFeature) fail(`${paths.verificationMap}: missing feature ${featureId}`);
+  if (!directFunctionFeature) fail(`${paths.functionMap}: missing feature ${directFeatureId}`);
+  if (!directVerificationFeature) fail(`${paths.verificationMap}: missing feature ${directFeatureId}`);
+  for (const symbol of [
+    'V3ResponsesDirectStoplessControlState',
+    'prepare_v3_responses_direct_stopless_control_request',
+    'apply_v3_responses_direct_stopless_json_response_control',
+    'wrap_direct_sse_stopless_control_stream',
+    'direct_json_stopless_metadata_center_projects_noop_and_continues_on_remote_direct_locator',
+  ]) {
+    requireArrayIncludes(directFunctionFeature?.entry_symbols, symbol, `${paths.functionMap} ${directFeatureId}.entry_symbols`);
+  }
+  requireArrayIncludes(directFunctionFeature?.required_gates, verifyGate, `${paths.functionMap} ${directFeatureId}.required_gates`);
+  requireArrayIncludes(directVerificationFeature?.required_gates, verifyGate, `${paths.verificationMap} ${directFeatureId}.required_gates`);
   for (const [label, feature] of [
     [paths.functionMap, functionFeature],
     [paths.verificationMap, verificationFeature],
@@ -407,6 +448,28 @@ function verifyMainlineOwnership() {
     fail(`${featureId}: StoplessCenter update must bind to v3-servertool-stopless-resp-02`);
   }
 
+  const directChain = chains.find((chain) => chain?.chain_id === directFeatureId);
+  if (!directChain) {
+    fail(`${paths.mainlineMap}: missing chain ${directFeatureId}`);
+  } else {
+    const directEdges = Array.isArray(directChain.edges) ? directChain.edges : [];
+    const directReaders = directEdges.filter((edge) => edge?.resource_flow?.side_channel_reads?.includes(resourceId));
+    const directWriters = directEdges.filter((edge) => edge?.resource_flow?.side_channel_writes?.includes(resourceId));
+    if (directReaders.length === 0) fail(`${directFeatureId}: missing declared Direct StoplessCenter read edge`);
+    if (directWriters.length === 0) fail(`${directFeatureId}: missing declared Direct StoplessCenter write edge`);
+    if (!directReaders.some((edge) => edge.step_id === 'v3-direct-stopless-req-01')) {
+      fail(`${directFeatureId}: StoplessCenter load must bind to v3-direct-stopless-req-01`);
+    }
+    if (!directWriters.some((edge) => edge.step_id === 'v3-direct-stopless-resp-02')) {
+      fail(`${directFeatureId}: StoplessCenter update must bind to v3-direct-stopless-resp-02`);
+    }
+    requireTextIncludes(
+      JSON.stringify(directChain),
+      'wrap_direct_sse_stopless_control_stream',
+      `${directFeatureId} SSE transport projection edge`,
+    );
+  }
+
   for (const chain of chains) {
     for (const edge of chain.edges ?? []) {
       const flow = edge.resource_flow ?? {};
@@ -416,8 +479,8 @@ function verifyMainlineOwnership() {
         ...(flow.side_channel_reads ?? []),
         ...(flow.side_channel_writes ?? []),
       ];
-      if (accesses.includes(resourceId) && chain.chain_id !== featureId) {
-        fail(`${edge.step_id}: undeclared cross-SOP StoplessCenter access outside ${featureId}`);
+      if (accesses.includes(resourceId) && !allowedStoplessChainIds.has(chain.chain_id)) {
+        fail(`${edge.step_id}: undeclared cross-SOP StoplessCenter access outside ${[...allowedStoplessChainIds].join('|')}`);
       }
       if (
         ['v3-responses-relay-server-02', 'v3-responses-relay-server-03'].includes(edge.step_id)
@@ -491,6 +554,40 @@ function verifyRuntimeSeparation() {
     readText('v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs'),
     'json_stopless_center_missing_client_session_scope_passes_stop_without_control_write',
     'StoplessCenter missing-session red/green test',
+  );
+}
+
+function verifyDirectRuntimeSeparation() {
+  for (const token of [
+    'pub struct V3ResponsesDirectStoplessControlScope',
+    'pub struct V3ResponsesDirectStoplessControlState',
+    'pub fn load_for_scope(',
+    'fn prepare_v3_responses_direct_stopless_control_request(',
+    'fn apply_v3_responses_direct_stopless_json_response_control(',
+    'fn apply_v3_responses_direct_stopless_control_request_transition(',
+    'fn apply_v3_responses_direct_stopless_control_response_transition(',
+    'fn wrap_direct_sse_stopless_control_stream(',
+    'fn commit_v3_direct_stopless_remote_locator_for_payload(',
+    'V3DirectStoplessReq01RuntimeControlLoaded',
+    'V3DirectStoplessResp02RuntimeControlUpdated',
+    'has_client_session_scope',
+    'session_id.starts_with("request:")',
+  ]) {
+    requireTextIncludes(directRuntimeSource, token, `${paths.directRuntime}`);
+  }
+  // Direct must not write Relay StoplessCenter handle.
+  if (directRuntimeSource.includes('V3ResponsesRelayStoplessControlState')) {
+    fail(`${paths.directRuntime}: Direct stopless control must not reference Relay StoplessCenter handle`);
+  }
+  requireTextIncludes(
+    readText('v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs'),
+    'direct_json_stopless_metadata_center_projects_noop_and_continues_on_remote_direct_locator',
+    'Direct StoplessCenter positive test',
+  );
+  requireTextIncludes(
+    readText('v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs'),
+    'direct_sse_stopless_metadata_center_projects_terminal_frames_without_sse_owning_semantics',
+    'Direct SSE StoplessCenter positive test',
   );
 }
 

@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>36 functional paths</span>
-        <span>242 caller edges</span>
+        <span>37 functional paths</span>
+        <span>249 caller edges</span>
       </div>
     </header>
 
@@ -473,7 +473,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>3</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>170</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>177</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -566,6 +566,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_protocol_conversion_field_parity"><code>v3.protocol_conversion_field_parity</code></a><br/>v 3.protocol_conversion_field_parity</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>9</td><td><code>v3.protocol_conversion_field_parity</code></td><td><code>sha256:e36a1502442f…</code></td></tr>
 <tr><td><a href="#chain-v3_responses_relay_source_server_entry"><code>v3.responses_relay.source_server_entry</code></a><br/>v 3.responses_relay.source_server_entry</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>9</td><td><code>v3.hub_relay_runtime_closeout</code></td><td><code>sha256:79a41dfcf958…</code></td></tr>
 <tr><td><a href="#chain-v3_servertool_hook_skeleton_lifecycle"><code>v3.servertool_hook_skeleton_lifecycle</code></a><br/>06 Stopless / Servertool</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>8</td><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><code>sha256:e47bae6a4f5f…</code></td></tr>
+<tr><td><a href="#chain-v3_direct_stopless_metadata_center"><code>v3.direct_stopless_metadata_center</code></a><br/>v 3.direct_stopless_metadata_center</td><td><span class="status pending_review">pending review</span></td><td>7</td><td>4</td><td><code>v3.direct_stopless_metadata_center</code></td><td><code>sha256:da2c908cad35…</code></td></tr>
 <tr><td><a href="#chain-v3_hub_relay_tool_servertool_multiturn_parity"><code>v3.hub_relay.tool_servertool_multiturn_parity</code></a><br/>v 3.hub_relay.tool_servertool_multiturn_parity</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>7</td><td><code>v3.relay_tool_servertool_multiturn_parity_closeout</code></td><td><code>sha256:b0f92f2f3831…</code></td></tr>
 <tr><td><a href="#chain-v3_resp03_tool_governance_gap_closeout"><code>v3.resp03_tool_governance_gap_closeout</code></a><br/>v 3.resp 03_tool_governance_gap_closeout</td><td><span class="status pending_review">pending review</span></td><td>6</td><td>4</td><td><code>v3.resp03_tool_governance_gap_closeout</code></td><td><code>sha256:757a47abbe39…</code></td></tr>
 <tr><td><a href="#chain-v3_live_provider_compat_parity"><code>v3.live_provider_compat.parity</code></a><br/>v 3.live_provider_compat.parity</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>1</td><td><code>v3.live_provider_compat_parity_closeout</code></td><td><code>sha256:0fd1c6b97be5…</code></td></tr>
@@ -859,6 +860,13 @@ flowchart TD
             <span><code>v3.servertool_hook_skeleton_lifecycle</code></span>
             <span>8 edges · 8 resources · v3-runtime::hub_v1</span>
             <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_direct_stopless_metadata_center">
+            <span class="chain-id">v 3.direct_stopless_metadata_center</span>
+            <span>V3Execution11ProtocolDecision → V3DirectStoplessResp03NoopCliOrTerminalProjected</span>
+            <span><code>v3.direct_stopless_metadata_center</code></span>
+            <span>7 edges · 4 resources · v3-runtime, v3-runtime::hub_v1</span>
+            <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_protocol_normalization_tool_governance_boundary">
             <span class="chain-id">v 3.protocol_normalization_tool_governance_boundary</span>
@@ -2543,6 +2551,60 @@ flowchart TD
 <tr><td><code>v3-servertool-stopless-resp-02</code></td><td><code>V3StoplessResp01ReasoningStopInspected</code><br/>→ <code>V3StoplessResp02RuntimeControlUpdated</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_responses_relay_stopless_control_transition</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td><td><code>V3ResponsesRelayStoplessControlState::store_for_scope</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td></tr>
 <tr><td><code>v3-servertool-stopless-resp-03</code></td><td><code>V3StoplessResp02RuntimeControlUpdated</code><br/>→ <code>V3StoplessResp03NoopCliOrTerminalProjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_tool_call_servertool_hook_at_resp03</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td><td><code>build_stopless_cli_projection_payload</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
 <tr><td><code>v3-servertool-stopless-resp-04</code></td><td><code>V3StoplessResp03NoopCliOrTerminalProjected</code><br/>→ <code>V3HubRespContinuation04Committed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.continuation.local_context_truth</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.continuation.local_context_truth</code></div></td><td><code>commit_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td><td><code>build_v3_relay_local_continuation_context_at_resp04</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_direct_stopless_metadata_center" >
+      <summary>
+        <span class="summary-main">v 3.direct_stopless_metadata_center</span>
+        <span class="summary-sub">V3Execution11ProtocolDecision → V3DirectStoplessResp03NoopCliOrTerminalProjected</span>
+        <span class="summary-sub">7 edges · <code>v3.direct_stopless_metadata_center</code> · V3Execution11ProtocolDecision → V3DirectStoplessResp03NoopCliOrTerminalProjected</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Direct-scoped StoplessCenter MetadataCenter control lifecycle for same-protocol /v1/responses Direct. Semantic owner remains StoplessCenterMetadataControl; Direct adapter handle is V3ResponsesDirectStoplessControlState. Control starts only after SameProtocolDirect decision; SSE is transport projection only.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.direct_stopless_metadata_center</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>v3-runtime · v3-runtime::hub_v1</code></span>
+          <span>resources: <code>4</code></span>
+          <span>manifest: <code>docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml</code></span>
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_direct_stopless_metadata_center_0[&quot;&lt;b&gt;协议执行决策&lt;/b&gt;&lt;br/&gt;比较入口协议与 selected provider protocol；同协议 Direct，mismatch Relay/显式错误&lt;br/&gt;&lt;small&gt;V3Execution11ProtocolDecision&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_1[&quot;&lt;b&gt;Direct Stopless Req 01 Runtime Control Loaded&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectStoplessReq01RuntimeControlLoaded&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_2[&quot;&lt;b&gt;Direct Stopless Req 02 Noop Cli Consumed&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectStoplessReq02NoopCliConsumed&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_3[&quot;&lt;b&gt;Direct Stopless Req 03 Guidance Tool Injected&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectStoplessReq03GuidanceToolInjected&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_4[&quot;&lt;b&gt;Direct 响应准备&lt;/b&gt;&lt;br/&gt;Direct 专属投影准备节点；阻断 raw→client 直跳&lt;br/&gt;&lt;small&gt;V3DirectResp14ProviderProjectionPrepared&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_5[&quot;&lt;b&gt;Direct Stopless Resp 01 Evidence Observed&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectStoplessResp01EvidenceObserved&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_6[&quot;&lt;b&gt;Direct Stopless Resp 02 Runtime Control Updated&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectStoplessResp02RuntimeControlUpdated&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_7[&quot;&lt;b&gt;Direct Stopless Resp 03 Noop Cli Or Terminal Projected&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3DirectStoplessResp03NoopCliOrTerminalProjected&lt;/small&gt;&quot;]
+  n_v3_direct_stopless_metadata_center_0 --&gt;|v3-direct-stopless-req-01&lt;br/&gt;v3-runtime → v3-runtime| n_v3_direct_stopless_metadata_center_1
+  n_v3_direct_stopless_metadata_center_1 --&gt;|v3-direct-stopless-req-02&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_direct_stopless_metadata_center_2
+  n_v3_direct_stopless_metadata_center_2 --&gt;|v3-direct-stopless-req-03&lt;br/&gt;v3-runtime → v3-runtime| n_v3_direct_stopless_metadata_center_3
+  n_v3_direct_stopless_metadata_center_4 --&gt;|v3-direct-stopless-resp-01&lt;br/&gt;v3-runtime → v3-runtime| n_v3_direct_stopless_metadata_center_5
+  n_v3_direct_stopless_metadata_center_5 --&gt;|v3-direct-stopless-resp-02&lt;br/&gt;v3-runtime → v3-runtime| n_v3_direct_stopless_metadata_center_6
+  n_v3_direct_stopless_metadata_center_6 --&gt;|v3-direct-stopless-resp-03&lt;br/&gt;v3-runtime → v3-runtime| n_v3_direct_stopless_metadata_center_7
+  n_v3_direct_stopless_metadata_center_4 --&gt;|v3-direct-stopless-sse-01&lt;br/&gt;v3-runtime → v3-runtime| n_v3_direct_stopless_metadata_center_7
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_direct_stopless_metadata_center_0,n_v3_direct_stopless_metadata_center_1,n_v3_direct_stopless_metadata_center_2,n_v3_direct_stopless_metadata_center_3,n_v3_direct_stopless_metadata_center_4,n_v3_direct_stopless_metadata_center_5,n_v3_direct_stopless_metadata_center_6,n_v3_direct_stopless_metadata_center_7 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-direct-stopless-req-01</code></td><td><code>V3Execution11ProtocolDecision</code><br/>→ <code>V3DirectStoplessReq01RuntimeControlLoaded</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel_core</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>prepare_v3_responses_direct_stopless_control_request</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
+<tr><td><code>v3-direct-stopless-req-02</code></td><td><code>V3DirectStoplessReq01RuntimeControlLoaded</code><br/>→ <code>V3DirectStoplessReq02NoopCliConsumed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>prepare_v3_responses_direct_stopless_control_request</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>apply_v3_stopless_request_hook_at_req04</code><br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small></td></tr>
+<tr><td><code>v3-direct-stopless-req-03</code></td><td><code>V3DirectStoplessReq02NoopCliConsumed</code><br/>→ <code>V3DirectStoplessReq03GuidanceToolInjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>prepare_v3_responses_direct_stopless_control_request</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>apply_v3_responses_direct_stopless_control_request_transition</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
+<tr><td><code>v3-direct-stopless-resp-01</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code><br/>→ <code>V3DirectStoplessResp01EvidenceObserved</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_responses_direct_stopless_json_response_control</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>run_v3_responses_direct_stopless_response_hooks</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
+<tr><td><code>v3-direct-stopless-resp-02</code></td><td><code>V3DirectStoplessResp01EvidenceObserved</code><br/>→ <code>V3DirectStoplessResp02RuntimeControlUpdated</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.metadata.runtime_control_stopless</code></div></td><td><code>apply_v3_responses_direct_stopless_json_response_control</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>apply_v3_responses_direct_stopless_control_response_transition</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
+<tr><td><code>v3-direct-stopless-resp-03</code></td><td><code>V3DirectStoplessResp02RuntimeControlUpdated</code><br/>→ <code>V3DirectStoplessResp03NoopCliOrTerminalProjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.continuation.remote_binding</code></div></td><td><code>apply_v3_responses_direct_stopless_json_response_control</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>commit_v3_direct_stopless_remote_locator_for_payload</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
+<tr><td><code>v3-direct-stopless-sse-01</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code><br/>→ <code>V3DirectStoplessResp03NoopCliOrTerminalProjected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.metadata.runtime_control_stopless</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.metadata.runtime_control_stopless</code> <code>v3.continuation.remote_binding</code></div></td><td><code>wrap_direct_sse_stopless_control_stream</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>apply_v3_responses_direct_stopless_json_response_control</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td></tr>
 </tbody>
 </table>
       </div>

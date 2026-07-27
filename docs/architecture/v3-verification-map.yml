@@ -1851,7 +1851,7 @@ features:
       - stop/end_turn with canonical reasoning summary and unfinished `stop_schema.nextStep` projects no-op, stores the nextStep only as scoped StoplessCenter `next_step_prompt`, and Req04 carries it into the next provider-facing continuation prompt
       - stop/end_turn with canonical reasoning summary and `stop_schema.blocked=true` plus blocked reason appends the blocked reason to canonical summary and passes through without no-op or counter increment
       - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
-      - Responses protocol direct stays zero relay StoplessCenter write; response-side evidence gate may run only with same-turn StoplessCenter schema_guidance_active state. With inactive state, completed no-summary responses pass through unchanged; with active state, summary/schema decides pass-through vs continuation while direct owner remains direct
+      - Responses protocol direct stays zero Relay StoplessCenter write; Direct may write only Direct-scoped StoplessCenter via V3ResponsesDirectStoplessControlState after SameProtocolDirect. With inactive/missing scope or stopless_center=false, completed no-summary responses pass through unchanged; with active Direct state, summary/schema decides pass-through vs no-op projection while Direct owner remains Direct
       - "`[features].stopless_center = false` disables relay stopless injection and projection"
       - architecture resource-control gate rejects StoplessCenter state modeled as CLI args/stdout, local continuation context/store, provider/client normal payload, debug/snapshot truth, generic Hub closeout, or server-entry aggregate ownership
       - normalization boundary gate rejects tool governance hook schema and tool-result payload logic in ReqInbound RespInbound ReqOutbound RespOutbound
@@ -1888,11 +1888,57 @@ features:
       - "Stopless response interception is gated by MetadataCenter StoplessCenter state machine same-turn schema_guidance_active: inactive state means no CLI projection and no StoplessCenter write; accepted canonical summary or accepted_stop_schema is evidence; missing both continues only when active. StoplessCenter state machine, schema_guidance_active, inactive state, accepted canonical summary, accepted_stop_schema, and Anthropic exception handling are all explicit contract terms."
       - "inactive state means pass-through"
       - "Old V3 stop schema/fence/CLI JSON continuation is not an allowed runtime source. `<rcc_stop_schema>`, visible-text `schemaFeedback`, `repeatCount`, `maxRepeats`, `triggerHint`, `continuationPrompt`, and visible-text `next_step` must not appear in provider/client normal payload. The only schema exception is a canonical reasoning `summary` sibling `stop_schema` / `stopSchema` object inspected at Resp03; unfinished `nextStep` becomes scoped StoplessCenter `next_step_prompt`, not CLI/stdout/debug/continuation state."
-      - "StoplessCenter state changes only at Resp03 and is read at Req04 from MetadataCenter/runtime_control side-channel state through `StoplessCenterMetadataControl`; `V3ResponsesRelayStoplessControlState` is only an adapter runtime handle."
+      - "StoplessCenter state changes only at Resp03/Direct response control and is read at Req04/Direct request control from MetadataCenter/runtime_control side-channel state through `StoplessCenterMetadataControl`; `V3ResponsesRelayStoplessControlState` and `V3ResponsesDirectStoplessControlState` are only adapter runtime handles."
       - "data/control lock: StoplessCenter is a Metadata Center control-signal; client/provider normal payload carries user/model data only."
       - "Local continuation context/store, CLI stdout, CLI args, empty CLI JSON envelopes, client/provider body, snapshot metadata, `__runtime.json`, generic Hub closeout, and server-entry aggregate edges must never carry or own StoplessCenter control."
-      - "Central aggregation is allowed only through declared v3.servertool_hook_skeleton_lifecycle SOP/pipeline nodes; cross-process shortcuts and undeclared relay-local StoplessCenter access must fail gate."
+      - "Central aggregation is allowed only through declared v3.servertool_hook_skeleton_lifecycle and v3.direct_stopless_metadata_center SOP/pipeline nodes; cross-process shortcuts and undeclared StoplessCenter access must fail gate."
       - "Generated stopless review docs must stay manifest-synced and contain both lifecycle flowchart and state transition diagram; stale Markdown or HTML is a gate failure."
+
+  - feature_id: v3.direct_stopless_metadata_center
+    status: controlled_runtime_slice_verified
+    change_risk: critical
+    owner_kind: rust_project_v3_runtime_direct_stopless_control
+    owner_scope: "Same-protocol /v1/responses Direct StoplessCenter MetadataCenter control lifecycle using Direct-scoped adapter handle only. Direct remains provider passthrough + hooks; control starts after SameProtocolDirect; SSE is transport projection only."
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
+      - docs/goals/v3-direct-stopless-metadata-center-plan.md
+      - docs/design/v3-stopless-schema-guidance-activation-contract.md
+    design:
+      - docs/goals/v3-direct-stopless-metadata-center-plan.md
+      - docs/design/v3-stopless-schema-guidance-activation-contract.md
+      - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
+    required_contract:
+      - Semantic owner remains StoplessCenterMetadataControl; Direct/Relay are adapter handles only
+      - Direct stopless request control runs only after SameProtocolDirect decision
+      - Direct writes only V3ResponsesDirectStoplessControlState and never Relay StoplessCenter
+      - Direct no-op projection may commit Direct remote locator for provider-native response id
+      - SSE wrapper reuses Direct response control helper and does not own StoplessCenter semantics
+      - StoplessCenter state never enters provider/client body, CLI args/stdout, debug snapshot, or continuation payload/history
+      - Provider echo of injected stopless instructions/internal reasoningStop tool/stopless-required tool_choice is stripped before client-visible projection
+      - Inactive/missing client scope and stopless_center=false pass through without Direct control write
+      - Architecture resource-control gate rejects reintroducing direct_stopless_center_write=forbidden and undeclared StoplessCenter access
+    required_gates:
+      - npm run verify:v3-stopless-resource-control
+      - npm run test:v3-stopless-resource-control-red-fixtures
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics -- --nocapture
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-architecture-docs
+      - npm run verify:v3-cargo-fmt
+      - git diff --check
+    notes:
+      - "Direct-scoped StoplessCenter is MetadataCenter control state, not Relay Chat Process re-entry."
+      - "Data/control lock still holds: normal payload carries user/model data only."
+      - "Declared SOP access is limited to v3.servertool_hook_skeleton_lifecycle and v3.direct_stopless_metadata_center."
+    runtime_status: controlled_runtime_slice_only
 
   - feature_id: v3.protocol_normalization_tool_governance_boundary
     status: source_controlled_runtime_boundary_verified

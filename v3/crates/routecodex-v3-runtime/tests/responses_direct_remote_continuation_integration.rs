@@ -8,8 +8,10 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw,
-    execute_v3_responses_direct_runtime_kernel_with_continuation, register_responses_direct_hooks,
-    V3ClientBody, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    execute_v3_responses_direct_runtime_kernel_with_continuation,
+    execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control,
+    register_responses_direct_hooks, V3ClientBody, V3ResponsesDirectContinuationScope,
+    V3ResponsesDirectContinuationState, V3ResponsesDirectStoplessControlState,
     V3RuntimeUsageSummary,
 };
 use serde_json::{json, Value};
@@ -162,6 +164,191 @@ async fn direct_sse_completed_without_summary_passes_through_without_synthetic_s
     let provider_request = serde_json::to_string(&requests[0]).unwrap();
     assert!(!provider_request.contains("call_stopless_reasoning"));
     assert!(!provider_request.contains("routecodex hook run reasoningStop"));
+}
+
+#[tokio::test]
+async fn direct_json_stopless_metadata_center_projects_noop_and_continues_on_remote_direct_locator()
+{
+    let manifest = manifest_with_direct_stopless();
+    let state = V3ResponsesDirectContinuationState::default();
+    let stopless = V3ResponsesDirectStoplessControlState::default();
+    let transport = DirectStoplessNoSummaryThenSummaryTransport::default();
+    let scope = V3ResponsesDirectContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-direct-active",
+        "conversation-stopless-direct-active",
+        5555,
+        "g",
+    );
+
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+        &state,
+        &stopless,
+        &manifest,
+        build_v3_server_03_http_request_raw(
+            "s".into(),
+            "req-direct-stopless-active-1".into(),
+            "exec-direct-stopless-active-1".into(),
+            "POST".into(),
+            "/v1/responses".into(),
+            json!({"model":"gpt-5.5","input":"continue until summary","tools":[{"type":"function","name":"exec_command"}]}),
+        ),
+        scope.clone(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 200, "{first:#?}");
+    assert!(first
+        .node_trace
+        .contains(&"V3DirectStoplessReq03GuidanceToolInjected"));
+    assert!(first
+        .node_trace
+        .contains(&"V3DirectStoplessResp02RuntimeControlUpdated"));
+    assert!(!first.node_trace.contains(&"V3HubRespChatProcess03Governed"));
+    let V3ClientBody::Json(first_body) = &first.client_payload.body else {
+        panic!("first direct stopless response must be JSON: {first:#?}");
+    };
+    assert_eq!(first_body["status"], "requires_action", "{first_body}");
+    let first_serialized = serde_json::to_string(first_body).unwrap();
+    assert!(first_serialized.contains("partial direct answer without summary"));
+    assert!(first_serialized.contains("call_stopless_reasoning"));
+    assert!(first_serialized.contains("routecodex hook run reasoningStop"));
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "active Direct stopless must commit a Direct remote locator for the native response id"
+    );
+    assert_eq!(
+        stopless.len().unwrap(),
+        1,
+        "active Direct stopless must store Direct-scoped MetadataCenter control state"
+    );
+
+    let second =
+        execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+            &state,
+            &stopless,
+            &manifest,
+            build_v3_server_03_http_request_raw(
+                "s".into(),
+                "req-direct-stopless-active-2".into(),
+                "exec-direct-stopless-active-2".into(),
+                "POST".into(),
+                "/v1/responses".into(),
+                json!({
+                    "model":"gpt-5.5",
+                    "previous_response_id":"resp_direct_stopless_1",
+                    "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}]
+                }),
+            ),
+            scope,
+            register_responses_direct_hooks(),
+            &transport,
+            2_000,
+        )
+        .await;
+    assert_eq!(second.client_payload.status, 200, "{second:#?}");
+    assert!(second
+        .node_trace
+        .contains(&"V3HubReqContinuation03Classified"));
+    assert!(second
+        .node_trace
+        .contains(&"V3DirectStoplessReq02NoopCliConsumed"));
+    assert_eq!(
+        state.len().unwrap(),
+        0,
+        "terminal summary releases Direct locator"
+    );
+    assert_eq!(
+        stopless.len().unwrap(),
+        0,
+        "terminal summary clears Direct stopless control"
+    );
+    let V3ClientBody::Json(second_body) = &second.client_payload.body else {
+        panic!("second direct stopless response must be JSON: {second:#?}");
+    };
+    assert_eq!(second_body["status"], "completed", "{second_body}");
+    assert!(serde_json::to_string(second_body)
+        .unwrap()
+        .contains("Completed after direct stopless continuation."));
+
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let first_request = serde_json::to_string(&requests[0]).unwrap();
+    assert_eq!(
+        first_request.matches("\"name\":\"reasoningStop\"").count(),
+        1,
+        "Direct request must inject exactly one provider-visible reasoningStop tool: {first_request}"
+    );
+    let second_request = serde_json::to_string(&requests[1]).unwrap();
+    assert_eq!(
+        requests[1]["previous_response_id"],
+        "resp_direct_stopless_1"
+    );
+    assert!(second_request.contains("继续当前目标"));
+    assert!(!second_request.contains("call_stopless_reasoning"));
+    assert_eq!(
+        second_request.matches("\"name\":\"reasoningStop\"").count(),
+        1,
+        "Direct continuation request must re-inject exactly one reasoningStop tool: {second_request}"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_sse_owning_semantics()
+{
+    let manifest = manifest_with_direct_stopless();
+    let state = V3ResponsesDirectContinuationState::default();
+    let stopless = V3ResponsesDirectStoplessControlState::default();
+    let transport = DirectStoplessSseNoSummaryThenSummaryTransport::default();
+    let scope = V3ResponsesDirectContinuationScope::responses(
+        "/v1/responses",
+        "session-stopless-direct-sse-active",
+        "conversation-stopless-direct-sse-active",
+        5555,
+        "g",
+    );
+
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+        &state,
+        &stopless,
+        &manifest,
+        build_v3_server_03_http_request_raw(
+            "s".into(),
+            "req-direct-stopless-sse-active-1".into(),
+            "exec-direct-stopless-sse-active-1".into(),
+            "POST".into(),
+            "/v1/responses".into(),
+            json!({"model":"gpt-5.5","stream":true,"input":"stream until summary","tools":[{"type":"function","name":"exec_command"}]}),
+        ),
+        scope,
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 200, "{first:#?}");
+    assert!(matches!(&first.client_payload.body, V3ClientBody::Sse(_)));
+    let first_body = collect_sse_body_text(first.client_payload.body).await;
+    assert!(first_body.contains("response.completed"), "{first_body}");
+    assert!(first_body.contains("response.done"), "{first_body}");
+    assert!(first_body.contains("partial direct SSE answer without summary"));
+    assert!(first_body.contains("call_stopless_reasoning"));
+    assert!(first_body.contains("routecodex hook run reasoningStop"));
+    assert!(first_body.contains("data: [DONE]"));
+    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(stopless.len().unwrap(), 1);
+
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let provider_request = serde_json::to_string(&requests[0]).unwrap();
+    assert_eq!(
+        provider_request.matches("\"name\":\"reasoningStop\"").count(),
+        1,
+        "Direct SSE provider request must inject exactly one reasoningStop tool: {provider_request}"
+    );
 }
 
 #[derive(Default)]
@@ -1564,7 +1751,11 @@ fn assert_error_chain(output: &routecodex_v3_runtime::V3ResponsesDirectRuntimeOu
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
-    manifest_variant("a", true, &[])
+    manifest_variant_with_stopless("a", true, &[], false)
+}
+
+fn manifest_with_direct_stopless() -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_variant_with_stopless("a", true, &[], true)
 }
 
 fn http_only_manifest_without_remote_continuation(
@@ -1573,6 +1764,8 @@ fn http_only_manifest_without_remote_continuation(
         parse_v3_config_02_authoring(
             r#"
 version = 3
+[features]
+stopless_center = false
 [servers.s]
 bind = "127.0.0.1"
 port = 5555
@@ -1604,6 +1797,15 @@ fn manifest_variant(
     enabled: bool,
     extra_capabilities: &[&str],
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_variant_with_stopless(auth_alias, enabled, extra_capabilities, false)
+}
+
+fn manifest_variant_with_stopless(
+    auth_alias: &str,
+    enabled: bool,
+    extra_capabilities: &[&str],
+    stopless_center: bool,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let mut capabilities = vec!["text", "tools"];
     capabilities.extend_from_slice(extra_capabilities);
     let capabilities = capabilities
@@ -1616,6 +1818,8 @@ fn manifest_variant(
             &format!(
                 r#"
 version = 3
+[features]
+stopless_center = {stopless_center}
 [servers.s]
 bind = "127.0.0.1"
 port = 5555

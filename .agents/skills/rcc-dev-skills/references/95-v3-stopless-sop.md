@@ -76,7 +76,7 @@ stopless 拦截的先决条件不是“看见 stop/end_turn”本身，而是**S
 - 响应侧 accepted evidence 只有 canonical reasoning `summary` 和 canonical sibling `stop_schema` / `stopSchema`；assistant visible text、fenced JSON、`<rcc_stop_schema>`、CLI stdout 永远不是证据。
 - schema guidance 本身是触发 stopless 的条件；StoplessCenter 同轮 inactive state 时，即使响应缺 summary/schema，也必须放行，禁止静默合成续杯。Inactive state means pass-through.
 - Anthropic 等 provider 若因系统提示词/工具 schema 校验无法合法注入 guidance，provider-validity 优先；本轮 StoplessCenter 保持 inactive state，不激发 stopless。
-- 该合同适用于 Responses 协议 provider turn（direct 或 relay）。Relay 可写 StoplessCenter；direct 只可在同轮 StoplessCenter active state 存在时使用响应侧 evidence gate，不得写 relay StoplessCenter 或伪造非 provider-native continuation。
+- 该合同适用于 Responses 协议 provider turn（direct 或 relay）。Relay 只写 Relay adapter handle；Direct 在 `SameProtocolDirect` 决策之后只写 Direct-scoped adapter handle（`V3ResponsesDirectStoplessControlState`），不得写 Relay StoplessCenter、不得把控制状态写入 provider/client payload、不得伪造非 provider-native continuation、不得为 stopless 重入 Relay Chat Process。
 - StoplessCenter state machine 是唯一 activation truth；`schema_guidance_active` inactive state means pass-through without CLI projection; accepted canonical summary and accepted stop_schema pass through.
 - 详细设计真源：`docs/design/v3-stopless-schema-guidance-activation-contract.md`。
 
@@ -234,7 +234,7 @@ Reset 边界：
 - valid finished/blocked terminal。
 - 最新真实 user turn 在 stopless pair 之后出现。
 - session/scope 改变。
-- profile disabled / provider-direct。Responses 协议 direct 只允许 response-side summary gate 和下一轮标准 Responses continuation 信号处理，不写 StoplessCenter 控制状态，不注入 provider/model-visible `reasoningStop`。
+- profile disabled / provider-direct / 缺失 client session scope：Direct StoplessCenter 保持 inactive，不写控制状态，不注入 provider/model-visible `reasoningStop`。Responses same-protocol Direct 只有在 `SameProtocolDirect` 决策之后，才允许通过 Direct-scoped MetadataCenter handle 执行 Req04/Resp03 stopless 控制链；该链不得写 Relay StoplessCenter。
 
 ## `/v1/responses` continuation 不可变区顺序
 
@@ -268,7 +268,7 @@ Req04 Chat Process:
 - Managed relay 必须注入 stopless guidance。
 - 原 client tool surface 必须保留：顶层 `tools` 仍顶层，Responses `input[].type=additional_tools.tools` 仍嵌入原路径。
 - 只允许追加 exactly-one 内部/model-visible `reasoningStop` tool。
-- Responses 协议 direct/provider-direct 默认零 relay stopless 注入；只有当同轮请求已由合法 hook/schema guidance 驱动 StoplessCenter 进入 `schema_guidance_active` state 时，response-side 才允许按本合同做 evidence gate。direct 续轮只承认 provider 原生 pending/function_call 或同轮 activation 后的标准 continuation 合同；本地 stopless control state 不能写入 direct 上游或 relay StoplessCenter。
+- Responses 协议 Direct/provider-direct 默认零 Relay stopless 注入；same-protocol Direct 仅在 `SameProtocolDirect` 决策后运行 Direct-scoped Req04/Resp03 control handle。只有当同轮请求已由合法 hook/schema guidance 驱动 Direct StoplessCenter 进入 `schema_guidance_active` state 时，response-side 才允许按本合同做 evidence gate。Direct 续轮只承认 provider-native response id / pending / function_call 与同轮 activation 后的标准 continuation 合同；本地 stopless control state 不能写入 direct 上游、client payload、continuation payload/history 或 Relay StoplessCenter。
 
 ### Round 1 response：client-visible
 
@@ -280,8 +280,9 @@ Req04 Chat Process:
 - 先保留模型本轮可见文本，再投影 client-visible `exec_command` no-op。
 - CLI 命令必须是 no-input：`routecodex hook run reasoningStop`。
 - 投影结果不得泄漏 raw internal `reasoningStop`、StoplessCenter state、repeat counter、schema feedback、metadata/debug 字段。
+- 若 provider 在 Direct/Relay 响应对象里回显了本轮注入的 stopless `instructions`、内部 `reasoningStop` tool 或由 stopless 提升的 `tool_choice:required`，Resp03/Direct response control 必须在 client-visible payload 前清理；可保留原 client instruction，但不得把内部指导词或内部工具声明透给客户端。
 - 投影完成后才允许进入 continuation save。
-- Responses 协议 direct 不写 relay StoplessCenter，也不从无 activation 的 completed stop 合成本地 stopless no-op：terminal stop/status completed 若 StoplessCenter 同轮 inactive state，必须作为 provider 原生完成响应透传。若 StoplessCenter 同轮 active state 存在，direct 可按同一 response-side summary/schema gate 决定放行或续杯，但 continuation 必须保持 direct owner，不能伪装 relay continuation。
+- Responses 协议 Direct 不写 Relay StoplessCenter，也不从无 activation 的 completed stop 合成本地 stopless no-op：terminal stop/status completed 若 StoplessCenter 同轮 inactive state，必须作为 provider 原生完成响应透传。若 StoplessCenter 同轮 active state 存在，Direct 必须按同一 response-side summary/schema gate 决定放行或续杯，并通过 Direct-scoped MetadataCenter handle 更新控制状态；no-op 投影只能绑定 provider-native response id 形成 Direct remote locator，continuation 必须保持 direct owner，不能伪装 relay continuation。
 
 ### Round 2 request：state-machine guideline
 
@@ -345,6 +346,10 @@ Req04 Chat Process:
 | `V3StoplessResp02RuntimeControlUpdated` | stop classification + previous state | next StoplessCenter state / clear | state 有 phase、need_continue、blocked、guard 闭环 |
 | `V3StoplessResp03NoopCliOrTerminalProjected` | state transition + visible text | client-visible message + no-input CLI or unmodified guard pass-through | 命令无 `--input-json`；可见文本保留；达到 guard 时不合成内部状态诊断 |
 | `V3HubRespContinuation04Committed` | finalized response | canonical continuation context | 保存发生在投影后；store 不写 StoplessCenter |
+| `V3DirectStoplessReq01RuntimeControlLoaded` | SameProtocolDirect 决策后的 Direct request + Direct-scoped StoplessCenter | typed state machine snapshot | Direct control 只能在 Direct handle 读取；不经 Relay、不污染 routing/capability selection |
+| `V3DirectStoplessReq03GuidanceToolInjected` | Direct scoped state + cleaned request | provider-facing guidance + exactly-one internal tool | 只在同轮 schema guidance 合法时激活；provider/client normal payload 不携带 control state |
+| `V3DirectStoplessResp02RuntimeControlUpdated` | Direct response evidence + active request state | Direct-scoped StoplessCenter transition | 只写 `V3ResponsesDirectStoplessControlState`；不得引用 Relay handle |
+| `wrap_direct_sse_stopless_control_stream` | SSE terminal frame payload | re-encoded SSE frame | SSE 只是 transport projection；调用同一 Direct JSON response control helper，不拥有 semantics |
 
 ## 测试与 gate 设计
 

@@ -22,7 +22,10 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+  'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
+  'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-debug/src/lib.rs',
 ];
 
@@ -76,6 +79,21 @@ const cases = [
     marker: '  provider_validation_exception: disable_activation_when_guidance_injection_is_provider_invalid\n',
     replacement: '  provider_validation_exception: force_schema_guidance\n',
     diagnostic: /activation_contract\.provider_validation_exception must equal "disable_activation_when_guidance_injection_is_provider_invalid"/u,
+  },
+
+  {
+    name: 'activation contract forbids Direct scoped StoplessCenter writes',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '  direct_stopless_center_write: direct_scoped_only\n',
+    replacement: '  direct_stopless_center_write: forbidden\n',
+    diagnostic: /activation_contract\.direct_stopless_center_write must equal "direct_scoped_only"/u,
+  },
+  {
+    name: 'activation contract stops applying to direct path',
+    path: 'docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml',
+    marker: '    - responses_direct\n',
+    replacement: '',
+    diagnostic: /activation_contract\.applies_to_paths must include responses_direct/u,
   },
   {
     name: 'design doc allows no-marker no-op projection',
@@ -154,6 +172,14 @@ const cases = [
     replacement: 'session_id.starts_with("routecodex-disabled-request-fallback:")',
     diagnostic: /request-fallback scope guard missing session_id\.starts_with\("request:"\)/u,
   },
+
+  {
+    name: 'Direct request fallback scope can write StoplessCenter',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    marker: 'session_id.starts_with("request:")',
+    replacement: 'session_id.starts_with("routecodex-disabled-request-fallback:")',
+    diagnostic: /missing session_id\.starts_with\("request:"\)|request-fallback scope guard missing session_id\.starts_with\("request:"\)/u,
+  },
   {
     name: 'StoplessCenter state loses max_stop_budget field',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
@@ -195,6 +221,42 @@ const cases = [
     marker: ', next_step_prompt,',
     replacement: ', ',
     diagnostic: /state_fields must include next_step_prompt/u,
+  },
+
+  {
+    name: 'resource map loses Direct StoplessCenter implementation handle',
+    path: 'docs/architecture/v3-resource-operation-map.yml',
+    marker: ', V3ResponsesDirectStoplessControlState(adapter_runtime_handle)',
+    replacement: '',
+    diagnostic: /implementation_handles must classify V3ResponsesDirectStoplessControlState/u,
+  },
+  {
+    name: 'resource map loses Direct StoplessCenter writer',
+    path: 'docs/architecture/v3-resource-operation-map.yml',
+    marker: ', V3ResponsesDirectStoplessControlState::store_for_scope',
+    replacement: '',
+    diagnostic: /allowed_writers must include V3ResponsesDirectStoplessControlState::store_for_scope/u,
+  },
+  {
+    name: 'resource map loses Direct StoplessCenter reader',
+    path: 'docs/architecture/v3-resource-operation-map.yml',
+    marker: ', V3ResponsesDirectStoplessControlState::load_for_scope',
+    replacement: '',
+    diagnostic: /allowed_readers must include V3ResponsesDirectStoplessControlState::load_for_scope/u,
+  },
+  {
+    name: 'direct mainline chain loses StoplessCenter control chain id',
+    path: 'docs/architecture/v3-mainline-call-map.yml',
+    marker: '  - chain_id: v3.direct_stopless_metadata_center\n',
+    replacement: '  - chain_id: v3.direct_stopless_metadata_center_removed\n',
+    diagnostic: /missing chain v3\.direct_stopless_metadata_center/u,
+  },
+  {
+    name: 'direct runtime writes Relay StoplessCenter handle',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    marker: 'use crate::hub_v1::{\n',
+    replacement: 'use crate::hub_v1::{\n    V3ResponsesRelayStoplessControlState,\n',
+    diagnostic: /Direct stopless control must not reference Relay StoplessCenter handle/u,
   },
   {
     name: 'no-op CLI carries session scope',
