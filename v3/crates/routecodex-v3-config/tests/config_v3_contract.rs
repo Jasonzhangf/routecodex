@@ -1151,11 +1151,17 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
         None,
         "providers without an existing V2 compatibility profile must not get a synthetic profile"
     );
+    assert_eq!(
+        manifest.providers["orangeai"].auth.entries[0].api_key.as_deref(),
+        Some("secret-orangeai-key1"),
+        "V2 apiKey must remain the auth handle truth and must not be materialized into a V3-only token file"
+    );
+    assert!(manifest.providers["orangeai"].auth.entries[0].env.is_none());
     assert!(manifest.providers["orangeai"].auth.entries[0]
         .token_file
-        .as_ref()
-        .is_some_and(|path| path.contains(".routecodex-v3-secret-handles")));
+        .is_none());
     assert!(!format!("{manifest:?}").contains("secret-orangeai-key1"));
+    assert!(!format!("{manifest:?}").contains(".routecodex-v3-secret-handles"));
 
     let group = &manifest.route_groups["gateway_priority_5555"];
     assert_eq!(

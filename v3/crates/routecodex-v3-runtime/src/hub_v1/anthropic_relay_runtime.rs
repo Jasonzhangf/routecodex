@@ -1160,9 +1160,10 @@ fn provider_target(
         .ok_or_else(|| {
             V3AnthropicRelayRuntimeError::Target("selected auth handle missing".to_string())
         })?;
-    let secret = match (&auth.env, &auth.token_file) {
-        (Some(env), None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path)) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
+    let secret = match (&auth.env, &auth.token_file, &auth.api_key) {
+        (Some(env), None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
+        (None, Some(path), None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
+        (None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
         _ => {
             return Err(V3AnthropicRelayRuntimeError::Target(
                 "selected auth handle is invalid".to_string(),

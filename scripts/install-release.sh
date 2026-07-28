@@ -283,12 +283,12 @@ verify_runtime_health() {
 
   health_matches_expected_version() {
     local health_file="$1"
-    node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&body.version===expected){process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
+    node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);const v2=body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&body.version===expected;const v3=body.status==='ok'&&body.manifest_version===3&&body.build_version===expected;if(v2||v3){process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
   }
 
   health_reports_ready_wrong_version() {
     local health_file="$1"
-    node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);if(body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&typeof body.version==='string'&&body.version!==expected){console.log(body.version);process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
+    node -e "const fs=require('fs');const p=process.argv[1];const expected=process.argv[2];const raw=fs.readFileSync(p,'utf8');const body=JSON.parse(raw);const v2Ready=body.status==='ok'&&body.ready===true&&body.pipelineReady===true&&typeof body.version==='string';const v3Ready=body.status==='ok'&&body.manifest_version===3&&typeof body.build_version==='string';if(v2Ready&&body.version!==expected){console.log(body.version);process.exit(0)}if(v3Ready&&body.build_version!==expected){console.log(body.build_version);process.exit(0)}process.exit(1)" "$health_file" "$EXPECTED_VERSION"
   }
 
   probe_release_runtime_available() {

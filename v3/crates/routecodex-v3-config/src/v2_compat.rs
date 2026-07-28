@@ -18,8 +18,6 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
-const V2_SECRET_HANDLE_DIR: &str = ".routecodex-v3-secret-handles";
-
 pub(crate) fn compile_v2_config_02_authoring_from_file(
     config_path: &Path,
     raw: &str,
@@ -496,9 +494,9 @@ fn resolve_v2_provider_default_compatibility_profile(provider_id: &str) -> Optio
 }
 
 fn compile_v2_auth(
-    config_dir: &Path,
+    _config_dir: &Path,
     provider_id: &str,
-    source_hash: String,
+    _source_hash: String,
     auth: V2ProviderAuthConfig,
 ) -> Result<V3ProviderAuthAuthoringConfig, V3ConfigError> {
     let entries = if let Some(entries) = auth.entries {
@@ -514,9 +512,12 @@ fn compile_v2_auth(
     let mut v3_entries = Vec::new();
     for entry in entries {
         let alias = entry.alias.unwrap_or_else(|| "key1".to_string());
-        if entry.env.is_some() && entry.token_file.is_some() {
+        let handle_count = usize::from(entry.env.is_some())
+            + usize::from(entry.token_file.is_some())
+            + usize::from(entry.api_key.is_some());
+        if handle_count != 1 {
             return Err(validation(format!(
-                "v2 provider {provider_id} auth {alias} cannot declare both env and tokenFile"
+                "v2 provider {provider_id} auth {alias} must declare exactly one of apiKey, env, or tokenFile"
             )));
         }
         if let Some(env) = entry.env {
@@ -524,6 +525,7 @@ fn compile_v2_auth(
                 alias,
                 env: Some(env),
                 token_file: None,
+                api_key: None,
             });
             continue;
         }
@@ -538,6 +540,7 @@ fn compile_v2_auth(
                 alias,
                 env: None,
                 token_file: Some(token_file.to_string()),
+                api_key: None,
             });
             continue;
         }
@@ -546,81 +549,22 @@ fn compile_v2_auth(
                 "v2 provider {provider_id} auth {alias} missing apiKey, env, or tokenFile"
             ))
         })?;
-        let token_file = materialize_v2_secret_token_file(
-            config_dir,
-            provider_id,
-            &alias,
-            &source_hash,
-            api_key,
-        )?;
+        if api_key.trim().is_empty() {
+            return Err(validation(format!(
+                "v2 provider {provider_id} auth {alias} apiKey is empty"
+            )));
+        }
         v3_entries.push(V3ProviderAuthEntryAuthoringConfig {
             alias,
             env: None,
-            token_file: Some(token_file),
+            token_file: None,
+            api_key: Some(api_key),
         });
     }
     Ok(V3ProviderAuthAuthoringConfig {
         auth_type: V3ProviderAuthType::ApiKey,
         entries: v3_entries,
     })
-}
-
-fn materialize_v2_secret_token_file(
-    config_dir: &Path,
-    provider_id: &str,
-    alias: &str,
-    source_hash: &str,
-    secret: String,
-) -> Result<String, V3ConfigError> {
-    let dir = config_dir
-        .join(V2_SECRET_HANDLE_DIR)
-        .join(provider_id)
-        .join(alias);
-    fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.token", &source_hash[..16]));
-    // Expand ${VAR} and ${VAR:-default} patterns from environment
-    let expanded = expand_env_vars(&secret);
-    fs::write(&path, format!("{}\n", expanded.trim()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(path.display().to_string())
-}
-
-fn expand_env_vars(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut result = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            let mut j = i + 2;
-            while j < bytes.len() && bytes[j] != b'}' {
-                j += 1;
-            }
-            if j < bytes.len() {
-                let inner = &input[i + 2..j];
-                let (var_name, default_val) = if let Some(dash_pos) = inner.find(":-") {
-                    (&inner[..dash_pos], Some(&inner[dash_pos + 2..]))
-                } else {
-                    (inner, None)
-                };
-                let env_val = std::env::var(var_name).ok().unwrap_or_default();
-                let replacement = if env_val.is_empty() {
-                    default_val.unwrap_or("")
-                } else {
-                    &env_val
-                };
-                result.push_str(replacement);
-                i = j + 1;
-                continue;
-            }
-        }
-        result.push(bytes[i] as char);
-        i += 1;
-    }
-    result
 }
 
 fn compile_v2_provider_models(

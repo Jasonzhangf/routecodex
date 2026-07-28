@@ -590,6 +590,7 @@ async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::V
     Json(json!({
         "status": "ok",
         "version": 3,
+        "build_version": env!("CARGO_PKG_VERSION"),
         "manifest_version": state.manifest_version,
         "server_id": state.server.id,
         "bind": state.server.bind,

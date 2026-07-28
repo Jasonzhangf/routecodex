@@ -189,11 +189,15 @@ fn responses_direct_request_projection_hook(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    let secret = match (&candidate.env_name, &candidate.token_file) {
-        (Some(name), None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
-        (None, Some(path)) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (Some(name), Some(_)) => V3ProviderAuthSecretHandle::Environment(name.clone()),
-        (None, None) => {
+    let secret = match (
+        &candidate.env_name,
+        &candidate.token_file,
+        &candidate.api_key,
+    ) {
+        (Some(name), None, None) => V3ProviderAuthSecretHandle::Environment(name.clone()),
+        (None, Some(path), None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
+        (None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
+        _ => {
             return Err(build_v3_error_01_source_raised_internal(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Provider12ResponsesWirePayload",
@@ -536,6 +540,7 @@ mod tests {
                     compatibility_profile: None,
                     env_name: Some("TEST_KEY".to_string()),
                     token_file: None,
+                    api_key: None,
                     required_capabilities: Vec::new(),
                     pool_ids: vec!["default".to_string()],
                     default_pool_member: true,

@@ -198,7 +198,8 @@ impl V3ManagedLifecycle {
                 PathBuf::from(home)
                     .join(".rcc")
                     .join("state")
-                    .join("v3-runtime")
+                    .join("runtime-lifecycle")
+                    .join("v3")
             }
         };
         Ok(Self {
@@ -1577,8 +1578,12 @@ fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> Result<(), V
         .filter(|provider| provider.enabled)
     {
         for entry in &provider.auth.entries {
-            match (&entry.env, &entry.token_file) {
-                (Some(name), None) => {
+            // Support three auth handle shapes:
+            // 1. env: read from environment variable (checked at runtime)
+            // 2. token_file: read from file (file must be non-empty)
+            // 3. api_key: inline literal (always valid, no runtime check needed)
+            match (&entry.env, &entry.token_file, &entry.api_key) {
+                (Some(name), None, None) => {
                     if std::env::var_os(name).is_none() {
                         return Err(V3LifecycleError::Validation(format!(
                             "provider {} auth {} environment handle {} is unavailable",
@@ -1586,7 +1591,7 @@ fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> Result<(), V
                         )));
                     }
                 }
-                (None, Some(path)) => {
+                (None, Some(path), None) => {
                     let mut file = File::open(path).map_err(|error| {
                         V3LifecycleError::Validation(format!(
                             "provider {} auth {} token-file handle is unreadable: {error}",
@@ -1601,9 +1606,19 @@ fn validate_auth_handles(manifest: &V3Config05ManifestPublished) -> Result<(), V
                         )));
                     }
                 }
+                // api_key: inline literal is always valid, no runtime check needed
+                (None, None, Some(_)) => {}
+                // Explicit empty entries are invalid
+                (None, None, None) => {
+                    return Err(V3LifecycleError::Validation(format!(
+                        "provider {} auth {} has no auth handle (env, token_file, or api_key)",
+                        provider.id, entry.alias
+                    )))
+                }
+                // Mixed handles are invalid
                 _ => {
                     return Err(V3LifecycleError::Validation(format!(
-                        "provider {} auth {} has invalid handle shape",
+                        "provider {} auth {} has invalid handle shape (mutually exclusive)",
                         provider.id, entry.alias
                     )))
                 }
@@ -2416,6 +2431,28 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         ));
         drop(first);
         acquire_operation_lock(&instance_dir, "third").unwrap();
+    }
+
+    #[test]
+    fn lifecycle_accepts_api_key_only_and_rejects_mixed_auth_handles() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let root = TempDir::new().unwrap();
+        let (config, executable, state) = fixture(&root);
+        let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+        let (_, mut manifest) = lifecycle.declaration(&executable).unwrap();
+        let entry = &mut manifest.providers.get_mut("test").unwrap().auth.entries[0];
+        entry.env = None;
+        entry.token_file = None;
+        entry.api_key = Some("inline-secret".to_string());
+        validate_auth_handles(&manifest).unwrap();
+
+        let entry = &mut manifest.providers.get_mut("test").unwrap().auth.entries[0];
+        entry.env = Some("V3_LIFECYCLE_TEST_KEY".to_string());
+        assert!(matches!(
+            validate_auth_handles(&manifest),
+            Err(V3LifecycleError::Validation(message))
+                if message.contains("invalid handle shape")
+        ));
     }
 
     #[test]

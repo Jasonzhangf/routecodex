@@ -9,6 +9,7 @@ const V3_HISTORICAL_TOOL_IMAGE_PLACEHOLDER_TEXT: &str = "[Image omitted]";
 pub enum V3ProviderAuthSecretHandle {
     Environment(String),
     TokenFile(String),
+    ApiKey(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

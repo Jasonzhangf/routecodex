@@ -4803,3 +4803,14 @@ Tags: #routecodex #5520 #10000 #gpt56-routing-removed #encrypted-reasoning
 - The only payload writer is Rust owner `v3.route_selected_provider_model_binding` / `selected_provider_model_binding.rs`, shared by Direct and Relay before Provider compatibility. Virtual Router selects opaque targets and never edits payload; Provider12 validates `body.model == target.wire_model` and must not silently overwrite.
 - Retry/reselection always binds from the new attempt's selected target. A mismatch is internal `provider_model_binding_mismatch`, not provider health/failure input.
 - Verified installed/live on 2026-07-27: old 5555 sample `652302-6819` dry-run emitted `glmrelay_openai` body `model=glm-5.2`; real sample `652291-6808` emitted per-provider models `glm-5.2`, `gpt-5.5`, and `MiniMax-M3` across eight attempts with no cross-attempt alias leak.
+
+## 2026-07-28 - rccv3 config.v3.toml coexistence and release-install source truth
+- `rccv3` default config path is `~/.rcc/config.v3.toml`. V2 `~/.rcc/config.toml` currently coexists and must not be used as the V3 default unless Jason explicitly approves a migration/cutover.
+- V2 provider `apiKey` compiled by V3 config compatibility remains a V3 `api_key` auth handle; it must not be materialized into `.routecodex-v3-secret-handles` or another token-file truth. Provider transport is the only place that resolves api_key/env/token_file into a bearer secret.
+- V3 lifecycle auth validation must accept exactly one of `env`, `token_file`, or `api_key`; api_key-only is valid, mixed handles are invalid.
+- `npm run install:release` builds from a clean committed source snapshot. If a fix is uncommitted, the installed `~/.rcc/install/current/dist/bin/rccv3` will not contain it even if local tests/builds pass. Commit first, then release install/restart/live verify.
+- When validating rccv3 lifecycle code after changes, force rebuild the V3 CLI/lifecycle crates (`cargo clean -p routecodex-v3-lifecycle -p routecodex-v3-cli` or equivalent package-scoped clean) before trusting `dist/bin/rccv3`; stale Cargo artifacts can mask lifecycle changes.
+
+## 2026-07-28 — V3 release health version truth
+- V3 `/health` keeps protocol/schema `version=3`; release/runtime semver must be exposed as `build_version` and release install verification must read `build_version` for V3, not reinterpret `version` as package semver.
+- `install:release` may successfully install/restart yet fail if its verifier is V2-only; fix verifier/schema truth, not the running server.

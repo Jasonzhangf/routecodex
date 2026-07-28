@@ -1,5 +1,33 @@
+use routecodex_v3_config::V3Config05ManifestPublished;
 use serde_json::Value;
 use std::sync::Arc;
+
+pub(crate) fn v3_stopless_center_enabled_for_server(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> bool {
+    v3_feature_enabled_for_server(manifest, server_id, "stopless_center")
+}
+
+pub(crate) fn v3_responses_direct_stopless_center_enabled_for_server(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> bool {
+    v3_feature_enabled_for_server(manifest, server_id, "responses_direct_stopless_center")
+}
+
+fn v3_feature_enabled_for_server(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    feature: &str,
+) -> bool {
+    let global_enabled = manifest.features.get(feature).copied().unwrap_or(false);
+    manifest
+        .servers
+        .get(server_id)
+        .and_then(|server| server.features.get(feature).copied())
+        .unwrap_or(global_enabled)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum V3HubEntryProtocol {
@@ -177,6 +205,8 @@ pub enum V3StoplessCenterStopKind {
     ReasoningBlocked,
     NonStopProgress,
 }
+
+const V3_STOPLESS_PROVIDER_CALL_ID: &str = "call_stopless_reasoning";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3StoplessCenterNextRequestPolicy {
@@ -359,6 +389,16 @@ impl V3StoplessCenterState {
 
     pub fn last_response_id(&self) -> Option<&str> {
         self.last_response_id.as_deref()
+    }
+
+    pub fn last_provider_stopless_call_id(&self) -> Option<&str> {
+        match self.last_stop_kind {
+            V3StoplessCenterStopKind::ReasoningContinue
+            | V3StoplessCenterStopKind::ReasoningNeedsEvidence => {
+                Some(V3_STOPLESS_PROVIDER_CALL_ID)
+            }
+            _ => None,
+        }
     }
 
     pub fn last_transition_reason(&self) -> Option<&str> {

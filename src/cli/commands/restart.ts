@@ -381,7 +381,7 @@ function nativeV3StateInstancesDir(ctx: RestartCommandContext): string {
   if (explicit) {
     return pathImpl.join(explicit, 'instances');
   }
-  return pathImpl.join(home(), '.rcc', 'state', 'v3-runtime', 'instances');
+  return pathImpl.join(home(), '.rcc', 'state', 'runtime-lifecycle', 'v3', 'instances');
 }
 
 function parseJsonFile(ctx: RestartCommandContext, filePath: string): any | null {
@@ -549,7 +549,7 @@ function buildNativeV3RestartMembers(
   return nativeV3.members.map((member) => ({
     port: member.port,
     host: explicitHost || member.host || LOCAL_HOSTS.LOCALHOST,
-    oldPids: normalizePids(ctx.findListeningPids(member.port))
+    oldPids: []
   }));
 }
 
@@ -687,6 +687,25 @@ async function resolveRestartTarget(ctx: RestartCommandContext, options: Restart
   const explicitHost = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : null;
 
   if (explicitPort) {
+    const explicitConfigPath = options.config ? resolveRouteCodexConfigPath(options.config) : undefined;
+    const nativeV3FromRegistry = ctx.isDevPackage
+      ? null
+      : resolveNativeV3RestartTargetFromRegistry(ctx, {
+          port: explicitPort,
+          configPath: explicitConfigPath
+        });
+    if (nativeV3FromRegistry) {
+      const nativeMembers = buildNativeV3RestartMembers(ctx, nativeV3FromRegistry, explicitHost)
+        .sort((a, b) => a.port - b.port);
+      const nativeLocator = nativeMembers.find((member) => member.port === explicitPort) || nativeMembers[0];
+      return {
+        host: nativeLocator.host,
+        port: nativeLocator.port,
+        oldPids: nativeLocator.oldPids,
+        members: nativeMembers,
+        nativeV3: nativeV3FromRegistry
+      };
+    }
     const grouped = ctx.isDevPackage
       ? null
       : resolvePortGroupFromConfig(ctx, {
@@ -708,7 +727,7 @@ async function resolveRestartTarget(ctx: RestartCommandContext, options: Restart
     if (!locator?.oldPids.length) {
       const nativeV3 = resolveNativeV3RestartTargetFromRegistry(ctx, {
         port: explicitPort,
-        configPath: options.config ? resolveRouteCodexConfigPath(options.config) : undefined
+        configPath: explicitConfigPath
       });
       if (nativeV3) {
         const nativeMembers = buildNativeV3RestartMembers(ctx, nativeV3, explicitHost)
@@ -750,7 +769,7 @@ async function resolveRestartTarget(ctx: RestartCommandContext, options: Restart
         nativeV3 = resolveNativeV3RestartTargetFromRegistry(ctx, {
           port: explicitPort,
           serverId: typeof resolved.probe.body.server_id === 'string' ? resolved.probe.body.server_id : undefined,
-          configPath: options.config ? resolveRouteCodexConfigPath(options.config) : undefined
+          configPath: explicitConfigPath
         });
         if (!nativeV3) {
           const serverId = typeof resolved.probe.body.server_id === 'string'
@@ -985,6 +1004,46 @@ async function waitForRestart(ctx: RestartCommandContext, target: RestartTarget)
   );
 }
 
+async function waitForNativeV3RestartHealth(ctx: RestartCommandContext, target: RestartTarget): Promise<void> {
+  const deadline = Date.now() + resolveRestartWaitMs(ctx);
+  while (Date.now() < deadline) {
+    let allHealthy = true;
+    for (const member of target.members) {
+      const resolved = await resolveMemberProbeHost(ctx, member);
+      member.host = resolved.host;
+      if (!isAggregateMemberReady(resolved.probe)) {
+        allHealthy = false;
+        if (resolved.probe?.ok) {
+          ctx.logger.info(
+            `[restart] wait_native_v3_restart.not_ready host=${resolved.host} port=${member.port} `
+            + `ready=${String(resolved.probe.body.ready)} pipelineReady=${String(resolved.probe.body.pipelineReady)}`
+          );
+        } else if (resolved.probe?.kind !== 'starting') {
+          logRestartHealthProbeNonBlocking(
+            ctx,
+            'wait_native_v3_restart.health_probe',
+            resolved.probe || { ok: false, kind: 'network_error' },
+            {
+              host: resolved.host,
+              port: member.port,
+              kind: resolved.probe?.kind
+            }
+          );
+        }
+        break;
+      }
+    }
+    if (allHealthy) {
+      return;
+    }
+    await ctx.sleep(250);
+  }
+  throw new Error(
+    `Timeout waiting for native V3 aggregate server health: `
+    + target.members.map(formatRestartMember).join(', ')
+  );
+}
+
 function requestInPlaceRestart(ctx: RestartCommandContext, target: RestartTarget): void {
   const pids = Array.isArray(target.oldPids) ? target.oldPids : [];
   let signaled = 0;
@@ -1077,7 +1136,11 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
         }
 
         spinner.text = 'Waiting for aggregate server members to become healthy...';
-        await waitForRestart(ctx, target);
+        if (transport === 'native_v3') {
+          await waitForNativeV3RestartHealth(ctx, target);
+        } else {
+          await waitForRestart(ctx, target);
+        }
 
         const members = target.members.map(formatRestartMember).join(', ');
         spinner.succeed(`Aggregate RouteCodex server restarted: ${members}`);

@@ -1457,6 +1457,7 @@ async fn resolve_secret(
                 auth_alias: auth.alias.clone(),
                 reason: error.to_string(),
             })?,
+        V3ProviderAuthSecretHandle::ApiKey(value) => expand_env_vars(value),
     };
     let secret = secret.trim().to_string();
     if secret.is_empty() {
@@ -1467,6 +1468,40 @@ async fn resolve_secret(
         });
     }
     Ok(secret)
+}
+
+fn expand_env_vars(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut result = String::with_capacity(input.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+            let mut j = i + 2;
+            while j < bytes.len() && bytes[j] != b'}' {
+                j += 1;
+            }
+            if j < bytes.len() {
+                let inner = &input[i + 2..j];
+                let (var_name, default_val) = if let Some(dash_pos) = inner.find(":-") {
+                    (&inner[..dash_pos], Some(&inner[dash_pos + 2..]))
+                } else {
+                    (inner, None)
+                };
+                let env_val = std::env::var(var_name).ok().unwrap_or_default();
+                let replacement = if env_val.is_empty() {
+                    default_val.unwrap_or("")
+                } else {
+                    &env_val
+                };
+                result.push_str(replacement);
+                i = j + 1;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
 }
 
 #[cfg(test)]

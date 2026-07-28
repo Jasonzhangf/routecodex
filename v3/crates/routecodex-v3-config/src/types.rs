@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Config01FileSource {
@@ -520,14 +521,27 @@ pub enum V3ProviderAuthType {
     TokenFile,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderAuthEntryAuthoringConfig {
     pub alias: String,
     #[serde(default)]
     pub env: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "tokenFile")]
     pub token_file: Option<String>,
+    #[serde(default, alias = "apiKey")]
+    pub api_key: Option<String>,
+}
+
+impl fmt::Debug for V3ProviderAuthEntryAuthoringConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("V3ProviderAuthEntryAuthoringConfig")
+            .field("alias", &self.alias)
+            .field("env", &self.env)
+            .field("token_file", &self.token_file)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -916,11 +930,23 @@ pub struct V3ProviderAuthManifest {
     pub entries: Vec<V3ProviderAuthEntryManifest>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct V3ProviderAuthEntryManifest {
     pub alias: String,
     pub env: Option<String>,
     pub token_file: Option<String>,
+    pub api_key: Option<String>,
+}
+
+impl fmt::Debug for V3ProviderAuthEntryManifest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("V3ProviderAuthEntryManifest")
+            .field("alias", &self.alias)
+            .field("env", &self.env)
+            .field("token_file", &self.token_file)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

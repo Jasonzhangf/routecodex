@@ -1105,6 +1105,7 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             .unwrap();
         assert_eq!(health["server_id"], listener.server_id);
         assert_eq!(health["manifest_version"], 3);
+        assert_eq!(health["build_version"], env!("CARGO_PKG_VERSION"));
         let invalid_gemini = client
             .post(format!(
                 "http://{}/v1beta/models/test/generateContent",

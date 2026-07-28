@@ -7,6 +7,8 @@ import { resolveServerPidCachePath } from './server-runtime-pid.js';
 // feature_id: runtime.lifecycle.restart_command
 type SpawnSyncLike = typeof nodeSpawnSync;
 
+const LISTENER_DISCOVERY_TIMEOUT_MS = 1500;
+
 export type ManagedZombieProcess = {
   pid: number;
   ppid: number;
@@ -100,7 +102,7 @@ function listListeningPidsByPort(port: number, spawnSyncImpl: SpawnSyncLike): nu
     const result = spawnSyncImpl(
       'lsof',
       ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'],
-      { encoding: 'utf8' }
+      { encoding: 'utf8', timeout: LISTENER_DISCOVERY_TIMEOUT_MS }
     );
     if (result.error || Number(result.status ?? 0) !== 0) {
       return [];
@@ -140,7 +142,7 @@ export function listListeningPortsByPid(
     const result = spawnSyncImpl(
       'lsof',
       ['-nP', '-Pan', '-p', String(pid), '-iTCP', '-sTCP:LISTEN'],
-      { encoding: 'utf8' }
+      { encoding: 'utf8', timeout: LISTENER_DISCOVERY_TIMEOUT_MS }
     );
     if (result.error || Number(result.status ?? 0) !== 0) {
       return [];

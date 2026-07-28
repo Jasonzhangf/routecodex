@@ -3,6 +3,11 @@ pub(crate) use crate::{
 };
 
 mod common;
+pub(crate) use common::{
+    v3_responses_direct_stopless_center_enabled_for_server, v3_stopless_center_enabled_for_server,
+    V3HubOpaquePayload, V3HubRelayCanonicalResponseContext, V3HubResponsePayload,
+    V3HubResponseToolCall,
+};
 pub use common::{
     V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode,
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayToolKind,
@@ -11,10 +16,6 @@ pub use common::{
     V3ProviderCompatError, V3ProviderCompatProfileId, V3StoplessCenterNextRequestPolicy,
     V3StoplessCenterPhase, V3StoplessCenterState, V3StoplessCenterSteering,
     V3StoplessCenterStopKind,
-};
-pub(crate) use common::{
-    V3HubOpaquePayload, V3HubRelayCanonicalResponseContext, V3HubResponsePayload,
-    V3HubResponseToolCall,
 };
 
 mod side_channel;

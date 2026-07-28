@@ -1103,6 +1103,7 @@ pub struct V3TargetCandidate {
     pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
+    pub api_key: Option<String>,
     pub required_capabilities: Vec<String>,
     pub pool_ids: Vec<String>,
     pub default_pool_member: bool,
@@ -1439,18 +1440,9 @@ impl V3TargetInterpreter {
             .get(forwarder_id)
             .filter(|forwarder| forwarder.enabled)
             .ok_or_else(|| V3TargetError::ForwarderMissing(forwarder_id.to_string()))?;
-        if scope.visible_model_ids.is_empty() {
-            scope.visible_model_ids =
-                normalized_model_visible_ids(&forwarder.model, &forwarder.aliases, None);
-        }
-        if !requested_model_matches_visible_ids(
-            scope.requested_model_filter.as_deref(),
-            &scope.visible_model_ids,
-        ) {
-            return Err(requested_model_unavailable_error(
-                scope.requested_model_filter.as_deref(),
-            ));
-        }
+        // Forwarder layer: do NOT check requested_model here. Forwarder.model is just
+        // an abstract routing hint; the actual wire model is determined by nested provider
+        // targets. Model validation must only happen at the provider layer after expansion.
         let order = self.policy_order(
             &forwarder.selection.strategy,
             &forwarder.targets,
@@ -1567,6 +1559,7 @@ impl V3TargetInterpreter {
                 compatibility_profile: provider.compatibility_profile.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
+                api_key: entry.api_key.clone(),
                 required_capabilities: scope.required_capabilities.clone(),
                 pool_ids: scope.pool_ids.clone(),
                 default_pool_member: scope.default_pool_member,

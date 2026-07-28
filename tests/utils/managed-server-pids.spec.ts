@@ -111,6 +111,7 @@ describe('managed server pid discovery', () => {
   it('listManagedServerPidsByPort falls back to listening pid when pid file is stale', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-fallback-'));
     fs.writeFileSync(path.join(home, 'server-5520.pid'), '99999', 'utf8');
+    const lsofOptions: unknown[] = [];
 
     const pids = listManagedServerPidsByPort(5520, {
       routeCodexHomeDir: home,
@@ -120,8 +121,9 @@ describe('managed server pid discovery', () => {
         }
         throw new Error('unexpected processKill call');
       }) as any,
-      spawnSyncImpl: ((cmd: string, args?: string[]) => {
+      spawnSyncImpl: ((cmd: string, args?: string[], options?: unknown) => {
         if (cmd === 'lsof') {
+          lsofOptions.push(options);
           return {
             stdout: '22222\n',
             status: 0,
@@ -144,6 +146,7 @@ describe('managed server pid discovery', () => {
     });
 
     expect(pids).toEqual([22222]);
+    expect(lsofOptions).toEqual([expect.objectContaining({ timeout: 1500 })]);
   });
 
   it('listManagedServerPidsByPort accepts snapshot pid from pid file', () => {

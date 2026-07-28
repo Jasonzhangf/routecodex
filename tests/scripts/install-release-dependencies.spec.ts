@@ -21,6 +21,14 @@ describe('install-release dependency installation', () => {
     expect(releaseScript).not.toContain('install-release.runtime-version-adoption');
   });
 
+
+  it('accepts V3 health build_version while preserving V2 health version verification', () => {
+    expect(releaseScript).toContain("body.version===expected");
+    expect(releaseScript).toContain("body.manifest_version===3&&body.build_version===expected");
+    expect(releaseScript).toContain("v2Ready&&body.version!==expected");
+    expect(releaseScript).toContain("v3Ready&&body.build_version!==expected");
+  });
+
   it('uses one aggregate restart located by verify port and no-restart start only when stopped', () => {
     expect(releaseScript).toContain('restart_release_runtime_for_aggregate');
     expect(releaseScript).not.toContain('restart_release_runtime_for_port');

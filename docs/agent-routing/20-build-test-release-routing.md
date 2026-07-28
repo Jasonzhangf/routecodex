@@ -36,5 +36,6 @@
 
 ## 发布边界
 - CLI release 统一走 `npm run install:release`（隔离构建 + release snapshot 安装 + restart/health smoke）。
+- `install:release` 消费提交后的干净源码快照；未提交改动不会进入 `~/.rcc/install/current`。V3 lifecycle/CLI 改动必须先 commit，再 release install + live verify。
 - release 运行时真源是 `~/.rcc/install/current`；dev `install:global` 仍是独立语义。
 - 不提交构建产物（`dist/`、tarball）。

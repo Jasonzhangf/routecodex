@@ -787,7 +787,7 @@ describe('cli restart command', () => {
         }) as any,
         fsImpl: {
           existsSync: (target: string) => (
-            String(target).includes('/state/v3-runtime')
+            String(target).includes('/state/runtime-lifecycle/v3')
             || String(target).endsWith('/instance.json')
             || String(target).endsWith('/status.json')
             || String(target) === '/tmp/config.v3.toml'
@@ -955,7 +955,7 @@ describe('cli restart command', () => {
         }) as any,
         fsImpl: {
           existsSync: (target: string) => (
-            String(target).includes('/state/v3-runtime')
+            String(target).includes('/state/runtime-lifecycle/v3')
             || String(target).endsWith('/instance.json')
             || String(target).endsWith('/status.json')
             || String(target) === '/tmp/config.v3.toml'

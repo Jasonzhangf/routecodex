@@ -839,15 +839,12 @@ fn compile_auth(
                 entry.alias
             )));
         }
-        if entry.env.is_none() && entry.token_file.is_none() {
+        let handle_count = usize::from(entry.env.is_some())
+            + usize::from(entry.token_file.is_some())
+            + usize::from(entry.api_key.is_some());
+        if handle_count != 1 {
             return Err(validation(format!(
-                "provider {provider_id} auth {} needs env or token_file",
-                entry.alias
-            )));
-        }
-        if entry.env.is_some() && entry.token_file.is_some() {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} cannot define both env and token_file",
+                "provider {provider_id} auth {} must define exactly one of env, token_file, or api_key",
                 entry.alias
             )));
         }
@@ -869,10 +866,21 @@ fn compile_auth(
                 entry.alias
             )));
         }
+        if entry
+            .api_key
+            .as_deref()
+            .is_some_and(|secret| secret.trim().is_empty())
+        {
+            return Err(validation(format!(
+                "provider {provider_id} auth {} api_key cannot be empty",
+                entry.alias
+            )));
+        }
         entries.push(V3ProviderAuthEntryManifest {
             alias: entry.alias,
             env: entry.env,
             token_file: entry.token_file,
+            api_key: entry.api_key,
         });
     }
     Ok(V3ProviderAuthManifest {

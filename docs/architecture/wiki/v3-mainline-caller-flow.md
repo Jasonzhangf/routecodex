@@ -1626,7 +1626,7 @@ Manifest: `docs/architecture/manifests/v3.selected_provider_model_binding.mainli
 ```mermaid
 flowchart TD
   subgraph c_37_v3_selected_provider_model_binding_m_llmswitch_core["llmswitch-core"]
-    c_37_v3_selected_provider_model_binding_5["llmswitch-core<br/>run_req_outbound_stage3_compat<br/><small>llmswitch-core/rust-core/crates/provider-compat-core/src/req_outbound_stage3_compat.rs</small>"]
+    c_37_v3_selected_provider_model_binding_5["llmswitch-core<br/>run_req_outbound_stage3_compat<br/><small>llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs</small>"]
   end
   subgraph c_37_v3_selected_provider_model_binding_m_v3_provider_responses["v3-provider-responses"]
     c_37_v3_selected_provider_model_binding_2["v3-provider-responses<br/>build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small>"]
@@ -1650,4 +1650,4 @@ flowchart TD
 | `v3-model-bind-01` | `V3Target10ConcreteProviderSelected` → `V3SelectedProviderModelBindingBlock` | anchored | responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | bind_v3_selected_provider_model<br/><small>routecodex-v3-runtime/src/selected_provider_model_binding.rs</small> | `v3.route_selected_provider_model_binding` |
 | `v3-model-bind-02` | `V3SelectedProviderModelBindingBlock` → `V3Provider12ResponsesWirePayload` | anchored | responses_direct_request_projection_hook<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small> | `v3.route_selected_provider_model_binding` |
 | `v3-model-bind-03` | `V3HubReqOutbound07ProviderSemantic` → `V3SelectedProviderModelBindingBlock` | anchored | build_v3_provider_standard_protocol_payload_from_req07<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | bind_v3_selected_provider_model<br/><small>routecodex-v3-runtime/src/selected_provider_model_binding.rs</small> | `v3.route_selected_provider_model_binding` |
-| `v3-model-bind-04` | `V3SelectedProviderModelBindingBlock` → `ProviderReqCompat06ProviderCompat` | anchored | apply_v3_provider_req_compat<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | run_req_outbound_stage3_compat<br/><small>llmswitch-core/rust-core/crates/provider-compat-core/src/req_outbound_stage3_compat.rs</small> | `v3.route_selected_provider_model_binding` |
+| `v3-model-bind-04` | `V3SelectedProviderModelBindingBlock` → `ProviderReqCompat06ProviderCompat` | anchored | apply_v3_provider_req_compat<br/><small>routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs</small> | run_req_outbound_stage3_compat<br/><small>llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs</small> | `v3.route_selected_provider_model_binding` |
