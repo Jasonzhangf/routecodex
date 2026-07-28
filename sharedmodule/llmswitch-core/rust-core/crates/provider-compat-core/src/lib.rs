@@ -246,6 +246,23 @@ pub fn run_resp_inbound_stage3_compat(
         return Ok(build_compat_result(input.payload, None));
     }
 
+    if is_cc_profile(profile_id) {
+        if provider_protocol_matches(
+            input.adapter_context.provider_protocol.as_ref(),
+            "openai-responses",
+        ) || provider_protocol_matches(
+            input.adapter_context.provider_protocol.as_ref(),
+            "openai-chat",
+        ) {
+            return Ok(CompatResult {
+                payload: apply_cc_response_compat(input.payload),
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
+        return Ok(build_compat_result(input.payload, None));
+    }
+
     Ok(build_compat_result(input.payload, None))
 }
 
@@ -301,6 +318,10 @@ fn is_gemini_profile(profile: &str) -> bool {
 
 fn is_glm_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:glm")
+}
+
+fn is_cc_profile(profile: &str) -> bool {
+    profile_matches(profile, "responses:cc")
 }
 
 fn is_single_tool_call_history_profile(profile: &str) -> bool {
@@ -1486,6 +1507,59 @@ fn harvest_text_tool_calls(payload: Value) -> Result<Value, String> {
     Ok(payload)
 }
 
+const CC_DIAGNOSTIC_ROUTING_MARKER: &str = "检测到请求较复杂已自动路由到硬推理模型";
+const CC_DIAGNOSTIC_TEMPLATE_MARKERS: [&str; 3] = [
+    "Noticing frequent 'deadlock detected' messages in the logs",
+    "Following the state machine, an order transitions CREATED then PAID then SHIPPED then",
+    "Verifying config.v3.toml provider configurationPlanning removal of inline provider",
+];
+
+fn apply_cc_response_compat(payload: Value) -> Value {
+    if !cc_payload_contains_diagnostic_text(&payload) {
+        return payload;
+    }
+    let id = payload
+        .as_object()
+        .and_then(|root| root.get("id"))
+        .cloned()
+        .unwrap_or_else(|| Value::String("resp_cc_reasoning_stop_noop".to_string()));
+    json!({
+        "id": id,
+        "status": "completed",
+        "finish_reason": "stop",
+        "output": []
+    })
+}
+
+fn cc_payload_contains_diagnostic_text(value: &Value) -> bool {
+    let mut text = String::new();
+    collect_cc_response_text(value, &mut text);
+    text.contains(CC_DIAGNOSTIC_ROUTING_MARKER)
+        || CC_DIAGNOSTIC_TEMPLATE_MARKERS
+            .iter()
+            .all(|marker| text.contains(marker))
+}
+
+fn collect_cc_response_text(value: &Value, text: &mut String) {
+    match value {
+        Value::String(value) => {
+            text.push_str(value);
+            text.push('\n');
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_cc_response_text(item, text);
+            }
+        }
+        Value::Object(object) => {
+            for value in object.values() {
+                collect_cc_response_text(value, text);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn apply_glm_response_compat(payload: Value) -> Value {
     let Some(root) = payload.as_object() else {
         return payload;
@@ -1616,6 +1690,104 @@ mod tests {
                 .unwrap_or(""),
             "{\"cmd\":\"pwd\"}"
         );
+    }
+
+    #[test]
+    fn cc_response_profile_projects_known_diagnostic_text_to_empty_natural_stop() {
+        let diagnostic = "检测到请求较复杂已自动路由到硬推理模型\nNoticing frequent 'deadlock detected' messages in the logs\nVerifying config.v3.toml provider configurationPlanning removal of inline provider";
+        let input = ReqOutboundCompatInput {
+            payload: json!({
+                "object": "response",
+                "id": "resp_cc_diagnostic_1",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": diagnostic}]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("responses:cc".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let result = run_resp_inbound_stage3_compat(input).unwrap();
+        assert_eq!(result.applied_profile.as_deref(), Some("responses:cc"));
+        assert_eq!(result.payload["status"], "completed");
+        assert_eq!(result.payload["finish_reason"], "stop");
+        assert!(result.payload["output"].as_array().unwrap().is_empty());
+        let serialized = serde_json::to_string(&result.payload).unwrap();
+        assert!(!serialized.contains("deadlock detected"));
+        assert!(!serialized.contains("Verifying config.v3.toml"));
+    }
+
+    #[test]
+    fn cc_response_profile_preserves_normal_text_and_passthrough_profile_preserves_diagnostic() {
+        let normal = ReqOutboundCompatInput {
+            payload: json!({
+                "object": "response",
+                "id": "resp_cc_normal_1",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "normal answer"}]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("responses:cc".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let normal_result = run_resp_inbound_stage3_compat(normal).unwrap();
+        assert_eq!(normal_result.payload["output"][0]["type"], "message");
+        assert_eq!(
+            normal_result.payload["output"][0]["content"][0]["text"],
+            "normal answer"
+        );
+
+        let near_match = ReqOutboundCompatInput {
+            payload: json!({
+                "object": "response",
+                "id": "resp_cc_near_match_1",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Noticing frequent 'deadlock detected' messages in the logs"}]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("responses:cc".to_string()),
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let near_match_result = run_resp_inbound_stage3_compat(near_match).unwrap();
+        assert_eq!(near_match_result.payload["output"][0]["type"], "message");
+
+        let passthrough = ReqOutboundCompatInput {
+            payload: json!({
+                "object": "response",
+                "id": "resp_passthrough_diagnostic_1",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Noticing frequent 'deadlock detected' messages in the logs"}]
+                }]
+            }),
+            adapter_context: AdapterContext {
+                compatibility_profile: None,
+                provider_protocol: Some("openai-responses".to_string()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        let passthrough_result = run_resp_inbound_stage3_compat(passthrough).unwrap();
+        assert_eq!(passthrough_result.applied_profile, None);
+        assert_eq!(passthrough_result.payload["output"][0]["type"], "message");
     }
 
     #[test]

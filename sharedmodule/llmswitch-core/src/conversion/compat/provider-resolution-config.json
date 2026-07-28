@@ -14,6 +14,8 @@
   },
   "defaultOutboundProfile": "openai-chat",
   "compatibilityProfileBlocks": [
+    { "providerId": "cc", "compatibilityProfile": "responses:cc" },
+    { "providerId": "cc-sol", "compatibilityProfile": "responses:cc" },
     { "providerId": "lmstudio", "compatibilityProfile": "responses:lmstudio" },
     { "providerId": "minimax", "compatibilityProfile": "chat:minimax" },
     { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" }
