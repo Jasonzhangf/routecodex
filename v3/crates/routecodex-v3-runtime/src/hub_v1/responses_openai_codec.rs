@@ -836,15 +836,28 @@ fn read_v3_trimmed_owned(text: &str) -> Option<String> {
 }
 
 fn convert_v3_responses_image_part_to_openai_chat_part(part: &Map<String, Value>) -> Value {
-    if part.get("type").and_then(Value::as_str) == Some("image_url") {
-        return Value::Object(part.clone());
-    }
-    let image_url = part
+    let image_url = normalize_v3_responses_image_url_for_openai_chat(part);
+    json!({"type":"image_url","image_url":image_url})
+}
+
+fn normalize_v3_responses_image_url_for_openai_chat(part: &Map<String, Value>) -> Value {
+    let source = part
         .get("image_url")
         .cloned()
         .or_else(|| part.get("url").cloned())
         .unwrap_or(Value::Null);
-    json!({"type":"image_url","image_url":image_url})
+
+    let mut image_url = match source {
+        Value::Object(object) => object,
+        Value::String(url) => Map::from_iter([("url".to_string(), Value::String(url))]),
+        other => Map::from_iter([("url".to_string(), other)]),
+    };
+
+    if let Some(detail) = part.get("detail").cloned() {
+        image_url.entry("detail".to_string()).or_insert(detail);
+    }
+
+    Value::Object(image_url)
 }
 
 fn v3_openai_chat_wire_role(role: &str) -> &str {
@@ -865,6 +878,31 @@ fn read_v3_non_empty_str(value: Option<&Value>) -> Option<&str> {
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+
+    #[test]
+    fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,AAAA",
+                    "detail": "high"
+                }]
+            }]
+        }))
+        .expect("Responses image_url must project to OpenAI Chat image_url.url");
+
+        let image_part = &request["messages"][0]["content"][0];
+        assert_eq!(image_part["type"], json!("image_url"));
+        assert_eq!(
+            image_part["image_url"],
+            json!({"url":"data:image/png;base64,AAAA","detail":"high"}),
+            "OpenAI Chat provider wire must not emit bare string image_url: {request}"
+        );
+    }
 
     #[test]
     fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id() {
