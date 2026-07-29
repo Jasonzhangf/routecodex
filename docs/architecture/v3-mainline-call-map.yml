@@ -55,6 +55,8 @@ chains:
         callee_symbol: build_v3_config_04_resource_registry_from_v3_config_03
         callee_file: v3/crates/routecodex-v3-config/src/lib.rs
         owner_feature_id: v3.config_interpreter_contract
+        semantic_input: "schema-validated authoring with optional global stopless_center and explicit per-server feature overrides"
+        semantic_output: "resource registry with omitted global stopless_center deterministically materialized as true while explicit global and server overrides remain unchanged"
         resource_flow:
           consumes: [v3.config.schema_validated]
           produces: [v3.config.resource_registry, v3.config.hub_pipeline_declarations, v3.hub.runtime_resource_declarations, v3.config.route_pool_match_declarations, v3.provider_error.policy_manifest]

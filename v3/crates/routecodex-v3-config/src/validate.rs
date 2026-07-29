@@ -38,6 +38,11 @@ pub(crate) fn build_resource_registry(
         return Err(validation("at least one enabled server is required"));
     }
 
+    let mut features = authoring.features;
+    features
+        .entry("stopless_center".to_string())
+        .or_insert(true);
+
     Ok(V3Config04ResourceRegistryBuilt {
         version: authoring.version,
         hub_v1,
@@ -45,7 +50,7 @@ pub(crate) fn build_resource_registry(
         providers,
         forwarders,
         route_groups,
-        features: authoring.features,
+        features,
         debug: compile_debug(authoring.debug)?,
         error: compile_error(authoring.error, provider_error_action_policies)?,
     })

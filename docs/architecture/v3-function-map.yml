@@ -176,6 +176,8 @@ features:
       - npm run verify:v3-rust-only
       - npm run test:v3-workspace
       - git diff --check
+    notes:
+      - "Config04 is the sole owner that materializes omitted global stopless_center as true before Config05 publication; explicit global and per-server values remain authoritative."
     runtime_status: owner_queryability_bound_to_existing_config_contract_source
 
   - feature_id: v3.foundation_p0_p2

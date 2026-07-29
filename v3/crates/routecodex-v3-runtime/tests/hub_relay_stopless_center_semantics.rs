@@ -7,11 +7,14 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_runtime::{
     build_v3_hub_req_inbound_01_client_raw, build_v3_provider_resp_inbound_01_raw,
     compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks,
-    execute_v3_responses_relay_runtime, V3HubContinuationLookup, V3HubContinuationOwnership,
-    V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
-    V3HubProviderWireProtocol, V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile,
-    V3HubServertoolRequestProfile, V3HubTransportIntent, V3ResponsesRelayClientBody,
-    V3ResponsesRelayRuntimeInput, V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase,
+    execute_v3_responses_relay_runtime,
+    execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control,
+    V3HubContinuationLookup, V3HubContinuationOwnership, V3HubContinuationScope,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
+    V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubServertoolRequestProfile,
+    V3HubTransportIntent, V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle,
+    V3ResponsesRelayRuntimeInput, V3ResponsesRelayStoplessControlScope,
+    V3ResponsesRelayStoplessControlState, V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase,
     V3StoplessCenterState, V3StoplessCenterSteering, V3StoplessCenterStopKind,
 };
 use serde_json::{json, Value};
@@ -1018,6 +1021,46 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "respons
     .unwrap()
 }
 
+fn manifest_without_stopless_center() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.controlled]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "controlled"
+endpoints = ["responses"]
+[providers.controlled]
+type = "responses"
+base_url = "http://controlled.invalid/v1"
+default_model = "responses-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+[providers.controlled.models.responses-wire-model]
+wire_name = "responses-wire-model"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+"#
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn valid_stopless_control_scope() -> V3ResponsesRelayStoplessControlScope {
+    V3ResponsesRelayStoplessControlScope::new(
+        "/v1/responses",
+        "session-stopless-default",
+        "conversation-stopless-default",
+        5555,
+        "controlled",
+    )
+}
+
 #[tokio::test]
 async fn feature_toggle_false_disables_relay_stopless_injection_and_projection() {
     let manifest = manifest_with_stopless_center(false);
@@ -1067,4 +1110,243 @@ async fn feature_toggle_false_disables_relay_stopless_injection_and_projection()
             "feature disabled must not inject relay stopless marker {forbidden}: {serialized}"
         );
     }
+}
+
+#[tokio::test]
+async fn omitted_stopless_center_compiles_true_and_injects_guidance_and_projects_noop() {
+    let manifest = manifest_without_stopless_center();
+    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let transport = CaptureJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_omitted_stopless",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"omitted feature natural stop should project no-op"}]
+            }]
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".to_string(),
+            request_id: "req-omitted-stopless".to_string(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "input":[{"role":"user","content":"omitted stopless center"}],
+                "tools":[{"type":"function","name":"exec","description":"original tool"}]
+            }),
+        },
+        &transport,
+        &provider_health,
+        &stopless_control,
+        valid_stopless_control_scope(),
+    )
+    .await
+    .unwrap();
+
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("omitted stopless test expects JSON body");
+    };
+    assert_eq!(
+        body["status"], "requires_action",
+        "omitted feature default true must project stopless no-op: {body}"
+    );
+    let provider_body = transport.captures.lock().unwrap().first().unwrap().clone();
+    let serialized = serde_json::to_string(&provider_body).unwrap();
+    let stopless_tool_count = provider_body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
+        .count();
+    assert_eq!(
+        stopless_tool_count, 1,
+        "omitted feature default true must inject exactly one reasoningStop tool: {provider_body}"
+    );
+    assert!(
+        serialized.contains("reasoningStop"),
+        "omitted feature default true must inject stopless reasoningStop tool: {serialized}"
+    );
+    assert!(
+        serialized.contains("当前轮推进准则"),
+        "omitted feature default true must inject stopless guidance: {serialized}"
+    );
+    assert_eq!(stopless_cmd(&body), "routecodex hook run reasoningStop");
+}
+
+#[tokio::test]
+async fn omitted_stopless_center_without_control_scope_stays_inactive() {
+    let manifest = manifest_without_stopless_center();
+    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
+    let transport = CaptureJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_omitted_stopless_without_scope",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"missing control scope must pass through"}]
+            }]
+        }),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".to_string(),
+            request_id: "req-omitted-stopless-without-scope".to_string(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "input":[{"role":"user","content":"no client session scope"}],
+                "tools":[{"type":"function","name":"exec","description":"original tool"}]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("missing control scope test expects JSON body");
+    };
+    assert_eq!(
+        body["status"], "completed",
+        "compiled default true must not activate StoplessCenter without an explicit client session scope: {body}"
+    );
+    let client_body = serde_json::to_string(&body).unwrap();
+    assert!(client_body.contains("missing control scope must pass through"));
+    for forbidden in [
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !client_body.contains(forbidden),
+            "missing control scope must not project stopless artifact {forbidden}: {client_body}"
+        );
+    }
+    let provider_body = transport.captures.lock().unwrap().first().unwrap().clone();
+    let provider_request = serde_json::to_string(&provider_body).unwrap();
+    for forbidden in ["reasoningStop", "当前轮推进准则"] {
+        assert!(
+            !provider_request.contains(forbidden),
+            "missing control scope must not inject stopless provider guidance/tool {forbidden}: {provider_request}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn server_override_precedence_applies_after_compiled_global_default() {
+    let mut server_disabled_manifest = manifest_without_stopless_center();
+    server_disabled_manifest
+        .servers
+        .get_mut("controlled")
+        .unwrap()
+        .features
+        .insert("stopless_center".to_string(), false);
+    let disabled_transport = CaptureJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_server_stopless_disabled",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"output_text","text":"server override disabled"}]
+        }),
+    };
+    let disabled_provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest(&server_disabled_manifest);
+    let disabled_stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let disabled_scope = valid_stopless_control_scope();
+    let disabled_output =
+        execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+            &server_disabled_manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".to_string(),
+                request_id: "req-server-stopless-disabled".to_string(),
+                payload: json!({
+                    "model":"gpt-5.5",
+                    "input":[{"role":"user","content":"server override false"}]
+                }),
+            },
+            &disabled_transport,
+            &disabled_provider_health,
+            &disabled_stopless_control,
+            disabled_scope.clone(),
+        )
+        .await
+        .unwrap();
+    let V3ResponsesRelayClientBody::Json(disabled_body) = disabled_output.client_body else {
+        panic!("server-disabled stopless test expects JSON body");
+    };
+    assert_eq!(disabled_body["status"], "completed");
+    assert!(
+        !serde_json::to_string(disabled_transport.captures.lock().unwrap().first().unwrap())
+            .unwrap()
+            .contains("reasoningStop")
+    );
+    assert!(
+        disabled_stopless_control
+            .load_for_scope(&disabled_scope)
+            .unwrap()
+            .is_none(),
+        "server override false must prevent StoplessCenter control writes even with valid scope"
+    );
+
+    let mut server_enabled_manifest = manifest_with_stopless_center(false);
+    server_enabled_manifest
+        .servers
+        .get_mut("controlled")
+        .unwrap()
+        .features
+        .insert("stopless_center".to_string(), true);
+    let enabled_provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest(&server_enabled_manifest);
+    let enabled_stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let enabled_transport = CaptureJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_server_stopless_enabled",
+            "object":"response",
+            "status":"completed",
+            "finish_reason":"stop",
+            "output":[{"type":"output_text","text":"server override enabled"}]
+        }),
+    };
+    let enabled_output =
+        execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+            &server_enabled_manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".to_string(),
+                request_id: "req-server-stopless-enabled".to_string(),
+                payload: json!({
+                    "model":"gpt-5.5",
+                    "input":[{"role":"user","content":"server override true"}]
+                }),
+            },
+            &enabled_transport,
+            &enabled_provider_health,
+            &enabled_stopless_control,
+            valid_stopless_control_scope(),
+        )
+        .await
+        .unwrap();
+    let V3ResponsesRelayClientBody::Json(enabled_body) = enabled_output.client_body else {
+        panic!("server-enabled stopless test expects JSON body");
+    };
+    assert_eq!(enabled_body["status"], "requires_action");
+    assert!(
+        serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap())
+            .unwrap()
+            .contains("reasoningStop")
+    );
 }

@@ -1364,7 +1364,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let stopless_control_has_client_session_scope = stopless_control
         .as_ref()
         .map(|execution| execution.scope.has_client_session_scope())
-        .unwrap_or(true);
+        .unwrap_or(false);
     let mut trace = Vec::with_capacity(17);
     let client_response_transport_intent =
         v3_responses_relay_transport_intent_from_stream_field(&input.payload);
