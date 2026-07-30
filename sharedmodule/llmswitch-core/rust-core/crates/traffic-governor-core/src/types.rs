@@ -20,6 +20,7 @@ pub struct AcquireContext {
     pub stale_lease_ms: Option<u64>,
     pub requests_per_minute: Option<u32>,
     pub rpm_timeout_ms: Option<u64>,
+    pub rpm_window_ms: Option<u64>,
 }
 
 impl AcquireContext {
@@ -34,6 +35,7 @@ impl AcquireContext {
             stale_lease_ms: None,
             requests_per_minute: None,
             rpm_timeout_ms: None,
+            rpm_window_ms: None,
         }
     }
 }
@@ -180,20 +182,39 @@ pub struct OutcomeEvent {
 // Errors
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrafficAdmissionLane {
+    Concurrency,
+    Rpm,
+}
+
+impl std::fmt::Display for TrafficAdmissionLane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Concurrency => f.write_str("concurrency"),
+            Self::Rpm => f.write_str("rpm"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficAdmissionBackpressure {
+    pub code: String,
+    pub lane: TrafficAdmissionLane,
+    pub runtime_key: String,
+    pub state_key: String,
+    pub timeout_ms: u64,
+    pub waited_ms: u64,
+    pub current: u64,
+    pub limit: u64,
+}
+
 #[derive(Debug)]
 pub enum GovernorError {
-    /// 并发容量饱和
-    ConcurrencySaturated {
-        runtime_key: String,
-        current: usize,
-        max: usize,
-    },
-    /// RPM 超限
-    RpmExceeded {
-        runtime_key: String,
-        current: u32,
-        max: u32,
-    },
+    /// 独立 admission lane 在配置的等待上限内仍不可用。
+    AdmissionTimedOut(TrafficAdmissionBackpressure),
     /// 超时
     Timeout { operation: String, timeout_ms: u64 },
     /// 文件 I/O 错误
@@ -207,23 +228,15 @@ pub enum GovernorError {
 impl std::fmt::Display for GovernorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GovernorError::ConcurrencySaturated {
-                runtime_key,
-                current,
-                max,
-            } => {
-                write!(
-                    f,
-                    "concurrency saturated for {runtime_key}: {current}/{max}"
-                )
-            }
-            GovernorError::RpmExceeded {
-                runtime_key,
-                current,
-                max,
-            } => {
-                write!(f, "RPM exceeded for {runtime_key}: {current}/{max}")
-            }
+            GovernorError::AdmissionTimedOut(backpressure) => write!(
+                f,
+                "traffic admission timed out in {} lane for {} after {}ms ({}/{})",
+                backpressure.lane,
+                backpressure.runtime_key,
+                backpressure.waited_ms,
+                backpressure.current,
+                backpressure.limit
+            ),
             GovernorError::Timeout {
                 operation,
                 timeout_ms,

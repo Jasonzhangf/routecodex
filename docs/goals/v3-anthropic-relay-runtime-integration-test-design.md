@@ -15,7 +15,7 @@ HTTP and consumes the shared structured SSE Transport contract.
 
 The machine-readable lifecycle is
 `docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml`. Its node and
-`v3-anthropic-relay-01..15` edge IDs must remain identical to the mainline call map and wiki.
+`v3-anthropic-relay-01..17` edge IDs must remain identical to the mainline call map and wiki.
 
 ## Whitebox matrix
 
@@ -23,8 +23,14 @@ The machine-readable lifecycle is
 | --- | --- | --- |
 | JSON thinking + tool | Anthropic input becomes one Responses wire request; reasoning/function call becomes thinking/tool_use after Resp04 | side-channel fields fail before provider send |
 | SSE thinking + tool | validated structured frames preserve event order and reach the single Resp05/Server06 exit | malformed/unsupported frames fail explicitly; no handler parser |
+| Responses SSE terminal | raw SSE chunks enter `V3ProviderRespInbound01Raw`; `ProviderRespCompat02` invokes the canonical collector before `V3HubRespInbound02Normalized`, and Anthropic projection occurs only after Resp04 | EOF/`[DONE]` without a terminal response enters Error01-06; no partial success synthesis, pre-Resp01 semantic materialization, or second parser |
+| Anthropic provider thinking SSE | `thinking/thinking_delta/signature_delta` and `redacted_thinking/data` normalize to Responses reasoning summary/encrypted_content | `reasoning` aliases, native+alias dual truth, cross-block delta types, `thinking_delta.text`, `redacted_thinking.signature`, and malformed signature fail in the provider event codec |
 | provider 429/5xx | failure enters Error01-06 and retains Anthropic error polarity | failure cannot reach Resp01-06 success nodes |
-| topology | all 15 fixed adjacent nodes occur once and in order | shortcut, missing edge, duplicate response exit, dynamic hook, or P6 extension fails source/mutation gates |
+| topology | all 17 fixed adjacent nodes occur once and in order | shortcut, missing edge, duplicate response exit, dynamic hook, or P6 extension fails source/mutation gates |
+| client payload ownership | Resp04-finalized truth is projected once into Resp05 and returned only from ServerResp06 | runtime closures cannot return a payload that bypasses Resp05/ServerResp06 |
+
+The integration test, verifier, and red fixtures are wired into `verify:architecture-ci-longtail`,
+which is invoked by `verify:architecture-ci`.
 
 ## Controlled blackbox
 

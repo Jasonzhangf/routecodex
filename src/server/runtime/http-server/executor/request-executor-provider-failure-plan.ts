@@ -4,6 +4,9 @@ import type {
   RequestExecutorProviderFailurePlan,
   RetryErrorSnapshot
 } from './request-executor-error-types.js';
+import {
+  attachErrorErr05ExecutionDecision
+} from './request-executor-error-types.js';
 import type {
   RequestExecutorProviderErrorStage
 } from './request-executor-error-types.js';
@@ -29,30 +32,41 @@ type RuntimeManager = {
 
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 
-function readErrorBackoffPortScope(metadata?: Record<string, unknown>): string {
-  const entryPort = metadata?.entryPort ?? metadata?.matchedPort ?? metadata?.port;
-  if (typeof entryPort === 'number' && Number.isFinite(entryPort)) {
-    return `port:${Math.floor(entryPort)}`;
+function buildProviderErrorBackoffScopePrefix(args: {
+  routecodexRoutingPolicyGroup?: string;
+  providerKey?: string;
+}): string {
+  const routingGroup = buildProviderErrorBackoffLaneGroup({
+    routecodexRoutingPolicyGroup: args.routecodexRoutingPolicyGroup
+  });
+  if (typeof args.providerKey !== 'string' || !args.providerKey.trim()) {
+    throw new Error('provider action gate requires provider runtime identity truth');
   }
-  if (typeof entryPort === 'string' && entryPort.trim()) {
-    return `port:${entryPort.trim()}`;
+  return `${routingGroup}|${args.providerKey.trim()}|`;
+}
+
+export function buildProviderErrorBackoffLaneGroup(args: {
+  routecodexRoutingPolicyGroup?: string;
+}): string {
+  if (
+    typeof args.routecodexRoutingPolicyGroup !== 'string'
+    || !args.routecodexRoutingPolicyGroup.trim()
+  ) {
+    throw new Error('provider action gate requires routecodexRoutingPolicyGroup truth');
   }
-  return 'port:unknown';
+  return args.routecodexRoutingPolicyGroup.trim();
 }
 
 function buildProviderErrorBackoffScope(args: {
-  metadata?: Record<string, unknown>;
+  routecodexRoutingPolicyGroup?: string;
   providerKey?: string;
-  routeName?: string;
-  stage: string;
+  errorFamily: string;
 }): string {
-  const providerKey = typeof args.providerKey === 'string' && args.providerKey.trim()
-    ? args.providerKey.trim()
-    : 'provider:unknown';
-  const routeName = typeof args.routeName === 'string' && args.routeName.trim()
-    ? args.routeName.trim()
-    : 'route:unknown';
-  return `${readErrorBackoffPortScope(args.metadata)}|${providerKey}|${routeName}|${args.stage}`;
+  const errorFamily = args.errorFamily.trim();
+  if (!errorFamily) {
+    throw new Error('provider action gate requires normalized error family truth');
+  }
+  return `${buildProviderErrorBackoffScopePrefix(args)}${errorFamily}`;
 }
 
 export async function resolveRequestExecutorProviderFailurePlan(args: {
@@ -134,6 +148,16 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     abortSignal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });
+  attachErrorErr05ExecutionDecision(args.error, retryExecutionPlan);
+  if (
+    retryExecutionPlan.action === 'client_disconnected'
+    || retryExecutionPlan.action === 'reject_non_provider_error'
+  ) {
+    return {
+      reportPlan,
+      retryExecutionPlan,
+    };
+  }
   const reportStage = reportPlan.stageHint;
   try {
     await reportRequestExecutorProviderError({
@@ -166,14 +190,21 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
     });
   }
   const providerErrorBackoffScope = buildProviderErrorBackoffScope({
-    metadata: args.metadata,
+    routecodexRoutingPolicyGroup: args.routecodexRoutingPolicyGroup,
     providerKey: args.providerKey,
-    routeName: args.routeName,
-    stage: reportStage
+    errorFamily:
+      reportPlan.errorCode
+      ?? reportPlan.upstreamCode
+      ?? reportPlan.stageHint
+  });
+  const providerErrorBackoffLaneGroup = buildProviderErrorBackoffLaneGroup({
+    routecodexRoutingPolicyGroup: args.routecodexRoutingPolicyGroup,
   });
   const providerErrorBackoffDelayMs = recordErrorActionBackoff({
     category: 'global_error',
-    scopeKey: providerErrorBackoffScope
+    scopeKey: providerErrorBackoffScope,
+    laneGroupKey: providerErrorBackoffLaneGroup,
+    actionScopeKey: args.logicalRequestChainKey,
   });
   args.logStage('provider.error_action_backoff_wait', args.requestId, {
     providerKey: args.providerKey,
@@ -185,7 +216,9 @@ export async function resolveRequestExecutorProviderFailurePlan(args: {
   await waitErrorActionBackoffWithGate({
     category: 'global_error',
     scopeKey: providerErrorBackoffScope,
-    ms: providerErrorBackoffDelayMs,
+    laneGroupKey: providerErrorBackoffLaneGroup,
+    actionScopeKey: args.logicalRequestChainKey,
+    terminalProjection: retryExecutionPlan.action === 'project_terminal',
     signal: args.abortSignal,
     logNonBlockingError: args.logNonBlockingError
   });

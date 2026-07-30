@@ -2,29 +2,70 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_01_source_raised_internal, build_v3_error_02_classified_from_v3_error_01,
     build_v3_error_03_target_local_action_from_v3_error_02,
-    build_v3_error_04_target_exhaustion_decision_from_v3_error_03,
+    build_v3_error_04_target_exhaustion_decision_with_provider_availability,
     build_v3_error_05_execution_decision_from_v3_error_04,
-    build_v3_error_06_client_projected_from_v3_error_05, V3ErrorActionScope, V3ErrorHandlingCenter,
+    build_v3_error_06_client_projected_from_v3_error_05, V3Error05ExecutionAction,
+    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorHandlingCenter,
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3InternalErrorCode,
+    V3HttpBoundaryErrorKind, V3InternalErrorCode,
 };
+
+fn recovery_witness() -> V3Error05RecoveryAdmissionWitness {
+    V3Error05RecoveryAdmissionWitness::new(
+        "server-a",
+        "group-a",
+        "provider-a:key-a:model-a",
+        "provider_failure",
+        1,
+    )
+    .expect("valid Error05 recovery witness")
+}
+
+fn project_exhausted_provider(
+    source: routecodex_v3_error::V3Error01SourceRaised,
+    action_scope: V3ErrorActionScope,
+    source_status: Option<u16>,
+) -> routecodex_v3_error::V3Error06ClientProjected {
+    build_v3_error_06_client_projected_from_v3_error_05(
+        V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source,
+                action_scope,
+                candidates_remaining: 0,
+                source_status,
+            },
+            false,
+            false,
+            None,
+        )
+        .try_into_terminal()
+        .expect("explicit route/default exhaustion proof must yield terminal Error05"),
+    )
+}
 
 #[test]
 fn error_handling_center_owns_error01_06_and_preserves_provider_error_status() {
-    let source = build_v3_error_01_source_raised(
+    let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
         "rate_limit_error",
         "controlled rate limit",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("rate_limit_error".to_string()),
+            provider_id: Some("controlled".to_string()),
+            upstream_request_id: None,
+            message: Some("controlled rate limit".to_string()),
+        },
     );
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+    let projected = project_exhausted_provider(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: "controlled".to_string(),
         },
-        candidates_remaining: 0,
-        source_status: Some(429),
-    });
+        Some(429),
+    );
 
     assert_eq!(projected.status, 429);
     assert_eq!(projected.body["error"]["code"], "rate_limit_error");
@@ -37,24 +78,47 @@ fn error_handling_center_owns_error01_06_and_preserves_provider_error_status() {
 
 #[test]
 fn error_handling_center_never_projects_an_error_as_http_success() {
-    let source = build_v3_error_01_source_raised(
+    let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
         "provider_business_error",
         "provider returned an error envelope with HTTP 200",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(200),
+            code: Some("provider_business_error".to_string()),
+            provider_id: Some("controlled".to_string()),
+            upstream_request_id: None,
+            message: Some("provider returned an error envelope with HTTP 200".to_string()),
+        },
     );
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+    let projected = project_exhausted_provider(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: "controlled".to_string(),
         },
-        candidates_remaining: 0,
-        source_status: Some(200),
-    });
+        Some(200),
+    );
 
     assert_eq!(projected.status, 502);
     assert!(projected.status >= 400);
     assert_eq!(projected.body["error"]["decision"], "project_client_error");
+}
+
+#[test]
+fn request_in_flight_projects_standard_error_chain_with_http_conflict() {
+    let projected = routecodex_v3_error::project_v3_http_boundary_error(
+        V3HttpBoundaryErrorKind::RequestInFlight,
+        "controlled active Responses request",
+    );
+
+    assert_eq!(projected.status, 409);
+    assert_eq!(projected.body["error"]["code"], "request_in_flight");
+    assert_eq!(
+        projected.body["error"]["error_node"],
+        "V3Error06ClientProjected"
+    );
+    assert_eq!(projected.chain.len(), 6);
 }
 
 #[test]
@@ -75,15 +139,20 @@ fn provider_failure_builds_adjacent_action_and_keeps_error_polarity() {
     );
     assert!(action.action.retry_eligible);
     assert!(action.action.health_affecting);
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 1);
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        action, 1, false, false,
+    );
     assert!(!exhaustion.target_exhausted);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    assert_eq!(execution.decision, "target_local_reselect");
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
-    assert_eq!(projected.status, 502);
-    assert_eq!(projected.body["error"]["code"], "provider_http_503");
-    assert_eq!(projected.chain[0], "V3Error01SourceRaised");
-    assert_eq!(projected.chain[5], "V3Error06ClientProjected");
+    let execution =
+        build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, Some(recovery_witness()));
+    assert!(matches!(
+        execution.action,
+        V3Error05ExecutionAction::WaitThenReselect { .. }
+    ));
+    assert!(
+        execution.try_into_terminal().is_err(),
+        "retryable provider failure must not enter Error06"
+    );
 }
 
 #[test]
@@ -102,9 +171,19 @@ fn client_disconnect_is_health_neutral_and_terminal_projection_is_not_success() 
     );
     assert!(!action.action.health_affecting);
     assert!(!action.action.retry_eligible);
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        action, 0, false, false,
+    );
+    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
+    assert_eq!(
+        execution.action,
+        V3Error05ExecutionAction::ClientDisconnected
+    );
+    let projected = build_v3_error_06_client_projected_from_v3_error_05(
+        execution
+            .try_into_terminal()
+            .expect("disconnect is terminal"),
+    );
     assert_eq!(projected.status, 499);
     assert!(projected.body.get("ok").is_none());
 }
@@ -127,11 +206,17 @@ fn provider_failure_projects_only_after_selected_target_is_fully_exhausted() {
         0,
     );
     assert!(!action.action.retry_eligible);
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        action, 0, false, false,
+    );
     assert!(exhaustion.target_exhausted);
-    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-    assert_eq!(execution.decision, "project_client_error");
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+    let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
+    assert_eq!(execution.action, V3Error05ExecutionAction::ProjectTerminal);
+    let projected = build_v3_error_06_client_projected_from_v3_error_05(
+        execution
+            .try_into_terminal()
+            .expect("exhausted provider failure is terminal"),
+    );
     assert_eq!(projected.status, 502);
     assert_eq!(projected.body["error"]["target_exhausted"], true);
 }
@@ -152,14 +237,13 @@ fn external_provider_429_projects_external_link_without_internal_code() {
             message: Some("provider returned HTTP 429".to_string()),
         },
     );
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+    let projected = project_exhausted_provider(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: "asxs-grok".to_string(),
         },
-        candidates_remaining: 0,
-        source_status: None,
-    });
+        None,
+    );
 
     assert_eq!(projected.status, 429);
     assert_eq!(
@@ -257,9 +341,19 @@ fn already_terminal_target_exhaustion_and_success_control_never_become_success()
             V3ErrorActionScope::None,
             0,
         );
-        let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(action, 0);
-        let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-        let projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+        let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+            action, 0, false, false,
+        );
+        let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
+        assert_eq!(
+            execution.action,
+            V3Error05ExecutionAction::RejectNonProviderError
+        );
+        let projected = build_v3_error_06_client_projected_from_v3_error_05(
+            execution
+                .try_into_terminal()
+                .expect("already-terminal non-provider error"),
+        );
         assert_eq!(projected.status, expected_status);
         assert!(projected.body.get("ok").is_none());
         assert!(projected.status >= 400);

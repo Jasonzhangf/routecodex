@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, jest, test } from '@jest/globals';
-import { resolveRequestExecutorProviderFailurePlan } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
+import {
+  buildProviderErrorBackoffLaneGroup,
+  resolveRequestExecutorProviderFailurePlan as resolveRequestExecutorProviderFailurePlanImpl
+} from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-failure-plan';
 import {
   registerErrorActionQueueHook,
   resetErrorActionQueueStateForTests
 } from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue';
+
+const resolveRequestExecutorProviderFailurePlan = (
+  args: Parameters<typeof resolveRequestExecutorProviderFailurePlanImpl>[0]
+) => resolveRequestExecutorProviderFailurePlanImpl({
+  routecodexRoutingPolicyGroup: 'test-routing-group',
+  ...args
+});
 
 describe('request-executor-provider-failure-plan', () => {
   afterEach(() => {
@@ -11,8 +21,18 @@ describe('request-executor-provider-failure-plan', () => {
     resetErrorActionQueueStateForTests();
   });
 
+  test('provider action lane fails fast without routing-group truth', () => {
+    expect(() => buildProviderErrorBackoffLaneGroup({}))
+      .toThrow('provider action gate requires routecodexRoutingPolicyGroup truth');
+    expect(buildProviderErrorBackoffLaneGroup({
+      routecodexRoutingPolicyGroup: ' gateway-priority '
+    })).toBe('gateway-priority');
+  });
+
   test('protocol boundary conflicts never exclude providers from VR route hits', async () => {
     const excludedProviderKeys = new Set<string>();
+    const events: unknown[] = [];
+    const unregister = registerErrorActionQueueHook((event) => events.push(event));
     const error = Object.assign(
       new Error('MetadataCenter runtime_control.providerProtocol conflict: existing=openai-responses selected=anthropic-messages'),
       {
@@ -49,11 +69,11 @@ describe('request-executor-provider-failure-plan', () => {
     expect(plan.retryExecutionPlan.excludedCurrentProvider).toBe(false);
     expect(plan.retryExecutionPlan.retrySwitchPlan).toBeUndefined();
     expect(excludedProviderKeys.has('minimax.key1.MiniMax-M3')).toBe(false);
+    expect(events).toEqual([]);
+    unregister();
   }, 10_000);
 
   test('provider failure plan records and blocks through global error action queue', async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-06-28T00:00:00.000Z'));
     const events: unknown[] = [];
     const logs: Array<{ stage: string; details?: Record<string, unknown> }> = [];
     const unregister = registerErrorActionQueueHook((event) => events.push(event));
@@ -98,21 +118,24 @@ describe('request-executor-provider-failure-plan', () => {
       return plan;
     });
 
-    await jest.advanceTimersByTimeAsync(2999);
+    await new Promise((resolve) => setTimeout(resolve, 900));
     expect(resolved).toBe(false);
-    await jest.advanceTimersByTimeAsync(1);
     const plan = await promise;
     unregister();
 
     expect(plan.retryExecutionPlan.shouldRetry).toBe(true);
-    expect(events).toEqual([
-      expect.objectContaining({ type: 'record', category: 'global_error', delayMs: 3000 }),
-      expect.objectContaining({ type: 'wait_start', category: 'global_error', delayMs: 3000 }),
-      expect.objectContaining({ type: 'wait_end', category: 'global_error', delayMs: 3000 })
-    ]);
+    expect(events).toHaveLength(3);
+    expect(events[0]).toEqual(
+      expect.objectContaining({ type: 'record', category: 'global_error', delayMs: 1000 })
+    );
+    for (const event of events.slice(1) as Array<{ type: string; delayMs: number }>) {
+      expect(['wait_start', 'wait_end']).toContain(event.type);
+      expect(event.delayMs).toBeGreaterThanOrEqual(900);
+      expect(event.delayMs).toBeLessThanOrEqual(1000);
+    }
     expect(logs.some((entry) => entry.stage === 'provider.error_action_backoff_wait')).toBe(true);
     expect(logs.some((entry) => entry.stage === 'provider.error_action_backoff_wait.completed')).toBe(true);
-  });
+  }, 10_000);
 
   test('local CLIENT_TOOL_ARGS_INVALID conversion failures remain recoverable only when they affect health', async () => {
     const plan = await resolveRequestExecutorProviderFailurePlan({

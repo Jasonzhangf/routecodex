@@ -1,0 +1,163 @@
+{
+  "debug_id": "v3-provider-responses-terminal-missing-review-20260729",
+  "state": "locked",
+  "symptom": {
+    "observed": "5555 /v1/responses frequently reports provider_response_sse_terminal_missing after a provider Responses SSE ends without response.completed",
+    "expected": "response.completed is the only provider Responses success terminal; pre-client Relay failures re-enter typed Error01-05 reselection, while post-client Direct failures remain explicit stream failures",
+    "entry": "POST /v1/responses on managed V3 port 5555",
+    "ids": [
+      "openai-responses-router-gpt-5.5-20260729T191113605-673306-10943",
+      "openai-responses-router-gpt-5.5-20260729T231156238-677882-15519"
+    ],
+    "raw_evidence": [
+      "~/.rcc/codex-samples/openai-responses/ports/5555/openai-responses-router-gpt-5.5-20260729T231156238-677882-15519/request.json",
+      ".agent-collab/runs/20260729T120627Z-Macstudio.local-54831-13806/old-terminal-missing-replay.body",
+      ".agent-collab/runs/20260729T120627Z-Macstudio.local-54831-13806/evidence.jsonl"
+    ]
+  },
+  "sop_model_flow": {
+    "status": "known",
+    "flow_id": "v3.provider_action_gate.mainline",
+    "source_docs": [
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-mainline-call-map.yml",
+      "docs/architecture/v3-verification-map.yml",
+      "docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
+      "docs/architecture/wiki/v3-provider-action-gate.md",
+      ".agents/skills/rcc-dev-skills/references/25-protocol-sse-continuation-boundary.md"
+    ],
+    "lifecycle_nodes": [
+      "V3ProviderRespInbound01Raw",
+      "V3ProviderResponsesEventCodec",
+      "V3ProviderResponsesTerminalObserved",
+      "V3Error01SourceRaised",
+      "V3Error02Classified",
+      "V3Error03TargetLocalAction",
+      "V3Error04TargetExhaustionDecision",
+      "V3Error05ExecutionDecision",
+      "V3ProviderActionFailureRecorded",
+      "V3ProviderActionRecoveryTicket",
+      "V3ProviderActionGateAdmission"
+    ],
+    "resource_edges": [
+      "sse.provider_stream_aggregate -> response.provider_raw",
+      "error.source -> error.execution_decision",
+      "error.execution_decision -> v3.error.provider_action_gate"
+    ],
+    "forbidden_edges": [
+      "response.done -> provider semantic terminal",
+      "data:[DONE] -> provider semantic terminal",
+      "target resolution source error -> old provider terminal projection",
+      "recovery ticket -> unrelated provider/error-family generation"
+    ],
+    "owner_graph": [
+      "v3.provider_action_gate",
+      "error.mainline",
+      "v3.hub_pipeline.v1.response"
+    ],
+    "gap_if_new": ""
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "cause": "The upstream provider intermittently closes Responses SSE before response.completed",
+      "modules": [
+        "routecodex-v3-provider-responses transport",
+        "routecodex-v3-runtime provider Responses event codec"
+      ],
+      "supporting_evidence": "The failing sample reaches EOF with provider_response_sse_terminal_missing; replay later succeeds with response.completed, proving stochastic upstream behavior.",
+      "counter_evidence_or_gap": "The upstream incomplete stream cannot be prevented locally without fabricating business terminal semantics.",
+      "verification_action": "Replay the exact request through installed 5555 and inspect provider/client SSE events.",
+      "confidence": 100
+    },
+    {
+      "id": "H2",
+      "cause": "Error05 swallows target-resolution source errors and fabricates route/default exhaustion from an Err value",
+      "modules": [
+        "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs"
+      ],
+      "supporting_evidence": "run_v3_relay_provider_failure_policy uses if let Ok(alternative), then later builds ProjectTerminal with zero remaining/default false.",
+      "counter_evidence_or_gap": "Only V3TargetInterpreter::select_available exhaustion is authoritative exhaustion evidence.",
+      "verification_action": "Inject classifier/config target-resolution failure and assert it remains its own Error01 instead of projecting the prior provider failure.",
+      "confidence": 100
+    },
+    {
+      "id": "H3",
+      "cause": "Recovery state stores only a bool and reselects the latest same-group lane instead of the exact failure key/generation",
+      "modules": [
+        "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
+        "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
+        "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+        "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs"
+      ],
+      "supporting_evidence": "Consumers use pending_provider_action_gate plus max_by_key(next_admission_at), so concurrent failures can redirect recovery to another key.",
+      "counter_evidence_or_gap": "Pinned continuations correctly require exact-provider lookup but do not solve exact failure-family generation ownership.",
+      "verification_action": "Record a recovery ticket, add an unrelated/newer lane, and assert the ticket cannot consume or silently switch to it.",
+      "confidence": 100
+    },
+    {
+      "id": "H4",
+      "cause": "Direct Stopless response hooks accept response.done before provider terminal validation",
+      "modules": [
+        "v3/crates/routecodex-v3-runtime/src/kernel.rs"
+      ],
+      "supporting_evidence": "transform_direct_sse_stopless_control_frame accepts response.completed or response.done even though closeout later requires response.completed.",
+      "counter_evidence_or_gap": "response.done is valid only on the client projection side after canonical completion.",
+      "verification_action": "Feed response.done without response.completed and assert Stopless state is unchanged before explicit terminal-missing failure.",
+      "confidence": 100
+    }
+  ],
+  "active_hypothesis": "H3",
+  "confirmed_hypothesis": "H3",
+  "first_divergence_node": "V3ProviderResponsesEventCodec and V3Error05ExecutionDecision recovery handoff",
+  "root_cause_module": "routecodex-v3-runtime provider Responses event codec plus provider action gate/Error05 policy",
+  "unique_owner": "v3.provider_action_gate with adjacent provider Responses event codec",
+  "allowed_paths": [
+    "v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs",
+    "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
+    "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
+    "v3/crates/routecodex-v3-runtime/src/lib.rs",
+    "v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs",
+    "v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs",
+    "docs/architecture/v3-function-map.yml",
+    "docs/architecture/v3-mainline-call-map.yml",
+    "docs/architecture/v3-verification-map.yml",
+    "docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
+    "docs/architecture/wiki/v3-provider-action-gate.md",
+    "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
+    "docs/architecture/wiki/v3-mainline-caller-flow.md",
+    "scripts/architecture/verify-v3-provider-action-gate.mjs",
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "package.json",
+    ".github/workflows/test.yml",
+    "note.md",
+    "MEMORY.md",
+    ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"
+  ],
+  "forbidden_paths": [
+    "v3/crates/routecodex-v3-sse/**",
+    "v3/crates/routecodex-v3-server/**",
+    "src/**",
+    "~/.rcc/config.v3.toml"
+  ],
+  "required_verification": [
+    "provider action gate red then green tests",
+    "provider Responses terminal positive and negative tests",
+    "typed target-resolution source-error and exhaustion tests",
+    "V3 function/mainline/verification map gates and red fixtures",
+    "cargo check and build:v3-cli",
+    "global install and managed aggregate restart",
+    "all aggregate member health checks",
+    "exact 5555 old-sample replay",
+    "codex --profile tcm review semantic PASS"
+  ],
+  "exact_replay": "~/.rcc/codex-samples/openai-responses/ports/5555/openai-responses-router-gpt-5.5-20260729T231156238-677882-15519/request.json",
+  "confidence": 100
+}

@@ -205,14 +205,15 @@ impl ResponsesTransport for AnthropicProviderJsonToolMissingNameTransport {
 
 #[tokio::test]
 async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wire() {
+    let server_id = "anthropic_wire_selected";
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
+            server_id: server_id.into(),
             request_id: "req-anthropic-anthropic-provider-wire".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -253,6 +254,7 @@ async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 
 #[tokio::test]
 async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_request() {
+    let server_id = "anthropic_wire_dynamic_packet";
     let dynamic_system = json!([
         {
             "type":"text",
@@ -279,9 +281,9 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
     };
 
     let output = execute_v3_anthropic_relay_runtime_with_client_headers(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
+            server_id: server_id.into(),
             request_id: "req-anthropic-dynamic-claude-code".into(),
             payload: json!({
                 "model":"claude-fable-5",
@@ -363,14 +365,15 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
 
 #[tokio::test]
 async fn anthropic_relay_stream_request_projects_json_provider_body_as_sse_events() {
+    let server_id = "anthropic_wire_stream_projection";
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
+            server_id: server_id.into(),
             request_id: "req-anthropic-json-body-client-sse".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -398,10 +401,11 @@ async fn anthropic_relay_stream_request_projects_json_provider_body_as_sse_event
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
+    let server_id = "anthropic_wire_sse_success";
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
+            server_id: server_id.into(),
             request_id: "req-anthropic-provider-sse".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -430,10 +434,11 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() {
+    let server_id = "anthropic_wire_sse_eof_failure";
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
+            server_id: server_id.into(),
             request_id: "req-anthropic-provider-sse-eof".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -465,10 +470,11 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_inference() {
+    let server_id = "anthropic_wire_tool_missing_name_failure";
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
+            server_id: server_id.into(),
             request_id: "req-anthropic-provider-tool-missing-name".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -500,23 +506,23 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
     );
 }
 
-fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest(server_id: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
-            r#"
+            &format!(r#"
 version = 3
 
-[servers.gateway_priority_5555]
+[servers.{server_id}]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "gateway_priority_5555"
+routing_group = "{server_id}"
 endpoints = ["responses", "anthropic"]
 
 [providers.minimax]
 type = "anthropic"
 base_url = "http://controlled.invalid/anthropic"
 default_model = "MiniMax-M3"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "MINIMAX_TEST_KEY" }}] }}
 
 [providers.minimax.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
@@ -528,13 +534,13 @@ wire_name = "claude-fable-5"
 supports_streaming = true
 capabilities = ["text", "tools", "reasoning", "vision", "longcontext"]
 
-[route_groups.gateway_priority_5555.pools.default]
-selection = { strategy = "priority" }
+[route_groups.{server_id}.pools.default]
+selection = {{ strategy = "priority" }}
 targets = [
-  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "minimax", model = "claude-fable-5", key = "key1", priority = 1 },
+  {{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }},
+  {{ kind = "provider_model", provider = "minimax", model = "claude-fable-5", key = "key1", priority = 1 }},
 ]
-"#,
+"#),
         )
         .unwrap(),
     )

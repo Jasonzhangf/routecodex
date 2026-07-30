@@ -47,6 +47,15 @@ const EXPECTED_RELAY_TRACE: [&str; 17] = [
     "V3ServerRespOutbound06ClientFrame",
 ];
 
+fn assert_relay_trace(trace: &[&'static str]) {
+    let semantic_trace = trace
+        .iter()
+        .copied()
+        .filter(|node| *node != "V3ProviderActionGateAdmission")
+        .collect::<Vec<_>>();
+    assert_eq!(semantic_trace, EXPECTED_RELAY_TRACE);
+}
+
 struct JsonThenSseTransport {
     captures: Mutex<Vec<Value>>,
     turn: AtomicUsize,
@@ -144,7 +153,7 @@ async fn controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit() 
     .await
     .unwrap();
     assert_eq!(json_output.status, 200);
-    assert_eq!(json_output.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&json_output.node_trace);
     assert_eq!(
         json_output
             .node_trace
@@ -167,7 +176,7 @@ async fn controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit() 
     .await
     .unwrap();
     assert_eq!(sse_output.status, 200);
-    assert_eq!(sse_output.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&sse_output.node_trace);
     assert_eq!(
         sse_output.client_response["events"]
             .as_array()
@@ -206,7 +215,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     .await
     .unwrap();
     assert_eq!(json_output.status, 200);
-    assert_eq!(json_output.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&json_output.node_trace);
     assert!(!json_output
         .node_trace
         .contains(&"V3Req04StandardizedResponses"));
@@ -254,6 +263,13 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         Some("stop"),
         "ordinary completed Responses Relay JSON without provider finish_reason must infer stop for console observability"
     );
+    let json_timing = json_observability
+        .timing
+        .expect("Responses Relay JSON success must publish Runtime timing");
+    assert_eq!(
+        json_timing.internal.checked_add(json_timing.external),
+        Some(json_timing.runtime_total)
+    );
     assert_eq!(
         json_observability
             .usage
@@ -299,7 +315,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     .await
     .unwrap();
     assert_eq!(sse_output.status, 200);
-    assert_eq!(sse_output.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&sse_output.node_trace);
     let sse_observability = sse_output
         .observability
         .as_ref()
@@ -316,10 +332,21 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         "Responses Relay must keep SSE as transport-only: Responses event payload codec builds Hub semantic, hooks run in Hub, and client event payload codec encodes finalized frames"
     );
     assert_eq!(sse_observability.provider_status, Some(200));
+    let sse_timing = sse_observability
+        .timing
+        .expect("materialized Responses Relay SSE must publish Runtime timing");
+    assert_eq!(
+        sse_timing.internal.checked_add(sse_timing.external),
+        Some(sse_timing.runtime_total)
+    );
     let stream_observation = sse_output
         .stream_observation
         .clone()
         .expect("Responses Relay SSE output must expose stream observability");
+    assert_eq!(
+        stream_observation.snapshot().unwrap().timing,
+        Some(sse_timing)
+    );
     match sse_output.client_body {
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             let mut forwarded = Vec::new();
@@ -442,7 +469,7 @@ async fn responses_relay_client_sse_request_projects_sse_even_when_provider_retu
     .unwrap();
 
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&output.node_trace);
     let observability = output
         .observability
         .as_ref()
@@ -538,18 +565,11 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
     );
     assert!(body.get("instructions").is_none());
     assert_eq!(body["input"][0]["type"], "message");
-    assert_eq!(body["input"][0]["role"], "system");
+    assert_eq!(body["input"][0]["role"], "user");
     assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
-    assert!(
-        body["input"][0]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("当前轮推进准则")),
-        "Responses target must carry Stopless guidance in provider-standard system input: {body}"
-    );
-    assert_eq!(body["input"][1]["type"], "message");
-    assert_eq!(body["input"][1]["role"], "user");
-    assert_eq!(body["input"][1]["content"][0]["type"], "input_text");
-    assert_eq!(body["input"][1]["content"][0]["text"], "search docs");
+    assert_eq!(body["input"][0]["content"][0]["text"], "search docs");
+    assert_eq!(body["input"].as_array().map(Vec::len), Some(1));
+    assert!(!body.to_string().contains("当前轮推进准则"));
     assert_eq!(body["tools"][0]["type"], "tool_search");
     let serialized = serde_json::to_string(body).unwrap();
     assert!(!serialized.contains("\"name\":\"exec\""));
@@ -1051,7 +1071,7 @@ async fn local_continuation_servertool_roundtrip_is_runtime_e2e() {
     )
     .await
     .unwrap();
-    assert_eq!(first.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&first.node_trace);
     assert!(first.servertool_followup_required);
     assert_eq!(first.client_response["stop_reason"], "tool_use");
     assert_eq!(state.len().unwrap(), 1);
@@ -1075,7 +1095,7 @@ async fn local_continuation_servertool_roundtrip_is_runtime_e2e() {
     )
     .await
     .unwrap();
-    assert_eq!(second.node_trace, EXPECTED_RELAY_TRACE);
+    assert_relay_trace(&second.node_trace);
     assert!(!second.servertool_followup_required);
     assert!(state.is_empty().unwrap());
 
@@ -1133,6 +1153,35 @@ impl ResponsesTransport for ErrorTransport {
 
 struct ResponsesContextErrorThenSuccessTransport {
     captures: Mutex<Vec<(String, Value)>>,
+}
+
+struct ResponsesCompatStormTransport {
+    sends: Mutex<Vec<Instant>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesCompatStormTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends.lock().unwrap().push(Instant::now());
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"resp_compat_storm_retry",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"serialized"}]
+            }))
+            .unwrap(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -1221,6 +1270,96 @@ impl ResponsesTransport for ResponsesMalformedJsonThenSuccessTransport {
                 "usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
             }))
             .unwrap(),
+        ))
+    }
+}
+
+struct ResponsesDuplicateToolIdentityThenSuccessTransport {
+    captures: Mutex<Vec<(String, Value)>>,
+    stream_response: bool,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesDuplicateToolIdentityThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.captures
+            .lock()
+            .unwrap()
+            .push((request.provider_id().to_string(), request.body().clone()));
+        let response = if request.provider_id() == "limited" {
+            json!({
+                "id":"resp_duplicate_tool_identity",
+                "status":"requires_action",
+                "output":[
+                    {
+                        "type":"function_call",
+                        "id":"fc_duplicate_a",
+                        "call_id":"call_duplicate",
+                        "name":"lookup",
+                        "arguments":"{\"query\":\"first\"}"
+                    },
+                    {
+                        "type":"function_call",
+                        "id":"fc_duplicate_b",
+                        "call_id":"call_duplicate",
+                        "name":"lookup_again",
+                        "arguments":"{\"query\":\"second\"}"
+                    }
+                ]
+            })
+        } else {
+            json!({
+                "id":"resp_after_duplicate_tool_identity",
+                "status":"requires_action",
+                "output":[
+                    {
+                        "type":"function_call",
+                        "id":"fc_distinct_a",
+                        "call_id":"call_distinct_a",
+                        "name":"lookup",
+                        "arguments":"{\"query\":\"first\"}"
+                    },
+                    {
+                        "type":"function_call",
+                        "id":"fc_distinct_b",
+                        "call_id":"call_distinct_b",
+                        "name":"lookup_again",
+                        "arguments":"{\"query\":\"second\"}"
+                    }
+                ],
+                "usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
+            })
+        };
+        let headers = vec![V3ProviderResponseHeader {
+            name: "content-type".to_string(),
+            value: if self.stream_response {
+                b"text/event-stream".to_vec()
+            } else {
+                b"application/json".to_vec()
+            },
+        }];
+        if self.stream_response {
+            let frame = format!(
+                "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"type":"response.completed","response":response})
+            );
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                headers,
+                Box::pin(futures_util::stream::iter([Ok(frame.into_bytes())])),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            headers,
+            serde_json::to_vec(&response).unwrap(),
         ))
     }
 }
@@ -1339,15 +1478,44 @@ impl ResponsesTransport for ResponsesSseMalformedEventJsonTransport {
     }
 }
 
+struct ResponsesSseTerminalMissingTransport;
+
+#[async_trait]
+impl ResponsesTransport for ResponsesSseTerminalMissingTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([Ok(concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_missing_terminal\",\"delta\":\"partial\"}\n\n",
+                "data: [DONE]\n\n",
+            )
+            .as_bytes()
+            .to_vec())])),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn responses_relay_provider_context_error_reselects_next_candidate_before_projection() {
+    let server_id = "responses_context_reselect";
+    let manifest = responses_reselect_manifest_for_scope(server_id);
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };
     let output = execute_v3_responses_relay_runtime(
-        &responses_reselect_manifest(),
+        &manifest,
         V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-responses-context-reselect".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1374,9 +1542,16 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
     );
     assert_eq!(observability.provider_status, Some(200));
     assert_eq!(observability.attempts, Some(2));
+    let timing = observability
+        .timing
+        .expect("successful retry must publish accumulated Runtime timing");
+    assert_eq!(
+        timing.internal.checked_add(timing.external),
+        Some(timing.runtime_total)
+    );
     assert_eq!(
         observability.unavailable_candidates,
-        vec!["limited:key1:gpt-5.5".to_string()]
+        vec!["limited:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()]
     );
     assert_eq!(
         observability
@@ -1410,13 +1585,15 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
 #[tokio::test]
 async fn responses_relay_provider_response_decode_error_reselects_next_candidate_before_projection()
 {
+    let server_id = "responses_decode_reselect";
+    let manifest = responses_reselect_manifest_for_scope(server_id);
     let transport = ResponsesMalformedJsonThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
     };
     let output = execute_v3_responses_relay_runtime(
-        &responses_reselect_manifest(),
+        &manifest,
         V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-responses-malformed-provider-json-reselect".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1441,7 +1618,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
     assert_eq!(observability.attempts, Some(2));
     assert_eq!(
         observability.unavailable_candidates,
-        vec!["limited:key1:gpt-5.5".to_string()]
+        vec!["limited:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()]
     );
     assert_eq!(observability.provider_failure_events.len(), 1);
     let provider_event = &observability.provider_failure_events[0];
@@ -1462,8 +1639,108 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
 }
 
 #[tokio::test]
+async fn responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse(
+) {
+    for (suffix, stream_response) in [("json", false), ("sse", true)] {
+        let server_id = format!("responses_duplicate_tool_identity_{suffix}");
+        let manifest = responses_reselect_manifest_for_scope(&server_id);
+        let transport = ResponsesDuplicateToolIdentityThenSuccessTransport {
+            captures: Mutex::new(Vec::new()),
+            stream_response,
+        };
+        let output = execute_v3_responses_relay_runtime(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id,
+                request_id: format!("req-responses-duplicate-tool-identity-{suffix}"),
+                payload: json!({
+                    "model":"client-responses",
+                    "input":"reject duplicate provider tool identity and reselect",
+                    "stream":stream_response
+                }),
+            },
+            &transport,
+        )
+        .await
+        .expect("provider-origin Resp03 malformed tool identity must enter Error05 reselection");
+
+        assert_eq!(output.status, 200);
+        assert!(output.error_chain.is_none());
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+        let observability = output
+            .observability
+            .as_ref()
+            .expect("successful retry must keep console observability");
+        assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
+        assert_eq!(observability.provider_status, Some(200));
+        assert_eq!(observability.attempts, Some(2));
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        let provider_event = &observability.provider_failure_events[0];
+        assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
+        assert_eq!(provider_event.status, 502);
+        assert_eq!(provider_event.action, "switch_provider");
+        assert_eq!(
+            provider_event.next_provider_key.as_deref(),
+            Some("minimax:key1:MiniMax-M3")
+        );
+
+        let captures = transport.captures.lock().unwrap();
+        assert_eq!(captures.len(), 2);
+        assert_eq!(captures[0].0, "limited");
+        assert_eq!(captures[1].0, "minimax");
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion() {
+    let server_id = "responses_duplicate_tool_identity_terminal";
+    let transport = ResponsesDuplicateToolIdentityThenSuccessTransport {
+        captures: Mutex::new(Vec::new()),
+        stream_response: false,
+    };
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &responses_single_limited_manifest_for_scope(server_id),
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            request_id: "req-responses-duplicate-tool-identity-terminal".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"reject duplicate provider tool identity without a backup target",
+                "stream":false
+            }),
+        },
+        &transport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+        },
+    )
+    .await
+    .expect("provider-origin Resp03 failure must terminate through typed Error05/Error06");
+
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain.as_ref().unwrap(),
+        &V3_ERROR_CHAIN_NODE_IDS
+    );
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    let V3ResponsesRelayClientBody::Json(error_body) = output.client_body else {
+        panic!("terminal provider response failure must project standard Responses JSON error")
+    };
+    assert!(error_body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.contains("duplicate call_id/id")));
+    assert_eq!(
+        error_body.pointer("/error/stage").and_then(Value::as_str),
+        Some("V3HubRespChatProcess03Governed")
+    );
+    assert_eq!(transport.captures.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn responses_relay_shared_health_cools_provider_key_after_three_cross_request_failures() {
-    let manifest = responses_reselect_manifest();
+    let server_id = "responses_shared_health";
+    let manifest = responses_reselect_manifest_for_scope(server_id);
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
     let transport = ResponsesContextErrorThenSuccessTransport {
         captures: Mutex::new(Vec::new()),
@@ -1473,7 +1750,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
             &manifest,
             V3ResponsesRelayRuntimeInput {
-                server_id: "controlled".into(),
+                server_id: server_id.into(),
                 request_id: format!("req-responses-context-reselect-{turn}"),
                 payload: json!({
                     "model":"client-responses",
@@ -1485,7 +1762,6 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             &provider_health,
             V3ResponsesRelayRetryPolicy {
                 same_candidate_retries: 3,
-                retry_delay_ms: 1,
             },
         )
         .await
@@ -1508,11 +1784,10 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             observability.provider_failure_events[0].action,
             "switch_provider"
         );
-        if turn > 0 {
-            assert_eq!(observability.provider_failure_events[0].wait_ms, Some(1));
-        } else {
-            assert_eq!(observability.provider_failure_events[0].wait_ms, None);
-        }
+        assert_eq!(
+            observability.provider_failure_events[0].wait_ms,
+            Some(1_000)
+        );
         if turn == 2 {
             assert_eq!(observability.provider_failure_events[0].failure_count, 3);
             assert_eq!(
@@ -1528,7 +1803,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
     let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
         &manifest,
         V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-responses-context-reselect-cooled".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1540,7 +1815,6 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         &provider_health,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 3,
-            retry_delay_ms: 1,
         },
     )
     .await
@@ -1556,9 +1830,9 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(observability.attempts, Some(1));
-    assert!(observability
-        .unavailable_candidates
-        .contains(&"limited:key1:gpt-5.5".to_string()));
+    assert!(observability.unavailable_candidates.contains(
+        &"limited:key1:gpt-5.5:availability(provider_key:limited:key1:gpt-5.5)".to_string()
+    ));
     assert!(
         observability.provider_failure_events.is_empty(),
         "cooled provider must be skipped before network send; no new provider error event belongs to this request"
@@ -1577,14 +1851,15 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
 
 #[tokio::test]
 async fn responses_relay_default_floor_retries_until_success_within_cap() {
+    let server_id = "responses_default_floor_success";
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
         fail_count: 2,
     };
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
-        &responses_single_limited_manifest(),
+        &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-responses-context-exhausted".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1595,7 +1870,6 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
         &transport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: V3ResponsesRelayRetryPolicy::default().same_candidate_retries,
-            retry_delay_ms: 0,
         },
     )
     .await
@@ -1621,16 +1895,17 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
 
 #[tokio::test]
 async fn responses_relay_default_floor_projects_error_after_retry_cap() {
+    let server_id = "responses_default_floor_terminal";
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
         fail_count: usize::MAX,
     };
     let output = tokio::time::timeout(
-        Duration::from_millis(250),
+        Duration::from_secs(14),
         execute_v3_responses_relay_runtime_with_retry_policy(
-            &responses_single_limited_manifest(),
+            &responses_single_limited_manifest_for_scope(server_id),
             V3ResponsesRelayRuntimeInput {
-                server_id: "controlled".into(),
+                server_id: server_id.into(),
                 request_id: "req-responses-default-floor-cap".into(),
                 payload: json!({
                     "model":"gpt-5.5",
@@ -1641,7 +1916,6 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
             &transport,
             V3ResponsesRelayRetryPolicy {
                 same_candidate_retries: 2,
-                retry_delay_ms: 1,
             },
         ),
     )
@@ -1681,15 +1955,16 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
 
 #[tokio::test]
 async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
+    let server_id = "responses_default_floor_wait";
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
         fail_count: 1,
     };
     let started = Instant::now();
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
-        &responses_single_limited_manifest(),
+        &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-responses-default-floor-waits".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1700,7 +1975,6 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
         &transport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 1,
-            retry_delay_ms: 25,
         },
     )
     .await
@@ -1708,24 +1982,99 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
 
     assert_eq!(output.status, 200);
     assert!(
-        started.elapsed() >= Duration::from_millis(20),
-        "default floor retry must block on backoff instead of forming an immediate error storm"
+        started.elapsed() >= Duration::from_millis(1_000),
+        "default floor retry must consume the isolated one-second action gate"
     );
     assert_eq!(transport.captures.lock().unwrap().len(), 2);
 }
 
-#[test]
-fn responses_relay_default_floor_backoff_sequence_is_fixed_five_seconds() {
-    let policy = V3ResponsesRelayRetryPolicy::default();
-    assert_eq!(policy.same_candidate_retries, 2);
-    assert_eq!(policy.default_floor_delay_ms_for_retry(1), 5_000);
-    assert_eq!(policy.default_floor_delay_ms_for_retry(2), 5_000);
-    assert_eq!(policy.default_floor_delay_ms_for_retry(3), 5_000);
-    let no_sleep_policy = V3ResponsesRelayRetryPolicy {
-        same_candidate_retries: 0,
-        retry_delay_ms: 0,
+#[tokio::test]
+async fn responses_relay_provider_request_compat_failure_reselects_without_action_gate() {
+    let transport = ResponsesContextErrorThenSuccessTransport {
+        captures: Mutex::new(Vec::new()),
     };
-    assert_eq!(no_sleep_policy.default_floor_delay_ms_for_retry(1), 0);
+    let started = Instant::now();
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &responses_request_compat_reselect_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "compat_reselect".into(),
+            request_id: "req-responses-provider-compat-reselect".into(),
+            payload: json!({
+                "model":"client-responses",
+                "messages":[{"role":"user","content":"provider compat must reselect"}],
+                "metadata":{"unsupported":"forces_anthropic_provider_compat_error"},
+                "stream":false
+            }),
+        },
+        &transport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+        },
+    )
+    .await
+    .expect("provider-bound request compat failure must reselect instead of bypassing Error05");
+
+    assert_eq!(output.status, 200);
+    assert_eq!(output.error_chain, None);
+    assert!(
+        started.elapsed() < Duration::from_millis(1_000),
+        "request-local provider compat reselect must not consume provider action gate delay"
+    );
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(
+        captures
+            .iter()
+            .map(|(provider_id, _)| provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["minimax"],
+        "the incompatible Anthropic request must fail before send and only the reselected Responses provider may reach transport"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_provider_request_compat_failures_do_not_serialize_request_local_reselects() {
+    let manifest = responses_request_compat_storm_manifest();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let transport = ResponsesCompatStormTransport {
+        sends: Mutex::new(Vec::new()),
+    };
+    let run = |request_id: &'static str| {
+        execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "compat_storm".into(),
+                request_id: request_id.into(),
+                payload: json!({
+                    "model":"client-responses",
+                    "messages":[{"role":"user","content":"serialize provider compat failures"}],
+                    "metadata":{"unsupported":"forces_anthropic_provider_compat_error"},
+                    "stream":false
+                }),
+            },
+            &transport,
+            &provider_health,
+            V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 0,
+            },
+        )
+    };
+
+    let (first, second) = tokio::join!(run("req-compat-storm-a"), run("req-compat-storm-b"));
+    let first = first.expect("first compat failure must reselect through Error05");
+    let second = second.expect("second compat failure must reselect through Error05");
+    assert_eq!(first.status, 200);
+    assert_eq!(second.status, 200);
+    assert!(first.error_chain.is_none());
+    assert!(second.error_chain.is_none());
+
+    let sends = transport.sends.lock().unwrap();
+    assert_eq!(sends.len(), 2, "only the compatible provider may be sent");
+    let separation = sends[1].duration_since(sends[0]);
+    assert!(
+        separation < Duration::from_millis(1_000),
+        "request-local compat reselects must not be serialized by provider action gate; observed {separation:?}"
+    );
 }
 
 #[tokio::test]
@@ -1744,7 +2093,6 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
         &ResponsesSseBodyReadErrorTransport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 0,
-            retry_delay_ms: 0,
         },
     )
     .await
@@ -1770,6 +2118,72 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
 }
 
 #[tokio::test]
+async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery() {
+    let server_id = "responses_terminal_missing_fresh_isolation";
+    let manifest = responses_single_limited_manifest_for_scope(server_id);
+    let failed = execute_v3_responses_relay_runtime_with_retry_policy(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            request_id: "req-responses-terminal-missing".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"truncated stream",
+                "stream":true
+            }),
+        },
+        &ResponsesSseTerminalMissingTransport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(failed.status, 502);
+    let V3ResponsesRelayClientBody::Json(error_body) = failed.client_body else {
+        panic!("terminal-missing provider stream must project an explicit JSON error")
+    };
+    assert!(error_body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.contains("response.completed")));
+
+    let success_transport = SingleJsonCaptureTransport {
+        captures: Mutex::new(Vec::new()),
+        response: json!({
+            "id":"resp_after_terminal_missing",
+            "status":"completed",
+            "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fresh request succeeded"}]}]
+        }),
+    };
+    let fresh = tokio::time::timeout(
+        Duration::from_millis(500),
+        execute_v3_responses_relay_runtime_with_retry_policy(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: server_id.into(),
+                request_id: "req-responses-after-terminal-missing".into(),
+                payload: json!({
+                    "model":"client-responses",
+                    "input":"fresh request",
+                    "stream":false
+                }),
+            },
+            &success_transport,
+            V3ResponsesRelayRetryPolicy {
+                same_candidate_retries: 0,
+            },
+        ),
+    )
+    .await
+    .expect("fresh Responses request consumed the prior terminal-missing recovery lane")
+    .unwrap();
+    assert_eq!(fresh.status, 200);
+    assert_eq!(success_transport.captures.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
         &responses_single_limited_manifest(),
@@ -1785,7 +2199,6 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
         &ResponsesSseInvalidUtf8Transport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 0,
-            retry_delay_ms: 0,
         },
     )
     .await
@@ -1825,7 +2238,6 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
         &ResponsesSseMalformedEventJsonTransport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 0,
-            retry_delay_ms: 0,
         },
     )
     .await
@@ -1895,13 +2307,19 @@ fn provider_key_consecutive_failures_cool_for_fifteen_minutes_without_cross_mode
 
 #[tokio::test]
 async fn provider_error_closeout_enters_error01_06_without_success_projection() {
+    let server_id = "provider_error_terminal_closeout";
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
-        request(
-            "req-closeout-error",
-            json!([{"role":"user","content":"fail"}]),
-            false,
-        ),
+        &manifest_for_scope(server_id),
+        V3AnthropicRelayRuntimeInput {
+            server_id: server_id.into(),
+            request_id: "req-closeout-error".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "messages":[{"role":"user","content":"fail"}],
+                "tools":[{"name":"servertool.exec","input_schema":{"type":"object"}}],
+                "stream":false
+            }),
+        },
         &ErrorTransport,
     )
     .await
@@ -1930,15 +2348,15 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
     assert!(!output.servertool_followup_required);
 }
 
-fn responses_reselect_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
-    compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
+fn responses_reselect_manifest_for_scope(
+    scope: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = r#"
 version = 3
-[servers.controlled]
+[servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "controlled"
+routing_group = "__SCOPE__"
 endpoints = ["responses"]
 [providers.limited]
 type = "responses"
@@ -1962,17 +2380,70 @@ supports_streaming = true
 supports_thinking = true
 max_context_tokens = 1000000
 capabilities = ["text", "tools", "reasoning"]
-[route_groups.controlled.pools.client_responses]
+[route_groups.__SCOPE__.pools.client_responses]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
   { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 },
   { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
 ]
-[route_groups.controlled.pools.default]
+[route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
   { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
+"#;
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source.replace("__SCOPE__", scope)).unwrap(),
+    )
+    .unwrap()
+}
+
+fn responses_request_compat_reselect_manifest() -> routecodex_v3_config::V3Config05ManifestPublished
+{
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.compat_reselect]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "compat_reselect"
+endpoints = ["responses"]
+[providers.limited]
+type = "anthropic"
+base_url = "http://limited.invalid/v1"
+default_model = "claude-fable-5"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
+[providers.limited.models."claude-fable-5"]
+wire_name = "claude-fable-5"
+supports_streaming = true
+supports_thinking = true
+max_context_tokens = 200000
+capabilities = ["text", "tools", "reasoning"]
+[providers.minimax]
+type = "responses"
+base_url = "http://minimax.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_KEY" }] }
+[providers.minimax.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+supports_thinking = true
+max_context_tokens = 1000000
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.compat_reselect.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "limited", model = "claude-fable-5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
+[route_groups.compat_reselect.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "limited", model = "claude-fable-5", key = "key1", priority = 1 },
   { kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 2 }
 ]
 "#,
@@ -1982,15 +2453,71 @@ targets = [
     .unwrap()
 }
 
-fn responses_single_limited_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn responses_request_compat_storm_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
 version = 3
-[servers.controlled]
+[servers.compat_storm]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "controlled"
+routing_group = "compat_storm"
+endpoints = ["responses"]
+[providers.compat_storm_anthropic]
+type = "anthropic"
+base_url = "http://compat-storm-anthropic.invalid/v1"
+default_model = "claude-fable-5"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "COMPAT_STORM_ANTHROPIC_KEY" }] }
+[providers.compat_storm_anthropic.models."claude-fable-5"]
+wire_name = "claude-fable-5"
+supports_streaming = true
+supports_thinking = true
+max_context_tokens = 200000
+capabilities = ["text", "tools", "reasoning"]
+[providers.compat_storm_responses]
+type = "responses"
+base_url = "http://compat-storm-responses.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "COMPAT_STORM_RESPONSES_KEY" }] }
+[providers.compat_storm_responses.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+supports_thinking = true
+max_context_tokens = 1000000
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.compat_storm.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "compat_storm_anthropic", model = "claude-fable-5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "compat_storm_responses", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
+[route_groups.compat_storm.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "compat_storm_anthropic", model = "claude-fable-5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "compat_storm_responses", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn responses_single_limited_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_single_limited_manifest_for_scope("controlled")
+}
+
+fn responses_single_limited_manifest_for_scope(
+    scope: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
 endpoints = ["responses"]
 [providers.limited]
 type = "responses"
@@ -2003,22 +2530,20 @@ supports_streaming = true
 supports_thinking = true
 max_context_tokens = 200000
 capabilities = ["text", "tools", "reasoning"]
-[route_groups.controlled.pools.client_responses]
+[route_groups.__SCOPE__.pools.client_responses]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
   { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 }
 ]
-[route_groups.controlled.pools.default]
+[route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
   { kind = "provider_model", provider = "limited", model = "gpt-5.5", key = "key1", priority = 1 }
 ]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap()
+"#
+    .replace("__SCOPE__", scope);
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
 fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayRuntimeInput {
@@ -2035,14 +2560,16 @@ fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayR
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
-    compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
+    manifest_for_scope("controlled")
+}
+
+fn manifest_for_scope(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = r#"
 version = 3
-[servers.controlled]
+[servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "controlled"
+routing_group = "__SCOPE__"
 endpoints = ["anthropic"]
 [providers.controlled]
 type = "responses"
@@ -2054,22 +2581,20 @@ wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
-[route_groups.controlled.pools.claude_client]
+[route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-[route_groups.controlled.pools.client_responses]
+[route_groups.__SCOPE__.pools.client_responses]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-[route_groups.controlled.pools.default]
+[route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap()
+"#
+    .replace("__SCOPE__", scope);
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
 fn openai_chat_target_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {

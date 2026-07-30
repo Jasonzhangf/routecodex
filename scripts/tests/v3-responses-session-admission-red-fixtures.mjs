@@ -24,6 +24,9 @@ const copied = [
   "v3/crates/routecodex-v3-server/src/session_admission.rs",
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   "v3/crates/routecodex-v3-error/src/lib.rs",
+  "v3/crates/routecodex-v3-config/src/lib.rs",
+  "v3/crates/routecodex-v3-config/src/types.rs",
+  "v3/crates/routecodex-v3-config/tests/config_v3_contract.rs",
   "docs/architecture/v3-function-map.yml",
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-mainline-call-map.yml",
@@ -65,10 +68,90 @@ const cases = [
     path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) =>
       source.replace(
-        "v3_client_sse_body(stream, false)",
-        "v3_client_sse_body(stream, true)",
+        "v3_client_sse_body(stream, None)",
+        "v3_client_sse_body(stream, Some(Duration::from_millis(3_000)))",
       ),
     diagnostic: /Error06\/foundation SSE must bypass success keepalive injection/u,
+  },
+  {
+    name: "CI omits the actual behavior gate",
+    path: ".github/workflows/test.yml",
+    mutate: (source) =>
+      source.replaceAll(
+        "      - name: V3 Responses session admission behavior\n        run: npm run test:v3-responses-session-admission\n",
+        "",
+      ),
+    diagnostic: /CI must run the actual admission and keepalive behavior gate/u,
+  },
+  {
+    name: "function map claims a fake inherent Drop symbol",
+    path: "docs/architecture/v3-function-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "<V3ResponsesSessionAdmissionPermit as Drop>::drop",
+        "V3ResponsesSessionAdmissionPermit::drop",
+      ),
+    diagnostic: /real Drop trait implementation symbol|nonexistent inherent permit drop/u,
+  },
+  {
+    name: "keepalive edge hides its typed config read",
+    path: "docs/architecture/v3-mainline-call-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "side_channel_reads: [v3.config.http_sse_keepalive_interval]",
+        "side_channel_reads: []",
+      ),
+    diagnostic: /truthfully read the typed Config05 interval/u,
+  },
+  {
+    name: "canonical keepalive config accepts the retired variable",
+    path: "v3/crates/routecodex-v3-config/src/lib.rs",
+    mutate: (source) =>
+      source.replace(
+        "RCC_HTTP_SSE_KEEPALIVE_MS is not supported; use ROUTECODEX_HTTP_SSE_KEEPALIVE_MS",
+        "RCC_HTTP_SSE_KEEPALIVE_MS is silently ignored",
+      ),
+    diagnostic: /reject the retired legacy keepalive variable/u,
+  },
+  {
+    name: "session admission regains middleware parsing",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    mutate: (source) =>
+      source.replace(
+        "async fn pending_endpoint(",
+        "struct V3ResponsesAdmissionParsedPayload(Value);\nasync fn responses_session_admission_middleware() {}\n\nasync fn pending_endpoint(",
+      ),
+    diagnostic: /must not create middleware JSON parsing/u,
+  },
+  {
+    name: "keepalive edge is reassigned to the SSE codec owner",
+    path: "docs/architecture/v3-mainline-call-map.yml",
+    mutate: (source) =>
+      source.replaceAll(
+        "owner_feature_id: v3.sse_http_keepalive_boundary",
+        "owner_feature_id: v3.sse_transport_core_independent",
+      ),
+    diagnostic: /server-owned feature/u,
+  },
+  {
+    name: "client-drop HTTP blackbox is removed",
+    path: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
+    mutate: (source) =>
+      source.replace(
+        "async fn responses_client_drop_releases_same_session_before_provider_eof()",
+        "async fn removed_responses_client_drop_release_blackbox()",
+      ),
+    diagnostic: /client drop releases admission before provider EOF/u,
+  },
+  {
+    name: "behavior gate omits the client-drop HTTP blackbox",
+    path: "package.json",
+    mutate: (source) =>
+      source.replace(
+        " && cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact --nocapture",
+        "",
+      ),
+    diagnostic: /must execute the controlled client-drop HTTP blackbox/u,
   },
 ];
 

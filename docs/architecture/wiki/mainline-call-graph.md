@@ -467,6 +467,56 @@ flowchart LR
 | ien-05 | `IntErrNum05DebugArtifactProjected -> IntErrNum06ExternalLinked` | anchored | `projectInternalDebugErrorToDebugArtifact -> linkExternalError` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
 | ien-06 | `IntErrNum06ExternalLinked -> IntErrNum07ClientBoundaryPreserved` | anchored | `linkExternalError -> preserveInternalErrorClientBoundary` |  | `debug.internal_error_numbering`<br/>Internal debug error numbering registry and envelope construction for RouteCodex-owned `500-1xx/2xx/3xx` side-channel errors, with external errors linked but never wrapped |
 
+## error.provider_action_gate.mainline
+
+Typed ErrorErr05 provider actions enter the Rust process-shared isolated-1s/sustained-5s gate; this lifecycle ends at the atomic terminal generation commit. ErrorErr05 -> ErrorErr06 remains the separate error.mainline#err-05 projection edge.
+
+Entry contract: `ErrorErr05ExecutionDecision` via `docs/goals/direct-relay-cross-request-error-storm-control-plan.md`
+
+```mermaid
+flowchart LR
+  ProviderActionGateAbandoned["ProviderActionGateAbandoned"]
+  ProviderActionGateAbandonRequested["ProviderActionGateAbandonRequested"]
+  ProviderActionGateSuccessCommitted["ProviderActionGateSuccessCommitted"]
+  ProviderActionGateSuccessRequested["ProviderActionGateSuccessRequested"]
+  ProviderActionGateTerminalCommitted["ProviderActionGateTerminalCommitted"]
+  ProviderActionGateTerminalCommitRequested["ProviderActionGateTerminalCommitRequested"]
+  ProviderActionGateAdmission["ProviderActionGateAdmission"]
+  ProviderActionGateFailureRecorded["ProviderActionGateFailureRecorded"]
+  ErrorErr05ExecutionDecision["ErrorErr05ExecutionDecision"]
+  ErrorErr05ExecutionDecision -->|error-provider-action-gate-01| ProviderActionGateFailureRecorded
+  ProviderActionGateFailureRecorded -->|error-provider-action-gate-02| ProviderActionGateAdmission
+  ProviderActionGateAdmission -->|error-provider-action-gate-03| ProviderActionGateTerminalCommitRequested
+  ProviderActionGateTerminalCommitRequested -->|error-provider-action-gate-04| ProviderActionGateTerminalCommitted
+  ProviderActionGateAdmission -->|error-provider-action-gate-05| ProviderActionGateSuccessRequested
+  ProviderActionGateSuccessRequested -->|error-provider-action-gate-06| ProviderActionGateSuccessCommitted
+  ProviderActionGateAdmission -->|error-provider-action-gate-07| ProviderActionGateAbandonRequested
+  ProviderActionGateAbandonRequested -->|error-provider-action-gate-08| ProviderActionGateAbandoned
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class ErrorErr05ExecutionDecision anchored;
+  class ProviderActionGateFailureRecorded anchored;
+  class ProviderActionGateAdmission anchored;
+  class ProviderActionGateTerminalCommitRequested anchored;
+  class ProviderActionGateTerminalCommitted anchored;
+  class ProviderActionGateSuccessRequested anchored;
+  class ProviderActionGateSuccessCommitted anchored;
+  class ProviderActionGateAbandonRequested anchored;
+  class ProviderActionGateAbandoned anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| error-provider-action-gate-01 | `ErrorErr05ExecutionDecision -> ProviderActionGateFailureRecorded` | anchored | `resolveRequestExecutorProviderFailurePlan -> recordErrorActionBackoff` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-02 | `ProviderActionGateFailureRecorded -> ProviderActionGateAdmission` | anchored | `resolveRequestExecutorProviderFailurePlan -> waitErrorActionBackoffWithGate` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-03 | `ProviderActionGateAdmission -> ProviderActionGateTerminalCommitRequested` | anchored | `waitErrorActionBackoffWithGate -> commitProviderActionTerminalNative` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-04 | `ProviderActionGateTerminalCommitRequested -> ProviderActionGateTerminalCommitted` | anchored | `commit_provider_action_terminal_json -> commit_terminal` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-05 | `ProviderActionGateAdmission -> ProviderActionGateSuccessRequested` | anchored | `recordErrorActionSuccessByLaneGroup -> recordProviderActionSuccessNative` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-06 | `ProviderActionGateSuccessRequested -> ProviderActionGateSuccessCommitted` | anchored | `record_provider_action_success_json -> record_success` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-07 | `ProviderActionGateAdmission -> ProviderActionGateAbandonRequested` | anchored | `waitErrorActionBackoffWithGate -> abandonProviderActionAdmissionNative` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+| error-provider-action-gate-08 | `ProviderActionGateAbandonRequested -> ProviderActionGateAbandoned` | anchored | `abandon_provider_action_admission_json -> abandon_admission` |  | `error.provider_action_gate`<br/>Rust process-shared cross-request provider action admission gate |
+
 ## error.mainline
 
 Provider/runtime/direct failures enter unified ErrorErr chain; provider availability/cooldown truth stays provider/server-scoped and must not be rewritten into session-storm truth before client projection.
@@ -502,8 +552,46 @@ flowchart LR
 | err-01 | `ErrorErr01SourceRaised -> ErrorErr02HostCaptured` | anchored | `reportProviderErrorToRouterPolicy -> reportProviderErrorToRouterPolicy` |  | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate |
 | err-02 | `ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified` | anchored | `resolveProviderFailureClassification -> classify_error_err02_host_captured` |  | `error.provider_failure_policy`<br/>provider/server error cataloging, runtime classification, router policy application, and availability/cooldown truth; session-local storm semantics are explicitly separate |
 | err-03 | `ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied` | anchored | `report_provider_error_to_router_policy_json_bridge -> report_provider_error` |  | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate |
-| err-04 | `ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` | anchored | `resolveProviderRetryExecutionPlan -> resolve_error_err05_execution_decision` |  | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute |
+| err-04 | `ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision` | anchored | `resolveProviderRetryExecutionPlan -> resolve_error_err05_execution_decision` |  | `error.execution_decision_consumer`<br/>Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions |
 | err-05 | `ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` | anchored | `project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` |  | `error.client_projection`<br/>ErrorErr06 client-visible HTTP/SSE error projection, including started-stream incomplete SSE error frames |
+
+## vr.route_classifier.mainline
+
+V2 Virtual Router consumes the shared Rust current-turn/tool classifier before producing the single selected-route truth.
+
+Entry contract: `HubReqChatProcess03Governed` via `docs/goals/v3-v2-route-classifier-parity-test-design.md`
+
+```mermaid
+flowchart LR
+  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
+  VrRouteClassifier03Classified["VrRouteClassifier03Classified"]
+  VrRouteClassifier03ShellClassification["VrRouteClassifier03ShellClassification"]
+  VrRouteClassifier03ToolClassification["VrRouteClassifier03ToolClassification"]
+  VrRouteClassifier03ActiveTurnSignals["VrRouteClassifier03ActiveTurnSignals"]
+  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
+  HubReqChatProcess03Governed -->|vrc-01| VrRouteClassifier03ActiveTurnSignals
+  VrRouteClassifier03ActiveTurnSignals -->|vrc-02| VrRouteClassifier03ToolClassification
+  VrRouteClassifier03ToolClassification -->|vrc-03| VrRouteClassifier03ShellClassification
+  VrRouteClassifier03ActiveTurnSignals -->|vrc-04| VrRouteClassifier03Classified
+  VrRouteClassifier03Classified -->|vrc-05| VrRoute04SelectedTarget
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class HubReqChatProcess03Governed anchored;
+  class VrRouteClassifier03ActiveTurnSignals anchored;
+  class VrRouteClassifier03ToolClassification anchored;
+  class VrRouteClassifier03ShellClassification anchored;
+  class VrRouteClassifier03Classified anchored;
+  class VrRoute04SelectedTarget anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| vrc-01 | `HubReqChatProcess03Governed -> VrRouteClassifier03ActiveTurnSignals` | anchored | `build_routing_features -> extract_active_turn_signals` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-02 | `VrRouteClassifier03ActiveTurnSignals -> VrRouteClassifier03ToolClassification` | anchored | `classify_call_value -> classify_tool_call` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-03 | `VrRouteClassifier03ToolClassification -> VrRouteClassifier03ShellClassification` | anchored | `classify_tool_call -> classify_shell_command` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-04 | `VrRouteClassifier03ActiveTurnSignals -> VrRouteClassifier03Classified` | anchored | `classify -> classify_route` |  | `vr.route_classifier`<br/>shared V2/V3 current-turn route classification contract |
+| vrc-05 | `VrRouteClassifier03Classified -> VrRoute04SelectedTarget` | anchored | `route -> classify` |  | `vr.route_selection`<br/>virtual router route classification and selected target truth |
 
 ## vr.route_token_estimation.mainline
 
@@ -911,6 +999,232 @@ flowchart LR
 | sse-transport-core-03-v2 | `SseTransportIn03ValidatedFrameStream -> SseTransportOut04EncodedChunk` | anchored | `parse_sse_stream_chunk_with_config -> build_sse_transport_out_04_from_sse_transport_in_03` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
 | sse-transport-core-03-v3 | `SseTransportIn03ValidatedFrameStream -> SseTransportOut04EncodedChunk` | anchored | `validated_sse_stream -> build_sse_transport_out_04_from_sse_transport_in_03` |  | `sse.transport_core_shared`<br/>One protocol-neutral Rust SSE transport owner shared by V2 and V3 adapters |
 
+## v3.console_human_readable_layering.mainline
+
+Runtime-owned Responses Direct/Relay observability, post-commit typed Error01, pre-commit Error06, listener startup, and debug-sink failures enter Server-owned typed layered console projections without rendered-text reparsing.
+
+Entry contract: `V3ConsoleObs01RuntimeObservability` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3ServerRespOutbound06ClientFrame["V3ServerRespOutbound06ClientFrame"]
+  V3RuntimeStreamObservation["V3RuntimeStreamObservation"]
+  V3SseTerminalFailureObservation["V3SseTerminalFailureObservation"]
+  V3ConsoleDebugFailure08HumanBlock["V3ConsoleDebugFailure08HumanBlock"]
+  V3DebugSink01WriteFailed["V3DebugSink01WriteFailed"]
+  V3ConsoleStartup07HumanBlock["V3ConsoleStartup07HumanBlock"]
+  V3ServerStartup01ListenerSetPreflight["V3ServerStartup01ListenerSetPreflight"]
+  V3ConsoleError06HumanBlock["V3ConsoleError06HumanBlock"]
+  V3Error06ClientProjected["V3Error06ClientProjected"]
+  V3ConsoleError01HumanBlock["V3ConsoleError01HumanBlock"]
+  V3Error01SourceRaised["V3Error01SourceRaised"]
+  V3ConsoleStopless05ExceptionalBlock["V3ConsoleStopless05ExceptionalBlock"]
+  V3ConsoleProvider04ExceptionalBlock["V3ConsoleProvider04ExceptionalBlock"]
+  V3ConsoleResp03HumanBlock["V3ConsoleResp03HumanBlock"]
+  V3ConsoleReq02HumanBlock["V3ConsoleReq02HumanBlock"]
+  V3ConsoleObs01RuntimeObservability["V3ConsoleObs01RuntimeObservability"]
+  V3ConsoleObs01RuntimeObservability -->|v3-console-01| V3ConsoleReq02HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-02| V3ConsoleResp03HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-03| V3ConsoleProvider04ExceptionalBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-04| V3ConsoleStopless05ExceptionalBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-05| V3ConsoleResp03HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-06| V3ConsoleStopless05ExceptionalBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-07| V3ConsoleResp03HumanBlock
+  V3ConsoleObs01RuntimeObservability -->|v3-console-08| V3ConsoleStopless05ExceptionalBlock
+  V3Error01SourceRaised -->|v3-console-09| V3ConsoleError01HumanBlock
+  V3Error01SourceRaised -->|v3-console-10| V3ConsoleError01HumanBlock
+  V3Error06ClientProjected -->|v3-console-11| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-12| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-13| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-14| V3ConsoleError06HumanBlock
+  V3ServerStartup01ListenerSetPreflight -->|v3-console-15| V3ConsoleStartup07HumanBlock
+  V3DebugSink01WriteFailed -->|v3-console-16| V3ConsoleDebugFailure08HumanBlock
+  V3SseTerminalFailureObservation -->|v3-console-17| V3Error01SourceRaised
+  V3RuntimeStreamObservation -->|v3-console-18| V3Error01SourceRaised
+  V3Error06ClientProjected -->|v3-console-19| V3ConsoleError06HumanBlock
+  V3Error06ClientProjected -->|v3-console-20| V3ConsoleError06HumanBlock
+  V3ServerRespOutbound06ClientFrame -->|v3-console-21| V3RuntimeStreamObservation
+  V3ServerRespOutbound06ClientFrame -->|v3-console-22| V3RuntimeStreamObservation
+  V3RuntimeStreamObservation -->|v3-console-23| V3Error01SourceRaised
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3ConsoleObs01RuntimeObservability anchored;
+  class V3ConsoleReq02HumanBlock anchored;
+  class V3ConsoleResp03HumanBlock anchored;
+  class V3ConsoleProvider04ExceptionalBlock anchored;
+  class V3ConsoleStopless05ExceptionalBlock anchored;
+  class V3Error01SourceRaised anchored;
+  class V3ConsoleError01HumanBlock anchored;
+  class V3Error06ClientProjected anchored;
+  class V3ConsoleError06HumanBlock anchored;
+  class V3ServerStartup01ListenerSetPreflight anchored;
+  class V3ConsoleStartup07HumanBlock anchored;
+  class V3DebugSink01WriteFailed anchored;
+  class V3ConsoleDebugFailure08HumanBlock anchored;
+  class V3SseTerminalFailureObservation anchored;
+  class V3RuntimeStreamObservation anchored;
+  class V3ServerRespOutbound06ClientFrame anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-console-01 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleReq02HumanBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_request_route_hit_console_line_for_observability` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-02 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-03 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleProvider04ExceptionalBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_provider_observability_console_lines` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-04 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-05 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-06 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-07 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_direct_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-08 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_direct_sse_complete_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-09 | `V3Error01SourceRaised -> V3ConsoleError01HumanBlock` | anchored | `emit_relay_sse_failure_console_line -> emit_v3_post_commit_sse_source_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-10 | `V3Error01SourceRaised -> V3ConsoleError01HumanBlock` | anchored | `emit_direct_sse_failure_console_line -> emit_v3_post_commit_sse_source_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-11 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `emit_v3_direct_frame_console_lines -> emit_v3_frame_error_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-12 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `emit_v3_direct_frame_console_lines -> emit_v3_frame_error_console_line_for_state` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-13 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `record_and_emit_v3_error_projection -> emit_v3_error_console_line_for_state` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-14 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `allocate_v3_console_request_id -> emit_v3_error_console_line_for_state` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-15 | `V3ServerStartup01ListenerSetPreflight -> V3ConsoleStartup07HumanBlock` | anchored | `emit_v3_startup_console_line -> format_v3_startup_console_block` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-16 | `V3DebugSink01WriteFailed -> V3ConsoleDebugFailure08HumanBlock` | anchored | `append_v3_human_console_line -> emit_v3_debug_sink_console_failure` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-17 | `V3SseTerminalFailureObservation -> V3Error01SourceRaised` | anchored | `poll_next -> raise_v3_sse_provider_failure` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-18 | `V3RuntimeStreamObservation -> V3Error01SourceRaised` | anchored | `client_disconnected -> raise_v3_sse_client_disconnect` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-19 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `error_output_response_for_server_with_project_path -> emit_v3_frame_error_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-20 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `error_output_response_for_responses_request_with_project_path -> emit_v3_frame_error_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-21 | `V3ServerRespOutbound06ClientFrame -> V3RuntimeStreamObservation` | anchored | `wrap_v3_relay_sse_console_stream -> client_disconnected` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-22 | `V3ServerRespOutbound06ClientFrame -> V3RuntimeStreamObservation` | anchored | `wrap_v3_direct_sse_console_stream -> client_disconnected` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+| v3-console-23 | `V3RuntimeStreamObservation -> V3Error01SourceRaised` | anchored | `client_disconnected -> raise_v3_sse_client_disconnect` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
+
+## v3.console_request_count_visibility.mainline
+
+One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.
+
+Entry contract: `V3RequestCounter01AggregateOwned` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3ConsoleResp03HumanBlock["V3ConsoleResp03HumanBlock"]
+  V3ConsoleReq02HumanBlock["V3ConsoleReq02HumanBlock"]
+  V3RequestIdentity03Allocated["V3RequestIdentity03Allocated"]
+  V3RequestCounter02ListenerShared["V3RequestCounter02ListenerShared"]
+  V3RequestCounter01AggregateOwned["V3RequestCounter01AggregateOwned"]
+  V3RequestCounter01AggregateOwned -->|v3-console-count-01| V3RequestCounter02ListenerShared
+  V3RequestCounter02ListenerShared -->|v3-console-count-02| V3RequestIdentity03Allocated
+  V3RequestIdentity03Allocated -->|v3-console-count-03| V3ConsoleReq02HumanBlock
+  V3RequestIdentity03Allocated -->|v3-console-count-04| V3ConsoleResp03HumanBlock
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3RequestCounter01AggregateOwned anchored;
+  class V3RequestCounter02ListenerShared anchored;
+  class V3RequestIdentity03Allocated anchored;
+  class V3ConsoleReq02HumanBlock anchored;
+  class V3ConsoleResp03HumanBlock anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-console-count-01 | `V3RequestCounter01AggregateOwned -> V3RequestCounter02ListenerShared` | anchored | `spawn_v3_server_aggregate -> V3RequestIdCounter::new` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+| v3-console-count-02 | `V3RequestCounter02ListenerShared -> V3RequestIdentity03Allocated` | anchored | `next_v3_console_request_identity -> next_request_identity` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+| v3-console-count-03 | `V3RequestIdentity03Allocated -> V3ConsoleReq02HumanBlock` | anchored | `render_v3_request_console_block -> format_v3_console_request_count` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+| v3-console-count-04 | `V3RequestIdentity03Allocated -> V3ConsoleResp03HumanBlock` | anchored | `render_v3_response_console_block -> format_v3_console_request_count` |  | `v3.console_request_count_visibility`<br/>One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines. |
+
+## v3.runtime_timing_observability.mainline
+
+Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.
+
+Entry contract: `V3RuntimeTimingStart` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3RuntimeTimingObservability["V3RuntimeTimingObservability"]
+  V3RuntimeTimingServerProjection["V3RuntimeTimingServerProjection"]
+  V3RuntimeTimingStreamObservation["V3RuntimeTimingStreamObservation"]
+  V3RuntimeTimingTerminal["V3RuntimeTimingTerminal"]
+  V3RuntimeTimingExternalComplete["V3RuntimeTimingExternalComplete"]
+  V3RuntimeTimingExternalAttempt["V3RuntimeTimingExternalAttempt"]
+  V3RuntimeTimingStart["V3RuntimeTimingStart"]
+  V3RuntimeTimingStart -->|v3-runtime-timing-01| V3RuntimeTimingExternalAttempt
+  V3RuntimeTimingExternalAttempt -->|v3-runtime-timing-02| V3RuntimeTimingExternalComplete
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-03| V3RuntimeTimingExternalAttempt
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-04| V3RuntimeTimingTerminal
+  V3RuntimeTimingTerminal -->|v3-runtime-timing-05| V3RuntimeTimingStreamObservation
+  V3RuntimeTimingStreamObservation -->|v3-runtime-timing-06| V3RuntimeTimingServerProjection
+  V3RuntimeTimingTerminal -->|v3-runtime-timing-07| V3RuntimeTimingObservability
+  V3RuntimeTimingObservability -->|v3-runtime-timing-08| V3RuntimeTimingServerProjection
+  V3RuntimeTimingStart -->|v3-runtime-timing-09| V3RuntimeTimingExternalAttempt
+  V3RuntimeTimingExternalAttempt -->|v3-runtime-timing-10| V3RuntimeTimingExternalComplete
+  V3RuntimeTimingExternalComplete -->|v3-runtime-timing-11| V3RuntimeTimingTerminal
+  V3RuntimeTimingTerminal -->|v3-runtime-timing-12| V3RuntimeTimingStreamObservation
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3RuntimeTimingStart anchored;
+  class V3RuntimeTimingExternalAttempt anchored;
+  class V3RuntimeTimingExternalComplete anchored;
+  class V3RuntimeTimingTerminal anchored;
+  class V3RuntimeTimingStreamObservation anchored;
+  class V3RuntimeTimingServerProjection anchored;
+  class V3RuntimeTimingObservability anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-runtime-timing-01 | `V3RuntimeTimingStart -> V3RuntimeTimingExternalAttempt` | anchored | `execute_v3_responses_relay_runtime_inner -> start_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-02 | `V3RuntimeTimingExternalAttempt -> V3RuntimeTimingExternalComplete` | anchored | `execute_v3_responses_relay_runtime_inner -> finish_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-03 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingExternalAttempt` | anchored | `execute_v3_responses_relay_runtime_inner -> start_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-04 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingTerminal` | anchored | `execute_v3_responses_relay_runtime_inner -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-05 | `V3RuntimeTimingTerminal -> V3RuntimeTimingStreamObservation` | anchored | `execute_v3_responses_relay_runtime_inner -> record_timing` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-06 | `V3RuntimeTimingStreamObservation -> V3RuntimeTimingServerProjection` | anchored | `complete_relay_sse -> merge_v3_runtime_stream_observation` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-07 | `V3RuntimeTimingTerminal -> V3RuntimeTimingObservability` | anchored | `execute_v3_responses_direct_runtime_kernel_core -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-08 | `V3RuntimeTimingObservability -> V3RuntimeTimingServerProjection` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-09 | `V3RuntimeTimingStart -> V3RuntimeTimingExternalAttempt` | anchored | `execute_v3_responses_direct_runtime_kernel_core -> start_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-10 | `V3RuntimeTimingExternalAttempt -> V3RuntimeTimingExternalComplete` | anchored | `wrap_direct_sse_provider_event_json_observation_stream -> finish_external` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-11 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingTerminal` | anchored | `wrap_direct_sse_provider_outcome_stream -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-12 | `V3RuntimeTimingTerminal -> V3RuntimeTimingStreamObservation` | anchored | `wrap_direct_sse_provider_outcome_stream -> record_timing` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+
+## v3.codex_sample_retention_snap_scope
+
+Explicit CLI authorization is published through the managed manifest; Debug bounds diagnostic copies; Server alone persists and trims Codex samples.
+
+Entry contract: `V3CodexSample01CliAuthorization` via `docs/architecture/function-map.yml`
+
+```mermaid
+flowchart LR
+  V3ServerStartup01ListenerSetPreflight["V3ServerStartup01ListenerSetPreflight"]
+  V3CodexSample06RetentionEnforced["V3CodexSample06RetentionEnforced"]
+  V3CodexSample05FilesystemPersisted["V3CodexSample05FilesystemPersisted"]
+  V3CodexSample04PayloadBudgeted["V3CodexSample04PayloadBudgeted"]
+  V3CodexSample03AuthorizedCapture["V3CodexSample03AuthorizedCapture"]
+  V3CodexSample02ManifestAuthorizationPublished["V3CodexSample02ManifestAuthorizationPublished"]
+  V3CodexSample01CliAuthorization["V3CodexSample01CliAuthorization"]
+  V3CodexSample01CliAuthorization -->|v3-codex-sample-01| V3CodexSample02ManifestAuthorizationPublished
+  V3CodexSample02ManifestAuthorizationPublished -->|v3-codex-sample-02| V3CodexSample03AuthorizedCapture
+  V3CodexSample03AuthorizedCapture -->|v3-codex-sample-03| V3CodexSample04PayloadBudgeted
+  V3CodexSample04PayloadBudgeted -->|v3-codex-sample-04| V3CodexSample05FilesystemPersisted
+  V3CodexSample04PayloadBudgeted -->|v3-codex-sample-05| V3CodexSample05FilesystemPersisted
+  V3CodexSample05FilesystemPersisted -->|v3-codex-sample-06| V3CodexSample06RetentionEnforced
+  V3ServerStartup01ListenerSetPreflight -->|v3-codex-sample-07| V3CodexSample06RetentionEnforced
+  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+  class V3CodexSample01CliAuthorization anchored;
+  class V3CodexSample02ManifestAuthorizationPublished anchored;
+  class V3CodexSample03AuthorizedCapture anchored;
+  class V3CodexSample04PayloadBudgeted anchored;
+  class V3CodexSample05FilesystemPersisted anchored;
+  class V3CodexSample06RetentionEnforced anchored;
+  class V3ServerStartup01ListenerSetPreflight anchored;
+```
+
+| step | transition | status | caller -> callee | split binding | owner |
+| --- | --- | --- | --- | --- | --- |
+| v3-codex-sample-01 | `V3CodexSample01CliAuthorization -> V3CodexSample02ManifestAuthorizationPublished` | anchored | `configure_v3_snapshot_flags -> with_direct_snapshots_enabled` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-02 | `V3CodexSample02ManifestAuthorizationPublished -> V3CodexSample03AuthorizedCapture` | anchored | `declaration -> apply_snapshot_authorization_to_manifest` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-03 | `V3CodexSample03AuthorizedCapture -> V3CodexSample04PayloadBudgeted` | anchored | `capture_v3_live_raw_request -> redact_payload_for_side_channel` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-04 | `V3CodexSample04PayloadBudgeted -> V3CodexSample05FilesystemPersisted` | anchored | `capture_v3_responses_direct_response -> persist_v3_codex_sample_payload` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-05 | `V3CodexSample04PayloadBudgeted -> V3CodexSample05FilesystemPersisted` | anchored | `capture_v3_responses_relay_provider_snapshots -> persist_v3_codex_sample_payload` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-06 | `V3CodexSample05FilesystemPersisted -> V3CodexSample06RetentionEnforced` | anchored | `persist_v3_codex_sample_payload -> enforce_v3_codex_sample_request_retention` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+| v3-codex-sample-07 | `V3ServerStartup01ListenerSetPreflight -> V3CodexSample06RetentionEnforced` | anchored | `spawn_v3_server_aggregate -> enforce_v3_codex_sample_listener_retention` |  | `v3.codex_sample_retention_snap_scope`<br/>V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap. |
+
 ## Shared Multi-Reference Functions
 
 | function_id | symbol | owner | note |
@@ -925,7 +1239,7 @@ flowchart LR
 | native.provider_response_diagnostic_alarm_effect | `plan_provider_response_diagnostic_alarm_effect_json` | `hub.provider_response_diagnostic_alarm_effect_plan`<br/>Rust-owned provider-response diagnostic alarm console effect plan | Rust selects diagnostic alarm entries and emits complete console message effects; TS executes console.warn IO only. |
 | native.provider_response_outbound_effect_materialization | `materialize_provider_response_outbound_effect_plan_json` | `hub.provider_response_outbound_effect_materialization`<br/>Rust-owned provider-response outbound payload/effect materialization; TS only executes request-local host IO | Rust validates the total response plan and returns payload, request/diagnostic projection, and normalized runtime effects; TS performs host IO only. |
 | native.provider_response_stage_recorder_effect | `plan_provider_response_stage_recorder_effect_json` | `hub.provider_response_stage_recorder_effect_plan`<br/>Rust-owned provider-response debug stage recorder effect plan; TS only executes recorder IO | Rust emits ordered response debug stage records; TS only executes recorder IO and does not own stage names or debug payload envelopes. |
-| error.execution_decision_consumer | `resolveProviderRetryExecutionPlan` | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute | Thin executor host captures ErrorErr02 JSON, invokes Rust ErrorErr05 truth once, and applies request-local attempt/exclusion effects. |
+| error.execution_decision_consumer | `resolveProviderRetryExecutionPlan` | `error.execution_decision_consumer`<br/>Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions | Thin executor host captures ErrorErr02 JSON, invokes Rust ErrorErr05 truth once, and applies request-local attempt/exclusion effects. |
 | runtime.lifecycle.pid_cache_writer | `writeServerPidCache` | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state | Writes transient pid.cache JSON under runtime-lifecycle subdir; truth remains HTTP /health + listener identity. |
 | runtime.lifecycle.stop_intent_signal | `writeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Cross-process stop-intent signal; daemon-stop-intent.ts is a thin re-export facade. |
 | runtime.lifecycle.stop_intent_consumer | `consumeServerStopIntent` | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL | Consumes and TTL-gates stop-intent.json; same owner truth as the writer. |
@@ -949,7 +1263,7 @@ flowchart LR
 | debug.provider_golden_capture_config_projection | `buildDerivedConfig` | `debug.provider_golden_capture_payload_copy_budget`<br/>Provider golden capture derives temporary configs with path-local owners instead of deep-cloning complete config graphs | Debug capture block: creates path-local temporary config owners while borrowing unchanged nested provider and config branches until artifact serialization. |
 | debug.outbound_regression_execution_copy | `cloneOutboundRegressionExecutionPayload` | `debug.outbound_regression_payload_copy_budget`<br/>Outbound provider regression keeps exactly one structured-clone execution graph without fallback cloning | Debug script block: creates the single provider-mutation isolation graph for one outbound regression attempt; JSON and original-object fallback paths are forbidden. |
 | error.err_04_router_policy_applied | `report_provider_error` | `error.pipeline_contract`<br/>ErrorErr01-06 provider/runtime error chain contract and architecture gate | Router policy applied between ErrorErr03 and ErrorErr05; Rust provider runtime ingress normalizes provider error events into ErrorErr04 policy truth. |
-| error.err_04_executor_envelope | `RequestExecutorErrorErr04RouterPolicyEnvelope` | `error.execution_decision_consumer`<br/>Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute | Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract. |
+| error.err_04_executor_envelope | `RequestExecutorErrorErr04RouterPolicyEnvelope` | `error.execution_decision_consumer`<br/>Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions | Executor-side envelope alias for ErrorErr04RouterPolicyApplied; call map edge err-03 crosses from ErrorErr03 to ErrorErr05 per contract. |
 
 ## Maintenance Rules
 

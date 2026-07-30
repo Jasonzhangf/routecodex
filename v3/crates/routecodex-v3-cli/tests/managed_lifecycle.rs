@@ -1010,6 +1010,11 @@ fn top_level_start_snap_forces_debug_snapshots() {
     }
     let debug = http_get_json(ports[0], "/_routecodex/debug/status");
     assert_eq!(debug["debug"]["snapshots_enabled"], true);
+    assert_eq!(debug["debug"]["codex_samples_enabled"], true);
+    assert_eq!(
+        debug["debug"]["direct_snapshots_enabled"], false,
+        "--snap must retain Relay samples without persisting Direct samples"
+    );
     let expected_log_file = home
         .join(".rcc")
         .join("logs")
@@ -1049,6 +1054,87 @@ fn top_level_start_snap_forces_debug_snapshots() {
 }
 
 #[test]
+fn top_level_start_without_snap_disables_codex_samples_but_preserves_debug_runtime() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_snapshots(&root, ports, true);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = run(binary, &state_root, &config, "start");
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let debug = http_get_json(ports[0], "/_routecodex/debug/status");
+    assert_eq!(
+        debug["debug"]["snapshots_enabled"], true,
+        "managed CLI must not disable configured Debug runtime features"
+    );
+    assert_eq!(
+        debug["debug"]["codex_samples_enabled"], false,
+        "managed CLI without --snap/--snapall must not persist Codex samples"
+    );
+    assert_eq!(debug["debug"]["direct_snapshots_enabled"], false);
+
+    let stop = run_top_level(binary, &state_root, &config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
+fn top_level_start_snapall_enables_direct_snapshots() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let ports = [free_port(), free_port()];
+    let config = write_config_with_snapshots(&root, ports, false);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = spawn_top_level_start_with_args_and_home(
+        binary,
+        &state_root,
+        &config,
+        &["--snapall"],
+        &home,
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let debug = http_get_json(ports[0], "/_routecodex/debug/status");
+    assert_eq!(debug["debug"]["snapshots_enabled"], true);
+    assert_eq!(debug["debug"]["codex_samples_enabled"], true);
+    assert_eq!(debug["debug"]["direct_snapshots_enabled"], true);
+
+    let stop = run_top_level(binary, &state_root, &config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    let start_output = start.wait_with_output().unwrap();
+    assert!(
+        start_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+}
+
+#[test]
 fn top_level_restart_snap_forces_debug_snapshots() {
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
@@ -1067,6 +1153,7 @@ fn top_level_restart_snap_forces_debug_snapshots() {
     }
     let before = http_get_json(ports[0], "/_routecodex/debug/status");
     assert_eq!(before["debug"]["snapshots_enabled"], false);
+    assert_eq!(before["debug"]["codex_samples_enabled"], false);
 
     let restart = Command::new(binary)
         .args(["restart", "--config"])
@@ -1090,6 +1177,7 @@ fn top_level_restart_snap_forces_debug_snapshots() {
     }
     let after = http_get_json(ports[0], "/_routecodex/debug/status");
     assert_eq!(after["debug"]["snapshots_enabled"], true);
+    assert_eq!(after["debug"]["codex_samples_enabled"], true);
 
     let stop = run_top_level(binary, &state_root, &config, "stop");
     assert!(
@@ -1124,6 +1212,7 @@ fn top_level_start_snap_stages_enable_local_stage_selector() {
     }
     let debug = http_get_json(ports[0], "/_routecodex/debug/status");
     assert_eq!(debug["debug"]["snapshots_enabled"], true);
+    assert_eq!(debug["debug"]["codex_samples_enabled"], true);
     assert_eq!(
         debug["debug"]["snapshot_stages"],
         "client-request,provider-request"

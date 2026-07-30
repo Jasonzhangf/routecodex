@@ -1,5 +1,8 @@
 use crate::types::*;
-use crate::{looks_like_secret_literal, validation, V3ConfigError};
+use crate::{
+    compile_v3_http_sse_keepalive_ms_from_environment, looks_like_secret_literal, validation,
+    V3ConfigError,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn validate_schema(
@@ -32,7 +35,13 @@ pub(crate) fn build_resource_registry(
     let forwarders = compile_forwarders(authoring.forwarders, &providers)?;
     validate_client_aliases(&providers, &forwarders)?;
     let route_groups = compile_route_groups(authoring.route_groups, &providers, &forwarders)?;
-    let servers = compile_servers(authoring.servers, &route_groups, hub_v1.is_some())?;
+    let http_sse_keepalive_ms = compile_v3_http_sse_keepalive_ms_from_environment()?;
+    let servers = compile_servers(
+        authoring.servers,
+        &route_groups,
+        hub_v1.is_some(),
+        http_sse_keepalive_ms,
+    )?;
     ensure_unique_listen_addresses(&servers)?;
     if !servers.values().any(|server| server.enabled) {
         return Err(validation("at least one enabled server is required"));
@@ -460,6 +469,7 @@ fn compile_servers(
     authoring: BTreeMap<String, V3ServerAuthoringConfig>,
     route_groups: &BTreeMap<String, V3RouteGroupManifest>,
     hub_v1_enabled: bool,
+    http_sse_keepalive_ms: u64,
 ) -> Result<BTreeMap<String, V3ServerManifest>, V3ConfigError> {
     authoring
         .into_iter()
@@ -516,6 +526,7 @@ fn compile_servers(
                         .collect(),
                     features: server.features,
                     execution,
+                    http_sse_keepalive_ms,
                 },
             ))
         })
@@ -1202,6 +1213,11 @@ fn compile_pool_match(
             "route group {group_id} non-default pool {pool_id} must declare precedence"
         ))
     })?;
+    if pool_id == "longcontext" && authoring.min_input_tokens.is_none() {
+        return Err(validation(format!(
+            "route group {group_id} longcontext pool must declare min_input_tokens"
+        )));
+    }
     if authoring.entry_protocol.is_none()
         && authoring.models.is_empty()
         && authoring.required_capabilities.is_empty()
@@ -1431,7 +1447,9 @@ fn compile_debug(authoring: V3DebugAuthoringConfig) -> Result<V3DebugManifest, V
         log_console: authoring.log_console,
         log_file: authoring.log_file,
         snapshots: authoring.snapshots,
+        codex_samples: false,
         snapshot_stages,
+        snapshot_direct: authoring.snapshot_direct.unwrap_or(true),
         dry_run: authoring.dry_run,
         retention: authoring.retention,
     })

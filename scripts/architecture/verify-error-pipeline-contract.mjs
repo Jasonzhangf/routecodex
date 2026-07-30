@@ -98,8 +98,13 @@ if (!providerDirect.includes('onProviderError?: (error: unknown, context: Provid
 if (!providerDirect.includes('const errorAction = await options.onProviderError?.(error, auditContext);')) {
   failures.push('provider-direct-pipeline must await ErrorErr05 action from caller-owned onProviderError hook');
 }
-if (!providerDirect.includes('if (errorAction && !errorAction.shouldRethrow)')) {
-  failures.push('provider-direct-pipeline must consume non-rethrow ErrorErr05 action instead of always rethrowing');
+for (const action of ['wait_then_retry_same', 'wait_then_reselect', 'project_terminal']) {
+  if (!providerDirect.includes(`errorAction.action === '${action}'`)) {
+    failures.push(`provider-direct-pipeline must consume typed ErrorErr05 ${action} action`);
+  }
+}
+if (providerDirect.includes('shouldRethrow') || providerDirect.includes('request_reroute')) {
+  failures.push('provider-direct-pipeline must not consume removed untyped direct-decision actions');
 }
 if (!providerDirect.includes('errorAction,')) {
   failures.push('provider-direct-pipeline must return caller-owned ErrorErr05 action to the HTTP/direct consumer');
@@ -118,8 +123,14 @@ if (!/onProviderError:\s*async\s*\(error,\s*context\)/.test(serverIndex)) {
 if (!serverIndex.includes('await resolveRequestExecutorProviderFailurePlan({')) {
   failures.push('http-server provider-direct path must build the ErrorErr05 decision wrapper');
 }
-if (!serverIndex.includes('return decideDirectProviderRetry({')) {
-  failures.push('http-server provider-direct path must consume ErrorErr05 via typed direct decision action');
+if (!serverIndex.includes('return directFailurePlan.retryExecutionPlan;')) {
+  failures.push('http-server provider-direct path must return the Rust-owned typed ErrorErr05 execution decision');
+}
+if (!serverIndex.includes("routeName: 'default'") || !serverIndex.includes('defaultPoolSingletonProvider')) {
+  failures.push('http-server provider-direct path must model its explicit binding as the default singleton tier');
+}
+if (serverIndex.includes('decideDirectProviderRetry') || serverIndex.includes('defaultTierAvailable: false')) {
+  failures.push('http-server provider-direct path must not restore removed TS policy or a false default-pool claim');
 }
 if (!serverIndex.includes('await processProviderSendFailure({')) {
   failures.push('http-server router-direct path must consume ErrorErr05 through processProviderSendFailure');

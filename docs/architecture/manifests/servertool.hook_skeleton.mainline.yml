@@ -30,6 +30,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - metadata.runtime_control
+      produces:
+        - servertool.followup_state
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: sth-resp-02
     from_node: ServertoolRespHook01Intercepted
     to_node: ServertoolRespHook02SchemaValidated
@@ -37,6 +47,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - servertool.followup_state
+        - response.hub_semantic
+      produces:
+        - servertool.followup_state
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: sth-resp-03
     from_node: ServertoolRespHook02SchemaValidated
     to_node: ServertoolRespHook03HookResponseInjected
@@ -44,6 +64,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - servertool.followup_state
+      produces:
+        - response.hub_semantic
+        - servertool.followup_state
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: sth-resp-06
     from_node: ServertoolRespHook03HookResponseInjected
     to_node: ServertoolRespHook06ProjectionFinalized
@@ -51,6 +81,15 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - servertool.followup_state
+      produces:
+        - response.hub_semantic
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes: []
   - step_id: sth-resp-07
     from_node: ServertoolRespHook06ProjectionFinalized
     to_node: HubRespOutbound04ClientSemantic
@@ -58,6 +97,15 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - servertool.followup_state
+      produces:
+        - response.client_payload
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes: []
   - step_id: sth-cli-01
     from_node: ServertoolRespHook03HookResponseInjected
     to_node: ServertoolCli04ClientExecuted
@@ -65,6 +113,15 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - servertool.followup_state
+      produces:
+        - servertool.followup_state
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: sth-req-01
     from_node: ChatProcReqContinuation03CanonicalRestored
     to_node: ServertoolReqHook01ResultParsed
@@ -72,6 +129,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - servertool.followup_state
+      produces:
+        - servertool.followup_state
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: sth-req-02
     from_node: ServertoolReqHook01ResultParsed
     to_node: ServertoolReqHook02TextRewritten
@@ -79,6 +146,14 @@ edges:
     owner_feature_id: hub.req_chatprocess_governance
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - servertool.followup_state
+      produces:
+        - request.normal_payload
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes: []
   - step_id: sth-req-03
     from_node: ServertoolReqHook02TextRewritten
     to_node: ServertoolReqHook03ToolInjected
@@ -86,6 +161,15 @@ edges:
     owner_feature_id: hub.req_chatprocess_governance
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - servertool.followup_state
+      produces:
+        - request.normal_payload
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes: []
   - step_id: sth-req-04
     from_node: ServertoolReqHook03ToolInjected
     to_node: ServertoolReqHook04RequestFinalized
@@ -93,6 +177,13 @@ edges:
     owner_feature_id: hub.req_chatprocess_governance
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - request.normal_payload
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: sth-req-05
     from_node: ServertoolReqHook04RequestFinalized
     to_node: HubReqChatProcess03Governed
@@ -100,6 +191,13 @@ edges:
     owner_feature_id: hub.req_chatprocess_governance
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - request.normal_payload
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

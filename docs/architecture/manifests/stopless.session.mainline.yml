@@ -29,6 +29,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - metadata.runtime_control
+      produces:
+        - servertool.followup_state
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: stl-02
     from_node: StoplessResp02SchemaGateEvaluated
     to_node: StoplessState03RuntimeSnapshotResolved
@@ -36,6 +46,19 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - servertool.followup_state
+        - metadata.runtime_control
+      produces:
+        - stopless.schema_gate_state
+        - stopless.runtime_snapshot
+      side_channel_reads:
+        - servertool.followup_state
+        - metadata.runtime_control
+      side_channel_writes:
+        - stopless.schema_gate_state
+        - stopless.runtime_snapshot
   - step_id: stl-03
     from_node: StoplessState03RuntimeSnapshotResolved
     to_node: StoplessCli04ProjectionPlanned
@@ -43,6 +66,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - stopless.schema_gate_state
+        - stopless.runtime_snapshot
+      produces:
+        - stopless.cli_projection
+      side_channel_reads:
+        - stopless.schema_gate_state
+        - stopless.runtime_snapshot
+      side_channel_writes: []
   - step_id: stl-04
     from_node: StoplessCli04ProjectionPlanned
     to_node: StoplessCli06ClientExecuted
@@ -50,6 +83,13 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - stopless.cli_projection
+      produces:
+        - stopless.cli_result
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: stl-05
     from_node: StoplessCli06ClientExecuted
     to_node: StoplessReq07ContinuationRestored
@@ -57,6 +97,18 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - stopless.cli_result
+        - stopless.runtime_snapshot
+        - continuation.scope_state
+      produces:
+        - stopless.runtime_snapshot
+      side_channel_reads:
+        - stopless.runtime_snapshot
+        - continuation.scope_state
+      side_channel_writes:
+        - stopless.runtime_snapshot
   - step_id: stl-06
     from_node: StoplessReq07ContinuationRestored
     to_node: StoplessReq08GuidanceRewritten
@@ -64,6 +116,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - stopless.cli_result
+        - stopless.runtime_snapshot
+      produces:
+        - stopless.guidance_rewrite
+      side_channel_reads:
+        - stopless.runtime_snapshot
+      side_channel_writes: []
   - step_id: stl-07
     from_node: StoplessReq08GuidanceRewritten
     to_node: StoplessReq09SchemaContractInjected
@@ -71,6 +133,13 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - stopless.guidance_rewrite
+      produces:
+        - stopless.schema_contract
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: stl-08
     from_node: StoplessReq09SchemaContractInjected
     to_node: VrRoute04SelectedTarget
@@ -78,6 +147,16 @@ edges:
     owner_feature_id: hub.servertool_stopless_cli_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - stopless.schema_contract
+        - metadata.runtime_control
+      produces:
+        - route.selection
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes:
+        - route.selection
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

@@ -1,3 +1,4 @@
+use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -78,10 +79,29 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Value {
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
     if let Some(instructions) = instructions {
-        lift_responses_instructions_into_input(&mut normalized, instructions);
+        if responses_input_accepts_system_instruction_prefix(&normalized) {
+            lift_responses_instructions_into_input(&mut normalized, instructions);
+        } else if let Some(object) = normalized.as_object_mut() {
+            object.insert("instructions".to_string(), Value::String(instructions));
+        }
     }
     normalize_responses_target_token_and_logprob_fields(&mut normalized);
     normalized
+}
+
+fn responses_input_accepts_system_instruction_prefix(payload: &Value) -> bool {
+    payload
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("message")
+                    || item
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .is_some_and(|role| matches!(role, "user" | "system" | "developer"))
+            })
+        })
 }
 
 fn lift_responses_instructions_into_input(payload: &mut Value, instructions: String) {
@@ -176,6 +196,45 @@ fn normalize_responses_target_token_and_logprob_fields(payload: &mut Value) {
         if let Some(value) = top_logprobs {
             row.insert("top_logprobs".to_string(), value);
         }
+    }
+}
+
+pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
+    payload: &Value,
+    original_responses_payload: Option<&Value>,
+    entry_protocol: V3HubEntryProtocol,
+) -> Result<Value, String> {
+    match entry_protocol {
+        V3HubEntryProtocol::Responses => {
+            if let Some(original_surface) =
+                build_v3_responses_original_input_surface_from_chat_canonical(
+                    payload,
+                    original_responses_payload,
+                )
+            {
+                return Ok(original_surface);
+            }
+            if payload.get("input").and_then(Value::as_array).is_some() {
+                return Ok(normalize_responses_payload_for_provider_standard(payload));
+            }
+            if payload.get("messages").and_then(Value::as_array).is_some() {
+                return Ok(strip_private_fields(payload));
+            }
+            Err("Responses entry to Anthropic provider wire requires governed messages or Responses input".to_string())
+        }
+        V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
+            if payload.get("messages").and_then(Value::as_array).is_some() {
+                return Ok(strip_private_fields(payload));
+            }
+            if payload.get("input").and_then(Value::as_array).is_some() {
+                return Ok(normalize_responses_payload_for_provider_standard(payload));
+            }
+            Err("Anthropic provider wire requires governed Chat/Anthropic messages or Responses input".to_string())
+        }
+        V3HubEntryProtocol::Gemini => Err(
+            "Gemini entry to Anthropic provider wire requires an explicit protocol codec"
+                .to_string(),
+        ),
     }
 }
 

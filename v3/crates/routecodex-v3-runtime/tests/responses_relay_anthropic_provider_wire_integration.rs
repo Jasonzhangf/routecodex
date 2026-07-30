@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -162,7 +163,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 
     assert_eq!(
         transport.captured_url.lock().unwrap().as_deref(),
-        Some("http://controlled.invalid/anthropic/v1/messages")
+        Some("http://controlled.invalid/anthropic/v1/messages?beta=true")
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert_eq!(captured["model"], "MiniMax-M3");
@@ -294,7 +295,6 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
         &transport,
         V3ResponsesRelayRetryPolicy {
             same_candidate_retries: 1,
-            retry_delay_ms: 0,
         },
     )
     .await
@@ -331,7 +331,7 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let error = execute_v3_responses_relay_runtime(
+    let output = execute_v3_responses_relay_runtime(
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
@@ -346,12 +346,18 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
         &transport,
     )
     .await
-    .unwrap_err();
+    .unwrap();
 
-    assert!(
-        error.to_string().contains("metadata.unsupported"),
-        "unmappable Responses metadata must fail before Anthropic provider wire send: {error}"
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
     );
+    let observability = output.observability.as_ref().expect("observability");
+    assert!(observability.provider_failure_events.iter().all(|failure| {
+        failure.error_type.as_deref() == Some("provider_request_compat_error")
+            && failure.message.contains("metadata.unsupported")
+    }), "unmappable Responses metadata must be projected through the provider error chain: {observability:?}");
     assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
@@ -443,7 +449,7 @@ impl ResponsesTransport for AnthropicProviderJsonReasoningTransport {
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         assert_eq!(
             request.url(),
-            "http://controlled.invalid/anthropic/v1/messages"
+            "http://controlled.invalid/anthropic/v1/messages?beta=true"
         );
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
@@ -512,7 +518,7 @@ impl ResponsesTransport for AnthropicProviderSseReasoningTransport {
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         assert_eq!(
             request.url(),
-            "http://controlled.invalid/anthropic/v1/messages"
+            "http://controlled.invalid/anthropic/v1/messages?beta=true"
         );
         let stream = futures_util::stream::iter([
             Ok(br#"event: message_start

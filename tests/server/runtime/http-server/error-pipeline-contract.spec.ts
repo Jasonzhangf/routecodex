@@ -80,9 +80,13 @@ describe('Error Pipeline contract', () => {
     const source = fs.readFileSync(filePath, 'utf8');
     expect(source).toContain('onProviderError?: (error: unknown, context: ProviderDirectAuditContext)');
     expect(source).toContain('const errorAction = await options.onProviderError?.(error, auditContext);');
-    expect(source).toContain('if (errorAction && !errorAction.shouldRethrow)');
+    expect(source).toContain("errorAction.action === 'wait_then_retry_same'");
+    expect(source).toContain("errorAction.action === 'wait_then_reselect'");
+    expect(source).toContain("errorAction.action === 'project_terminal'");
     expect(source).toContain('errorAction,');
     expect(source).not.toContain('resolveRequestExecutorProviderFailurePlan');
+    expect(source).not.toContain('shouldRethrow');
+    expect(source).not.toContain('request_reroute');
     expect(source).not.toContain('errorClassification:');
   });
 
@@ -108,8 +112,13 @@ describe('Error Pipeline contract', () => {
     expect(source).toContain('provider-direct.send.error');
     expect(source).toContain("source: 'provider-direct'");
     expect(source).toContain('await resolveRequestExecutorProviderFailurePlan({');
-    expect(source).toContain('return decideDirectProviderRetry({');
-    expect(source).toContain('routeName: \'port.provider-direct\'');
+    expect(source).toContain('return directFailurePlan.retryExecutionPlan;');
+    expect(source).toContain("routeName: 'default'");
+    expect(source).toContain('resolveErrorErr05RouteAvailabilityDecision');
+    expect(source).toContain('defaultPoolSingletonProvider');
+    expect(source).not.toContain('decideDirectProviderRetry');
+    expect(source).not.toContain('defaultTierAvailable: false');
+    expect(source).not.toContain('normalizeProviderResponse(undefined)');
     expect(source).not.toContain('provider-direct.retry.standard_pipeline');
   });
 

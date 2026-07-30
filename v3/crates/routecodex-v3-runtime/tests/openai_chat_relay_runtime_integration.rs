@@ -1,15 +1,17 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
-    ResponsesTransport, V3ProviderError, V3ProviderHttpFailure, V3ProviderResp14Raw,
-    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    ResponsesTransport, V3ProviderAvailabilityReader, V3ProviderError, V3ProviderHttpFailure,
+    V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_openai_chat_relay_runtime, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput,
+    execute_v3_openai_chat_relay_runtime,
+    execute_v3_openai_chat_relay_runtime_with_provider_health, V3OpenAiChatRelayClientBody,
+    V3OpenAiChatRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 struct JsonTransport {
     captured_url: Mutex<Option<String>>,
@@ -201,6 +203,60 @@ impl ResponsesTransport for ErrorTransport {
     }
 }
 
+struct ClientDisconnectTransport;
+
+#[async_trait]
+impl ResponsesTransport for ClientDisconnectTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Err(V3ProviderError::ClientDisconnect {
+            request_id: request.request_id().to_string(),
+            provider_id: request.provider_id().to_string(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_action_gate() {
+    let manifest = manifest();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    for index in 0..3 {
+        let started = Instant::now();
+        let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: "controlled".into(),
+                request_id: format!("req-client-disconnect-{index}"),
+                payload: json!({
+                    "model":"chat-client-alias",
+                    "messages":[{"role":"user","content":"disconnect"}],
+                    "stream":false
+                }),
+            },
+            &ClientDisconnectTransport,
+            provider_health.runtime_health(),
+        )
+        .await
+        .expect("client disconnect has a typed terminal projection");
+        assert_eq!(output.status, 499);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "client disconnect entered the provider action wait gate"
+        );
+    }
+
+    let availability = provider_health.store().availability(
+        "controlled",
+        Some("controlled"),
+        Some("chat-wire-model"),
+        u64::MAX,
+    );
+    assert!(availability.available);
+    assert!(availability.blocked_scopes.is_empty());
+}
+
 struct ReselectTransport {
     provider_ids: Mutex<Vec<String>>,
 }
@@ -251,13 +307,15 @@ impl ResponsesTransport for ReselectTransport {
 
 #[tokio::test]
 async fn provider_http_failure_reselects_next_candidate_before_client_projection() {
+    let server_id = "openai_chat_provider_http_reselect";
     let transport = ReselectTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
+    let started = Instant::now();
     let output = execute_v3_openai_chat_relay_runtime(
-        &manifest_with_two_providers(),
+        &manifest_with_two_providers_for_scope(server_id),
         V3OpenAiChatRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-provider-reselect".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -273,6 +331,10 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
         ["primary", "secondary"]
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(1_000),
+        "the first provider failure must block the reselected provider action for at least one second"
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
@@ -293,10 +355,11 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
+    let server_id = "openai_chat_provider_error_projection";
     let output = execute_v3_openai_chat_relay_runtime(
-        &manifest(),
+        &manifest_with_identity(server_id),
         V3OpenAiChatRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-error".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -481,6 +544,10 @@ struct ControlledSseTransport {
     receiver: Mutex<Option<ControlledSseReceiver>>,
 }
 
+struct RecoverySseTransport {
+    receiver: Mutex<Option<ControlledSseReceiver>>,
+}
+
 struct StaticSseTransport {
     chunks: Mutex<Option<Vec<Vec<u8>>>>,
 }
@@ -508,6 +575,38 @@ impl ResponsesTransport for ControlledSseTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let receiver = self.receiver.lock().unwrap().take().unwrap();
+        let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
+            receiver.recv().await.map(|item| (item, receiver))
+        });
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for RecoverySseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        if request.provider_id() == "primary" {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    status: 500,
+                    headers: vec![],
+                    body: br#"{"error":{"type":"server_error","message":"primary failed"}}"#
+                        .to_vec(),
+                }),
+            });
+        }
         let receiver = self.receiver.lock().unwrap().take().unwrap();
         let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
             receiver.recv().await.map(|item| (item, receiver))
@@ -618,6 +717,382 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
 }
 
 #[tokio::test]
+async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_request() {
+    use futures_util::StreamExt;
+    let manifest = manifest();
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let failing = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![
+            br#"data: {"id":"partial","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}
+
+"#
+            .to_vec(),
+            b"data: {malformed-json}\n\n".to_vec(),
+        ])),
+    };
+    let first = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-post-commit-failure".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"stream"}],
+                "stream":true
+            }),
+        },
+        &failing,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("first provider action returns a lazy stream");
+    let stream = match first.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE"),
+    };
+    let items = stream.collect::<Vec<_>>().await;
+    assert!(items.iter().any(Result::is_err));
+
+    let succeeding = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let second = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-after-post-commit-failure".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"next"}],
+                "stream":false
+            }),
+        },
+        &succeeding,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("second provider action");
+    assert_eq!(second.status, 200);
+}
+
+#[tokio::test]
+async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
+    use futures_util::StreamExt;
+    let manifest = manifest_with_identity("clean_eof");
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let failing = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![b"data: {malformed-json}\n\n".to_vec()])),
+    };
+    let failed = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "clean_eof".into(),
+            request_id: "req-seed-active-gate".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"seed"}],
+                "stream":true
+            }),
+        },
+        &failing,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("failing provider action returns a lazy stream");
+    let failed_stream = match failed.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE"),
+    };
+    assert!(failed_stream
+        .collect::<Vec<_>>()
+        .await
+        .iter()
+        .any(Result::is_err));
+
+    let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
+    terminal_sender
+        .send(Ok(
+            br#"data: {"id":"terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+            .to_vec(),
+        ))
+        .await
+        .unwrap();
+    let terminal = ControlledSseTransport {
+        receiver: Mutex::new(Some(terminal_receiver)),
+    };
+    let successful = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "clean_eof".into(),
+            request_id: "req-terminal-reset".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"reset"}],
+                "stream":true
+            }),
+        },
+        &terminal,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("terminal provider action");
+    let successful_stream = match successful.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE"),
+    };
+    let mut successful_stream = successful_stream;
+
+    let waiting_manifest = manifest.clone();
+    let waiting_health = provider_health.runtime_health();
+    let waiter = tokio::spawn(async move {
+        let succeeding = JsonTransport {
+            captured_url: Mutex::new(None),
+            captured_body: Mutex::new(None),
+        };
+        execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &waiting_manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: "clean_eof".into(),
+                request_id: "req-released-by-terminal-success".into(),
+                payload: json!({
+                    "model":"chat-client-alias",
+                    "messages":[{"role":"user","content":"released"}],
+                    "stream":false
+                }),
+            },
+            &succeeding,
+            waiting_health,
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        waiter.is_finished(),
+        "fresh OpenAI Chat request consumed an unrelated Error05 recovery lane"
+    );
+    let fresh = waiter
+        .await
+        .expect("fresh request task panicked")
+        .expect("fresh request failed");
+    assert_eq!(fresh.status, 200);
+
+    assert!(successful_stream.next().await.unwrap().is_ok());
+    assert!(successful_stream.next().await.unwrap().is_ok());
+
+    drop(terminal_sender);
+    assert!(
+        successful_stream.next().await.is_none(),
+        "clean EOF must finish the client stream"
+    );
+}
+
+#[tokio::test]
+async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
+    use futures_util::StreamExt;
+    let server_id = "openai_chat_active_recovery";
+    let manifest = manifest_with_two_providers_for_scope(server_id);
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
+    terminal_sender
+        .send(Ok(
+            br#"data: {"id":"terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+            .to_vec(),
+        ))
+        .await
+        .unwrap();
+    let first = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            request_id: "req-active-recovery-stream".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"recover as a lazy stream"}],
+                "stream":true
+            }),
+        },
+        &RecoverySseTransport {
+            receiver: Mutex::new(Some(terminal_receiver)),
+        },
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("first request must reach a lazy recovery stream");
+    assert!(
+        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
+        "the controlled lazy SSE must be a recovery action"
+    );
+    let mut first_stream = match first.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE"),
+    };
+    assert!(first_stream.next().await.unwrap().is_ok());
+    assert!(first_stream.next().await.unwrap().is_ok());
+
+    let waiting_manifest = manifest.clone();
+    let waiting_health = provider_health.runtime_health();
+    let waiter = tokio::spawn(async move {
+        execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &waiting_manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: server_id.into(),
+                request_id: "req-second-recovery-action".into(),
+                payload: json!({
+                    "model":"chat-client-alias",
+                    "messages":[{"role":"user","content":"also fail then recover"}],
+                    "stream":false
+                }),
+            },
+            &ReselectTransport {
+                provider_ids: Mutex::new(Vec::new()),
+            },
+            waiting_health,
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    assert!(
+        !waiter.is_finished(),
+        "active recovery permit expired by wall clock before terminal success"
+    );
+
+    let success_completed_at = Instant::now();
+    drop(terminal_sender);
+    assert!(
+        first_stream.next().await.is_none(),
+        "clean EOF must finish the first recovery stream"
+    );
+    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
+        .await
+        .expect("clean EOF did not release the queued recovery action")
+        .expect("queued recovery task panicked")
+        .expect("queued recovery action failed");
+    assert_eq!(released.status, 200);
+    assert!(
+        released
+            .node_trace
+            .contains(&"V3ProviderActionGateAdmission"),
+        "the competing request must also enter Error05 recovery"
+    );
+    assert!(
+        success_completed_at.elapsed() >= Duration::from_millis(4_800),
+        "terminal success must preserve the sustained five-second recovery spacing"
+    );
+}
+
+#[tokio::test]
+async fn sse_transport_error_after_done_is_failure() {
+    use futures_util::StreamExt;
+    let manifest = manifest_with_identity("post_done_transport");
+    let (sender, receiver) = tokio::sync::mpsc::channel(2);
+    sender
+        .send(Ok(
+            br#"data: {"id":"post-done-transport","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+            .to_vec(),
+        ))
+        .await
+        .unwrap();
+    sender
+        .send(Err(V3ProviderError::Transport {
+            request_id: "req-post-done-transport".into(),
+            provider_id: "post_done_transport".into(),
+            reason: "transport failed after done".into(),
+        }))
+        .await
+        .unwrap();
+    drop(sender);
+    let transport = ControlledSseTransport {
+        receiver: Mutex::new(Some(receiver)),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "post_done_transport".into(),
+            request_id: "req-post-done-transport".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"stream"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE"),
+    };
+    let items = stream.collect::<Vec<_>>().await;
+    assert!(items.iter().any(|item| item
+        .as_ref()
+        .is_err_and(|error| error.contains("transport failed after done"))));
+}
+
+#[tokio::test]
+async fn sse_malformed_frame_and_incomplete_tail_after_done_are_failures() {
+    use futures_util::StreamExt;
+    let terminal_and_done =
+        br#"data: {"id":"post-done-tail","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+        .to_vec();
+    let cases = [
+        (b"data: {malformed-json}\n\n".to_vec(), "frame after [DONE]"),
+        (b"event: unexpected-tail\n\n".to_vec(), "frame after [DONE]"),
+        (b"data: {unterminated".to_vec(), "final frame delimiter"),
+    ];
+    for (index, (tail, expected)) in cases.into_iter().enumerate() {
+        let identity = format!("post_done_tail_{index}");
+        let manifest = manifest_with_identity(&identity);
+        let transport = StaticSseTransport {
+            chunks: Mutex::new(Some(vec![terminal_and_done.clone(), tail])),
+        };
+        let output = execute_v3_openai_chat_relay_runtime(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: identity,
+                request_id: format!("req-post-done-{}", expected.replace(' ', "-")),
+                payload: json!({
+                    "model":"chat-client-alias",
+                    "messages":[{"role":"user","content":"stream"}],
+                    "stream":true
+                }),
+            },
+            &transport,
+        )
+        .await
+        .unwrap();
+        let stream = match output.client_body {
+            V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+            V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE"),
+        };
+        let items = stream.collect::<Vec<_>>().await;
+        assert!(
+            items
+                .iter()
+                .any(|item| item.as_ref().is_err_and(|error| error.contains(expected))),
+            "{expected}: {items:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn request_side_channel_is_rejected_before_provider_transport() {
     let error = execute_v3_openai_chat_relay_runtime(
         &manifest(),
@@ -656,7 +1131,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 [providers.controlled.models.chat-wire-model]
 wire_name = "chat-wire-model"
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "web_search"]
 [route_groups.controlled.pools.chat_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
@@ -671,15 +1146,48 @@ targets = [{ kind = "provider_model", provider = "controlled", model = "chat-wir
     .unwrap()
 }
 
-fn manifest_with_two_providers() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest_with_identity(identity: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
+        parse_v3_config_02_authoring(&format!(
             r#"
 version = 3
-[servers.controlled]
+[servers.{identity}]
 bind = "127.0.0.1"
 port = 1
-routing_group = "controlled"
+routing_group = "{identity}"
+endpoints = ["openai_chat"]
+[providers.{identity}]
+type = "openai_chat"
+base_url = "http://{identity}.invalid/v1"
+default_model = "chat-wire-model"
+auth = {{ type = "api_key", entries = [{{ alias = "{identity}", env = "CONTROLLED_KEY" }}] }}
+[providers.{identity}.models.chat-wire-model]
+wire_name = "chat-wire-model"
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+[route_groups.{identity}.pools.chat_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }}
+targets = [{{ kind = "provider_model", provider = "{identity}", model = "chat-wire-model", key = "{identity}", priority = 1 }}]
+[route_groups.{identity}.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "{identity}", model = "chat-wire-model", key = "{identity}", priority = 1 }}]
+"#
+        ))
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn manifest_with_two_providers_for_scope(
+    scope: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 1
+routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [providers.primary]
 type = "openai_chat"
@@ -690,7 +1198,7 @@ auth = { type = "api_key", entries = [{ alias = "primary", env = "V3_OPENAI_CHAT
 wire_name = "chat-wire-model"
 aliases = ["chat-client-alias"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "web_search"]
 [providers.secondary]
 type = "openai_chat"
 base_url = "http://secondary.invalid/v1"
@@ -700,23 +1208,21 @@ auth = { type = "api_key", entries = [{ alias = "secondary", env = "V3_OPENAI_CH
 wire_name = "chat-wire-model"
 aliases = ["chat-client-alias"]
 supports_streaming = true
-capabilities = ["text", "tools"]
-[route_groups.controlled.pools.chat_client]
+capabilities = ["text", "tools", "web_search"]
+[route_groups.__SCOPE__.pools.chat_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
 targets = [
   { kind = "provider_model", provider = "primary", model = "chat-wire-model", key = "primary", priority = 1 },
   { kind = "provider_model", provider = "secondary", model = "chat-wire-model", key = "secondary", priority = 2 }
 ]
-[route_groups.controlled.pools.default]
+[route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
   { kind = "provider_model", provider = "primary", model = "chat-wire-model", key = "primary", priority = 1 },
   { kind = "provider_model", provider = "secondary", model = "chat-wire-model", key = "secondary", priority = 2 }
 ]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap()
+"#
+    .replace("__SCOPE__", scope);
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }

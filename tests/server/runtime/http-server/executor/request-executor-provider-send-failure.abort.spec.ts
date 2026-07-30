@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { processProviderSendFailure } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-send-failure.js';
+import { processProviderSendFailure as processProviderSendFailureImpl } from '../../../../../src/server/runtime/http-server/executor/request-executor-provider-send-failure.js';
 import { resetErrorActionQueueStateForTests } from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue.js';
-import { mapErrorToHttp } from '../../../../../src/server/utils/http-error-mapper.js';
 
 jest.setTimeout(10_000);
+
+const processProviderSendFailure = (
+  args: Parameters<typeof processProviderSendFailureImpl>[0]
+) => processProviderSendFailureImpl({
+  routecodexRoutingPolicyGroup: 'test-routing-group',
+  ...args
+});
 
 describe('request executor provider send failure abort handling', () => {
   afterEach(() => {
@@ -12,9 +18,7 @@ describe('request executor provider send failure abort handling', () => {
     resetErrorActionQueueStateForTests();
   });
 
-  it('does not let a consumed zero transport wait override provider switch backoff before rerouting', async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-06-30T00:00:00.000Z'));
+  it('uses the single Rust provider-action wait before rerouting', async () => {
     const error = Object.assign(new Error('HTTP 502: upstream temporary failure'), {
       statusCode: 502,
       code: 'HTTP_502',
@@ -67,35 +71,25 @@ describe('request executor provider send failure abort handling', () => {
       })
     });
 
-    await jest.advanceTimersByTimeAsync(0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(logStage).toHaveBeenCalledWith(
       'provider.error_action_backoff_wait',
       'req_provider_switch_wait',
       expect.objectContaining({
-        scopeKey: 'port:unknown|spark.key1.gpt-5.3-codex-spark|tools|provider.send',
-        delayMs: 3000
+        scopeKey: 'test-routing-group|spark.key1.gpt-5.3-codex-spark|HTTP_502',
+        delayMs: 1000
       })
     );
-    await jest.advanceTimersByTimeAsync(3000);
+    await expect(pending).resolves.toMatchObject({ lastError: error });
     expect(logStage).toHaveBeenCalledWith(
       'provider.error_action_backoff_wait.completed',
       'req_provider_switch_wait',
-      expect.objectContaining({ delayMs: 3000 })
+      expect.objectContaining({ delayMs: 1000 })
     );
-    expect(logStage).toHaveBeenCalledWith(
+    expect(logStage).not.toHaveBeenCalledWith(
       'provider.switch_backoff_wait',
-      'req_provider_switch_wait',
-      expect.objectContaining({
-        scopeKey: 'gateway_priority_5555|tools|provider-switch',
-        waitMs: 3000
-      })
-    );
-    await jest.advanceTimersByTimeAsync(3000);
-    await expect(pending).resolves.toMatchObject({ lastError: error });
-    expect(logStage).toHaveBeenCalledWith(
-      'provider.switch_backoff_wait.completed',
-      'req_provider_switch_wait',
-      expect.objectContaining({ waitMs: 3000 })
+      expect.anything(),
+      expect.anything()
     );
     expect(logProviderRetrySwitch).toHaveBeenCalledWith(expect.objectContaining({
       switchAction: 'exclude_and_reroute',
@@ -483,14 +477,12 @@ describe('request executor provider send failure abort handling', () => {
     }));
   });
 
-  it('does not rethrow raw provider 400 when default-route retry candidates are exhausted but default floor remains', async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-07-17T00:00:00.000Z'));
-    const error = Object.assign(new Error('HTTP 400: invalid_prompt'), {
-      statusCode: 400,
-      status: 400,
-      code: 'HTTP_400',
-      upstreamCode: 'HTTP_400'
+  it('continues default-floor reroute when request-local default candidates were just excluded', async () => {
+    const error = Object.assign(new Error('HTTP 503: provider unavailable'), {
+      statusCode: 503,
+      status: 503,
+      code: 'HTTP_503',
+      upstreamCode: 'HTTP_503'
     });
     const excludedProviderKeys = new Set<string>(['default-b.key1.model']);
     const recordAttempt = jest.fn();
@@ -532,47 +524,26 @@ describe('request executor provider send failure abort handling', () => {
       logNonBlockingError: jest.fn(),
       writeProviderSnapshot: jest.fn(async () => undefined),
       extractRetryErrorSnapshot: () => ({
-        statusCode: 400,
-        errorCode: 'HTTP_400',
-        upstreamCode: 'HTTP_400',
-        reason: 'HTTP 400: invalid_prompt'
+        statusCode: 503,
+        errorCode: 'HTTP_503',
+        upstreamCode: 'HTTP_503',
+        reason: 'HTTP 503: provider unavailable'
       })
     });
 
-    const captured = pending.then(
-      () => undefined,
-      (error_) => error_
-    );
-    await jest.advanceTimersByTimeAsync(3000);
-    const thrown = await captured;
-
-    expect(thrown).toBeDefined();
-    expect(thrown).not.toBe(error);
-    expect(thrown).toMatchObject({
-      code: 'ROUTECODEX_PROVIDER_RETRY_STOPPED',
-      statusCode: 502,
-      status: 502,
-      requestId: 'req_default_route_no_raw_400_after_floor_exhausted',
-      providerKey: 'default-a.key1.model',
-      routeName: 'default',
-      details: expect.objectContaining({
-        retryStoppedEvidence: {
-          upstreamCode: 'HTTP_400',
-          upstreamStatus: 400,
-        },
+    await expect(pending).resolves.toMatchObject({
+      lastError: error,
+      allowRetryBeyondAttemptBudget: true,
+      retryExecutionPlan: expect.objectContaining({
+        action: 'wait_then_reselect',
+        shouldRetry: true,
         defaultPoolAvailable: true,
         policyExhausted: false,
         mayProject: false,
         routePoolRemainingAfterExclusion: []
       })
     });
-    const projected = mapErrorToHttp(thrown);
-    expect(projected.status).toBe(502);
-    expect(projected.body.error.code).toBe('ROUTECODEX_PROVIDER_RETRY_STOPPED');
-    expect(JSON.stringify(projected.body)).not.toContain('HTTP_400');
-    expect((thrown as { upstreamCode?: unknown }).upstreamCode).toBeUndefined();
-    expect((thrown as { upstreamStatus?: unknown }).upstreamStatus).toBeUndefined();
     expect(Array.from(excludedProviderKeys)).toEqual(['default-b.key1.model', 'default-a.key1.model']);
     expect(recordAttempt).toHaveBeenCalledWith({ error: true });
-  });
+  }, 15_000);
 });

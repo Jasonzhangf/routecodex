@@ -10,6 +10,8 @@ use serde_json::{json, Map, Number, Value};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod minimax_anthropic;
+
 // feature_id: v3.provider_compat_profile_loading
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -125,6 +127,16 @@ pub fn run_req_outbound_stage3_compat(
     }
 
     if is_minimax_profile(profile_id) {
+        if provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "anthropic-messages",
+        ) {
+            return Ok(CompatResult {
+                payload: minimax_anthropic::apply_request_compat(payload)?,
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
         return Ok(CompatResult {
             payload,
             applied_profile: Some(profile_id.to_string()),

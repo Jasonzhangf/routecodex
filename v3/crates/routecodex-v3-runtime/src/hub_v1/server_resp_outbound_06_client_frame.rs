@@ -1,4 +1,6 @@
 use super::{V3HubRespOutbound05ClientSemantic, V3HubTransportIntent};
+use serde_json::Value;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ServerRespOutbound06ClientFrame {
@@ -23,5 +25,10 @@ impl V3ServerRespOutbound06ClientFrame {
             .previous
             .provider_raw()
             .transport_intent
+    }
+
+    pub fn into_client_payload(self) -> Value {
+        Arc::try_unwrap(self.previous.client_payload)
+            .unwrap_or_else(|payload| payload.as_ref().clone())
     }
 }

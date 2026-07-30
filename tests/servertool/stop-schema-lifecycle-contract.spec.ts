@@ -76,7 +76,7 @@ describe('stop schema lifecycle contract', () => {
   test('fenced non-terminal schema follows up with schema-aware guidance', () => {
     const gate = evaluateStopSchemaGateDirectNative({
       assistantText:
-        '<rcc_stop_schema>{"stopreason":2,"reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}</rcc_stop_schema>',
+        '<rcc_stop_schema>{"stopreason":2,"current_goal":"finish verification","reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}</rcc_stop_schema>',
       used: 0,
       maxRepeats: 3,
     });
@@ -93,7 +93,7 @@ describe('stop schema lifecycle contract', () => {
   test('json code fence stop schema is harvested as the same stop contract', () => {
     const gate = evaluateStopSchemaGateDirectNative({
       assistantText:
-        '继续执行。\n```json\n{"stopreason":2,"reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}\n```',
+        '继续执行。\n```json\n{"stopreason":2,"current_goal":"finish verification","reason":"未完成","has_evidence":1,"evidence":"partial logs","issue_cause":"need more verification","excluded_factors":"syntax fixed","diagnostic_order":"read->run","done_steps":"checked logs","next_step":"rerun failing command","next_suggested_path":"","needs_user_input":false,"learned":""}\n```',
       used: 0,
       maxRepeats: 3,
     });
@@ -124,7 +124,7 @@ describe('stop schema lifecycle contract', () => {
       used: 0,
       maxRepeats: 3,
     });
-    expect(gate.action).toBe('followup');
-    expect(gate.reason_code).toBe('stop_schema_missing');
+    expect(gate.action).toBe('allow_stop');
+    expect(gate.reason_code).toBe('stop_schema_finished');
   });
 });

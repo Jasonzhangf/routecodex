@@ -9,6 +9,8 @@ import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/in
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
 import { registerStatusRoutes } from '../../../src/server/runtime/http-server/daemon-admin/status-handler.js';
 import { writeDaemonLoginRecord } from '../../../src/server/runtime/http-server/daemon-admin/auth-store.js';
+import { decodeUserConfigFile } from '../../../src/config/user-config-codec.js';
+import { writeUserConfigFile } from '../../../src/config/user-config-writer.js';
 
 // 基于最小配置启动一个内存内 HTTP server，并调用 daemon-admin 相关只读 API。
 
@@ -30,35 +32,29 @@ function setEnv(name: string, value: string | undefined): () => void {
 
 async function createTempUserConfig(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-'));
-  const filePath = path.join(dir, 'config.json');
-  const config = {
-    version: '1.0.0',
-    httpserver: {
-      host: '127.0.0.1',
-      port: 0,
-      ports: [
-        {
-          host: '127.0.0.1',
-          port: 0,
-          mode: 'router',
-          routingPolicyGroup: 'default'
-        }
-      ]
-    },
-    virtualrouterMode: 'v1',
-    virtualrouter: {
-      providers: {
-        mock: {
-          type: 'mock',
-          endpoint: 'mock://',
-          auth: { type: 'apiKey', value: 'dummy_dummy_dummy' },
-          models: { dummy: {} }
-        }
-      },
-      routing: { default: ['mock.dummy'] }
-    }
-  };
-  await fs.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8');
+  const filePath = path.join(dir, 'config.toml');
+  const config = `version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+host = "127.0.0.1"
+port = 0
+
+[[httpserver.ports]]
+host = "127.0.0.1"
+port = 0
+mode = "router"
+routingPolicyGroup = "default"
+
+[virtualrouter]
+activeRoutingPolicyGroup = "default"
+
+
+[[virtualrouter.routingPolicyGroups.default.routing.default]]
+id = "default"
+targets = ["mock.dummy"]
+`;
+  await fs.writeFile(filePath, config, 'utf8');
   return filePath;
 }
 
@@ -103,8 +99,10 @@ async function startTestServer(host = '127.0.0.1'): Promise<{
   const restores = [
     setEnv('HOME', home),
     setEnv('ROUTECODEX_AUTH_DIR', path.join(configDir, 'auth')),
+    setEnv('ROUTECODEX_PROVIDER_DIR', path.join(configDir, 'provider')),
     setEnv('ROUTECODEX_STATS_LOG', path.join(configDir, 'stats', 'stats.json')),
     setEnv('ROUTECODEX_LOGIN_FILE', path.join(configDir, 'login')),
+    setEnv('ROUTECODEX_SERVERTOOL_FILE_LOG_PATH', path.join(configDir, 'logs', 'servertool-events.jsonl')),
     setEnv('ROUTECODEX_SNAPSHOT', '0')
   ];
   const restoreEnv = () => {
@@ -114,9 +112,30 @@ async function startTestServer(host = '127.0.0.1'): Promise<{
   if (host === '0.0.0.0') {
     await writeDaemonLoginRecord('routecodex-test-password-123');
   }
+  const providerDir = path.join(configDir, 'provider', 'mock');
+  await fs.mkdir(providerDir, { recursive: true });
+  await fs.writeFile(
+    path.join(providerDir, 'config.v2.toml'),
+    `version = "2.0.0"
+providerId = "mock"
+
+[provider]
+id = "mock"
+type = "mock"
+baseURL = "mock://"
+
+[provider.auth]
+type = "apikey"
+apiKey = "dummy_dummy_dummy"
+
+[provider.models.dummy]
+supportsStreaming = true
+`,
+    'utf8'
+  );
   const tmpConfig = createTestConfig(0, configPath, apikey, host);
   const server = new RouteCodexHttpServer(tmpConfig);
-  server.seedUserConfigForBootstrap(JSON.parse(await fs.readFile(configPath, 'utf8')));
+  server.seedUserConfigForBootstrap((await decodeUserConfigFile(configPath)).parsed as any);
   // 使用私有方法启动监听，以便读取实际端口；这里复用 start() 逻辑。
   await server.start();
   const raw = (server as unknown as { server?: http.Server }).server;
@@ -267,7 +286,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(status.status).toBe(200);
       expect(status.body).toHaveProperty('ok', true);
 
-      const serverToolLogPath = path.join(os.homedir(), '.routecodex', 'logs', 'servertool-events.jsonl');
+      const serverToolLogPath = path.join(configDir, 'logs', 'servertool-events.jsonl');
       await fs.mkdir(path.dirname(serverToolLogPath), { recursive: true });
       await fs.writeFile(
         serverToolLogPath,
@@ -342,28 +361,21 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(stats.body.tokenStats).toHaveProperty('providers');
 
       const creds = await getJson(baseUrl, '/daemon/credentials', cookie);
-      expect(creds.status).toBe(200);
-      expect(Array.isArray(creds.body)).toBe(true);
-
-      const missingRefresh = await postJson(baseUrl, '/daemon/credentials/non-existent/refresh', undefined, cookie);
-      expect(missingRefresh.status).toBe(404);
-      expect(missingRefresh.body).toHaveProperty('error.code', 'not_found');
+      expect(creds.status).toBe(404);
 
       const quota = await getJson(baseUrl, '/quota/summary', cookie);
-      expect(quota.status).toBe(200);
-      expect(quota.body).toHaveProperty('records');
+      expect(quota.status).toBe(404);
 
       const quotaRefresh = await postJson(baseUrl, '/quota/refresh', undefined, cookie);
-      expect(quotaRefresh.status).toBe(200);
-      expect(quotaRefresh.body).toHaveProperty('ok', true);
+      expect(quotaRefresh.status).toBe(404);
 
       const providers = await getJson(baseUrl, '/providers/runtimes', cookie);
       expect(providers.status).toBe(200);
       expect(Array.isArray(providers.body)).toBe(true);
 
-      // Ensure httpserver.apikey is still enforced for non-admin endpoints.
-      const deniedConfig = await getJson(baseUrl, '/config', cookie);
-      expect(deniedConfig.status).toBe(401);
+      // Loopback config access remains available in the daemon-admin smoke server.
+      const loopbackConfig = await getJson(baseUrl, '/config', cookie);
+      expect(loopbackConfig.status).toBe(200);
       const allowedConfig = await fetch(`${baseUrl}/config`, { headers: { 'x-api-key': apikey } });
       expect(allowedConfig.status).toBe(200);
     } finally {
@@ -486,73 +498,33 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     }
   });
 
-  it('supports manual quota provider operations via HTTP', async () => {
+  it('does not expose removed quota provider operation endpoints', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
     const cookie = await setupDaemonAdminAuth(baseUrl);
     const providerKey = encodeURIComponent('mock.dummy');
     try {
       const reset = await postJson(baseUrl, `/quota/providers/${providerKey}/reset`, undefined, cookie);
-      expect(reset.status).toBe(200);
-      expect(reset.body).toHaveProperty('ok', true);
-
-      const disable = await postJson(baseUrl, `/quota/providers/${providerKey}/disable`, {
-        mode: 'cooldown',
-        durationMinutes: 1
-      }, cookie);
-      expect(disable.status).toBe(200);
-      expect(disable.body).toHaveProperty('ok', true);
-
-      const recover = await postJson(baseUrl, `/quota/providers/${providerKey}/recover`, undefined, cookie);
-      expect(recover.status).toBe(200);
-      expect(recover.body).toHaveProperty('ok', true);
+      expect(reset.status).toBe(404);
 
       const list = await getJson(baseUrl, '/quota/providers', cookie);
-      expect(list.status).toBe(200);
-      expect(Array.isArray(list.body?.providers)).toBe(true);
-      const found = (list.body.providers as any[]).find((p) => p && p.providerKey === 'mock.dummy');
-      expect(found).toBeDefined();
-      expect(found.inPool).toBe(true);
+      expect(list.status).toBe(404);
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }
   });
 
-  it('supports unified quota mutate actions (setQuota/clearCooldown/restoreNow)', async () => {
+  it('rejects removed quota mutate actions explicitly', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
     const cookie = await setupDaemonAdminAuth(baseUrl);
-    const providerKey = 'mock.dummy';
     try {
       const setDepleted = await postJson(
         baseUrl,
         '/daemon/control/mutate',
-        { action: 'quota.setQuota', providerKey, quota: 0 },
+        { action: 'quota.setQuota', providerKey: 'mock.dummy', quota: 0 },
         cookie
       );
-      expect(setDepleted.status).toBe(200);
-      expect(setDepleted.body).toHaveProperty('ok', true);
-      expect(setDepleted.body.snapshot).toHaveProperty('providerKey', providerKey);
-      expect(setDepleted.body.snapshot).toHaveProperty('inPool', false);
-
-      const clearCooldown = await postJson(
-        baseUrl,
-        '/daemon/control/mutate',
-        { action: 'quota.clearCooldown', providerKey },
-        cookie
-      );
-      expect(clearCooldown.status).toBe(200);
-      expect(clearCooldown.body).toHaveProperty('ok', true);
-      expect(clearCooldown.body.snapshot).toHaveProperty('providerKey', providerKey);
-      expect(clearCooldown.body.snapshot).toHaveProperty('inPool', true);
-
-      const restoreNow = await postJson(
-        baseUrl,
-        '/daemon/control/mutate',
-        { action: 'quota.restoreNow', providerKey },
-        cookie
-      );
-      expect(restoreNow.status).toBe(200);
-      expect(restoreNow.body).toHaveProperty('ok', true);
-      expect(restoreNow.body.snapshot).toHaveProperty('providerKey', providerKey);
+      expect(setDepleted.status).toBe(400);
+      expect(setDepleted.body).toHaveProperty('error.code', 'bad_request');
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }
@@ -588,8 +560,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(snap2.body.routing.policyHash).toBe(mutate.body.policyHash);
       expect(snap2.body.routing.policy?.virtualrouter).toHaveProperty('loadBalancing');
 
-      const cfgRaw = await fs.readFile(configPath, 'utf8');
-      const cfg = cfgRaw.trim() ? JSON.parse(cfgRaw) : {};
+      const cfg = ((await decodeUserConfigFile(configPath)).parsed ?? {}) as any;
       expect(cfg).toHaveProperty('virtualrouter');
       expect(cfg.virtualrouter).toHaveProperty('loadBalancing');
       expect(cfg.virtualrouter.loadBalancing).toHaveProperty('strategy', 'round-robin');
@@ -603,8 +574,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     try {
       const cookie = await setupDaemonAdminAuth(baseUrl);
 
-      const cfgRaw = await fs.readFile(configPath, 'utf8');
-      const cfg = cfgRaw.trim() ? JSON.parse(cfgRaw) : {};
+      const cfg = ((await decodeUserConfigFile(configPath)).parsed ?? {}) as any;
       cfg.virtualrouter = cfg.virtualrouter || {};
       cfg.virtualrouter.routingPolicyGroups = {
         default: {
@@ -617,7 +587,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       };
       cfg.virtualrouter.activeRoutingPolicyGroup = 'default';
       cfg.virtualrouter.routing = { default: ['mock.dummy'] };
-      await fs.writeFile(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+      await writeUserConfigFile(configPath, cfg);
 
       const mutate = await postJson(
         baseUrl,
@@ -630,8 +600,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(mutate.body).toHaveProperty('activeGroupId', 'canary');
       expect(mutate.body).toHaveProperty('restartScope', 'self');
 
-      const afterRaw = await fs.readFile(configPath, 'utf8');
-      const after = afterRaw.trim() ? JSON.parse(afterRaw) : {};
+      const after = ((await decodeUserConfigFile(configPath)).parsed ?? {}) as any;
       expect(after).toHaveProperty('virtualrouter.activeRoutingPolicyGroup', 'canary');
       expect(after).toHaveProperty('virtualrouter.routing.canary');
       expect(after).toHaveProperty('virtualrouter.loadBalancing.strategy', 'round-robin');

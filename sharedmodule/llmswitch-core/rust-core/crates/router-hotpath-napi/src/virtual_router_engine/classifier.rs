@@ -1,4 +1,5 @@
 use super::features::RoutingFeatures;
+use route_classifier_core::{classify_route, RouteClassifierInput};
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
@@ -12,7 +13,6 @@ pub(crate) struct ClassificationResult {
 #[derive(Debug, Clone)]
 pub(crate) struct RoutingClassifier {
     long_context_threshold_tokens: i64,
-    thinking_keywords: Vec<String>,
     background_keywords: Vec<String>,
 }
 
@@ -22,21 +22,6 @@ impl RoutingClassifier {
             .get("longContextThresholdTokens")
             .and_then(|v| v.as_i64())
             .unwrap_or(180_000);
-        let thinking_keywords = normalize_list(
-            config
-                .get("thinkingKeywords")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                }),
-            vec![
-                "think step".to_string(),
-                "analysis".to_string(),
-                "reasoning".to_string(),
-            ],
-        );
         let background_keywords = normalize_list(
             config
                 .get("backgroundKeywords")
@@ -50,13 +35,11 @@ impl RoutingClassifier {
         );
         Self {
             long_context_threshold_tokens,
-            thinking_keywords,
             background_keywords,
         }
     }
 
     pub(crate) fn classify(&self, features: &RoutingFeatures) -> ClassificationResult {
-        let latest_message_from_user = features.latest_message_from_user;
         let stopless_followup = features
             .metadata
             .get("runtime_control")
@@ -64,178 +47,26 @@ impl RoutingClassifier {
             .and_then(|rt| rt.get("serverToolFollowup"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let last_tool_category = if latest_message_from_user {
-            String::new()
-        } else {
-            features
-                .last_assistant_tool_category
-                .clone()
-                .unwrap_or_default()
-        };
-        // Web-search routing must be decided from current-turn signals only.
-        // Do not inherit web_search intent from historical tool continuation.
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
-        let has_visual = features.has_image_attachment
-            || (features.has_video_attachment && features.has_remote_video_attachment);
-        // Fresh user input starts on thinking. Tool-output continuations keep the
-        // current turn on the previous tool category instead of falling into tools.
-        let explicit_apply_patch_tool_request =
-            latest_message_from_user && features.has_apply_patch_tool_choice;
-        let thinking_from_user =
-            (latest_message_from_user && !explicit_apply_patch_tool_request) || stopless_followup;
-        // Continuation routes must be based on current-turn tool-output signal only.
-        // If this turn does not contain tool-call response activity, do not inherit
-        // historical labels into a new request.
-        let has_current_turn_continuation_signal =
-            !latest_message_from_user && features.has_tool_call_responses;
-        let thinking_continuation =
-            has_current_turn_continuation_signal && last_tool_category == "thinking";
-        let coding_continuation =
-            has_current_turn_continuation_signal && last_tool_category == "coding";
-        let search_continuation =
-            has_current_turn_continuation_signal && last_tool_category == "search";
-        let other_tool_continuation =
-            has_current_turn_continuation_signal && last_tool_category == "other";
-        let unknown_tool_continuation =
-            has_current_turn_continuation_signal && last_tool_category.is_empty();
-        let web_search_tool_intent =
-            has_current_turn_continuation_signal && last_tool_category == "websearch";
-        let user_text_lower = features.user_text_sample.to_lowercase();
-        // Keep web-search intent strict to avoid over-routing:
-        // only explicit web-search phrases should trigger web_search route.
-        // Web-search intent is only valid on the *current fresh user turn*.
-        // If tool-call responses already exist in the current segment, we are in a tool/followup loop
-        // and must not keep inheriting the previous user search intent.
-        let search_intent_from_text = latest_message_from_user
-            && !features.has_tool_call_responses
-            && contains_any_keyword(
-                &user_text_lower,
-                &[
-                    "search the web",
-                    "web search",
-                    "browse the web",
-                    "search online",
-                    "look it up",
-                    "with sources",
-                    "联网搜索",
-                    "上网搜索",
-                    "上网搜",
-                    "网页搜索",
-                    "请搜索",
-                    "引用来源",
-                ],
-            );
-        // Web-search routing is current-turn intent only.
-        // Servertool declaration itself must not force route switch.
-        let should_route_search =
-            web_search_tool_intent || (!has_visual && search_intent_from_text);
-
-        let mut evaluation: Vec<(String, bool, String)> = Vec::new();
-        evaluation.push((
-            "multimodal".to_string(),
-            has_visual,
-            "multimodal:visual-content".to_string(),
-        ));
-        evaluation.push((
-            "longcontext".to_string(),
+        let classification = classify_route(&RouteClassifierInput {
             reached_long_context,
-            "longcontext:token-threshold".to_string(),
-        ));
-        evaluation.push((
-            "thinking".to_string(),
-            (thinking_from_user || thinking_continuation) && !reached_long_context,
-            if thinking_continuation {
-                "thinking:last-tool-thinking".to_string()
-            } else {
-                "thinking:user-input".to_string()
-            },
-        ));
-        evaluation.push((
-            "coding".to_string(),
-            coding_continuation,
-            "coding:last-tool-coding".to_string(),
-        ));
-        evaluation.push((
-            "web_search".to_string(),
-            should_route_search,
-            if web_search_tool_intent {
-                "web_search:tool-intent".to_string()
-            } else {
-                "web_search:explicit-or-intent".to_string()
-            },
-        ));
-        evaluation.push((
-            "search".to_string(),
-            search_continuation,
-            "search:last-tool-search".to_string(),
-        ));
-        evaluation.push((
-            "tools".to_string(),
-            explicit_apply_patch_tool_request
-                || other_tool_continuation
-                || unknown_tool_continuation,
-            if explicit_apply_patch_tool_request {
-                "tools:apply_patch-tool-choice".to_string()
-            } else if other_tool_continuation {
-                "tools:last-tool-other".to_string()
-            } else {
-                "tools:tool-request-detected".to_string()
-            },
-        ));
-        evaluation.push((
-            "background".to_string(),
-            contains_keywords(&features.user_text_sample, &self.background_keywords),
-            "background:keywords".to_string(),
-        ));
-
-        for route in ROUTE_PRIORITY.iter() {
-            if let Some((_, triggered, reason)) =
-                evaluation.iter().find(|(name, _, _)| name == route)
-            {
-                if *triggered {
-                    return build_classification(route, reason, &evaluation);
-                }
-            }
+            has_image_attachment: features.has_image_attachment,
+            latest_message_from_user: features.latest_message_from_user,
+            stopless_followup,
+            has_current_turn_tool_output: features.has_tool_call_responses,
+            last_assistant_tool_category: features.last_assistant_tool_category.clone(),
+            current_user_text: features.user_text_sample.clone(),
+            has_background_keyword: contains_keywords(
+                &features.user_text_sample,
+                &self.background_keywords,
+            ),
+        });
+        ClassificationResult {
+            route_name: classification.route_name,
+            confidence: 0.9,
+            reasoning: classification.reasoning,
+            candidates: classification.candidates,
         }
-        build_classification(DEFAULT_ROUTE, "default:route-selected", &evaluation)
-    }
-}
-
-fn build_classification(
-    route: &str,
-    reason: &str,
-    evaluation: &[(String, bool, String)],
-) -> ClassificationResult {
-    let mut diagnostics: Vec<String> = Vec::new();
-    for (_, triggered, why) in evaluation.iter() {
-        if *triggered {
-            diagnostics.push(why.clone());
-        }
-    }
-    let mut reasoning_parts = Vec::new();
-    reasoning_parts.push(reason.to_string());
-    for entry in diagnostics.iter() {
-        if entry != reason && !reasoning_parts.contains(entry) {
-            reasoning_parts.push(entry.clone());
-        }
-    }
-    let mut candidates = vec![route.to_string()];
-    if route != "longcontext"
-        && evaluation
-            .iter()
-            .any(|(name, triggered, _)| name == "longcontext" && *triggered)
-        && !candidates.contains(&"longcontext".to_string())
-    {
-        candidates.push("longcontext".to_string());
-    }
-    if !candidates.contains(&DEFAULT_ROUTE.to_string()) {
-        candidates.push(DEFAULT_ROUTE.to_string());
-    }
-    ClassificationResult {
-        route_name: route.to_string(),
-        confidence: 0.9,
-        reasoning: reasoning_parts.join("|"),
-        candidates,
     }
 }
 
@@ -256,26 +87,7 @@ fn contains_keywords(text: &str, keywords: &[String]) -> bool {
     keywords.iter().any(|keyword| normalized.contains(keyword))
 }
 
-fn contains_any_keyword(text: &str, keywords: &[&str]) -> bool {
-    if text.is_empty() || keywords.is_empty() {
-        return false;
-    }
-    keywords.iter().any(|keyword| text.contains(keyword))
-}
-
-pub(crate) const DEFAULT_ROUTE: &str = "default";
-
-pub(crate) const ROUTE_PRIORITY: [&str; 9] = [
-    "multimodal",
-    "web_search",
-    "thinking",
-    "coding",
-    "longcontext",
-    "search",
-    "tools",
-    "background",
-    DEFAULT_ROUTE,
-];
+pub(crate) use route_classifier_core::DEFAULT_ROUTE;
 
 #[cfg(test)]
 mod tests {
@@ -302,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_patch_tool_choice_on_current_user_turn_routes_to_tools() {
+    fn apply_patch_tool_choice_does_not_change_current_user_route() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
             has_tools: true,
@@ -312,9 +124,8 @@ mod tests {
 
         let result = test_classifier().classify(&features);
 
-        assert_eq!(result.route_name, "tools");
-        assert!(result.reasoning.contains("tools:apply_patch-tool-choice"));
-        assert!(!result.reasoning.contains("thinking:user-input"));
+        assert_eq!(result.route_name, "thinking");
+        assert!(result.reasoning.contains("thinking:user-input"));
     }
 
     #[test]
@@ -622,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_intent_routes_to_web_search() {
+    fn tool_intent_routes_web_search_from_current_turn_evidence() {
         let features = RoutingFeatures {
             latest_message_from_user: false,
             has_tools: true,
@@ -634,11 +445,15 @@ mod tests {
         let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "web_search");
+        assert_eq!(
+            result.candidates,
+            vec!["web_search".to_string(), DEFAULT_ROUTE.to_string()]
+        );
         assert!(result.reasoning.contains("web_search:tool-intent"));
     }
 
     #[test]
-    fn chinese_search_intent_routes_to_web_search() {
+    fn chinese_search_intent_routes_web_search_from_current_user_turn() {
         let features = RoutingFeatures {
             latest_message_from_user: true,
             user_text_sample: "上网搜下 minimax m2.7 官方如何支持图片输入".to_string(),
@@ -648,6 +463,10 @@ mod tests {
         let result = test_classifier().classify(&features);
 
         assert_eq!(result.route_name, "web_search");
+        assert_eq!(
+            result.candidates,
+            vec!["web_search".to_string(), DEFAULT_ROUTE.to_string()]
+        );
         assert!(result.reasoning.contains("web_search:explicit-or-intent"));
     }
 

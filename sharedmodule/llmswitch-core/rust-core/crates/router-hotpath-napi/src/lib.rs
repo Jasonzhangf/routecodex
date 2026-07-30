@@ -1,4 +1,5 @@
-use napi::bindgen_prelude::Result as NapiResult;
+use napi::bindgen_prelude::{AsyncTask, Result as NapiResult};
+use napi::{Env, Task};
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -24,7 +25,6 @@ mod compat_tool_schema;
 mod config_file_codec;
 mod config_provider_codec;
 mod config_toml_codec;
-mod direct_decision;
 mod direct_route_audit_projection;
 mod direct_route_eligibility;
 mod direct_route_model_hooks;
@@ -75,6 +75,7 @@ mod metadata_center;
 mod napi_json;
 mod openai_openai_codec;
 mod primary_exhausted_to_default_pool_blocks;
+mod provider_action_gate;
 mod provider_dry_run_terminal_action;
 mod provider_response_metadata_sync_effect;
 mod provider_response_shared_pure_blocks;
@@ -3647,6 +3648,79 @@ pub fn resolve_error_err05_execution_decision_json(input_json: String) -> NapiRe
     ))
 }
 
+#[napi(js_name = "recordProviderActionFailureJson")]
+pub fn record_provider_action_failure_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionGateKeyInput = parse_napi_json(&input_json)?;
+    let recorded = provider_action_gate::record_failure(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&recorded)
+}
+
+#[napi(js_name = "providerActionGateContractJson")]
+pub fn provider_action_gate_contract_json() -> NapiResult<String> {
+    stringify_napi_json(&provider_action_gate::contract())
+}
+
+#[napi(js_name = "beginProviderActionWaitJson")]
+pub fn begin_provider_action_wait_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionWaitInput = parse_napi_json(&input_json)?;
+    let poll = provider_action_gate::begin_wait(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&poll)
+}
+
+#[napi(js_name = "pollProviderActionAdmissionJson")]
+pub fn poll_provider_action_admission_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionWaitInput = parse_napi_json(&input_json)?;
+    let poll = provider_action_gate::poll_admission(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&poll)
+}
+
+#[napi(js_name = "commitProviderActionTerminalJson")]
+pub fn commit_provider_action_terminal_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionTerminalCommitInput =
+        parse_napi_json(&input_json)?;
+    let committed =
+        provider_action_gate::commit_terminal(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&committed)
+}
+
+#[napi(js_name = "abandonProviderActionAdmissionJson")]
+pub fn abandon_provider_action_admission_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionAbandonInput = parse_napi_json(&input_json)?;
+    let abandoned =
+        provider_action_gate::abandon_admission(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&serde_json::json!({"abandoned": abandoned}))
+}
+
+#[napi(js_name = "recordProviderActionSuccessJson")]
+pub fn record_provider_action_success_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionSuccessInput = parse_napi_json(&input_json)?;
+    let recorded = provider_action_gate::record_success(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&recorded)
+}
+
+#[napi(js_name = "cancelProviderActionWaitJson")]
+pub fn cancel_provider_action_wait_json(input_json: String) -> NapiResult<String> {
+    let input: provider_action_gate::ProviderActionWaitInput = parse_napi_json(&input_json)?;
+    provider_action_gate::cancel_wait(input).map_err(napi::Error::from_reason)?;
+    stringify_napi_json(&serde_json::json!({"cancelled": true}))
+}
+
+#[napi(js_name = "peekProviderActionWaitJson")]
+pub fn peek_provider_action_wait_json(input_json: String) -> NapiResult<i64> {
+    let input: provider_action_gate::ProviderActionGateKeyInput = parse_napi_json(&input_json)?;
+    provider_action_gate::peek_wait(input)
+        .map(|value| value.min(i64::MAX as u64) as i64)
+        .map_err(napi::Error::from_reason)
+}
+
+#[napi(js_name = "resetProviderActionGateJson")]
+pub fn reset_provider_action_gate_json(input_json: String) -> NapiResult<i64> {
+    let input: provider_action_gate::ProviderActionResetInput = parse_napi_json(&input_json)?;
+    provider_action_gate::reset(input)
+        .map(|value| value.min(i64::MAX as usize) as i64)
+        .map_err(napi::Error::from_reason)
+}
+
 pub use responses_reasoning_registry::{
     consume_responses_passthrough_by_aliases_json, consume_responses_passthrough_json,
     consume_responses_payload_snapshot_by_aliases_json, consume_responses_payload_snapshot_json,
@@ -3815,22 +3889,6 @@ pub fn build_provider_response_timing_breakdown_json(input_json: String) -> Napi
 }
 
 // ---------------------------------------------------------------------------
-// direct_decision NAPI exports — Rust migration batch #4
-// ---------------------------------------------------------------------------
-
-#[napi]
-pub fn decide_direct_router_retry_json(input_json: String) -> NapiResult<String> {
-    direct_decision::decision::decide_direct_router_retry_json(input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-#[napi]
-pub fn decide_direct_provider_retry_json(input_json: String) -> NapiResult<String> {
-    direct_decision::decision::decide_direct_provider_retry_json(input_json)
-        .map_err(|e| napi::Error::from_reason(e))
-}
-
-// ---------------------------------------------------------------------------
 // runtime_lifecycle NAPI exports
 // ---------------------------------------------------------------------------
 
@@ -3928,39 +3986,40 @@ pub fn normalize_responses_direct_current_request_payload_json(
 // traffic-governor-core NAPI exports
 // ---------------------------------------------------------------------------
 
-#[napi]
-pub fn traffic_governor_acquire_json(input_json: String) -> NapiResult<String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Input {
-        runtime_key: String,
-        #[serde(default)]
-        provider_key: Option<String>,
-        request_id: String,
-        #[serde(default)]
-        scope_key: Option<String>,
-        #[serde(default)]
-        max_in_flight: Option<u32>,
-        #[serde(default)]
-        acquire_timeout_ms: Option<u64>,
-        #[serde(default)]
-        stale_lease_ms: Option<u64>,
-        #[serde(default)]
-        requests_per_minute: Option<u32>,
-        #[serde(default)]
-        rpm_timeout_ms: Option<u64>,
-        #[serde(default)]
-        store_root: Option<String>,
-    }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrafficGovernorAcquireInput {
+    runtime_key: String,
+    #[serde(default)]
+    provider_key: Option<String>,
+    request_id: String,
+    #[serde(default)]
+    scope_key: Option<String>,
+    #[serde(default)]
+    max_in_flight: Option<u32>,
+    #[serde(default)]
+    acquire_timeout_ms: Option<u64>,
+    #[serde(default)]
+    stale_lease_ms: Option<u64>,
+    #[serde(default)]
+    requests_per_minute: Option<u32>,
+    #[serde(default)]
+    rpm_timeout_ms: Option<u64>,
+    #[serde(default)]
+    rpm_window_ms: Option<u64>,
+    #[serde(default)]
+    store_root: Option<String>,
+}
 
-    let input: Input = serde_json::from_str(&input_json)
+fn execute_traffic_governor_acquire(input_json: &str) -> NapiResult<String> {
+    let input: TrafficGovernorAcquireInput = serde_json::from_str(input_json)
         .map_err(|e| napi::Error::from_reason(format!("parse input: {}", e)))?;
 
     let store_root = input
         .store_root
         .as_deref()
         .unwrap_or("/tmp/routecodex-traffic");
-    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+    let governor = traffic_governor_core::TrafficGovernor::process_shared(store_root);
 
     let ctx = traffic_governor_core::types::AcquireContext {
         runtime_key: input.runtime_key,
@@ -3972,11 +4031,19 @@ pub fn traffic_governor_acquire_json(input_json: String) -> NapiResult<String> {
         stale_lease_ms: input.stale_lease_ms,
         requests_per_minute: input.requests_per_minute,
         rpm_timeout_ms: input.rpm_timeout_ms,
+        rpm_window_ms: input.rpm_window_ms,
     };
 
-    let result = governor
-        .acquire(&ctx)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let result = match governor.acquire(&ctx) {
+        Ok(result) => result,
+        Err(traffic_governor_core::types::GovernorError::AdmissionTimedOut(backpressure)) => {
+            return serde_json::to_string(&serde_json::json!({
+                "backpressure": backpressure,
+            }))
+            .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)));
+        }
+        Err(error) => return Err(napi::Error::from_reason(error.to_string())),
+    };
 
     serde_json::to_string(&serde_json::json!({
         "permit": {
@@ -4007,6 +4074,28 @@ pub fn traffic_governor_acquire_json(input_json: String) -> NapiResult<String> {
     .map_err(|e| napi::Error::from_reason(format!("serialize: {}", e)))
 }
 
+struct TrafficGovernorAcquireTask {
+    input_json: String,
+}
+
+impl Task for TrafficGovernorAcquireTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> NapiResult<Self::Output> {
+        execute_traffic_governor_acquire(&self.input_json)
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> NapiResult<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+#[napi]
+pub fn traffic_governor_acquire_json(input_json: String) -> AsyncTask<TrafficGovernorAcquireTask> {
+    AsyncTask::new(TrafficGovernorAcquireTask { input_json })
+}
+
 #[napi]
 pub fn traffic_governor_release_json(input_json: String) -> NapiResult<String> {
     #[derive(serde::Deserialize)]
@@ -4027,7 +4116,7 @@ pub fn traffic_governor_release_json(input_json: String) -> NapiResult<String> {
         .store_root
         .as_deref()
         .unwrap_or("/tmp/routecodex-traffic");
-    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+    let governor = traffic_governor_core::TrafficGovernor::process_shared(store_root);
 
     let permit = traffic_governor_core::types::Permit {
         runtime_key: input.runtime_key,
@@ -4061,6 +4150,10 @@ pub fn traffic_governor_is_at_capacity_json(input_json: String) -> NapiResult<bo
     struct Input {
         runtime_key: String,
         #[serde(default)]
+        scope_key: Option<String>,
+        #[serde(default)]
+        max_in_flight: Option<u32>,
+        #[serde(default)]
         store_root: Option<String>,
     }
 
@@ -4071,9 +4164,13 @@ pub fn traffic_governor_is_at_capacity_json(input_json: String) -> NapiResult<bo
         .store_root
         .as_deref()
         .unwrap_or("/tmp/routecodex-traffic");
-    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+    let governor = traffic_governor_core::TrafficGovernor::process_shared(store_root);
 
-    Ok(governor.is_at_capacity(&input.runtime_key))
+    Ok(governor.is_at_capacity_in_scope(
+        &input.runtime_key,
+        input.scope_key.as_deref(),
+        input.max_in_flight.map(|value| value as usize),
+    ))
 }
 
 #[napi]
@@ -4108,7 +4205,7 @@ pub fn traffic_governor_observe_outcome_json(input_json: String) -> NapiResult<(
         .store_root
         .as_deref()
         .unwrap_or("/tmp/routecodex-traffic");
-    let governor = traffic_governor_core::TrafficGovernor::new(store_root);
+    let governor = traffic_governor_core::TrafficGovernor::process_shared(store_root);
 
     let event = traffic_governor_core::types::OutcomeEvent {
         runtime_key: input.runtime_key,

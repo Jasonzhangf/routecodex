@@ -31,15 +31,15 @@ const cases = [
   {
     name: 'continuation commit moves after Resp05',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    marker: 'let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);',
-    mutation: 'let _forbidden_resp05_before_commit = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);\n        let _late_resp04_commit = hooks.commit(resp03)?;\n        let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);',
+    marker: 'let resp04 = hooks.commit(resp03)?;',
+    mutation: 'let _forbidden_resp05_before_commit = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(resp04, client_payload);\n    let resp04 = hooks.commit(resp03)?;',
     diagnostic: /expected 1 occurrences|forbidden/,
   },
   {
     name: 'second response exit appears',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    marker: 'let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);',
-    mutation: 'let _second_resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);\n        let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);',
+    marker: 'let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);',
+    mutation: 'let _second_resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);\n    let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);',
     diagnostic: /expected 1 occurrences/,
   },
   {
@@ -124,7 +124,7 @@ const cases = [
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker: 'trace.push("V3HubRespChatProcess03Governed");',
     mutation: 'trace.push("V3HubRespOutbound05ClientSemantic");',
-    diagnostic: /expected 2 occurrences.*V3HubRespChatProcess03Governed|missing V3HubRespChatProcess03Governed/,
+    diagnostic: /expected 1 occurrences.*V3HubRespChatProcess03Governed|missing V3HubRespChatProcess03Governed/,
   },
   {
     name: 'responses relay SSE skips response hooks before client projection',
@@ -139,6 +139,20 @@ const cases = [
     marker: 'use serde_json::{json, Map, Value};',
     mutation: 'use serde_json::{json, Map, Value};\nfn project_sse_stream() {}',
     diagnostic: /project_sse_stream|forbidden/,
+  },
+  {
+    name: 'responses relay provider event codec owner is removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
+    marker: 'pub(super) fn observe_v3_runtime_responses_sse_transport_chunk(',
+    mutation: 'pub(super) fn removed_v3_runtime_responses_sse_transport_chunk(',
+    diagnostic: /missing fn observe_v3_runtime_responses_sse_transport_chunk\(/,
+  },
+  {
+    name: 'responses relay parent resurrects provider event codec owner',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'pub struct V3ResponsesRelayRetryPolicy {',
+    mutation: 'fn observe_v3_runtime_responses_sse_transport_chunk() {}\npub struct V3ResponsesRelayRetryPolicy {',
+    diagnostic: /observe_v3_runtime_responses_sse_transport_chunk|forbidden/,
   },
   {
     name: 'responses relay local continuation restore removed',
@@ -196,11 +210,69 @@ const cases = [
     mutation: '',
     diagnostic: /missing script verify:v3-hub-relay-runtime-closeout/,
   },
+  {
+    name: 'focused duplicate identity package gate removed',
+    file: 'package.json',
+    marker: '    "test:v3-5520-duplicate-tool-identity": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_duplicate_tool_identity -- --nocapture && npm run verify:v3-hub-relay-runtime-closeout && npm run test:v3-hub-relay-runtime-closeout-red-fixtures",\n',
+    mutation: '',
+    diagnostic: /missing script test:v3-5520-duplicate-tool-identity/,
+  },
+  {
+    name: 'focused duplicate identity CI gate removed',
+    file: '.github/workflows/test.yml',
+    marker: '        run: npm run test:v3-5520-duplicate-tool-identity\n',
+    mutation: '',
+    diagnostic: /expected 2 occurrences of run: npm run test:v3-5520-duplicate-tool-identity, found 1/,
+  },
+  {
+    name: 'provider response classifier regression test removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate()',
+    mutation: 'fn removed_provider_response_failure_classifier_regression()',
+    diagnostic: /missing provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate/,
+  },
+  {
+    name: 'duplicate identity integration test removed',
+    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
+    marker: 'responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse',
+    mutation: 'removed_duplicate_tool_identity_reselection_regression',
+    diagnostic: /missing responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse/,
+  },
+  {
+    name: 'Resp03 provider failure entry edge removed',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    marker: 'v3-hub-relay-response-failure-01',
+    mutation: 'removed-hub-relay-response-failure-01',
+    diagnostic: /missing v3-hub-relay-response-failure-01/,
+  },
+  {
+    name: 'Resp03 provider failure provenance drifts to provider raw',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: 'source_stage: "V3HubRespChatProcess03Governed"',
+    mutation: 'source_stage: "V3ProviderRespInbound01Raw"',
+    diagnostic: /missing source_stage: "V3HubRespChatProcess03Governed"/,
+  },
+  {
+    name: 'Resp03 Error01 call-map callee drifts to local envelope helper',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    marker: 'callee_symbol: build_v3_error_01_source_raised_external, callee_file: v3/crates/routecodex-v3-error/src/lib.rs',
+    mutation: 'callee_symbol: provider_response_hook_failure, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    diagnostic: /callee_symbol must equal build_v3_error_01_source_raised_external/,
+  },
+  {
+    name: 'shared relay Error01 builder call removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+    marker: 'let source = build_v3_error_01_source_raised_external(',
+    mutation: 'let source = removed_v3_error_01_source_raised_external(',
+    diagnostic: /missing build_v3_error_01_source_raised_external\(/,
+  },
 ];
 
 const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
@@ -214,6 +286,7 @@ const copyPaths = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
   'package.json',
+  '.github/workflows/test.yml',
 ];
 
 const failures = [];

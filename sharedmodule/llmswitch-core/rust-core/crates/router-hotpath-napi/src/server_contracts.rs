@@ -232,10 +232,10 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
         ServerModuleHelp {
             module_id: "server.error_action_queue",
             version: CONTRACT_VERSION,
-            owner_module: "src/server/runtime/http-server/executor/request-executor-error-action-queue.ts",
-            owner_builder: Some("describeErrorActionQueueContract"),
+            owner_module: "sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs",
+            owner_builder: Some("contract"),
             phase: "server.error_action",
-            description: "Unified error action queue for all host-side storm prevention waits. It records category/scope events, emits queue hooks, and performs blocking waits through one gate. Delay policy is a fixed 3000ms for every error. It does not classify errors, mutate provider health, or project client errors.",
+            description: "Rust-owned cross-request provider action gate. Isolated failure generations wait at least 1000ms; consecutive failures or overlapping waiters enter sustained mode and wait at least 5000ms. Each generation admits exactly one provider action. The TS queue is only an IO scheduler and telemetry bridge.",
             allowed_request_metadata_fields: &[],
             forbidden_metadata_fields: &["metadata", "metaCarrier", "__rt", "errorCarrier"],
             forbidden_provider_exits: vec![],
@@ -252,8 +252,9 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
             effects: &[
                 "record_error_action_backoff",
                 "emit_error_action_hook",
-                "blocking_wait_1s_2s_3s_cycle",
-                "enforce_fixed_waiter_cap",
+                "blocking_wait_isolated_1s_sustained_5s",
+                "single_admission_fifo",
+                "action_scope_owned_release",
             ],
             forbidden_paths: vec![
                 "provider.health",
@@ -266,8 +267,8 @@ fn server_module_helps() -> Vec<ServerModuleHelp> {
                 "provider_traffic_governor_unified_queue.red",
                 "server_module_help_error_action_queue.red",
             ],
-            debug_flow: "1. Query describeServerModuleHelp('server.error_action_queue'). 2. Inspect request-executor-error-action-queue.ts contract. 3. Verify category/scope hook events and 1s/2s/3s blocking wait behavior in focused tests.",
-            help: "Error action queue: all error-storm waits use one fixed blocking queue: 1s -> 2s -> 3s -> repeat. Supported categories are global_error, session_storm, and servertool_followup. No per-call/env backoff configuration, no local soft-wait loops.",
+            debug_flow: "1. Query describeServerModuleHelp('server.error_action_queue'). 2. Inspect provider_action_gate.rs as the delay/state owner and request-executor-error-action-queue.ts as the thin scheduler. 3. Verify isolated 1000ms, sustained 5000ms, single admission, success reset, cancellation, and scope isolation.",
+            help: "Error action gate: isolated provider failure generations wait at least 1000ms; consecutive failures or overlapping waiters wait at least 5000ms. Each generation admits one action. Supported host categories are global_error, session_storm, and servertool_followup. No per-call/env delay override and no waiter-overload provider error.",
         },
     ]
 }

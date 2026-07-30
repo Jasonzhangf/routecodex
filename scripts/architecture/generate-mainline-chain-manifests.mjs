@@ -18,6 +18,7 @@
  *       to_node
  *       status
  *       owner_feature_id
+ *       resource_flow (if declared on the source edge)
  *       binding_pending / split_binding_id (if present)
  *   verification:
  *     required_gates:
@@ -52,7 +53,7 @@ export function buildMainlineChainManifest(chain) {
     if (edge?.to_node) nodeSet.add(edge.to_node);
     const ow = edge?.owner_feature_id ?? '';
     if (ow) ownerCounts[ow] = (ownerCounts[ow] ?? 0) + 1;
-    edges.push({
+    const manifestEdge = {
       step_id: edge?.step_id ?? '',
       from_node: edge?.from_node ?? '',
       to_node: edge?.to_node ?? '',
@@ -60,7 +61,20 @@ export function buildMainlineChainManifest(chain) {
       owner_feature_id: ow || null,
       binding_pending: edge?.binding_pending === true ? true : null,
       split_binding_id: edge?.split_binding_id ?? null,
-    });
+    };
+    if (edge?.resource_flow && typeof edge.resource_flow === 'object') {
+      manifestEdge.resource_flow = {
+        consumes: Array.isArray(edge.resource_flow.consumes) ? edge.resource_flow.consumes : [],
+        produces: Array.isArray(edge.resource_flow.produces) ? edge.resource_flow.produces : [],
+        side_channel_reads: Array.isArray(edge.resource_flow.side_channel_reads)
+          ? edge.resource_flow.side_channel_reads
+          : [],
+        side_channel_writes: Array.isArray(edge.resource_flow.side_channel_writes)
+          ? edge.resource_flow.side_channel_writes
+          : [],
+      };
+    }
+    edges.push(manifestEdge);
   }
 
   // dominant owner

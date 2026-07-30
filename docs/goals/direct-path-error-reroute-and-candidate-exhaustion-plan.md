@@ -1,5 +1,10 @@
 # Direct Path Error Reroute + Candidate Exhaustion 修复计划
 
+> Historical implementation plan. The active cross-request admission contract is
+> `docs/architecture/manifests/error.provider_action_gate.mainline.yml`: isolated
+> `1s`, sustained `5s`, FIFO, one admission per generation, and explicit
+> action-scope release.
+>
 > Owner: Jason
 > Theme: 让 direct/provider/provider-pool 错误回到统一策略中心，按“候选优先”原则恢复对话
 > Date: 2026-06-14
@@ -47,7 +52,7 @@
 | (a) 错误必须统一回到错误处理中心 | ✅ F4 已接 `resolveRequestExecutorProviderFailurePlan` | 已闭合，待 gate 重跑 |
 | (b) provider 错误冷却计数由中心做 | ✅ `isProviderFailureHealthNeutral` 短路 client_disconnect；其它 5xx 走 ErrorErr05 决策 | 已闭合 |
 | (c) 切 provider 由中心做 | ⚠️ router-direct 已接 decision；provider-direct 是单绑定端口，只消费 decision 不合成 reroute | 需要 gate 重跑 + live probe |
-| (d) 非持续问题下次恢复，持续问题过段时间再试 | ✅ 已走 `request-executor-error-action-queue` 1s/2s/3s 队列 | 已闭合 |
+| (d) 非持续问题下次恢复，持续问题过段时间再试 | ✅ 已走 `request-executor-error-action-queue` + Rust provider action gate：isolated 1s / sustained 5s | 已闭合 |
 | (e) 持续问题过段时间再尝试 | ✅ cooldown 由 `error.backoff_action_queue` + `virtual_router_engine` 协同 | 已闭合 |
 | (f) 只要有 provider 就不应中断对话 | ⚠️ provider send 阶段已收口；post-send SSE incomplete 仍是另一个 gap | 本 plan 锁 send/reroute；SSE gap 另起 plan |
 | (g) 当前池空还有 default | ✅ Rust selection 已支持 requested route exhausted -> default route；新增 primary_exhausted contract/native export 可查询 | 需要 Rust cargo test + live probe |
@@ -109,7 +114,8 @@
    - direct consumer 必须消费 `ErrorErr05ExecutionDecision`，在候选耗尽前不得直接 client-visible
 3. 候选优先：
    - 任何 provider 执行期错误（recoverable / unrecoverable / periodic_recovery），若当前 pool 仍有未排除候选，必须先按统一策略动作：
-     1) 进入统一错误动作队列 blocking wait（`1s -> 2s -> 3s -> repeat`）
+     1) 进入统一错误动作队列和 Rust provider action gate blocking wait
+        （isolated 首次动作 `>=1s`；重叠/持续错误的后续动作间隔 `>=5s`）
      2) 由策略决定 `retry_same_provider_once` 或 `exclude_and_reroute`
    - 候选耗尽后，才允许进入 `ErrorErr06ClientProjected`
 4. secondary / default pool 扩池：

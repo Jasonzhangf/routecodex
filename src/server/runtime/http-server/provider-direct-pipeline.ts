@@ -9,7 +9,7 @@
 import type { PortConfig } from './port-config-types.js';
 import { checkDirectProtocolMatch, resolveActualBehavior } from './port-config-validator.js';
 import type { ProviderHandle, ProviderProtocol } from './types.js';
-import type { DirectRetryDecision } from './direct-decision.js';
+import type { ProviderRetryExecutionPlan } from './executor/request-executor-error-types.js';
 
 export interface ProviderDirectPipelineOptions {
   portConfig: PortConfig;
@@ -22,7 +22,7 @@ export interface ProviderDirectPipelineOptions {
   onSnapshotBefore?: (payload: Record<string, unknown>, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
   onSnapshotAfter?: (result: unknown, context: { port: number; providerKey: string; protocol: ProviderProtocol }) => void;
   /** Called when provider-mode direct transport fails; caller must report through ErrorErr01-06 and return the ErrorErr05 action. */
-  onProviderError?: (error: unknown, context: ProviderDirectAuditContext) => Promise<DirectRetryDecision | void> | DirectRetryDecision | void;
+  onProviderError?: (error: unknown, context: ProviderDirectAuditContext) => Promise<ProviderRetryExecutionPlan | void> | ProviderRetryExecutionPlan | void;
 }
 
 export interface ProviderDirectAuditContext {
@@ -36,7 +36,8 @@ export interface ProviderDirectAuditContext {
 
 export interface ProviderDirectPipelineResult {
   response?: unknown;
-  errorAction?: DirectRetryDecision;
+  errorAction?: ProviderRetryExecutionPlan;
+  sourceError?: unknown;
   providerHandle: ProviderHandle;
   actualBehavior: 'direct' | 'relay';
   inboundProtocol: ProviderProtocol;
@@ -75,12 +76,6 @@ export async function executeProviderDirectPipeline(
 
   const payloadToSend = requestPayload;
 
-  options.onSnapshotBefore?.(payloadToSend, {
-    port: portConfig.port,
-    providerKey: providerBinding,
-    protocol: inboundProtocol,
-  });
-
   if (actualBehavior === 'relay') {
     throw new Error(
       `Provider mode relay must run through Hub Pipeline/chat process, not provider-direct: inbound=${inboundProtocol}, provider=${providerHandle.providerProtocol}`,
@@ -105,24 +100,47 @@ export async function executeProviderDirectPipeline(
 
   const providerStartedAtMs = Date.now();
   let response: unknown;
-  try {
-    response = actualBehavior === 'direct' && typeof providerHandle.instance.processIncomingDirect === 'function'
-      ? await providerHandle.instance.processIncomingDirect(payloadToSend)
-      : await providerHandle.instance.processIncoming(payloadToSend);
-  } catch (error) {
-    const errorAction = await options.onProviderError?.(error, auditContext);
-    if (errorAction && !errorAction.shouldRethrow) {
-      return {
-        errorAction,
-        providerHandle,
-        actualBehavior,
-        inboundProtocol,
-        providerProtocol: providerHandle.providerProtocol,
-        externalLatencyStartedAtMs: providerStartedAtMs,
-        externalLatencyMs: Math.max(0, Date.now() - providerStartedAtMs),
-      };
+  for (;;) {
+    options.onSnapshotBefore?.(payloadToSend, {
+      port: portConfig.port,
+      providerKey: providerBinding,
+      protocol: inboundProtocol,
+    });
+    try {
+      response = actualBehavior === 'direct' && typeof providerHandle.instance.processIncomingDirect === 'function'
+        ? await providerHandle.instance.processIncomingDirect(payloadToSend)
+        : await providerHandle.instance.processIncoming(payloadToSend);
+      break;
+    } catch (error) {
+      const errorAction = await options.onProviderError?.(error, auditContext);
+      if (!errorAction) {
+        throw error;
+      }
+      if (errorAction.action === 'wait_then_retry_same') {
+        continue;
+      }
+      if (errorAction.action === 'wait_then_reselect') {
+        return {
+          errorAction,
+          sourceError: error,
+          providerHandle,
+          actualBehavior,
+          inboundProtocol,
+          providerProtocol: providerHandle.providerProtocol,
+          externalLatencyStartedAtMs: providerStartedAtMs,
+          externalLatencyMs: Math.max(0, Date.now() - providerStartedAtMs),
+        };
+      }
+      if (
+        errorAction.action === 'project_terminal'
+        || errorAction.action === 'client_disconnected'
+        || errorAction.action === 'reject_non_provider_error'
+      ) {
+        throw error;
+      }
+      const exhaustiveAction: never = errorAction.action;
+      throw new Error(`Unsupported ErrorErr05 provider-direct action: ${exhaustiveAction}`);
     }
-    throw error;
   }
   const externalLatencyMs = Math.max(0, Date.now() - providerStartedAtMs);
 

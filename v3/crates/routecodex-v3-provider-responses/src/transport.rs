@@ -15,6 +15,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, Notify, OwnedMutexGuard};
 use tokio_tungstenite::{
@@ -46,6 +47,7 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
     "x-stainless-retry-count",
     "x-stainless-timeout",
 ];
+const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 300;
 const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
     "V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw";
 
@@ -539,10 +541,24 @@ impl fmt::Debug for ProviderResponsesTransport {
 
 impl Default for ProviderResponsesTransport {
     fn default() -> Self {
+        Self::with_http_read_timeout(Duration::from_secs(V3_PROVIDER_HTTP_READ_TIMEOUT_SECS))
+    }
+}
+
+impl ProviderResponsesTransport {
+    fn with_http_read_timeout(timeout: Duration) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .read_timeout(timeout)
+                .build()
+                .expect("valid V3 provider HTTP client read timeout"),
             websocket_sessions: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    #[cfg(test)]
+    fn with_http_read_timeout_for_test(timeout: Duration) -> Self {
+        Self::with_http_read_timeout(timeout)
     }
 }
 
@@ -1675,6 +1691,46 @@ mod tests {
         assert!(raw_headers.contains("x-stainless-runtime: node"));
         assert!(raw_headers.contains("x-stainless-retry-count: 0"));
         assert!(raw_headers.contains("x-stainless-timeout: 300"));
+    }
+
+    #[tokio::test]
+    async fn responses_http_transport_times_out_on_stalled_read_instead_of_waiting_forever() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+
+        let auth_env = "RCCV3_TEST_HTTP_TIMEOUT_KEY";
+        std::env::set_var(auth_env, "sk-test-timeout");
+        let request = build_v3_transport_13_responses_http_request_from_parts(
+            "req-timeout",
+            "timeout-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::Environment(auth_env.into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"timeout-model","input":"hello","stream":false}),
+        )
+        .unwrap();
+        let transport =
+            ProviderResponsesTransport::with_http_read_timeout_for_test(Duration::from_millis(50));
+        let started = std::time::Instant::now();
+        let error = transport
+            .send(request)
+            .await
+            .expect_err("provider send must timeout");
+        std::env::remove_var(auth_env);
+        server.abort();
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        match error {
+            V3ProviderError::Transport { .. } => {}
+            other => panic!("expected transport timeout, got {other:?}"),
+        }
     }
 
     #[test]

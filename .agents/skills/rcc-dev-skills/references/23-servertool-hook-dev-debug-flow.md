@@ -347,3 +347,15 @@
 - [21-change-workflow.md](./21-change-workflow.md)
 - [40-owner-registry.md](./40-owner-registry.md)
 - [70-gate-discovery.md](./70-gate-discovery.md)
+
+## 2026-07-30 V3 web_search ServerTool 状态机锁
+
+- `web_search` 路由触发只看当前轮证据：当前 assistant 实际调用 canonical `web_search` server tool，或最新用户 turn 有明确 fresh/current/web/search 意图。仅声明 `web_search` 工具、工具 schema、模型 capability、历史上下文、route pool 含搜索 provider 都不能触发 `web_search` 路由。
+- V3 web_search 有两轴：route activation source 与 provider execution mode。不要把“是否有 web_search 工具”与“是否进入 web_search route”混在一起。
+- Provider execution mode 必须显式来自编译后的 provider/model truth，不按 provider 名字猜：`native_remote_search_tool_mix`、`native_remote_search_search_only`、`servertool_search_backend`、`none`。
+- GPT-family/native tool-mix search provider：命中 `web_search` route 后只做 route/pass-through，不启动本地 ServerTool web_search 状态机，不剥普通工具。
+- MiniMax 属于 native remote search 但 search-only/no ordinary tool mixing：明确搜索意图或 canonical web_search tool call 命中后，必须由 ServerTool 内部状态机管理，搜索 dispatch 中只保留 provider-compatible search surface，普通工具只在这个受控 dispatch 内剥离，搜索结果再通过 follow-up marker/echo 注入为 paired tool result。
+- canonical RouteCodex `web_search` server tool：正常主请求不因注入/声明工具而改 route；只有模型实际 call 该工具时，Resp ChatProcess 捕获，ServerTool 状态机二跳到 `web_search` route，结果按原 tool_call_id 配对回下一轮。
+- ServerTool 状态机与 continuation 无依赖关系，只要求 hook 顺序正确：request side 在 continuation restore 后、provider wire 前；response side 在 continuation save 前、RespOutbound 前。状态不得进入 continuation store 当语义真相。
+- Forbidden owners：Virtual Router 不看工具声明/Schema 文本，不修 payload；Provider compat 只做 wire shape，不决定 route/生命周期/配对；Server/SSE 不生成 search result、tool id、marker 或 follow-up；debug snapshot 不做 state truth。
+- 实现前先更新 `docs/goals/v3-web-search-servertool-state-machine-proposal.md`、function map、mainline call map、verification map，并先写红测：declared-tool-only 不进 route、MiniMax 混工具失败、状态隔离失败、payload 泄漏失败、Error01-06 failure path。

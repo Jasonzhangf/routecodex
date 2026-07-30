@@ -20,8 +20,7 @@
  * Contract: payload passthrough is preserved for all other fields, but error
  * policy passthrough is explicitly NOT preserved. All router-direct failures
  * must surface as normal ErrorErr05 plan and go through the unified decision
- * consumer (decideDirectRouterRetry in ./direct-decision.ts) before any client
- * projection.
+ * consumer before any client projection.
  */
 
 import { Readable, Transform, type TransformCallback } from 'node:stream';

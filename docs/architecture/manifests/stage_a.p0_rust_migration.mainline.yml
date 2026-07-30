@@ -26,6 +26,16 @@ edges:
     owner_feature_id: servertool.followup_orchestration
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - servertool.followup_state
+      produces:
+        - stage_a.servertool_outcome_plan
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes:
+        - stage_a.servertool_outcome_plan
   - step_id: stage-a-p0-02
     from_node: AnthropicChatInbound
     to_node: OpenAiChatCanonical
@@ -33,6 +43,13 @@ edges:
     owner_feature_id: conversion.shared.anthropic
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - stage_a.protocol_canonical
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: stage-a-p0-03
     from_node: HubRespChatProcess03Governed
     to_node: ResponsesContinuationStore
@@ -40,6 +57,16 @@ edges:
     owner_feature_id: conversion.responses.store
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - continuation.scope_state
+      produces:
+        - stage_a.continuation_store_state
+      side_channel_reads:
+        - continuation.scope_state
+      side_channel_writes:
+        - stage_a.continuation_store_state
   - step_id: stage-a-p0-04
     from_node: HubReqInbound02Standardized
     to_node: HubReqChatProcess03Governed
@@ -47,6 +74,15 @@ edges:
     owner_feature_id: hub.req_chatprocess.tool_governance
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - metadata.runtime_control
+      produces:
+        - stage_a.req_tool_governance_state
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes: []
   - step_id: stage-a-p0-05
     from_node: HubRespInbound02Parsed
     to_node: HubRespChatProcess03Governed
@@ -54,6 +90,15 @@ edges:
     owner_feature_id: hub.resp_chatprocess.tool_governance
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - metadata.runtime_control
+      produces:
+        - stage_a.resp_tool_governance_state
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes: []
   - step_id: stage-a-p0-06
     from_node: ResponsesRequestInbound
     to_node: OpenAiChatCanonical
@@ -61,6 +106,13 @@ edges:
     owner_feature_id: conversion.shared.responses_openai
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - stage_a.protocol_canonical
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

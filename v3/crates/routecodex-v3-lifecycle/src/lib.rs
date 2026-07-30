@@ -156,7 +156,13 @@ struct V3ManagedRestartPlanRecord {
     start_nonce: String,
     executable_path: String,
     snapshots: bool,
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    snapshot_direct: bool,
     snapshot_stages: Option<String>,
+}
+
+fn bool_is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +170,7 @@ struct ControlRestartPlan {
     declaration: V3ManagedInstanceDeclaration,
     executable_path: PathBuf,
     snapshots: bool,
+    snapshot_direct: bool,
     snapshot_stages: Option<String>,
 }
 
@@ -172,6 +179,7 @@ pub struct V3ManagedLifecycle {
     config_path: PathBuf,
     state_root: PathBuf,
     force_snapshots: bool,
+    force_snapshot_direct: bool,
     force_snapshot_stages: Option<String>,
     force_console: bool,
 }
@@ -206,6 +214,7 @@ impl V3ManagedLifecycle {
             config_path: config_path.into(),
             state_root,
             force_snapshots: false,
+            force_snapshot_direct: false,
             force_snapshot_stages: None,
             force_console: false,
         })
@@ -219,6 +228,7 @@ impl V3ManagedLifecycle {
             config_path: config_path.into(),
             state_root: state_root.into(),
             force_snapshots: false,
+            force_snapshot_direct: false,
             force_snapshot_stages: None,
             force_console: false,
         }
@@ -226,6 +236,14 @@ impl V3ManagedLifecycle {
 
     pub fn with_snapshots_enabled(mut self, enabled: bool) -> Self {
         self.force_snapshots = enabled;
+        self
+    }
+
+    pub fn with_direct_snapshots_enabled(mut self, enabled: bool) -> Self {
+        self.force_snapshot_direct = enabled;
+        if enabled {
+            self.force_snapshots = true;
+        }
         self
     }
 
@@ -259,13 +277,7 @@ impl V3ManagedLifecycle {
         identity.update(config_digest.as_bytes());
         let instance_id = format!("v3-{}", &format!("{:x}", identity.finalize())[..20]);
         let mut manifest = snapshot.manifest;
-        if self.force_snapshots {
-            manifest.debug.snapshots = true;
-        }
-        if let Some(stages) = self.force_snapshot_stages.as_ref() {
-            manifest.debug.snapshots = true;
-            manifest.debug.snapshot_stages = Some(stages.clone());
-        }
+        self.apply_snapshot_authorization_to_manifest(&mut manifest);
         if self.force_console {
             manifest.debug.log_console = true;
         }
@@ -311,6 +323,19 @@ impl V3ManagedLifecycle {
         ))
     }
 
+    fn apply_snapshot_authorization_to_manifest(&self, manifest: &mut V3Config05ManifestPublished) {
+        manifest.debug.codex_samples = self.force_snapshots;
+        manifest.debug.snapshot_direct = self.force_snapshot_direct;
+        if self.force_snapshots {
+            manifest.debug.snapshots = true;
+        }
+        if let Some(stages) = self.force_snapshot_stages.as_ref() {
+            manifest.debug.snapshots = true;
+            manifest.debug.codex_samples = true;
+            manifest.debug.snapshot_stages = Some(stages.clone());
+        }
+    }
+
     pub async fn start(
         &self,
         executable_path: impl AsRef<Path>,
@@ -354,7 +379,9 @@ impl V3ManagedLifecycle {
             .arg("run-managed-child")
             .arg("--config")
             .arg(&declaration.config_path);
-        if self.force_snapshots {
+        if self.force_snapshot_direct {
+            command.arg("--snapall");
+        } else if self.force_snapshots {
             command.arg("--snap");
         }
         if let Some(stages) = self.force_snapshot_stages.as_ref() {
@@ -591,6 +618,7 @@ impl V3ManagedLifecycle {
             &control_instance_dir,
             &control_declaration,
             self.force_snapshots,
+            self.force_snapshot_direct,
             self.force_snapshot_stages.clone(),
         )
         .await
@@ -1054,7 +1082,9 @@ async fn restart_managed_runtime_in_place(
         .arg("run-managed-child")
         .arg("--config")
         .arg(&declaration.config_path);
-    if restart_plan.snapshots {
+    if restart_plan.snapshot_direct {
+        command.arg("--snapall");
+    } else if restart_plan.snapshots {
         command.arg("--snap");
     }
     if let Some(stages) = restart_plan.snapshot_stages.as_deref() {
@@ -1115,11 +1145,13 @@ async fn send_restart_control(
     instance_dir: &Path,
     declaration: &V3ManagedInstanceDeclaration,
     snapshots: bool,
+    snapshot_direct: bool,
     snapshot_stages: Option<String>,
 ) -> Result<ControlResponse, V3LifecycleError> {
     let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
     let needs_restart_plan = published.executable_path != declaration.executable_path
         || snapshots
+        || snapshot_direct
         || snapshot_stages
             .as_ref()
             .is_some_and(|value| !value.trim().is_empty());
@@ -1133,6 +1165,7 @@ async fn send_restart_control(
                 start_nonce: control.start_nonce.clone(),
                 executable_path: declaration.executable_path.clone(),
                 snapshots,
+                snapshot_direct,
                 snapshot_stages,
             },
         )?;
@@ -1515,10 +1548,12 @@ fn control_restart_plan(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
     let snapshots = record.as_ref().is_some_and(|record| record.snapshots);
+    let snapshot_direct = record.as_ref().is_some_and(|record| record.snapshot_direct);
     Ok(Some(ControlRestartPlan {
         declaration,
         executable_path,
         snapshots: snapshots || snapshot_stages.is_some(),
+        snapshot_direct,
         snapshot_stages,
     }))
 }
@@ -2483,6 +2518,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
             start_nonce: "nonce".to_string(),
             executable_path: "/tmp/rccv3-next".to_string(),
             snapshots: true,
+            snapshot_direct: false,
             snapshot_stages: Some("provider-request".to_string()),
         };
 
@@ -2493,6 +2529,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         assert!(!rendered.contains("/tmp/rccv3-next"));
         assert!(rendered_plan.contains("\"executable_path\":\"/tmp/rccv3-next\""));
         assert!(rendered_plan.contains("\"snapshots\":true"));
+        assert!(rendered_plan.contains("\"snapshot_direct\":false"));
         assert!(rendered_plan.contains("\"snapshot_stages\":\"provider-request\""));
     }
 
@@ -2509,6 +2546,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
                 start_nonce: "previous-nonce".to_string(),
                 executable_path: "/tmp/rccv3-next".to_string(),
                 snapshots: true,
+                snapshot_direct: false,
                 snapshot_stages: None,
             },
         )
@@ -2967,5 +3005,46 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         assert!(instance_dir.join("pid.cache").exists());
         assert!(instance_dir.join("instance.json").exists());
         drop(occupied);
+    }
+
+    #[test]
+    fn restart_plan_omits_false_snapshot_direct_for_previous_release_child_compat() {
+        let plan = V3ManagedRestartPlanRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: "instance".to_string(),
+            start_nonce: "nonce".to_string(),
+            executable_path: "/tmp/rccv3".to_string(),
+            snapshots: false,
+            snapshot_direct: false,
+            snapshot_stages: None,
+        };
+
+        let encoded = serde_json::to_value(&plan).unwrap();
+        assert!(
+            encoded.get("snapshot_direct").is_none(),
+            "false snapshot_direct must not be written to restart.plan.json because previous-release managed children with deny_unknown_fields reject the newly-added field"
+        );
+
+        let decoded: V3ManagedRestartPlanRecord = serde_json::from_value(encoded).unwrap();
+        assert!(!decoded.snapshot_direct);
+    }
+
+    #[test]
+    fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
+        let plan = V3ManagedRestartPlanRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: "instance".to_string(),
+            start_nonce: "nonce".to_string(),
+            executable_path: "/tmp/rccv3".to_string(),
+            snapshots: true,
+            snapshot_direct: true,
+            snapshot_stages: None,
+        };
+
+        let encoded = serde_json::to_value(&plan).unwrap();
+        assert_eq!(
+            encoded.get("snapshot_direct"),
+            Some(&serde_json::json!(true))
+        );
     }
 }

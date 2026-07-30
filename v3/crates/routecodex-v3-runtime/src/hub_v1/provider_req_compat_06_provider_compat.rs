@@ -1,7 +1,9 @@
 use super::{
+    build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical,
     build_v3_openai_responses_standard_request_from_chat_canonical,
-    build_v3_responses_original_input_surface_from_chat_canonical, provider_protocol_compat_id,
+    build_v3_responses_original_input_surface_from_chat_canonical,
+    encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
     V3HubExecutionMode, V3HubOpaquePayload, V3HubProviderWireProtocol,
     V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError, V3ProviderCompatProfileId,
 };
@@ -108,11 +110,13 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
                 }
             }
             V3HubProviderWireProtocol::Anthropic => {
-                build_v3_responses_original_input_surface_from_chat_canonical(
+                let source = build_v3_anthropic_provider_request_source_from_chat_canonical(
                     input.provider_semantic_payload(),
                     input.original_responses_payload(),
-                )
-                .unwrap_or_else(|| input.provider_semantic_payload().clone())
+                    input.entry_protocol(),
+                )?;
+                encode_v3_responses_semantic_as_anthropic_request(source)
+                    .map_err(|error| error.to_string())?
             }
             V3HubProviderWireProtocol::Gemini => input.provider_semantic_payload().clone(),
         }
@@ -202,6 +206,147 @@ mod tests {
             selected_candidate(provider_protocol),
         );
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+    }
+
+    fn relay_req07_for_entry(
+        entry_protocol: V3HubEntryProtocol,
+        payload: serde_json::Value,
+        provider_protocol: V3HubProviderWireProtocol,
+    ) -> V3HubReqOutbound07ProviderSemantic {
+        let req01 = build_v3_hub_req_inbound_01_client_raw(
+            payload,
+            entry_protocol,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
+        let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
+            req02,
+            V3HubContinuationOwnership::New,
+        );
+        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+        let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+            req04,
+            V3HubExecutionMode::Relay,
+        );
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05,
+            V3HubTargetResolution::Routed,
+            selected_candidate(provider_protocol),
+        );
+        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+    }
+
+    #[test]
+    fn anthropic_entry_to_anthropic_provider_uses_governed_messages_without_responses_snapshot() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Anthropic,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"hello"}],
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+        assert!(req07.original_responses_payload().is_none());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
+        assert_eq!(
+            req_compat.provider_semantic_payload()["model"],
+            "provider-wire-model"
+        );
+        assert_eq!(
+            req_compat.provider_semantic_payload()["messages"][0]["role"],
+            "user"
+        );
+    }
+
+    #[test]
+    fn anthropic_entry_current_responses_semantic_input_encodes_to_anthropic_provider_wire() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Anthropic,
+            json!({
+                "model": "client-route-alias",
+                "input": [{
+                    "type":"message",
+                    "role":"user",
+                    "content":[{"type":"input_text","text":"hello"}]
+                }],
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+        assert!(req07.original_responses_payload().is_none());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
+        assert_eq!(
+            req_compat.provider_semantic_payload()["model"],
+            "provider-wire-model"
+        );
+        assert_eq!(
+            req_compat.provider_semantic_payload()["messages"][0]["content"][0]["text"],
+            "hello"
+        );
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("input")
+            .is_none());
+    }
+
+    #[test]
+    fn responses_entry_current_tool_history_surface_encodes_anthropic_without_original_snapshot() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": [
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"use tool"}]
+                    },
+                    {
+                        "type":"function_call",
+                        "id":"call_lookup",
+                        "call_id":"call_lookup",
+                        "name":"lookup",
+                        "arguments":"{\"query\":\"routecodex\"}"
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_lookup",
+                        "output":"tool result"
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    }
+                ],
+                "tools": [{
+                    "type":"function",
+                    "name":"lookup",
+                    "description":"lookup",
+                    "parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}
+                }],
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+        assert!(
+            req07.original_responses_payload().is_none(),
+            "ReqInbound leaves tool-history Responses surfaces as current payload instead of a separate original snapshot"
+        );
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
+        let payload = req_compat.provider_semantic_payload();
+        assert_eq!(payload["model"], "provider-wire-model");
+        assert!(payload.get("input").is_none());
+        assert_eq!(payload["messages"][0]["role"], "user");
+        assert_eq!(payload["messages"][1]["role"], "assistant");
+        assert_eq!(payload["messages"][1]["content"][0]["type"], "tool_use");
+        assert_eq!(payload["messages"][2]["role"], "user");
+        assert_eq!(payload["messages"][2]["content"][0]["type"], "tool_result");
     }
 
     #[test]

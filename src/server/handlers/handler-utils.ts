@@ -6,8 +6,12 @@ import {
   isClientDisconnectHttpProjectionSentinel,
   mapErrorToHttp,
   mapErrorToPublicLogSummary,
+  project_error_err_06_client_from_error_err_05_execution_decision,
   type HttpErrorPayload,
 } from '../utils/http-error-mapper.js';
+import {
+  readErrorErr05ExecutionDecision
+} from '../runtime/http-server/executor/request-executor-error-types.js';
 import {
   reportRouteError,
   type RouteErrorPayload
@@ -777,7 +781,13 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
   normalizedError: Error & Record<string, unknown>;
   onReportError?: (error: unknown) => void;
 }): Promise<HttpErrorPayload> {
-  const mapped = mapErrorToHttp(buildClientHttpProjectionSource(args.routePayload, args.normalizedError));
+  const projectionSource = buildClientHttpProjectionSource(args.routePayload, args.normalizedError);
+  const errorErr05 = readErrorErr05ExecutionDecision(args.normalizedError);
+  const mapped = errorErr05
+    ? project_error_err_06_client_from_error_err_05_execution_decision(
+      Object.assign(projectionSource, errorErr05)
+    )
+    : mapErrorToHttp(projectionSource);
   try {
     await reportRouteError(args.routePayload, { includeHttpResult: true });
   } catch (error) {

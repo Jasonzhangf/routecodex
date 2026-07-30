@@ -23,6 +23,13 @@ edges:
     owner_feature_id: debug.pipeline_dry_run_loop
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.protocol_context
+      produces:
+        - dryrun.provider_request_probe
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: ddr-02
     from_node: DebugDryRun02InternalControlCarrier
     to_node: ProviderReqOutbound07TransportRequest
@@ -30,6 +37,16 @@ edges:
     owner_feature_id: debug.pipeline_dry_run_loop
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - provider.wire_payload
+        - dryrun.provider_request_probe
+      produces:
+        - dryrun.provider_request_probe
+        - snapshot.debug_sample
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes: []
   - step_id: ddr-03
     from_node: DebugDryRun02InternalControlCarrier
     to_node: DebugDryRun03CapturedRequestReplay
@@ -37,6 +54,14 @@ edges:
     owner_feature_id: debug.pipeline_dry_run_loop
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - snapshot.debug_sample
+        - dryrun.provider_request_probe
+      produces:
+        - snapshot.debug_sample
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: ddr-02b
     from_node: ProviderReqOutbound07TransportRequest
     to_node: HubRespOutbound04ClientSemantic
@@ -44,6 +69,13 @@ edges:
     owner_feature_id: debug.pipeline_dry_run_terminal_action_plan
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - dryrun.provider_request_probe
+      produces:
+        - response.client_payload
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: ddr-04
     from_node: DebugDryRun04CapturedProviderResponse
     to_node: HubRespOutbound04ClientSemantic
@@ -51,6 +83,14 @@ edges:
     owner_feature_id: debug.pipeline_dry_run_loop
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.provider_raw
+        - snapshot.debug_sample
+      produces:
+        - response.client_payload
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

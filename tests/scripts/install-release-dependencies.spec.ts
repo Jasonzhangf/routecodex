@@ -29,6 +29,14 @@ describe('install-release dependency installation', () => {
     expect(releaseScript).toContain("v3Ready&&body.build_version!==expected");
   });
 
+  it('installs release snapshots into the same RCC homes refreshed by V2/global install', () => {
+    expect(releaseScript).toContain('install_release_snapshot_for_rcc_home');
+    expect(releaseScript).toContain('for root in "${roots[@]}"');
+    expect(releaseScript).toContain('roots+=("$HOME/.rcc")');
+    expect(releaseScript).toContain('if [ -d "/Volumes/extension/.rcc" ]; then');
+    expect(releaseScript).toContain('RCC_HOME="$root" ROUTECODEX_HOME="$root" ROUTECODEX_USER_DIR="$root"');
+  });
+
   it('uses one aggregate restart located by verify port and no-restart start only when stopped', () => {
     expect(releaseScript).toContain('restart_release_runtime_for_aggregate');
     expect(releaseScript).not.toContain('restart_release_runtime_for_port');

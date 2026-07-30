@@ -5,9 +5,10 @@ use crate::nodes::{
 use crate::shared::{project_provider_raw_to_client_payload, V3ProviderResponseProjection};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3InternalErrorCode,
+    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3Error05ExecutionDecision,
+    V3Error05RecoveryAdmissionWitness, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -52,7 +53,14 @@ type ResponseProjectionFuture = Pin<
     Box<dyn Future<Output = Result<V3ProviderResponseProjection, V3Error01SourceRaised>> + Send>,
 >;
 type ResponseProjectionHook = fn(V3ProviderResp14Raw) -> ResponseProjectionFuture;
-type ErrorHook = fn(V3Error01SourceRaised, V3ErrorActionScope, usize) -> V3Error06ClientProjected;
+type ErrorHook = fn(
+    V3Error01SourceRaised,
+    V3ErrorActionScope,
+    usize,
+    bool,
+    bool,
+    Option<V3Error05RecoveryAdmissionWitness>,
+) -> V3Error05ExecutionDecision;
 
 #[derive(Clone, Copy)]
 pub struct V3HookRegistry {
@@ -116,8 +124,18 @@ impl V3HookRegistry {
         source: V3Error01SourceRaised,
         scope: V3ErrorActionScope,
         candidates_remaining: usize,
-    ) -> V3Error06ClientProjected {
-        (self.error)(source, scope, candidates_remaining)
+        default_pool_available: bool,
+        same_provider_retry_available: bool,
+        recovery: Option<V3Error05RecoveryAdmissionWitness>,
+    ) -> V3Error05ExecutionDecision {
+        (self.error)(
+            source,
+            scope,
+            candidates_remaining,
+            default_pool_available,
+            same_provider_retry_available,
+            recovery,
+        )
     }
 }
 
@@ -151,7 +169,7 @@ pub fn register_responses_direct_hooks() -> V3HookRegistry {
             hook_id: "ResponsesDirectErrorHook",
             hook_point: V3HookPoint::Error,
             input_node: "V3Error01SourceRaised",
-            output_node: "V3Error06ClientProjected",
+            output_node: "V3Error05ExecutionDecision",
         },
     ];
     V3HookRegistry {
@@ -483,13 +501,21 @@ fn responses_direct_error_hook(
     source: V3Error01SourceRaised,
     scope: V3ErrorActionScope,
     candidates_remaining: usize,
-) -> V3Error06ClientProjected {
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: scope,
-        candidates_remaining,
-        source_status: None,
-    })
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    recovery: Option<V3Error05RecoveryAdmissionWitness>,
+) -> V3Error05ExecutionDecision {
+    V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: scope,
+            candidates_remaining,
+            source_status: None,
+        },
+        default_pool_available,
+        same_provider_retry_available,
+        recovery,
+    )
 }
 
 #[cfg(test)]

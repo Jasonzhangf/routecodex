@@ -11,6 +11,8 @@ pub use types::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+pub const V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS: u64 = 3_000;
+
 #[derive(Debug, thiserror::Error)]
 pub enum V3ConfigError {
     #[error("config io failed: {0}")]
@@ -68,6 +70,129 @@ pub fn compile_v3_config_05_manifest(
             validate_v3_config_03_schema_from_v3_config_02(authoring)?,
         )?,
     )
+}
+
+pub fn resolve_v3_http_sse_keepalive_ms(
+    routecodex_value: Option<&str>,
+    legacy_value: Option<&str>,
+) -> Result<u64, V3ConfigError> {
+    if legacy_value.is_some() {
+        return Err(validation(
+            "RCC_HTTP_SSE_KEEPALIVE_MS is not supported; use ROUTECODEX_HTTP_SSE_KEEPALIVE_MS",
+        ));
+    }
+
+    fn parse(value: &str) -> Result<u64, V3ConfigError> {
+        let trimmed = value.trim();
+        let parsed = trimmed.parse::<u64>().map_err(|_| {
+            validation(
+                "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS must be a positive integer number of milliseconds",
+            )
+        })?;
+        if parsed == 0 {
+            return Err(validation(
+                "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS must be a positive integer number of milliseconds",
+            ));
+        }
+        Ok(parsed)
+    }
+
+    match routecodex_value {
+        Some(value) => parse(value),
+        None => Ok(V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS),
+    }
+}
+
+pub(crate) fn compile_v3_http_sse_keepalive_ms_from_environment() -> Result<u64, V3ConfigError> {
+    fn read(name: &str) -> Result<Option<String>, V3ConfigError> {
+        std::env::var_os(name)
+            .map(|value| {
+                value.into_string().map_err(|_| {
+                    validation(format!(
+                        "{name} must contain valid UTF-8 positive integer milliseconds"
+                    ))
+                })
+            })
+            .transpose()
+    }
+
+    let routecodex_value = read("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS")?;
+    let legacy_value = read("RCC_HTTP_SSE_KEEPALIVE_MS")?;
+    resolve_v3_http_sse_keepalive_ms(routecodex_value.as_deref(), legacy_value.as_deref())
+}
+
+#[cfg(test)]
+mod http_sse_keepalive_environment_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::Mutex;
+
+    static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
+    const PRIMARY: &str = "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS";
+    const LEGACY: &str = "RCC_HTTP_SSE_KEEPALIVE_MS";
+
+    struct EnvironmentRestore {
+        primary: Option<OsString>,
+        legacy: Option<OsString>,
+    }
+
+    impl EnvironmentRestore {
+        fn capture() -> Self {
+            Self {
+                primary: std::env::var_os(PRIMARY),
+                legacy: std::env::var_os(LEGACY),
+            }
+        }
+    }
+
+    impl Drop for EnvironmentRestore {
+        fn drop(&mut self) {
+            match self.primary.take() {
+                Some(value) => std::env::set_var(PRIMARY, value),
+                None => std::env::remove_var(PRIMARY),
+            }
+            match self.legacy.take() {
+                Some(value) => std::env::set_var(LEGACY, value),
+                None => std::env::remove_var(LEGACY),
+            }
+        }
+    }
+
+    #[test]
+    fn http_sse_keepalive_environment_compiler_rejects_invalid_primary() {
+        let _lock = ENVIRONMENT_LOCK.lock().unwrap();
+        let _restore = EnvironmentRestore::capture();
+        std::env::set_var(PRIMARY, "invalid");
+        std::env::remove_var(LEGACY);
+
+        let error = compile_v3_http_sse_keepalive_ms_from_environment().unwrap_err();
+        assert!(error.to_string().contains(PRIMARY), "{error}");
+    }
+
+    #[test]
+    fn http_sse_keepalive_environment_compiler_rejects_legacy_variable() {
+        let _lock = ENVIRONMENT_LOCK.lock().unwrap();
+        let _restore = EnvironmentRestore::capture();
+        std::env::set_var(PRIMARY, "25");
+        std::env::set_var(LEGACY, "25");
+
+        let error = compile_v3_http_sse_keepalive_ms_from_environment().unwrap_err();
+        assert!(error.to_string().contains("not supported"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn http_sse_keepalive_environment_compiler_rejects_non_utf8_values() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let _lock = ENVIRONMENT_LOCK.lock().unwrap();
+        let _restore = EnvironmentRestore::capture();
+        std::env::set_var(PRIMARY, OsString::from_vec(vec![0xff]));
+        std::env::remove_var(LEGACY);
+
+        let error = compile_v3_http_sse_keepalive_ms_from_environment().unwrap_err();
+        assert!(error.to_string().contains("valid UTF-8"), "{error}");
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

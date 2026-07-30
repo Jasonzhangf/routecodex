@@ -17,6 +17,7 @@ use routecodex_v3_runtime::{
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 struct TwoTurnTransport {
@@ -1008,6 +1009,121 @@ struct PendingThenSseStreamFailureTransport {
     requests: Mutex<Vec<Value>>,
 }
 
+#[derive(Default)]
+struct PendingThenPostCommitSseFailureThenSuccessTransport {
+    requests: Mutex<Vec<Value>>,
+}
+
+struct DirectPostCommitMalformedSseTransport;
+
+struct DirectPostCommitFailedEventTransport;
+
+struct DirectTerminalSseTransport;
+
+struct DirectCompletedJsonTransport;
+
+#[async_trait]
+impl ResponsesTransport for DirectPostCommitMalformedSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![
+                Ok(concat!(
+                    "event: response.output_text.delta\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_post_commit\",\"delta\":\"partial\"}\n\n",
+                )
+                .as_bytes()
+                .to_vec()),
+                Ok(b"data: {malformed-json}\n\n".to_vec()),
+            ])),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectPostCommitFailedEventTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![
+                Ok(concat!(
+                    "event: response.output_text.delta\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_post_commit_failed\",\"delta\":\"partial\"}\n\n",
+                )
+                .as_bytes()
+                .to_vec()),
+                Ok(concat!(
+                    "event: response.failed\n",
+                    "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_post_commit_failed\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_503\",\"message\":\"provider failed after delta\"}}}\n\n",
+                )
+                .as_bytes()
+                .to_vec()),
+            ])),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectCompletedJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        json_response(
+            &request,
+            200,
+            json!({
+                "id":"resp_after_post_commit_failure",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"recovered"}]
+            }),
+        )
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectTerminalSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![Ok(concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_terminal_reset\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n",
+                "data: [DONE]\n\n",
+            )
+            .as_bytes()
+            .to_vec())])),
+        ))
+    }
+}
+
 #[async_trait]
 impl ResponsesTransport for PendingThenProviderFailureTransport {
     async fn send(
@@ -1066,6 +1182,60 @@ impl ResponsesTransport for PendingThenSseStreamFailureTransport {
 }
 
 #[async_trait]
+impl ResponsesTransport for PendingThenPostCommitSseFailureThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let mut requests = self.requests.lock().unwrap();
+        requests.push(request.body().clone());
+        match requests.len() {
+            1 => json_response(
+                &request,
+                200,
+                json!({
+                    "id":"resp_pinned_post_commit",
+                    "status":"requires_action",
+                    "output":[{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}]
+                }),
+            ),
+            2 => Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".into(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(vec![
+                    Ok(concat!(
+                        "event: response.output_text.delta\n",
+                        "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_pinned_post_commit\",\"delta\":\"partial\"}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec()),
+                    Ok(concat!(
+                        "event: response.failed\n",
+                        "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_pinned_post_commit\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_502\",\"message\":\"pinned provider failed after delta\"}}}\n\n",
+                    )
+                    .as_bytes()
+                    .to_vec()),
+                ])),
+            )),
+            _ => json_response(
+                &request,
+                200,
+                json!({
+                    "id":"resp_pinned_recovered",
+                    "status":"completed",
+                    "output":[{"type":"output_text","text":"recovered"}]
+                }),
+            ),
+        }
+    }
+}
+
+#[async_trait]
 impl ResponsesTransport for TwoTurnSseTransport {
     async fn send(
         &self,
@@ -1084,6 +1254,8 @@ impl ResponsesTransport for TwoTurnSseTransport {
                 concat!(
                 "event: response.output_item.done\n",
                 "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_sse_1\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_1\",\"status\":\"requires_action\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"{}\"}]}}\n\n",
                 "data: [DONE]\n\n"
             )
                 .as_bytes()
@@ -1252,6 +1424,8 @@ impl ResponsesTransport for PendingSseWithoutRemoteContinuationTransport {
                 concat!(
                     "event: response.output_item.done\n",
                     "data: {\"type\":\"response.output_item.done\",\"response_id\":\"resp_http_sse_pending\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_http_sse_pending\",\"name\":\"lookup\",\"arguments\":\"{}\"}}\n\n",
+                    "event: response.completed\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_http_sse_pending\",\"status\":\"requires_action\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_http_sse_pending\",\"name\":\"lookup\",\"arguments\":\"{}\"}]}}\n\n",
                     "data: [DONE]\n\n",
                 )
                 .as_bytes()
@@ -1547,7 +1721,8 @@ async fn direct_provider_event_json_observation_records_usage_and_completed_term
 
 #[tokio::test]
 async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream() {
-    let manifest = http_only_manifest_without_remote_continuation();
+    let routing_group = "direct_failed_terminal";
+    let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
     let transport = ObservedFailedTerminalOnlySseTransport::default();
     let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -1557,7 +1732,7 @@ async fn direct_provider_failed_terminal_enters_error_chain_before_client_stream
             "req-http-sse-terminal-observed-failed",
             json!({"model":"gpt-5.5","stream":true,"input":"fail"}),
         ),
-        scope(),
+        scope_for_group(routing_group),
         register_responses_direct_hooks(),
         &transport,
         1_000,
@@ -1987,14 +2162,187 @@ async fn duplicate_commit_and_already_terminal_are_explicit_errors_not_success_t
 }
 
 #[tokio::test]
+async fn direct_post_commit_malformed_sse_records_failure_but_fresh_request_bypasses_recovery() {
+    let routing_group = "direct_post_commit_malformed";
+    let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
+    let state = V3ResponsesDirectContinuationState::default();
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-direct-post-commit-malformed",
+            json!({"model":"gpt-5.5","stream":true,"input":"stream"}),
+        ),
+        scope_for_group(routing_group),
+        register_responses_direct_hooks(),
+        &DirectPostCommitMalformedSseTransport,
+        1_000,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 200, "{first:?}");
+    let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
+        panic!("first provider delta must keep Direct response lazy")
+    };
+    let first_chunk = stream
+        .next()
+        .await
+        .expect("first delta")
+        .expect("first delta must pass through");
+    assert!(String::from_utf8(first_chunk).unwrap().contains("partial"));
+    let error = stream
+        .next()
+        .await
+        .expect("malformed provider event must close the current stream")
+        .expect_err("malformed provider event must not reach the client as success");
+    assert!(error.message.contains("key must be a string"), "{error:?}");
+
+    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-direct-after-post-commit-malformed",
+            json!({"model":"gpt-5.5","input":"next"}),
+        ),
+        scope_for_group(routing_group),
+        register_responses_direct_hooks(),
+        &DirectCompletedJsonTransport,
+        2_000,
+    )
+    .await;
+    assert_eq!(second.client_payload.status, 200, "{second:?}");
+}
+
+#[tokio::test]
+async fn direct_post_commit_response_failed_records_failure_but_fresh_request_bypasses_recovery() {
+    let routing_group = "direct_post_commit_failed";
+    let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
+    let state = V3ResponsesDirectContinuationState::default();
+    let first = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-direct-post-commit-response-failed",
+            json!({"model":"gpt-5.5","stream":true,"input":"stream"}),
+        ),
+        scope_for_group(routing_group),
+        register_responses_direct_hooks(),
+        &DirectPostCommitFailedEventTransport,
+        1_000,
+    )
+    .await;
+    let V3ClientBody::Sse(mut stream) = first.client_payload.body else {
+        panic!("first provider delta must keep Direct response lazy")
+    };
+    assert!(stream.next().await.unwrap().is_ok());
+    let error = stream
+        .next()
+        .await
+        .expect("response.failed must close the current stream")
+        .expect_err("response.failed must not pass through as client success");
+    assert_eq!(error.code, "HTTP_503");
+    assert!(error.message.contains("provider failed after delta"));
+
+    let second = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-direct-after-post-commit-response-failed",
+            json!({"model":"gpt-5.5","input":"next"}),
+        ),
+        scope_for_group(routing_group),
+        register_responses_direct_hooks(),
+        &DirectCompletedJsonTransport,
+        2_000,
+    )
+    .await;
+    assert_eq!(second.client_payload.status, 200, "{second:?}");
+}
+
+#[tokio::test]
+async fn direct_terminal_sse_recovery_does_not_block_a_fresh_request() {
+    let routing_group = "direct_terminal_recovery";
+    let manifest = http_only_manifest_without_remote_continuation_for_group(routing_group);
+    let state = V3ResponsesDirectContinuationState::default();
+    let failed = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-direct-seed-active-gate",
+            json!({"model":"gpt-5.5","stream":true,"input":"seed"}),
+        ),
+        scope_for_group(routing_group),
+        register_responses_direct_hooks(),
+        &DirectPostCommitMalformedSseTransport,
+        1_000,
+    )
+    .await;
+    let V3ClientBody::Sse(failed_stream) = failed.client_payload.body else {
+        panic!("failing Direct response must be lazy")
+    };
+    assert!(failed_stream
+        .collect::<Vec<_>>()
+        .await
+        .iter()
+        .any(Result::is_err));
+
+    let terminal = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &state,
+        &manifest,
+        request(
+            "req-direct-terminal-reset",
+            json!({"model":"gpt-5.5","stream":true,"input":"reset"}),
+        ),
+        scope_for_group(routing_group),
+        register_responses_direct_hooks(),
+        &DirectTerminalSseTransport,
+        2_000,
+    )
+    .await;
+    let V3ClientBody::Sse(terminal_stream) = terminal.client_payload.body else {
+        panic!("terminal Direct response must stay lazy")
+    };
+
+    let waiting_manifest = manifest.clone();
+    let waiting_state = V3ResponsesDirectContinuationState::default();
+    let waiter = tokio::spawn(async move {
+        execute_v3_responses_direct_runtime_kernel_with_continuation(
+            &waiting_state,
+            &waiting_manifest,
+            request(
+                "req-direct-released-by-terminal-success",
+                json!({"model":"gpt-5.5","input":"released"}),
+            ),
+            scope_for_group(routing_group),
+            register_responses_direct_hooks(),
+            &DirectCompletedJsonTransport,
+            3_000,
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        waiter.is_finished(),
+        "fresh Direct request consumed an unrelated Error05 recovery lane"
+    );
+    let fresh = waiter.await.expect("fresh Direct request task panicked");
+    assert_eq!(fresh.client_payload.status, 200, "{fresh:?}");
+    let terminal_items = terminal_stream.collect::<Vec<_>>().await;
+    assert!(
+        terminal_items.iter().all(Result::is_ok),
+        "{terminal_items:?}"
+    );
+}
+
+#[tokio::test]
 async fn pinned_terminal_provider_failure_uses_error01_06_without_reselection() {
-    let manifest = manifest();
+    let routing_group = "direct_pinned_terminal";
+    let manifest = manifest_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
     let transport = PendingThenProviderFailureTransport::default();
     prime_pending_with_id(
         &state,
         &manifest,
-        scope(),
+        scope_for_group(routing_group),
         &transport,
         1_000,
         "req-failure-1",
@@ -2003,7 +2351,7 @@ async fn pinned_terminal_provider_failure_uses_error01_06_without_reselection() 
     let failure = continuation_turn(
         &state,
         &manifest,
-        scope(),
+        scope_for_group(routing_group),
         &transport,
         "resp_failure_1",
         "req-failure-2",
@@ -2023,14 +2371,15 @@ async fn pinned_terminal_provider_failure_uses_error01_06_without_reselection() 
 }
 
 #[tokio::test]
-async fn sse_stream_error_after_restore_preserves_previous_locator_truth() {
-    let manifest = manifest();
+async fn sse_stream_error_after_restore_releases_locator_after_terminal_error05() {
+    let routing_group = "direct_precommit_stream_error";
+    let manifest = manifest_for_group(routing_group);
     let state = V3ResponsesDirectContinuationState::default();
     let transport = PendingThenSseStreamFailureTransport::default();
     prime_pending_with_id(
         &state,
         &manifest,
-        scope(),
+        scope_for_group(routing_group),
         &transport,
         1_000,
         "req-sse-failure-1",
@@ -2039,7 +2388,7 @@ async fn sse_stream_error_after_restore_preserves_previous_locator_truth() {
     let output = continuation_turn(
         &state,
         &manifest,
-        scope(),
+        scope_for_group(routing_group),
         &transport,
         "resp_sse_failure_1",
         "req-sse-failure-2",
@@ -2047,7 +2396,6 @@ async fn sse_stream_error_after_restore_preserves_previous_locator_truth() {
     )
     .await;
     assert_error_chain(&output);
-    assert_eq!(state.len().unwrap(), 1);
     let V3ClientBody::Json(body) = &output.client_payload.body else {
         panic!("provider body stream failure before client bytes must project Error06 JSON")
     };
@@ -2056,26 +2404,112 @@ async fn sse_stream_error_after_restore_preserves_previous_locator_truth() {
         .as_str()
         .unwrap()
         .contains("controlled stream failure after restore"));
-    assert!(!output
+    assert!(output
         .node_trace
         .contains(&"V3HubRespContinuation04Committed"));
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn pinned_post_commit_stream_failure_preserves_pin_and_gates_the_same_provider_scope() {
+    let routing_group = "direct_pinned_post_commit";
+    let manifest = manifest_for_group(routing_group);
+    let state = V3ResponsesDirectContinuationState::default();
+    let transport = PendingThenPostCommitSseFailureThenSuccessTransport::default();
+    prime_pending_with_id(
+        &state,
+        &manifest,
+        scope_for_group(routing_group),
+        &transport,
+        1_000,
+        "req-pinned-post-commit-prime",
+    )
+    .await;
+    let failed = continuation_turn(
+        &state,
+        &manifest,
+        scope_for_group(routing_group),
+        &transport,
+        "resp_pinned_post_commit",
+        "req-pinned-post-commit-failure",
+        2_000,
+    )
+    .await;
+    let V3ClientBody::Sse(mut stream) = failed.client_payload.body else {
+        panic!("pinned post-commit failure must remain lazy until the failed event")
+    };
+    assert!(stream.next().await.unwrap().is_ok());
+    let error = stream
+        .next()
+        .await
+        .unwrap()
+        .expect_err("expected failed event");
+    assert_eq!(error.code, "HTTP_502");
+    assert_eq!(
+        state.len().unwrap(),
+        1,
+        "post-commit failure must not release the pinned continuation before terminal Error05"
+    );
+
+    let started = Instant::now();
+    let recovered = continuation_turn(
+        &state,
+        &manifest,
+        scope_for_group(routing_group),
+        &transport,
+        "resp_pinned_post_commit",
+        "req-pinned-post-commit-retry",
+        3_000,
+    )
+    .await;
+    assert_eq!(recovered.client_payload.status, 200, "{recovered:?}");
+    assert!(started.elapsed() >= Duration::from_millis(1_000));
+    assert_eq!(
+        count(&recovered.node_trace, "V3Router07OpaqueTargetHitOnce"),
+        0,
+        "pinned retry must not re-enter or scan the Router"
+    );
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[2]["previous_response_id"],
+        "resp_pinned_post_commit"
+    );
 }
 
 #[tokio::test]
 async fn capability_auth_and_provider_availability_drift_fail_at_req06_without_router_or_send() {
-    for (case, changed_manifest) in [
-        ("capability", manifest_variant("a", true, &["reasoning"])),
-        ("auth", manifest_variant("b", true, &[])),
-        ("availability", manifest_variant("a", false, &[])),
+    for (case, routing_group, changed_manifest) in [
+        (
+            "capability",
+            "direct_capability_drift",
+            manifest_variant_for_group("a", true, &["reasoning"], "direct_capability_drift"),
+        ),
+        (
+            "auth",
+            "direct_auth_drift",
+            manifest_variant_for_group("b", true, &[], "direct_auth_drift"),
+        ),
+        (
+            "availability",
+            "direct_availability_drift",
+            manifest_variant_for_group("a", false, &[], "direct_availability_drift"),
+        ),
     ] {
         let state = V3ResponsesDirectContinuationState::default();
         let transport = TwoTurnTransport::default();
-        prime_pending(&state, &manifest(), scope(), &transport, 1_000).await;
+        prime_pending(
+            &state,
+            &manifest_for_group(routing_group),
+            scope_for_group(routing_group),
+            &transport,
+            1_000,
+        )
+        .await;
         let output = continuation_turn(
             &state,
             &changed_manifest,
-            scope(),
+            scope_for_group(routing_group),
             &transport,
             "resp_remote_1",
             &format!("req-{case}-drift"),
@@ -2089,7 +2523,11 @@ async fn capability_auth_and_provider_availability_drift_fail_at_req06_without_r
         );
         assert_eq!(count(&output.node_trace, "V3TargetLocalReselected"), 0);
         assert_eq!(transport.requests.lock().unwrap().len(), 1);
-        assert_eq!(state.len().unwrap(), 1);
+        assert_eq!(
+            state.len().unwrap(),
+            usize::from(case == "capability"),
+            "capability revision mismatch is a continuation contract error and preserves the locator; missing auth/provider are exact-pin availability failures and release it after terminal Error05"
+        );
     }
 }
 
@@ -2109,12 +2547,16 @@ fn request(request_id: &str, body: Value) -> routecodex_v3_runtime::V3Server03Ht
 }
 
 fn scope() -> V3ResponsesDirectContinuationScope {
+    scope_for_group("g")
+}
+
+fn scope_for_group(routing_group: &str) -> V3ResponsesDirectContinuationScope {
     V3ResponsesDirectContinuationScope::responses(
         "/v1/responses",
         "session-a",
         "conversation-a",
         5555,
-        "g",
+        routing_group,
     )
 }
 
@@ -2226,7 +2668,11 @@ fn assert_error_chain(output: &routecodex_v3_runtime::V3ResponsesDirectRuntimeOu
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
-    manifest_variant_with_stopless("a", true, &[], false)
+    manifest_for_group("g")
+}
+
+fn manifest_for_group(routing_group: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_variant_with_stopless_for_group("a", true, &[], false, routing_group)
 }
 
 fn manifest_with_direct_stopless() -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -2235,13 +2681,19 @@ fn manifest_with_direct_stopless() -> routecodex_v3_config::V3Config05ManifestPu
 
 fn manifest_with_direct_stopless_server_stopless_disabled(
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    manifest_variant_with_stopless_and_server_override("a", true, &[], true, Some(false))
+    manifest_variant_with_stopless_and_server_override("a", true, &[], true, "g", Some(false))
 }
 
 fn http_only_manifest_without_remote_continuation(
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    http_only_manifest_without_remote_continuation_for_group("g")
+}
+
+fn http_only_manifest_without_remote_continuation_for_group(
+    routing_group: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
+        parse_v3_config_02_authoring(&format!(
             r#"
 version = 3
 [features]
@@ -2249,35 +2701,42 @@ stopless_center = false
 [servers.s]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "g"
+routing_group = "{routing_group}"
 endpoints = ["responses"]
 [providers.p]
 enabled = true
 type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "m"
-auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
-responses = { process = "chat", streaming = "always", transport = "http" }
+auth = {{ type = "api_key", entries = [{{ alias = "a", env = "TEST_KEY" }}] }}
+responses = {{ process = "chat", streaming = "always", transport = "http" }}
 [providers.p.models.m]
 wire_name = "wire-m"
 capabilities = ["text", "tools"]
 supports_streaming = true
-[route_groups.g.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }]
+[route_groups.{routing_group}.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }}]
 "#,
-        )
+        ))
         .unwrap(),
     )
     .unwrap()
 }
 
-fn manifest_variant(
+fn manifest_variant_for_group(
     auth_alias: &str,
     enabled: bool,
     extra_capabilities: &[&str],
+    routing_group: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    manifest_variant_with_stopless(auth_alias, enabled, extra_capabilities, false)
+    manifest_variant_with_stopless_for_group(
+        auth_alias,
+        enabled,
+        extra_capabilities,
+        false,
+        routing_group,
+    )
 }
 
 fn manifest_variant_with_stopless(
@@ -2286,11 +2745,28 @@ fn manifest_variant_with_stopless(
     extra_capabilities: &[&str],
     stopless_center: bool,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_variant_with_stopless_for_group(
+        auth_alias,
+        enabled,
+        extra_capabilities,
+        stopless_center,
+        "g",
+    )
+}
+
+fn manifest_variant_with_stopless_for_group(
+    auth_alias: &str,
+    enabled: bool,
+    extra_capabilities: &[&str],
+    stopless_center: bool,
+    routing_group: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     manifest_variant_with_stopless_and_server_override(
         auth_alias,
         enabled,
         extra_capabilities,
         stopless_center,
+        routing_group,
         None,
     )
 }
@@ -2300,6 +2776,7 @@ fn manifest_variant_with_stopless_and_server_override(
     enabled: bool,
     extra_capabilities: &[&str],
     stopless_center: bool,
+    routing_group: &str,
     server_stopless_center: Option<bool>,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let mut capabilities = vec!["text", "tools"];
@@ -2330,7 +2807,7 @@ responses_direct_stopless_center = {stopless_center}
 [servers.s]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "g"
+routing_group = "{routing_group}"
 endpoints = ["responses"]
 {server_features}
 [providers.p]
@@ -2344,7 +2821,7 @@ responses = {{ process = "chat", streaming = "always", transport = "websocket_v2
 	wire_name = "gpt-5.5"
 	capabilities = [{capabilities}]
 	supports_streaming = true
-	[route_groups.g.pools.default]
+	[route_groups.{routing_group}.pools.default]
 	selection = {{ strategy = "priority" }}
 	targets = [{{ kind = "provider_model", provider = "p", model = "gpt-5.5", key = "{auth_alias}", priority = 1 }}]
 "#,

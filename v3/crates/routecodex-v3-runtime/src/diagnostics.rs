@@ -61,7 +61,11 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
     let metadata = input.get("metadata").unwrap_or(&Value::Null);
     let endpoint = read_dry_run_endpoint(input, metadata).unwrap_or("/v1/responses");
     let entry_protocol = entry_protocol_from_endpoint(endpoint);
-    let facts = crate::build_v3_router_request_facts_for_entry(request, entry_protocol);
+    let facts = crate::build_v3_router_request_facts_for_entry(
+        request,
+        entry_protocol,
+        crate::configured_v3_longcontext_threshold_tokens(manifest, server_id),
+    );
     let request_input_tokens = facts.input_tokens;
     let request_capabilities = facts.capabilities.iter().cloned().collect::<Vec<_>>();
     // Reflects the live process-wide selection state without advancing it, so a

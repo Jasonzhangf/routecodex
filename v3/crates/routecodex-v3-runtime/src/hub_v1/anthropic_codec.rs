@@ -582,7 +582,7 @@ pub fn project_v3_anthropic_message_as_responses_response(
                     "text": part.get("text").cloned().unwrap_or(Value::String(String::new()))
                 }));
             }
-            Some("thinking" | "reasoning" | "redacted_thinking") => {
+            Some("thinking" | "redacted_thinking") => {
                 output_items.push(anthropic_reasoning_part_as_responses_reasoning(part)?);
             }
             Some("tool_use") => {
@@ -651,42 +651,69 @@ fn anthropic_reasoning_part_as_responses_reasoning(
     let object = part
         .as_object()
         .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "provider response reasoning content",
+            field: "reasoning content",
         })?;
-    let mut item = Map::new();
-    item.insert("type".to_string(), Value::String("reasoning".to_string()));
-    if let Some(text) = object
-        .get("thinking")
-        .or_else(|| object.get("text"))
-        .or_else(|| object.get("reasoning"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        item.insert(
-            "summary".to_string(),
-            Value::Array(vec![json!({"type":"summary_text","text":text})]),
-        );
+    match object.get("type").and_then(Value::as_str) {
+        Some("thinking") => {
+            validate_anthropic_reasoning_object_keys(object, &["type", "thinking", "signature"])?;
+            let thinking = require_nonempty_reasoning_string(object.get("thinking"))?;
+            let mut item = json!({
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":thinking}]
+            });
+            if let Some(signature) = optional_nonempty_reasoning_string(object, "signature")? {
+                item["encrypted_content"] = Value::String(signature.to_string());
+            }
+            Ok(item)
+        }
+        Some("redacted_thinking") => {
+            validate_anthropic_reasoning_object_keys(object, &["type", "data"])?;
+            let data = require_nonempty_reasoning_string(object.get("data"))?;
+            Ok(json!({
+                "type":"reasoning",
+                "encrypted_content":data
+            }))
+        }
+        _ => Err(V3AnthropicCodecError::MalformedField {
+            field: "reasoning content",
+        }),
     }
-    if let Some(encrypted_content) = object
-        .get("encrypted_content")
-        .or_else(|| object.get("signature"))
-        .or_else(|| object.get("data"))
+}
+
+fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3AnthropicCodecError> {
+    let value = value
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-    {
-        item.insert(
-            "encrypted_content".to_string(),
-            Value::String(encrypted_content.to_string()),
-        );
-    }
-    if !item.contains_key("summary") && !item.contains_key("encrypted_content") {
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning content",
+        })?;
+    if value.trim().is_empty() {
         return Err(V3AnthropicCodecError::MalformedField {
-            field: "provider response reasoning content",
+            field: "reasoning content",
         });
     }
-    Ok(Value::Object(item))
+    Ok(value)
+}
+
+fn optional_nonempty_reasoning_string<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+) -> Result<Option<&'a str>, V3AnthropicCodecError> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    Ok(Some(require_nonempty_reasoning_string(Some(value))?))
+}
+
+fn validate_anthropic_reasoning_object_keys(
+    object: &Map<String, Value>,
+    allowed: &[&str],
+) -> Result<(), V3AnthropicCodecError> {
+    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "reasoning content",
+        });
+    }
+    Ok(())
 }
 
 pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
@@ -917,6 +944,12 @@ fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError
 
 fn reject_side_channel_fields(value: &Value) -> Result<(), V3AnthropicCodecError> {
     let object = require_object(value)?;
+    reject_side_channel_object_keys(object)
+}
+
+fn reject_side_channel_object_keys(
+    object: &Map<String, Value>,
+) -> Result<(), V3AnthropicCodecError> {
     for key in object.keys() {
         if is_internal_side_channel_field(key) {
             return Err(V3AnthropicCodecError::SideChannelLeaked {
@@ -981,28 +1014,75 @@ fn encode_anthropic_messages_as_responses_semantic(
     let mut encoded = Vec::new();
     for message in messages {
         let role = message.get("role").cloned().unwrap_or(Value::Null);
-        let mut content = match message.get("content") {
-            Some(Value::String(text)) => vec![json!({"type":"input_text","text":text})],
-            Some(Value::Array(parts)) => parts
-                .iter()
-                .filter_map(anthropic_content_part_as_responses_message_part)
-                .collect::<Result<Vec<_>, _>>()?,
-            _ => Vec::new(),
-        };
-        if !content.is_empty() {
-            encoded.push(json!({"role":role,"content":std::mem::take(&mut content)}));
-        }
-        if let Some(parts) = message.get("content").and_then(Value::as_array) {
-            for part in parts {
-                match part.get("type").and_then(Value::as_str) {
-                    Some("tool_use") => encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?})),
-                    Some("tool_result") => encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))})),
-                    _ => {}
-                }
+        match message.get("content") {
+            Some(Value::String(text)) => {
+                encoded.push(json!({
+                    "role":role,
+                    "content":[{"type":"input_text","text":text}]
+                }));
             }
+            Some(Value::Array(parts)) => {
+                let mut message_content = Vec::new();
+                for part in parts {
+                    match part.get("type").and_then(Value::as_str) {
+                        Some("text" | "image") => {
+                            if let Some(content_part) =
+                                anthropic_content_part_as_responses_message_part(part)
+                            {
+                                message_content.push(content_part?);
+                            }
+                        }
+                        Some("thinking" | "redacted_thinking") => {
+                            push_responses_message_content(
+                                &mut encoded,
+                                &role,
+                                &mut message_content,
+                            );
+                            encoded.push(anthropic_reasoning_part_as_responses_reasoning(part)?);
+                        }
+                        Some("reasoning") => {
+                            return Err(V3AnthropicCodecError::MalformedField {
+                                field: "reasoning content",
+                            });
+                        }
+                        Some("tool_use") => {
+                            push_responses_message_content(
+                                &mut encoded,
+                                &role,
+                                &mut message_content,
+                            );
+                            encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                        }
+                        Some("tool_result") => {
+                            push_responses_message_content(
+                                &mut encoded,
+                                &role,
+                                &mut message_content,
+                            );
+                            encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))}));
+                        }
+                        _ => {}
+                    }
+                }
+                push_responses_message_content(&mut encoded, &role, &mut message_content);
+            }
+            _ => {}
         }
     }
     Ok(encoded)
+}
+
+fn push_responses_message_content(
+    encoded: &mut Vec<Value>,
+    role: &Value,
+    content: &mut Vec<Value>,
+) {
+    if !content.is_empty() {
+        encoded.push(json!({
+            "role":role,
+            "content":std::mem::take(content)
+        }));
+    }
 }
 
 fn anthropic_tool_result_output_as_responses_semantic(content: Option<&Value>) -> Value {
@@ -1283,6 +1363,18 @@ fn responses_input_array_as_anthropic_messages(
     while index < items.len() {
         let item = &items[index];
         if responses_input_item_type(item) == Some("reasoning") {
+            messages.push(json!({
+                "role":"assistant",
+                "content":[project_v3_responses_reasoning_item_as_anthropic_content(item)?]
+            }));
+            index += 1;
+            continue;
+        }
+        if responses_input_item_type(item) == Some("web_search_call") {
+            messages.push(json!({
+                "role":"assistant",
+                "content": responses_web_search_call_as_anthropic_server_tool_history(item, index)?
+            }));
             index += 1;
             continue;
         }
@@ -1292,6 +1384,9 @@ fn responses_input_array_as_anthropic_messages(
             while index < items.len() {
                 let current = &items[index];
                 if responses_input_item_type(current) == Some("reasoning") {
+                    tool_uses.push(project_v3_responses_reasoning_item_as_anthropic_content(
+                        current,
+                    )?);
                     index += 1;
                     continue;
                 }
@@ -1312,6 +1407,16 @@ fn responses_input_array_as_anthropic_messages(
             while index < items.len() {
                 let current = &items[index];
                 if responses_input_item_type(current) == Some("reasoning") {
+                    assistant_interleaved_content.push(
+                        project_v3_responses_reasoning_item_as_anthropic_content(current)?,
+                    );
+                    index += 1;
+                    continue;
+                }
+                if responses_input_item_type(current) == Some("web_search_call") {
+                    assistant_interleaved_content.extend(
+                        responses_web_search_call_as_anthropic_server_tool_history(current, index)?,
+                    );
                     index += 1;
                     continue;
                 }
@@ -1343,10 +1448,6 @@ fn responses_input_array_as_anthropic_messages(
             let mut result_ids = Vec::new();
             while index < items.len() {
                 let current = &items[index];
-                if responses_input_item_type(current) == Some("reasoning") {
-                    index += 1;
-                    continue;
-                }
                 if !is_responses_tool_output_item(current) {
                     break;
                 }
@@ -1409,7 +1510,13 @@ fn responses_input_item_as_anthropic_messages(
             field: "input item",
         })?;
     match object.get("type").and_then(Value::as_str) {
-        Some("reasoning") => Ok(()),
+        Some("reasoning") => {
+            messages.push(json!({
+                "role":"assistant",
+                "content":[project_v3_responses_reasoning_item_as_anthropic_content(item)?]
+            }));
+            Ok(())
+        }
         Some("function_call") | Some("custom_tool_call") | Some("tool_call") => {
             messages.push(json!({
                 "role":"assistant",
@@ -1498,6 +1605,278 @@ fn responses_tool_output_as_anthropic_tool_result(object: &Map<String, Value>) -
         "tool_use_id": responses_tool_output_id_value(object),
         "content": responses_tool_output_as_anthropic_content(object.get("output"))
     })
+}
+
+pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(
+    item: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    let object = item
+        .as_object()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning item",
+        })?;
+    let content_text =
+        responses_reasoning_text_entries(object.get("content"), &["reasoning_text"])?;
+    let summary_text = responses_reasoning_text_entries(object.get("summary"), &["summary_text"])?;
+    if !content_text.is_empty() && !summary_text.is_empty() {
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "reasoning item",
+        });
+    }
+    let thinking = if !content_text.is_empty() {
+        content_text.join("\n\n")
+    } else {
+        summary_text.join("\n\n")
+    };
+    let encrypted_content = match object.get("encrypted_content") {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            let value = value
+                .as_str()
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "reasoning item",
+                })?;
+            if value.trim().is_empty() {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "reasoning item",
+                });
+            }
+            Some(value)
+        }
+    };
+    if !thinking.is_empty() {
+        let mut block = json!({
+            "type":"thinking",
+            "thinking":thinking
+        });
+        if let Some(signature) = encrypted_content {
+            block["signature"] = Value::String(signature.to_string());
+        }
+        return Ok(block);
+    }
+    if let Some(data) = encrypted_content {
+        return Ok(json!({
+            "type":"redacted_thinking",
+            "data":data
+        }));
+    }
+    Err(V3AnthropicCodecError::MalformedField {
+        field: "reasoning item",
+    })
+}
+
+fn responses_reasoning_text_entries(
+    value: Option<&Value>,
+    accepted_types: &[&str],
+) -> Result<Vec<String>, V3AnthropicCodecError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let entries = value
+        .as_array()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning item",
+        })?;
+    let mut text = Vec::new();
+    for entry in entries {
+        let object = entry
+            .as_object()
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "reasoning item",
+            })?;
+        if !accepted_types
+            .iter()
+            .any(|accepted| object.get("type").and_then(Value::as_str) == Some(*accepted))
+        {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning item",
+            });
+        }
+        let value = object
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "reasoning item",
+            })?;
+        text.push(value.to_string());
+    }
+    Ok(text)
+}
+
+fn responses_web_search_call_as_anthropic_server_tool_history(
+    item: &Value,
+    input_index: usize,
+) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let object = item
+        .as_object()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "web_search_call",
+        })?;
+    let action = object.get("action").and_then(Value::as_object).ok_or(
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.action",
+        },
+    )?;
+    let action = validate_responses_web_search_action(action)?;
+    let call_id = responses_web_search_call_history_id(object, input_index)?;
+    let result_content = responses_web_search_call_result_content(object)?;
+    Ok(vec![
+        json!({
+            "type":"server_tool_use",
+            "id":call_id,
+            "name":"web_search",
+            "input":Value::Object(action)
+        }),
+        json!({
+            "type":"web_search_tool_result",
+            "tool_use_id":call_id,
+            "content":result_content
+        }),
+    ])
+}
+
+fn responses_web_search_call_history_id(
+    object: &Map<String, Value>,
+    input_index: usize,
+) -> Result<String, V3AnthropicCodecError> {
+    let mut values = Vec::new();
+    for key in ["call_id", "tool_call_id", "id"] {
+        if let Some(value) = object
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if !values.iter().any(|seen| seen == value) {
+                values.push(value.to_string());
+            }
+        }
+    }
+    match values.len() {
+        0 => Ok(format!("call_routecodex_web_search_{input_index}")),
+        1 => Ok(values.pop().expect("single web search identity")),
+        _ => Err(V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.id",
+        }),
+    }
+}
+
+fn validate_responses_web_search_action(
+    action: &Map<String, Value>,
+) -> Result<Map<String, Value>, V3AnthropicCodecError> {
+    reject_side_channel_object_keys(action)?;
+    let action_type = action
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.action.type",
+        })?;
+    match action_type {
+        "search" => {
+            let has_scalar_query = action
+                .get("query")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty());
+            let has_queries =
+                action
+                    .get("queries")
+                    .and_then(Value::as_array)
+                    .is_some_and(|queries| {
+                        queries.iter().any(|query| {
+                            query
+                                .as_str()
+                                .map(str::trim)
+                                .is_some_and(|value| !value.is_empty())
+                        })
+                    });
+            if !has_scalar_query && !has_queries {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "web_search_call.action.query",
+                });
+            }
+        }
+        "open_page" => {
+            action
+                .get("url")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "web_search_call.action.url",
+                })?;
+        }
+        "find_in_page" => {
+            action
+                .get("url")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "web_search_call.action.url",
+                })?;
+            action
+                .get("pattern")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "web_search_call.action.pattern",
+                })?;
+        }
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "web_search_call.action.type",
+            });
+        }
+    }
+    Ok(action.clone())
+}
+
+fn responses_web_search_call_result_content(
+    object: &Map<String, Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    let status = object.get("status").and_then(Value::as_str).ok_or(
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.status",
+        },
+    )?;
+    let has_error = object.get("error").is_some();
+    match status {
+        "completed" if has_error => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "web_search_call.result",
+            })
+        }
+        "completed" | "failed" => {}
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "web_search_call.status",
+            })
+        }
+    }
+
+    let mut outcome = Map::new();
+    for key in [
+        "status",
+        "action",
+        "result",
+        "result_items",
+        "output",
+        "error",
+    ] {
+        if let Some(field_payload) = object.get(key) {
+            outcome.insert(key.to_string(), field_payload.clone());
+        }
+    }
+    Ok(Value::Object(outcome))
 }
 
 fn responses_content_as_anthropic_content(

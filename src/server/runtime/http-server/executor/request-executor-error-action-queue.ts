@@ -1,8 +1,21 @@
 import {
+  abandonProviderActionAdmissionNative,
+  beginProviderActionWaitNative,
+  cancelProviderActionWaitNative,
+  commitProviderActionTerminalNative,
+  peekProviderActionWaitNative,
+  pollProviderActionAdmissionNative,
+  readProviderActionGateContractNative,
+  recordProviderActionFailureNative,
+  recordProviderActionSuccessNative,
+  resetProviderActionGateNative
+} from '../../../../modules/llmswitch/bridge/provider-action-gate-host.js';
+import {
+  throwIfClientAbortSignalAborted,
   waitWithClientAbortSignal
 } from './request-executor-abort.js';
 
-export const ERROR_ACTION_QUEUE_FEATURE_ID = 'feature_id: error.backoff_action_queue';
+export const ERROR_ACTION_QUEUE_FEATURE_ID = 'feature_id: error.provider_action_gate';
 
 export type ErrorActionCategory =
   | 'global_error'
@@ -24,37 +37,46 @@ export type ErrorActionQueueEvent =
       delayMs: number;
     };
 
-type ErrorActionQueueState = {
-  consecutive: number;
-  updatedAtMs: number;
-  nextAllowedAtMs: number;
-};
-
 type LogNonBlockingError = (stage: string, error: unknown, details?: Record<string, unknown>) => void;
 type ErrorActionQueueHook = (event: ErrorActionQueueEvent) => void;
+type AdmissionAbortRegistration = {
+  category: ErrorActionCategory;
+  laneKey: string;
+  laneGroupKey?: string;
+  actionScopeKey: string;
+  generation: number;
+  signal: AbortSignal;
+  onAbort: () => void;
+};
 
-const ERROR_ACTION_DELAY_SEQUENCE_MS = [3_000] as const;
-const ERROR_ACTION_STATE_TTL_MS = 10 * 60_000;
-const ERROR_ACTION_MAX_WAITERS = 64;
-
-const stateByQueueKey = new Map<string, ErrorActionQueueState>();
-const gateByQueueKey = new Map<string, Promise<void>>();
-const waiterStateByQueueKey = new Map<string, { activeWaiters: number; updatedAtMs: number }>();
 const hooks = new Set<ErrorActionQueueHook>();
+const admissionAbortRegistrations = new Set<AdmissionAbortRegistration>();
+let waiterSequence = 0;
 
 export function describeErrorActionQueueContract(): {
   featureId: string;
-  delaySequenceMs: readonly number[];
+  isolatedDelayMs: number;
+  sustainedDelayMs: number;
   blockingWait: true;
-  maxWaiters: number;
+  singleAdmissionPerGeneration: true;
+  explicitAdmissionOwnership: true;
+  wallClockExpiryForbidden: true;
+  waiterOrder: 'fifo_ticket';
+  abandonIsHealthNeutral: true;
   categories: ErrorActionCategory[];
   hookEvents: Array<ErrorActionQueueEvent['type']>;
 } {
+  const contract = readProviderActionGateContractNative();
   return {
     featureId: ERROR_ACTION_QUEUE_FEATURE_ID,
-    delaySequenceMs: ERROR_ACTION_DELAY_SEQUENCE_MS,
+    isolatedDelayMs: contract.isolatedDelayMs,
+    sustainedDelayMs: contract.sustainedDelayMs,
     blockingWait: true,
-    maxWaiters: ERROR_ACTION_MAX_WAITERS,
+    singleAdmissionPerGeneration: contract.singleAdmissionPerGeneration,
+    explicitAdmissionOwnership: contract.explicitAdmissionOwnership,
+    wallClockExpiryForbidden: contract.wallClockExpiryForbidden,
+    waiterOrder: contract.waiterOrder,
+    abandonIsHealthNeutral: contract.abandonIsHealthNeutral,
     categories: [
       'global_error',
       'session_storm',
@@ -62,10 +84,6 @@ export function describeErrorActionQueueContract(): {
     ],
     hookEvents: ['record', 'wait_start', 'wait_end']
   };
-}
-
-function nowMs(): number {
-  return Date.now();
 }
 
 function normalizeScopeKey(scopeKey: string): string {
@@ -166,14 +184,12 @@ export async function waitProviderTransportBackoffWithGate(args: {
   portScope?: string;
   metadata?: Record<string, unknown>;
   providerTransportBackoffKey?: string;
-  ms?: number;
   signal?: AbortSignal;
   logNonBlockingError?: LogNonBlockingError;
 }): Promise<number> {
   return waitErrorActionBackoffWithGate({
     category: 'global_error',
     scopeKey: resolveProviderTransportBackoffScopeKey(args),
-    ms: args.ms,
     signal: args.signal,
     logNonBlockingError: args.logNonBlockingError
   });
@@ -184,14 +200,12 @@ export async function waitProviderSwitchBackoffWithGate(args: {
   portScope?: string;
   metadata?: Record<string, unknown>;
   providerSwitchBackoffKey?: string;
-  ms?: number;
   signal?: AbortSignal;
   logNonBlockingError?: LogNonBlockingError;
 }): Promise<number> {
   return waitErrorActionBackoffWithGate({
     category: 'global_error',
     scopeKey: resolveProviderSwitchBackoffScopeKey(args),
-    ms: args.ms,
     signal: args.signal,
     logNonBlockingError: args.logNonBlockingError
   });
@@ -203,187 +217,232 @@ function emitHook(event: ErrorActionQueueEvent): void {
   }
 }
 
-function pruneExpired(currentMs = nowMs()): void {
-  for (const [key, state] of stateByQueueKey.entries()) {
-    if (currentMs - state.updatedAtMs >= ERROR_ACTION_STATE_TTL_MS) {
-      stateByQueueKey.delete(key);
+function disposeAdmissionAbortRegistrations(
+  matches: (registration: {
+    category: ErrorActionCategory;
+    laneKey: string;
+    laneGroupKey?: string;
+    actionScopeKey: string;
+  }) => boolean
+): void {
+  for (const registration of admissionAbortRegistrations) {
+    if (!matches(registration)) {
+      continue;
     }
+    registration.signal.removeEventListener('abort', registration.onAbort);
+    admissionAbortRegistrations.delete(registration);
   }
-  for (const [key, state] of waiterStateByQueueKey.entries()) {
-    if (state.activeWaiters <= 0 || currentMs - state.updatedAtMs >= ERROR_ACTION_STATE_TTL_MS) {
-      waiterStateByQueueKey.delete(key);
-    }
-  }
-}
-
-export function computeErrorActionBackoffDelayMs(consecutive: number): number {
-  const step = Math.max(1, Math.floor(Number.isFinite(consecutive) ? consecutive : 1));
-  return ERROR_ACTION_DELAY_SEQUENCE_MS[(step - 1) % ERROR_ACTION_DELAY_SEQUENCE_MS.length] ?? 3_000;
 }
 
 export function recordErrorActionBackoff(args: {
   category: ErrorActionCategory;
   scopeKey: string;
+  laneGroupKey?: string;
+  actionScopeKey?: string;
 }): number {
-  const currentMs = nowMs();
-  pruneExpired(currentMs);
-  const queueKey = buildQueueKey(args.category, args.scopeKey);
-  const previous = stateByQueueKey.get(queueKey);
-  const consecutive =
-    previous && currentMs - previous.updatedAtMs < ERROR_ACTION_STATE_TTL_MS
-      ? previous.consecutive + 1
-      : 1;
-  const delayMs = computeErrorActionBackoffDelayMs(consecutive);
   const scopeKey = normalizeScopeKey(args.scopeKey);
-  stateByQueueKey.set(queueKey, {
-    consecutive,
-    updatedAtMs: currentMs,
-    nextAllowedAtMs: currentMs + delayMs
-  });
+  const recorded = recordProviderActionFailureNative(
+    buildQueueKey(args.category, scopeKey),
+    args.laneGroupKey
+      ? buildQueueKey(args.category, args.laneGroupKey)
+      : undefined,
+    args.actionScopeKey
+  );
+  if (args.actionScopeKey) {
+    const laneGroupKey = args.laneGroupKey
+      ? buildQueueKey(args.category, args.laneGroupKey)
+      : undefined;
+    disposeAdmissionAbortRegistrations((registration) =>
+      registration.category === args.category
+      && registration.actionScopeKey === args.actionScopeKey
+      && (
+        laneGroupKey
+          ? registration.laneGroupKey === laneGroupKey
+          : registration.laneKey === buildQueueKey(args.category, scopeKey)
+      )
+    );
+  }
   emitHook({
     type: 'record',
     category: args.category,
     scopeKey,
-    consecutive,
-    delayMs
+    consecutive: recorded.generation,
+    delayMs: recorded.minimumDelayMs
   });
-  return delayMs;
+  return recorded.minimumDelayMs;
 }
 
 export function peekErrorActionBackoffWaitMs(args: {
   category: ErrorActionCategory;
   scopeKey: string;
 }): number {
-  const currentMs = nowMs();
-  const queueKey = buildQueueKey(args.category, args.scopeKey);
-  const state = stateByQueueKey.get(queueKey);
-  if (!state) {
-    return 0;
-  }
-  if (currentMs - state.updatedAtMs >= ERROR_ACTION_STATE_TTL_MS) {
-    stateByQueueKey.delete(queueKey);
-    return 0;
-  }
-  return Math.max(0, state.nextAllowedAtMs - currentMs);
+  return peekProviderActionWaitNative(buildQueueKey(args.category, args.scopeKey));
 }
 
 export function resetErrorActionBackoff(args: {
   category?: ErrorActionCategory;
   scopeKey?: string;
 } = {}): void {
-  if (!args.category && !args.scopeKey) {
-    stateByQueueKey.clear();
-    gateByQueueKey.clear();
-    waiterStateByQueueKey.clear();
+  if (args.category && args.scopeKey) {
+    const laneKey = buildQueueKey(args.category, args.scopeKey);
+    resetProviderActionGateNative({
+      laneKey
+    });
+    disposeAdmissionAbortRegistrations((registration) => registration.laneKey === laneKey);
     return;
   }
-  const scope = typeof args.scopeKey === 'string' ? normalizeScopeKey(args.scopeKey) : undefined;
-  for (const key of stateByQueueKey.keys()) {
-    const matchesCategory = !args.category || key.startsWith(`${args.category}|`);
-    const matchesScope = !scope || key.endsWith(`|${scope}`);
-    if (matchesCategory && matchesScope) {
-      stateByQueueKey.delete(key);
-    }
+  if (args.category) {
+    resetProviderActionGateNative({ lanePrefix: `${args.category}|` });
+    disposeAdmissionAbortRegistrations(
+      (registration) => registration.category === args.category
+    );
+    return;
   }
+  if (args.scopeKey) {
+    throw new Error('reset by scopeKey requires an explicit error action category');
+  }
+  resetProviderActionGateNative({});
+  disposeAdmissionAbortRegistrations(() => true);
 }
 
 export function resetErrorActionBackoffByScopePrefix(args: {
-  category?: ErrorActionCategory;
+  category: ErrorActionCategory;
   scopePrefix: string;
 }): void {
-  const prefix = normalizeScopeKey(args.scopePrefix);
-  if (!prefix) {
-    return;
-  }
-  for (const key of stateByQueueKey.keys()) {
-    const matchesCategory = !args.category || key.startsWith(`${args.category}|`);
-    const scopePart = key.slice(key.indexOf('|') + 1);
-    if (matchesCategory && scopePart.startsWith(prefix)) {
-      stateByQueueKey.delete(key);
-    }
-  }
+  const scopePrefix = normalizeScopeKey(args.scopePrefix);
+  resetProviderActionGateNative({
+    lanePrefix: `${args.category}|${scopePrefix}`
+  });
+  const lanePrefix = `${args.category}|${scopePrefix}`;
+  disposeAdmissionAbortRegistrations(
+    (registration) => registration.laneKey.startsWith(lanePrefix)
+  );
 }
 
-function acquireWaiterSlot(queueKey: string): void {
-  const currentMs = nowMs();
-  pruneExpired(currentMs);
-  const current = waiterStateByQueueKey.get(queueKey);
-  const activeWaiters = (current?.activeWaiters ?? 0) + 1;
-  if (activeWaiters > ERROR_ACTION_MAX_WAITERS) {
-    throw Object.assign(
-      new Error(`error action waiters overloaded for key ${queueKey}`),
-      {
-        statusCode: 429,
-        code: 'PROVIDER_TRAFFIC_SATURATED',
-        retryable: true,
-        details: {
-          reason: 'error_action_waiter_overload',
-          actionQueueKey: queueKey,
-          activeWaiters: current?.activeWaiters ?? 0,
-          maxWaiters: ERROR_ACTION_MAX_WAITERS
-        }
-      }
+export function resetErrorActionBackoffByLaneGroup(args: {
+  category: ErrorActionCategory;
+  laneGroupKey: string;
+}): void {
+  const laneGroupKey = buildQueueKey(args.category, args.laneGroupKey);
+  resetProviderActionGateNative({
+    laneGroupKey
+  });
+  disposeAdmissionAbortRegistrations(
+    (registration) => registration.laneGroupKey === laneGroupKey
+  );
+}
+
+export function recordErrorActionSuccessByLaneGroup(args: {
+  category: ErrorActionCategory;
+  laneGroupKey: string;
+  actionScopeKey: string;
+}): boolean {
+  const laneGroupKey = buildQueueKey(args.category, args.laneGroupKey);
+  const actionScopeKey = normalizeScopeKey(args.actionScopeKey);
+  const recorded = recordProviderActionSuccessNative(laneGroupKey, actionScopeKey);
+  if (recorded.accepted) {
+    disposeAdmissionAbortRegistrations((registration) =>
+      registration.laneGroupKey === laneGroupKey
+      && registration.actionScopeKey === actionScopeKey
     );
   }
-  waiterStateByQueueKey.set(queueKey, {
-    activeWaiters,
-    updatedAtMs: currentMs
-  });
-}
-
-function releaseWaiterSlot(queueKey: string): void {
-  const current = waiterStateByQueueKey.get(queueKey);
-  if (!current) {
-    return;
-  }
-  const activeWaiters = Math.max(0, current.activeWaiters - 1);
-  if (activeWaiters === 0) {
-    waiterStateByQueueKey.delete(queueKey);
-    return;
-  }
-  waiterStateByQueueKey.set(queueKey, {
-    activeWaiters,
-    updatedAtMs: nowMs()
-  });
+  return recorded.accepted;
 }
 
 export async function waitErrorActionBackoffWithGate(args: {
   category: ErrorActionCategory;
   scopeKey: string;
-  ms?: number;
+  laneGroupKey?: string;
+  actionScopeKey?: string;
+  terminalProjection?: boolean;
   signal?: AbortSignal;
   logNonBlockingError?: LogNonBlockingError;
 }): Promise<number> {
-  const waitMs = typeof args.ms === 'number' && Number.isFinite(args.ms) && args.ms > 0
-    ? Math.floor(args.ms)
-    : peekErrorActionBackoffWaitMs(args);
-  if (waitMs <= 0) {
-    return 0;
-  }
   const scopeKey = normalizeScopeKey(args.scopeKey);
-  const queueKey = buildQueueKey(args.category, scopeKey);
+  const laneKey = buildQueueKey(args.category, scopeKey);
+  const laneGroupKey = args.laneGroupKey
+    ? buildQueueKey(args.category, args.laneGroupKey)
+    : undefined;
   const logNonBlockingError = args.logNonBlockingError ?? (() => undefined);
-  acquireWaiterSlot(queueKey);
-  const previous = gateByQueueKey.get(queueKey) ?? Promise.resolve();
-  let release: () => void = () => undefined;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  gateByQueueKey.set(queueKey, current);
-  try {
-    await previous.catch((error: unknown) => {
-      logNonBlockingError('waitErrorActionBackoffWithGate.previous', error, { key: queueKey });
-    });
-    emitHook({ type: 'wait_start', category: args.category, scopeKey, delayMs: waitMs });
-    await waitWithClientAbortSignal(waitMs, args.signal, logNonBlockingError);
-    emitHook({ type: 'wait_end', category: args.category, scopeKey, delayMs: waitMs });
-    return waitMs;
-  } finally {
-    release();
-    if (gateByQueueKey.get(queueKey) === current) {
-      gateByQueueKey.delete(queueKey);
+  let totalWaitMs = 0;
+  for (;;) {
+    const waiterId = `${process.pid}:${++waiterSequence}`;
+    const actionScopeKey = normalizeScopeKey(args.actionScopeKey ?? waiterId);
+    let poll = beginProviderActionWaitNative(laneKey, waiterId, actionScopeKey);
+    try {
+      while (poll.state === 'wait') {
+        const waitMs = Math.max(1, Math.floor(poll.waitMs));
+        emitHook({ type: 'wait_start', category: args.category, scopeKey, delayMs: waitMs });
+        await waitWithClientAbortSignal(waitMs, args.signal, logNonBlockingError);
+        totalWaitMs += waitMs;
+        emitHook({ type: 'wait_end', category: args.category, scopeKey, delayMs: waitMs });
+        poll = pollProviderActionAdmissionNative(laneKey, waiterId, actionScopeKey);
+      }
+      if (!args.terminalProjection) {
+        if (poll.state === 'admitted' && args.signal) {
+          let registration: AdmissionAbortRegistration | undefined;
+          const abandon = (): void => {
+            if (registration) {
+              admissionAbortRegistrations.delete(registration);
+            }
+            abandonProviderActionAdmissionNative(
+              laneKey,
+              poll.generation,
+              actionScopeKey
+            );
+          };
+          if (args.signal.aborted) {
+            abandon();
+            throwIfClientAbortSignalAborted(args.signal);
+          } else {
+            registration = {
+              category: args.category,
+              laneKey,
+              laneGroupKey,
+              actionScopeKey,
+              generation: poll.generation,
+              signal: args.signal,
+              onAbort: abandon
+            };
+            admissionAbortRegistrations.add(registration);
+            args.signal.addEventListener('abort', abandon, { once: true });
+            if (args.signal.aborted) {
+              abandon();
+              throwIfClientAbortSignalAborted(args.signal);
+            }
+          }
+        }
+        return totalWaitMs;
+      }
+      if (
+        poll.state === 'admitted'
+        && commitProviderActionTerminalNative(
+          laneKey,
+          poll.generation,
+          actionScopeKey
+        )
+      ) {
+        disposeAdmissionAbortRegistrations((registration) =>
+          registration.laneKey === laneKey
+          && registration.actionScopeKey === actionScopeKey
+        );
+        return totalWaitMs;
+      }
+    } finally {
+      cancelProviderActionWaitNative(laneKey, waiterId, actionScopeKey);
     }
-    releaseWaiterSlot(queueKey);
+    const recorded = recordProviderActionFailureNative(
+      laneKey,
+      laneGroupKey,
+      actionScopeKey
+    );
+    emitHook({
+      type: 'record',
+      category: args.category,
+      scopeKey,
+      consecutive: recorded.generation,
+      delayMs: recorded.minimumDelayMs
+    });
   }
 }
 
@@ -394,23 +453,9 @@ export function registerErrorActionQueueHook(hook: ErrorActionQueueHook): () => 
   };
 }
 
-export function peekErrorActionBackoffConsecutiveForTests(args: {
-  category: ErrorActionCategory;
-  scopeKey: string;
-}): number {
-  return stateByQueueKey.get(buildQueueKey(args.category, args.scopeKey))?.consecutive ?? 0;
-}
-
-export function peekErrorActionWaitersForTests(args: {
-  category: ErrorActionCategory;
-  scopeKey: string;
-}): number {
-  return waiterStateByQueueKey.get(buildQueueKey(args.category, args.scopeKey))?.activeWaiters ?? 0;
-}
-
 export function resetErrorActionQueueStateForTests(): void {
-  stateByQueueKey.clear();
-  gateByQueueKey.clear();
-  waiterStateByQueueKey.clear();
+  resetProviderActionGateNative({});
+  disposeAdmissionAbortRegistrations(() => true);
   hooks.clear();
+  waiterSequence = 0;
 }

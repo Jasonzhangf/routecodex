@@ -41,7 +41,23 @@ edges:
   - { step_id: v3-hub-relay-closeout-14, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespContinuation04Committed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
   - { step_id: v3-hub-relay-closeout-15, from_node: V3HubRespContinuation04Committed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
   - { step_id: v3-hub-relay-closeout-16, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+error_path:
+  entry_edge:
+    step_id: v3-hub-relay-response-failure-01
+    from_node: V3HubRespChatProcess03Governed
+    to_node: V3Error01SourceRaised
+    status: anchored
+    owner_feature_id: v3.hub_relay_runtime_closeout
+  canonical_nodes:
+    - V3Error01SourceRaised
+    - V3Error02Classified
+    - V3Error03TargetLocalAction
+    - V3Error04TargetExhaustionDecision
+    - V3Error05ExecutionDecision
+    - V3Error06ClientProjected
+  downstream_owner_chain: v3.debug_error_foundation.mainline
 verification_gates:
+  - npm run test:v3-5520-duplicate-tool-identity
   - npm run test:v3-hub-relay-runtime-closeout
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures

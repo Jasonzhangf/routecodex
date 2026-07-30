@@ -245,13 +245,68 @@ cleanup_old_global_package() {
   fi
 }
 
-install_release_snapshot() {
-  echo "📦 安装 release snapshot（不可变运行时）..."
+install_release_snapshot_for_rcc_home() {
+  local root="$1"
+  if [ -z "$root" ]; then
+    return
+  fi
+  case "$root" in
+    ~/*) root="$HOME/${root#~/}" ;;
+  esac
+  local parent
+  parent="$(dirname "$root")"
+  mkdir -p "$parent"
+  root="$(cd "$parent" && pwd)/$(basename "$root")"
+  mkdir -p "$root"
+  echo "   -> $root"
   (
     cd "$INSTALL_BUILD_ROOT"
-    ROUTECODEX_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" node scripts/install-release-snapshot.mjs
+    RCC_HOME="$root" ROUTECODEX_HOME="$root" ROUTECODEX_USER_DIR="$root" ROUTECODEX_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" node scripts/install-release-snapshot.mjs
     node scripts/ensure-cli-executable.mjs
   )
+}
+
+install_release_snapshot() {
+  echo "📦 安装 release snapshot（不可变运行时）..."
+  local roots=()
+  if [ -n "${RCC_HOME:-}" ]; then
+    roots+=("$RCC_HOME")
+  fi
+  if [ -n "${ROUTECODEX_HOME:-}" ]; then
+    roots+=("$ROUTECODEX_HOME")
+  fi
+  if [ -n "${ROUTECODEX_USER_DIR:-}" ]; then
+    roots+=("$ROUTECODEX_USER_DIR")
+  fi
+  roots+=("$HOME/.rcc")
+  if [ -d "/Volumes/extension/.rcc" ]; then
+    roots+=("/Volumes/extension/.rcc")
+  fi
+
+  local seen=""
+  local refreshed=0
+  local root=""
+  for root in "${roots[@]}"; do
+    if [ -z "$root" ]; then
+      continue
+    fi
+    case "$root" in
+      ~/*) root="$HOME/${root#~/}" ;;
+    esac
+    local parent
+    parent="$(dirname "$root")"
+    mkdir -p "$parent"
+    root="$(cd "$parent" && pwd)/$(basename "$root")"
+    case " $seen " in
+      *" $root "*) continue ;;
+    esac
+    seen="$seen $root"
+    install_release_snapshot_for_rcc_home "$root"
+    refreshed=$((refreshed + 1))
+  done
+  if [ "$refreshed" -eq 0 ]; then
+    fail "未找到可刷新的 RCC home"
+  fi
   ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs"
 }
 

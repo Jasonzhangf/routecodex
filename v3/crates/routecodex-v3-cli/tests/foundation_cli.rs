@@ -107,6 +107,7 @@ fn top_level_start_help_exposes_snap_and_optional_config() {
     assert!(help.status.success());
     let stdout = String::from_utf8(help.stdout).unwrap();
     assert!(stdout.contains("--snap"), "{stdout}");
+    assert!(stdout.contains("--snapall"), "{stdout}");
     assert!(stdout.contains("--config"), "{stdout}");
     assert!(stdout.contains("-c"), "{stdout}");
 }
@@ -120,9 +121,35 @@ fn top_level_restart_help_exposes_snap_and_optional_config() {
     assert!(help.status.success());
     let stdout = String::from_utf8(help.stdout).unwrap();
     assert!(stdout.contains("--snap"), "{stdout}");
+    assert!(stdout.contains("--snapall"), "{stdout}");
     assert!(stdout.contains("--snap-stages"), "{stdout}");
     assert!(stdout.contains("--config"), "{stdout}");
     assert!(stdout.contains("-c"), "{stdout}");
+}
+
+#[test]
+fn snap_and_snapall_are_mutually_exclusive() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .args(["start", "--snap", "--snapall"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("cannot be used with"), "{stderr}");
+}
+
+#[test]
+fn blank_snap_stages_is_rejected_before_snapshot_authorization() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rccv3"))
+        .args(["start", "--snap-stages", "   "])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("--snap-stages must not be blank"),
+        "{stderr}"
+    );
 }
 
 #[test]

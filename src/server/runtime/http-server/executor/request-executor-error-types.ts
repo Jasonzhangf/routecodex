@@ -35,6 +35,12 @@ export type ProviderRetryExclusionPlan = {
 };
 
 export type ProviderRetryExecutionPlan = {
+  action:
+    | 'wait_then_retry_same'
+    | 'wait_then_reselect'
+    | 'project_terminal'
+    | 'client_disconnected'
+    | 'reject_non_provider_error';
   shouldRetry: boolean;
   excludedCurrentProvider: boolean;
   allowRetryBeyondAttemptBudget: boolean;
@@ -51,6 +57,42 @@ export type ProviderRetryExecutionPlan = {
   policyExhausted: boolean;
   mayProject: boolean;
 };
+
+export const ERROR_ERR05_EXECUTION_DECISION_PROPERTY =
+  'routecodexErrorErr05ExecutionDecision' as const;
+
+export function attachErrorErr05ExecutionDecision(
+  error: unknown,
+  decision: ProviderRetryExecutionPlan
+): void {
+  if (
+    decision.action === 'client_disconnected'
+    || decision.action === 'reject_non_provider_error'
+    || !error
+    || (typeof error !== 'object' && typeof error !== 'function')
+  ) {
+    return;
+  }
+  Object.defineProperty(error, ERROR_ERR05_EXECUTION_DECISION_PROPERTY, {
+    value: decision,
+    configurable: true,
+    enumerable: false,
+    writable: false,
+  });
+}
+
+export function readErrorErr05ExecutionDecision(
+  error: unknown
+): ProviderRetryExecutionPlan | undefined {
+  if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
+    return undefined;
+  }
+  const decision = (error as Record<string, unknown>)[ERROR_ERR05_EXECUTION_DECISION_PROPERTY];
+  if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {
+    return undefined;
+  }
+  return decision as ProviderRetryExecutionPlan;
+}
 
 export type ProviderRetryTelemetryPlan = {
   switchLogArgs: {

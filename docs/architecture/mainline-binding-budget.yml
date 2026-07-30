@@ -139,6 +139,25 @@ chains:
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: Stopless session chain is fully anchored and locked.
+  - chain_id: error.provider_action_gate.mainline
+    expected_total_edges: 8
+    min_anchored_edges: 8
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V2 provider-action admission is anchored from typed ErrorErr05 through
+      failure record, admission, and action-scope-owned terminal, success, and
+      abandon outcomes. ErrorErr06 remains the separate error.mainline#err-05
+      projection edge.
+  - chain_id: vr.route_classifier.mainline
+    expected_total_edges: 5
+    min_anchored_edges: 5
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      Virtual Router route classification is fully anchored through the shared
+      Rust V2/V3 classifier; web_search/search and multimodal/vision are
+      capability filters only and must not become route pool reasons.
   - chain_id: vr.route_token_estimation.mainline
     expected_total_edges: 2
     min_anchored_edges: 2
@@ -174,6 +193,45 @@ chains:
       Virtual Router hit-log projection is fully anchored: TS may only call
       Rust hit-log projection and emit the returned line/event without owning
       formatting, color, provider-label, route-summary, or telemetry semantics.
+  - chain_id: v3.console_request_count_visibility.mainline
+    expected_total_edges: 4
+    min_anchored_edges: 4
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 console request count visibility is fully anchored to server-owned
+      request/response headline rendering and the shared request-count formatter.
+      It is presentation-only and must not own request identity allocation.
+  - chain_id: v3.runtime_timing_observability.mainline
+    expected_total_edges: 12
+    min_anchored_edges: 12
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 runtime timing observability is fully anchored to runtime timing state,
+      stream observation, and server console projection. It must remain a
+      side-channel observability resource and must not affect provider routing,
+      retries, or request/response payload semantics.
+  - chain_id: v3.console_human_readable_layering.mainline
+    expected_total_edges: 23
+    min_anchored_edges: 23
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 console human-readable layering is fully anchored to the server-owned
+      observability projection functions. It is debug presentation only and must
+      not mutate request, response, routing, provider health, or error truth.
+  - chain_id: v3.codex_sample_retention_snap_scope
+    expected_total_edges: 7
+    min_anchored_edges: 7
+    max_partial_edges: 0
+    max_binding_pending_edges: 0
+    note: >
+      V3 Codex sample retention and snap scope is fully anchored to explicit
+      CLI authorization, manifest publication, debug payload budgeting,
+      filesystem persistence, and listener/request retention enforcement.
+      It is diagnostic side-channel only and must not mutate provider or
+      client payload semantics.
   - chain_id: sse.chat_stream_projection.mainline
     expected_total_edges: 6
     min_anchored_edges: 6

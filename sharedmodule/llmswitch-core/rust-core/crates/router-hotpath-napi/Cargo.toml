@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi4"] }
+route-classifier-core = { path = "../route-classifier-core" }
 stop-message-core = { path = "../stop-message-core" }
 followup-core = { path = "../followup-core" }
 servertool-core = { path = "../servertool-core" }

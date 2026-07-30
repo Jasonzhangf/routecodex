@@ -2,12 +2,13 @@ use futures_util::Stream;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
 };
+use routecodex_v3_route_classifier::{
+    classify_route, extract_active_turn_signals, RouteClassifierInput,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::pin::Pin;
-
-const DEFAULT_V3_LONGCONTEXT_THRESHOLD_TOKENS: u64 = 180_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
@@ -41,6 +42,13 @@ pub fn build_v3_server_03_http_request_raw(
 pub struct V3Req04StandardizedResponses {
     pub body: Value,
     pub protocol_context: V3ProtocolContext,
+    pub route_classifier_metadata: V3RouteClassifierMetadata,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct V3RouteClassifierMetadata {
+    pub has_image_attachment: bool,
+    pub stopless_followup: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +113,7 @@ pub struct V3Resp15ClientPayload {
 pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> V3Req04StandardizedResponses {
+    let route_classifier_metadata = extract_v3_route_classifier_metadata(&raw.body);
     V3Req04StandardizedResponses {
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,
@@ -114,63 +123,69 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             method: raw.method,
         },
         body: raw.body,
+        route_classifier_metadata,
     }
 }
 
 pub fn build_v3_router_request_facts_from_v3_req_04(
     standardized: &V3Req04StandardizedResponses,
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    build_v3_router_request_facts_for_entry(&standardized.body, "responses")
+    build_v3_router_request_facts_for_entry_with_metadata(
+        &standardized.body,
+        "responses",
+        configured_v3_longcontext_threshold_tokens(
+            manifest,
+            &standardized.protocol_context.server_id,
+        ),
+        standardized.route_classifier_metadata,
+    )
 }
 
 pub fn build_v3_router_request_facts_for_entry(
     body: &Value,
     entry_protocol: &str,
+    longcontext_threshold_tokens: Option<u64>,
+) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    build_v3_router_request_facts_for_entry_with_metadata(
+        body,
+        entry_protocol,
+        longcontext_threshold_tokens,
+        extract_v3_route_classifier_metadata(body),
+    )
+}
+
+fn build_v3_router_request_facts_for_entry_with_metadata(
+    body: &Value,
+    entry_protocol: &str,
+    longcontext_threshold_tokens: Option<u64>,
+    route_classifier_metadata: V3RouteClassifierMetadata,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
-    let tool_names = collect_v3_request_tool_names(body);
-    if !tool_names.is_empty() {
-        capabilities.insert("tools".to_string());
+    let active_turn = extract_active_turn_signals(body);
+    let route_classification = classify_route(&RouteClassifierInput {
+        reached_long_context: longcontext_threshold_tokens
+            .is_some_and(|threshold| input_tokens >= threshold),
+        has_image_attachment: route_classifier_metadata.has_image_attachment,
+        latest_message_from_user: active_turn.latest_message_from_user,
+        stopless_followup: route_classifier_metadata.stopless_followup,
+        has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
+        last_assistant_tool_category: active_turn
+            .last_assistant_tool
+            .as_ref()
+            .map(|tool| tool.category.clone()),
+        current_user_text: active_turn.current_user_text,
+        has_background_keyword: false,
+    });
+    for capability in &route_classification.required_capabilities {
+        capabilities.insert(capability.clone());
     }
-    if tool_names.iter().any(|name| is_v3_coding_tool_name(name)) {
-        capabilities.insert("coding".to_string());
-    }
-    if tool_names.iter().any(|name| name == "tool_search") {
-        capabilities.insert("search".to_string());
-    }
-    if tool_names
-        .iter()
-        .any(|name| matches!(name.as_str(), "web_search" | "web_search_preview"))
-    {
-        capabilities.insert("web_search".to_string());
-    }
-    if body.get("reasoning").is_some() {
-        capabilities.insert("reasoning".to_string());
-        capabilities.insert("thinking".to_string());
-    }
-    if value_has_current_user_input(body) {
-        capabilities.insert("thinking".to_string());
-    }
-    if input_tokens >= DEFAULT_V3_LONGCONTEXT_THRESHOLD_TOKENS {
-        capabilities.insert("longcontext".to_string());
-    }
-    if value_has_v3_media_kind(body, "image") {
+    if route_classifier_metadata.has_image_attachment {
         capabilities.insert("multimodal".to_string());
         capabilities.insert("vision".to_string());
     }
-    if body
-        .get("input")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                matches!(
-                    item.get("type").and_then(Value::as_str),
-                    Some("function_call_output" | "custom_tool_call_output")
-                )
-            })
-        })
-    {
+    if active_turn.has_current_turn_tool_output {
         capabilities.insert("tool_outputs".to_string());
     }
     routecodex_v3_virtual_router::V3RouterRequestFacts {
@@ -183,133 +198,34 @@ pub fn build_v3_router_request_facts_for_entry(
             .map(ToOwned::to_owned),
         capabilities,
         input_tokens,
+        route_classification,
     }
 }
 
-fn collect_v3_request_tool_names(body: &Value) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    collect_v3_tool_names_from_tools(body.get("tools"), &mut names);
-    collect_v3_tool_names_from_input(body.get("input"), &mut names);
-    names
-}
-
-fn collect_v3_tool_names_from_input(input: Option<&Value>, names: &mut BTreeSet<String>) {
-    match input {
-        Some(Value::Array(items)) => {
-            for item in items {
-                collect_v3_tool_names_from_input_item(item, names);
-            }
-        }
-        Some(Value::Object(_)) => {
-            if let Some(item) = input {
-                collect_v3_tool_names_from_input_item(item, names);
-            }
-        }
-        Some(Value::String(raw)) => {
-            if let Ok(parsed) = serde_json::from_str::<Value>(raw.trim()) {
-                collect_v3_tool_names_from_input(Some(&parsed), names);
-            }
-        }
-        _ => {}
+pub fn extract_v3_route_classifier_metadata(body: &Value) -> V3RouteClassifierMetadata {
+    V3RouteClassifierMetadata {
+        has_image_attachment: body
+            .pointer("/metadata/hasImageAttachment")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        stopless_followup: body
+            .pointer("/metadata/runtime_control/serverToolFollowup")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
-fn collect_v3_tool_names_from_input_item(item: &Value, names: &mut BTreeSet<String>) {
-    let Some(object) = item.as_object() else {
-        return;
-    };
-    if object
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|value| value == "additional_tools")
-        || object.contains_key("tools")
-    {
-        collect_v3_tool_names_from_tools(object.get("tools"), names);
-    }
-}
-
-fn collect_v3_tool_names_from_tools(tools: Option<&Value>, names: &mut BTreeSet<String>) {
-    let Some(Value::Array(tools)) = tools else {
-        return;
-    };
-    for tool in tools {
-        collect_v3_tool_name(tool, names);
-    }
-}
-
-fn collect_v3_tool_name(tool: &Value, names: &mut BTreeSet<String>) {
-    for candidate in [
-        tool.get("name"),
-        tool.pointer("/function/name"),
-        tool.get("type"),
-    ] {
-        let Some(name) = candidate.and_then(Value::as_str) else {
-            continue;
-        };
-        let normalized = name.trim().to_ascii_lowercase();
-        if normalized.is_empty() || normalized == "function" || normalized == "custom" {
-            continue;
-        }
-        names.insert(normalized);
-    }
-}
-
-fn is_v3_coding_tool_name(name: &str) -> bool {
-    matches!(
-        name,
-        "exec"
-            | "exec_command"
-            | "write_stdin"
-            | "apply_patch"
-            | "update_plan"
-            | "request_user_input"
-            | "view_image"
-    )
-}
-
-fn value_has_current_user_input(body: &Value) -> bool {
-    body.get("input")
-        .is_some_and(value_has_current_user_input_value)
-        || body
-            .get("messages")
-            .is_some_and(value_has_current_user_input_value)
-        || body
-            .get("prompt")
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.trim().is_empty())
-}
-
-fn value_has_current_user_input_value(value: &Value) -> bool {
-    match value {
-        Value::String(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return false;
-            }
-            let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
-                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
-            if likely_json {
-                return serde_json::from_str::<Value>(trimmed)
-                    .ok()
-                    .is_some_and(|parsed| value_has_current_user_input_value(&parsed));
-            }
-            true
-        }
-        Value::Array(items) => items.iter().any(value_has_current_user_input_value),
-        Value::Object(object) => {
-            let role_is_user = object
-                .get("role")
-                .and_then(Value::as_str)
-                .is_some_and(|role| role.trim().eq_ignore_ascii_case("user"));
-            if role_is_user {
-                return true;
-            }
-            object
-                .get("content")
-                .is_some_and(value_has_current_user_input_value)
-        }
-        _ => false,
-    }
+pub fn configured_v3_longcontext_threshold_tokens(
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+    server_id: &str,
+) -> Option<u64> {
+    manifest
+        .servers
+        .get(server_id)
+        .and_then(|server| manifest.route_groups.get(&server.routing_group))
+        .and_then(|group| group.pools.get("longcontext"))
+        .and_then(|pool| pool.match_rule.as_ref())
+        .and_then(|match_rule| match_rule.min_input_tokens)
 }
 
 fn estimate_v3_routing_input_tokens(body: &Value) -> u64 {
@@ -348,30 +264,6 @@ pub(crate) fn detect_v3_media_kind(
         return Some("image");
     }
     None
-}
-
-fn value_has_v3_media_kind(value: &Value, kind: &str) -> bool {
-    match value {
-        Value::Array(values) => values
-            .iter()
-            .any(|value| value_has_v3_media_kind(value, kind)),
-        Value::Object(values) => {
-            detect_v3_media_kind(values) == Some(kind)
-                || values
-                    .values()
-                    .any(|value| value_has_v3_media_kind(value, kind))
-        }
-        Value::String(raw) => {
-            let trimmed = raw.trim();
-            let likely_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
-                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
-            likely_json
-                && serde_json::from_str::<Value>(trimmed)
-                    .ok()
-                    .is_some_and(|parsed| value_has_v3_media_kind(&parsed, kind))
-        }
-        _ => false,
-    }
 }
 
 pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
@@ -470,6 +362,8 @@ mod tests {
     use super::build_v3_router_request_facts_for_entry;
     use serde_json::json;
 
+    const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
+
     #[test]
     fn v3_routing_token_estimate_omits_image_payload_bytes() {
         let base = json!({
@@ -503,9 +397,18 @@ mod tests {
             "tools": []
         });
 
-        let base_tokens = build_v3_router_request_facts_for_entry(&base, "responses").input_tokens;
-        let image_tokens =
-            build_v3_router_request_facts_for_entry(&with_image, "responses").input_tokens;
+        let base_tokens = build_v3_router_request_facts_for_entry(
+            &base,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        )
+        .input_tokens;
+        let image_tokens = build_v3_router_request_facts_for_entry(
+            &with_image,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        )
+        .input_tokens;
 
         assert!(
             image_tokens <= base_tokens + 8,
@@ -514,9 +417,10 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_mark_image_requests_as_multimodal() {
+    fn v3_routing_facts_use_metadata_attachment_as_only_multimodal_signal() {
         let request = json!({
             "model": "gpt-5.6-sol",
+            "metadata": {"hasImageAttachment": true},
             "input": [
                 {
                     "role": "user",
@@ -529,10 +433,38 @@ mod tests {
             "tools": []
         });
 
-        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
 
         assert!(facts.capabilities.contains("multimodal"));
         assert!(facts.capabilities.contains("vision"));
+    }
+
+    #[test]
+    fn v3_routing_facts_do_not_infer_multimodal_from_payload_image() {
+        let request = json!({
+            "model": "gpt-5.6-sol",
+            "metadata": {"hasImageAttachment": false},
+            "input": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Describe this image [Image #1]."},
+                    {"type": "input_image", "image_url": {"url": "data:image/png;base64,AAAA"}}
+                ]
+            }]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
+
+        assert!(!facts.capabilities.contains("multimodal"));
+        assert!(!facts.capabilities.contains("vision"));
     }
 
     #[test]
@@ -550,7 +482,11 @@ mod tests {
             ]
         });
 
-        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
 
         assert!(facts.capabilities.contains("text"));
         assert!(
@@ -560,20 +496,36 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_alias_reasoning_to_thinking_for_route_match() {
+    fn v3_routing_facts_do_not_use_reasoning_as_route_signal() {
         let request = json!({
             "model": "gpt-5.5",
             "reasoning": {"effort": "medium"},
-            "input": [{"role":"user","content":"think"}]
+            "input": [
+                {"role":"user","content":"apply the patch"},
+                {
+                    "type":"custom_tool_call",
+                    "name":"apply_patch",
+                    "call_id":"call_patch",
+                    "input":"*** Begin Patch\n*** Update File: a\n*** End Patch"
+                },
+                {
+                    "type":"custom_tool_call_output",
+                    "call_id":"call_patch",
+                    "output":"Done!"
+                }
+            ]
         });
 
-        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
-
-        assert!(facts.capabilities.contains("reasoning"));
-        assert!(
-            facts.capabilities.contains("thinking"),
-            "V3 config may use thinking while OpenAI Responses clients send reasoning; route facts must preserve both names"
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
         );
+
+        assert_eq!(facts.route_classification.route_name, "coding");
+        assert!(!facts.capabilities.contains("coding"));
+        assert!(!facts.capabilities.contains("thinking"));
+        assert!(!facts.capabilities.contains("reasoning"));
     }
 
     #[test]
@@ -583,17 +535,52 @@ mod tests {
             "input": [{"role":"user","content":"继续按照合同进行修复"}]
         });
 
-        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
 
         assert!(
-            facts.capabilities.contains("thinking"),
-            "current user input must enter the thinking route fact without requiring a reasoning field: {:?}",
+            !facts.capabilities.contains("thinking"),
+            "thinking is a route classification, not a target capability: {:?}",
             facts.capabilities
+        );
+        assert_eq!(facts.route_classification.route_name, "thinking");
+        assert_eq!(
+            facts.route_classification.candidates,
+            ["thinking", "default"]
         );
     }
 
     #[test]
-    fn v3_routing_facts_mark_codex_tool_surface_as_coding() {
+    fn v3_routing_facts_use_configured_longcontext_threshold() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [{"role":"user","content":"short request"}]
+        });
+
+        let below_configured_threshold =
+            build_v3_router_request_facts_for_entry(&request, "responses", Some(10_000));
+        assert_eq!(
+            below_configured_threshold.route_classification.route_name,
+            "thinking"
+        );
+
+        let at_configured_threshold =
+            build_v3_router_request_facts_for_entry(&request, "responses", Some(1));
+        assert_eq!(
+            at_configured_threshold.route_classification.route_name,
+            "longcontext"
+        );
+        assert_eq!(
+            at_configured_threshold.route_classification.candidates,
+            ["longcontext", "default"]
+        );
+    }
+
+    #[test]
+    fn v3_routing_facts_ignore_declared_codex_tool_surface() {
         let request = json!({
             "model": "gpt-5.5",
             "input": [
@@ -610,40 +597,158 @@ mod tests {
             ]
         });
 
-        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
 
-        assert!(facts.capabilities.contains("tools"));
-        assert!(
-            facts.capabilities.contains("coding"),
-            "Codex coding tool surfaces must route through the coding pool, not generic tools only: {:?}",
-            facts.capabilities
-        );
-        assert!(
-            facts.capabilities.contains("search"),
-            "tool_search remains visible for search-specific requests, but coding precedence can outrank it"
-        );
+        assert_eq!(facts.route_classification.route_name, "thinking");
+        assert!(!facts.capabilities.contains("thinking"));
+        assert!(!facts.capabilities.contains("tools"));
+        assert!(!facts.capabilities.contains("coding"));
+        assert!(!facts.capabilities.contains("search"));
     }
 
     #[test]
-    fn v3_routing_facts_mark_search_tool_surface_without_coding() {
+    fn v3_routing_facts_ignore_declared_web_search_tool_surface() {
         let request = json!({
             "model": "gpt-5.5",
             "tools": [
                 {"type":"function","name":"web_search"},
                 {"type":"function","name":"lookup"}
             ],
-            "input": [{"role":"user","content":"search only"}]
+            "input": [{"role":"user","content":"continue the implementation"}]
         });
 
-        let facts = build_v3_router_request_facts_for_entry(&request, "responses");
-
-        assert!(facts.capabilities.contains("tools"));
-        assert!(facts.capabilities.contains("web_search"));
-        assert!(
-            !facts.capabilities.contains("coding"),
-            "search-only tool surfaces must not be collapsed into coding: {:?}",
-            facts.capabilities
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
         );
+
+        assert_eq!(facts.route_classification.route_name, "thinking");
+        assert!(!facts.capabilities.contains("thinking"));
+        assert!(!facts.capabilities.contains("tools"));
+        assert!(!facts.capabilities.contains("web_search"));
+        assert!(!facts.capabilities.contains("coding"));
+    }
+
+    #[test]
+    fn v3_routing_facts_classify_actual_current_turn_tools() {
+        let classify = |name: &str, arguments: serde_json::Value| {
+            let request = json!({
+                "model": "gpt-5.5",
+                "tools": [{"type":"web_search"}],
+                "input": [
+                    {"role":"user","content":"continue"},
+                    {
+                        "type":"function_call",
+                        "name":name,
+                        "call_id":"call_tool",
+                        "arguments":arguments
+                    },
+                    {
+                        "type":"function_call_output",
+                        "call_id":"call_tool",
+                        "output":"ok"
+                    }
+                ]
+            });
+            build_v3_router_request_facts_for_entry(
+                &request,
+                "responses",
+                TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+            )
+        };
+
+        let thinking = classify("exec_command", json!({"cmd":"cat src/lib.rs"}));
+        assert_eq!(thinking.route_classification.route_name, "thinking");
+        assert!(!thinking.capabilities.contains("thinking"));
+        assert!(!thinking.capabilities.contains("web_search"));
+
+        let search = classify("exec_command", json!({"cmd":"rg -n route src"}));
+        assert_eq!(search.route_classification.route_name, "search");
+        assert!(!search.capabilities.contains("search"));
+
+        let tools = classify("exec_command", json!({"cmd":"cargo test"}));
+        assert_eq!(tools.route_classification.route_name, "tools");
+        assert!(!tools.capabilities.contains("tools"));
+
+        let web = classify("web_search", json!({"query":"latest release"}));
+        assert_eq!(web.route_classification.route_name, "web_search");
+        assert_eq!(
+            web.route_classification.candidates,
+            ["web_search", "default"]
+        );
+        assert!(web.capabilities.contains("web_search"));
+    }
+
+    #[test]
+    fn v3_routing_facts_ignore_historical_tools_after_new_user_turn() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"search the repo"},
+                {
+                    "type":"function_call",
+                    "name":"exec_command",
+                    "call_id":"call_old",
+                    "arguments":{"cmd":"rg -n route src"}
+                },
+                {"type":"function_call_output","call_id":"call_old","output":"old"},
+                {"role":"user","content":"now explain the result"}
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
+
+        assert_eq!(facts.route_classification.route_name, "thinking");
+        assert!(!facts.capabilities.contains("thinking"));
+        assert!(!facts.capabilities.contains("search"));
+        assert!(!facts.capabilities.contains("tools"));
+    }
+
+    #[test]
+    fn v3_routing_facts_classify_old_failure_sample_as_coding_not_web_search() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "metadata": null,
+            "reasoning": {"effort":"medium","summary":"detailed"},
+            "tools": [
+                {"type":"web_search"},
+                {"type":"custom","name":"apply_patch"}
+            ],
+            "input": [
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]},
+                {
+                    "type":"custom_tool_call",
+                    "name":"apply_patch",
+                    "call_id":"call_019fa961f9cc765083b8b8d3",
+                    "input":"*** Update File: v3/crates/routecodex-v3-server/src/lib.rs"
+                },
+                {
+                    "type":"custom_tool_call_output",
+                    "call_id":"call_019fa961f9cc765083b8b8d3",
+                    "output":"apply_patch verification failed"
+                }
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
+
+        assert_eq!(facts.route_classification.route_name, "coding");
+        assert!(!facts.capabilities.contains("coding"));
+        assert!(!facts.capabilities.contains("web_search"));
+        assert_eq!(facts.route_classification.candidates, ["coding", "default"]);
     }
 
     #[test]
@@ -671,9 +776,18 @@ mod tests {
             "tools": []
         });
 
-        let base_tokens = build_v3_router_request_facts_for_entry(&base, "responses").input_tokens;
-        let video_tokens =
-            build_v3_router_request_facts_for_entry(&with_video, "responses").input_tokens;
+        let base_tokens = build_v3_router_request_facts_for_entry(
+            &base,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        )
+        .input_tokens;
+        let video_tokens = build_v3_router_request_facts_for_entry(
+            &with_video,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        )
+        .input_tokens;
 
         assert!(
             video_tokens <= base_tokens + 12,

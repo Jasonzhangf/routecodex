@@ -27,9 +27,11 @@ enum Command {
     Start {
         #[arg(short, long)]
         config: Option<String>,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "snapall")]
         snap: bool,
-        #[arg(long)]
+        #[arg(long, default_value_t = false, conflicts_with = "snap")]
+        snapall: bool,
+        #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
     },
     Status {
@@ -41,9 +43,11 @@ enum Command {
         config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "snapall")]
         snap: bool,
-        #[arg(long)]
+        #[arg(long, default_value_t = false, conflicts_with = "snap")]
+        snapall: bool,
+        #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
     },
     Stop {
@@ -74,9 +78,11 @@ enum ServerCommand {
         config: Option<String>,
         #[arg(long, default_value_t = false)]
         foreground: bool,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "snapall")]
         snap: bool,
-        #[arg(long)]
+        #[arg(long, default_value_t = false, conflicts_with = "snap")]
+        snapall: bool,
+        #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
     },
     Status {
@@ -88,9 +94,11 @@ enum ServerCommand {
         config: Option<String>,
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "snapall")]
         snap: bool,
-        #[arg(long)]
+        #[arg(long, default_value_t = false, conflicts_with = "snap")]
+        snapall: bool,
+        #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
     },
     Stop {
@@ -103,9 +111,11 @@ enum ServerCommand {
     RunManagedChild {
         #[arg(short, long)]
         config: Option<String>,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "snapall")]
         snap: bool,
-        #[arg(long)]
+        #[arg(long, default_value_t = false, conflicts_with = "snap")]
+        snapall: bool,
+        #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
         #[arg(long, default_value_t = false)]
         console: bool,
@@ -146,6 +156,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         Command::Start {
             config,
             snap,
+            snapall,
             snap_stages,
         } => {
             let config = resolve_config_path(config)?;
@@ -155,14 +166,18 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 &config,
                 &executable,
                 snap,
+                snapall,
                 snap_stages.as_deref(),
             );
-            V3ManagedLifecycle::new(config)?
-                .with_snapshots_enabled(snap)
-                .with_snapshot_stages(snap_stages)
-                .with_console_enabled(true)
-                .start_foreground(&executable)
-                .await?;
+            configure_v3_snapshot_flags(
+                V3ManagedLifecycle::new(config)?,
+                snap,
+                snapall,
+                snap_stages,
+            )
+            .with_console_enabled(true)
+            .start_foreground(&executable)
+            .await?;
         }
         Command::Server {
             command:
@@ -170,6 +185,7 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     config,
                     foreground,
                     snap,
+                    snapall,
                     snap_stages,
                 },
         } => {
@@ -181,14 +197,18 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     &config,
                     &executable,
                     snap,
+                    snapall,
                     snap_stages.as_deref(),
                 );
-                V3ManagedLifecycle::new(config)?
-                    .with_snapshots_enabled(snap)
-                    .with_snapshot_stages(snap_stages)
-                    .with_console_enabled(true)
-                    .start_foreground(&executable)
-                    .await?;
+                configure_v3_snapshot_flags(
+                    V3ManagedLifecycle::new(config)?,
+                    snap,
+                    snapall,
+                    snap_stages,
+                )
+                .with_console_enabled(true)
+                .start_foreground(&executable)
+                .await?;
             } else {
                 let executable = std::env::current_exe()?;
                 let manifest = load_manifest(&config)?;
@@ -197,14 +217,18 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     &config,
                     &executable,
                     snap,
+                    snapall,
                     snap_stages.as_deref(),
                 );
-                let status = V3ManagedLifecycle::new(config)?
-                    .with_snapshots_enabled(snap)
-                    .with_snapshot_stages(snap_stages)
-                    .with_console_enabled(true)
-                    .start(&executable, Duration::from_secs(15))
-                    .await?;
+                let status = configure_v3_snapshot_flags(
+                    V3ManagedLifecycle::new(config)?,
+                    snap,
+                    snapall,
+                    snap_stages,
+                )
+                .with_console_enabled(true)
+                .start(&executable, Duration::from_secs(15))
+                .await?;
                 emit_v3_cli_start_completed_console_line(&status);
                 emit_v3_cli_server_started_console_line(&manifest, &executable);
                 println!("{}", serde_json::to_string(&status)?);
@@ -232,22 +256,27 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     config,
                     timeout_ms,
                     snap,
+                    snapall,
                     snap_stages,
                 },
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
-            let status = V3ManagedLifecycle::new(config)?
-                .with_snapshots_enabled(snap)
-                .with_snapshot_stages(snap_stages)
-                .restart(&executable, Duration::from_millis(timeout_ms))
-                .await?;
+            let status = configure_v3_snapshot_flags(
+                V3ManagedLifecycle::new(config)?,
+                snap,
+                snapall,
+                snap_stages,
+            )
+            .restart(&executable, Duration::from_millis(timeout_ms))
+            .await?;
             println!("{}", serde_json::to_string(&status)?);
         }
         Command::Restart {
             config,
             timeout_ms,
             snap,
+            snapall,
             snap_stages,
         } => {
             let config = resolve_config_path(config)?;
@@ -257,18 +286,22 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 &config,
                 &executable,
                 snap,
+                snapall,
                 snap_stages.as_deref(),
             );
             let manifest = load_manifest(&config)?;
-            let status = V3ManagedLifecycle::new(config)?
-                .with_snapshots_enabled(snap)
-                .with_snapshot_stages(snap_stages)
-                .restart_with_observer(
-                    &executable,
-                    Duration::from_millis(timeout_ms),
-                    emit_v3_cli_lifecycle_observation,
-                )
-                .await?;
+            let status = configure_v3_snapshot_flags(
+                V3ManagedLifecycle::new(config)?,
+                snap,
+                snapall,
+                snap_stages,
+            )
+            .restart_with_observer(
+                &executable,
+                Duration::from_millis(timeout_ms),
+                emit_v3_cli_lifecycle_observation,
+            )
+            .await?;
             emit_v3_cli_restart_completed_console_line(&status);
             emit_v3_cli_server_started_console_line(&manifest, &executable);
             println!("{}", serde_json::to_string(&status)?);
@@ -291,18 +324,22 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 ServerCommand::RunManagedChild {
                     config,
                     snap,
+                    snapall,
                     snap_stages,
                     console,
                 },
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
-            V3ManagedLifecycle::new(config)?
-                .with_snapshots_enabled(snap)
-                .with_snapshot_stages(snap_stages)
-                .with_console_enabled(console)
-                .run_managed_child(&executable)
-                .await?;
+            configure_v3_snapshot_flags(
+                V3ManagedLifecycle::new(config)?,
+                snap,
+                snapall,
+                snap_stages,
+            )
+            .with_console_enabled(console)
+            .run_managed_child(&executable)
+            .await?;
         }
     }
     Ok(())
@@ -327,6 +364,30 @@ fn load_manifest(
     Ok(V3ConfigStore::new(config).load_snapshot()?)
 }
 
+fn configure_v3_snapshot_flags(
+    lifecycle: V3ManagedLifecycle,
+    snap: bool,
+    snapall: bool,
+    snapshot_stages: Option<String>,
+) -> V3ManagedLifecycle {
+    let snapshot_stages = snapshot_stages
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let enabled = snap || snapall || snapshot_stages.is_some();
+    lifecycle
+        .with_snapshots_enabled(enabled)
+        .with_direct_snapshots_enabled(snapall)
+        .with_snapshot_stages(snapshot_stages)
+}
+
+fn parse_non_empty_snapshot_stages(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("--snap-stages must not be blank".to_string());
+    }
+    Ok(value.to_string())
+}
+
 fn should_print_version() -> bool {
     let mut args = std::env::args().skip(1);
     let Some(first) = args.next() else {
@@ -340,16 +401,18 @@ fn emit_v3_cli_start_console_line(
     config: &Path,
     executable: &Path,
     snap: bool,
+    snapall: bool,
     snap_stages: Option<&str>,
 ) {
     println!(
-        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={} snap_stages={}",
+        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={} snapall={} snap_stages={}",
         resolve_routecodex_package_version_from_executable(executable)
             .unwrap_or_else(|| "unknown".to_string()),
         env!("CARGO_PKG_VERSION"),
         executable.display(),
         config.display(),
         snap,
+        snapall,
         snap_stages.unwrap_or("")
     );
     flush_stdout_best_effort();

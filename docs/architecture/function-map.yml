@@ -1293,6 +1293,8 @@ owners:
     canonical_types:
       - ErrorErr03RuntimeClassified
       - ErrorErr04RouterPolicyApplied
+      - ErrorErr05ExecutionAction
+      - ErrorErr05ExecutionDecision
     canonical_builders:
       - classify_error_err02_host_captured
       - resolve_error_err05_execution_decision
@@ -1370,15 +1372,15 @@ owners:
       - "`resolveProviderRuntimeOrThrow` must not probe raw provider keys, normalized provider keys, or normalized runtime keys after the selected runtime key has no handle."
       - "Provider pool failover remains an ErrorErr04/VR policy concern; runtime-key lookup only resolves the current selected target to an initialized handle or fails fast."
 
-  - feature_id: error.backoff_action_queue
+  - feature_id: error.provider_action_gate
     status: active
-    summary: "unified blocking backoff queue for host-side error action categories"
-    owner_kind: ts_runtime_owner
-    owner_scope: "unified blocking backoff queue for host-side error action categories"
-    owner_module: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+    summary: "Rust process-shared cross-request provider action admission gate"
+    owner_kind: rust_ssot
+    owner_scope: "isolated/sustained generations, FIFO tickets, action-scope ownership, explicit outcomes, and single admission"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs
     resource_bindings:
       writes:
-        - error.action_backoff_queue@ErrorActionQueueState
+        - error.provider_action_gate@ProviderActionGateState
       reads:
         - error.chain@ErrorErr05ExecutionDecision
         - provider_runtime.observation@ErrorErr04RouterPolicyApplied
@@ -1386,23 +1388,47 @@ owners:
         - provider.wire_payload@ProviderReqOutbound06WirePayload
         - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
+      - ProviderActionGateState
+      - ProviderActionGateMode
+      - ProviderActionAdmissionPoll
       - ErrorActionCategory
       - ErrorActionQueueEvent
-      - ErrorActionQueueState
     canonical_builders:
-      - describeErrorActionQueueContract
-      - recordErrorActionBackoff
+      - record_failure
+      - begin_wait
+      - poll_admission
+      - commit_terminal
+      - record_success
+      - abandon_admission
+      - cancel_wait
+      - reset
+    mainline_bindings:
+      - error-provider-action-gate-01
+      - error-provider-action-gate-02
+      - error-provider-action-gate-03
+      - error-provider-action-gate-04
+      - error-provider-action-gate-05
+      - error-provider-action-gate-06
+      - error-provider-action-gate-07
+      - error-provider-action-gate-08
+    entry_symbols:
+      - resolveRequestExecutorProviderFailurePlan
       - waitErrorActionBackoffWithGate
+      - commitProviderActionTerminalNative
+      - commit_provider_action_terminal_json
+      - commit_terminal
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/llmswitch/bridge/provider-action-gate-host.ts
       - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+      - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
       - src/server/runtime/http-server/executor/request-executor-retry-state.ts
       - src/server/runtime/http-server/executor/retry-engine.ts
       - src/server/runtime/http-server/executor-provider.ts
-      - src/modules/traffic-governor/index.ts
-      - src/modules/llmswitch/bridge/traffic-governor-host.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs
-      - sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
       - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/red-tests/server_module_help_contract.test.ts
@@ -1414,32 +1440,134 @@ owners:
       - sharedmodule/llmswitch-core/src/servertool
     required_tests:
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts
       - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/red-tests/server_module_help_contract.test.ts
       - tests/sharedmodule/server-module-help.live.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
       - npm run verify:resource-operation-map
+      - npm run verify:v3-provider-action-gate
+      - npm run test:v3-provider-action-gate-red-fixtures
     migration_target: rust
     notes:
-      - "Error storm prevention uses a fixed 3s blocking wait after every error in the same category/scope."
-      - "Categories are global_error, session_storm, and servertool_followup."
-      - "Provider error switching uses the global_error queue with a routing-group/route scoped provider-switch key; each exclude_and_reroute must wait before the next provider is selected so priority/weighted pools have recovery time instead of storm-scanning the whole pool."
-      - "Provider traffic saturation no longer enters this queue; governor must raise saturation immediately so upper layers can switch provider without blocking wait."
-      - "`src/modules/traffic-governor/index.ts` must use the narrow `traffic-governor-host.ts` bridge and must not import the broad `native-exports.js` surface directly."
+      - "Rust process-shared state owns isolated 1s and sustained 5s provider-action admission; overlapping waiters promote the lane and each generation admits one provider action."
+      - "The TS queue is a narrow host/scheduler only. It cannot own delay constants, generation state, waiter caps, or policy."
+      - "The exact provider lane binds port/server scope, provider runtime identity, route, and normalized error family; active failure state is shared by routing-group lane and success resets that whole group."
       - "The queue owner does not decide which semantic family an error belongs to; provider availability vs session-local deterministic truth is decided upstream by error.provider_failure_policy + error.session_storm_boundary."
-      - "Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, or local waiter queues outside this owner."
+      - "Do not restore per-call/env backoff constants, softWaitTimeoutMs, exponential wait loops, local waiter queues, fixed waiter caps, or immediate saturation errors outside this Rust owner."
+
+  - feature_id: error.traffic_admission_lane
+    status: active
+    summary: "Rust process-shared concurrency/RPM admission and typed backpressure lane"
+    owner_kind: rust_ssot
+    owner_scope: "atomic permit admission, lease release, capacity waiting, timeout, and typed non-provider backpressure"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
+    resource_bindings:
+      writes:
+        - error.traffic_admission_lane@TrafficAdmissionBackpressure
+      reads:
+        - metadata.runtime_control@TrafficGovernorControl
+      forbidden:
+        - error.chain@ErrorErr03RuntimeClassified
+        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
+        - response.client_payload@ErrorErr06ClientProjected
+    canonical_types:
+      - TrafficGovernor
+      - TrafficAdmissionLane
+      - TrafficAdmissionBackpressure
+      - TrafficAdmissionBackpressureError
+    canonical_builders:
+      - process_shared
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+      - src/modules/traffic-governor/index.ts
+      - src/modules/llmswitch/bridge/traffic-governor-host.ts
+      - src/server/runtime/http-server/executor/request-executor-provider-send-failure.ts
+      - tests/modules/traffic-governor/traffic-governor-host.spec.ts
+      - tests/modules/traffic-governor/traffic-governor-async-admission.spec.ts
+      - tests/modules/traffic-governor/traffic-governor-provider-boundary.spec.ts
+      - docs
+    forbidden_paths:
+      - src/providers/profile
+      - src/server/handlers
+      - sharedmodule/llmswitch-core/src/servertool
+    required_tests:
+      - tests/modules/traffic-governor/traffic-governor-host.spec.ts
+      - tests/modules/traffic-governor/traffic-governor-async-admission.spec.ts
+      - tests/modules/traffic-governor/traffic-governor-provider-boundary.spec.ts
+    required_gates:
+      - npm run verify:function-map-compile-gate
+      - npm run verify:resource-operation-map
+      - npm run verify:error-pipeline-contract
+    migration_target: rust
+    notes:
+      - "Traffic admission saturation is not a provider failure and must bypass health observation, ErrorErr03-05, exclusion, reroute, and provider-style HTTP 429 projection."
+      - "The NAPI acquire call is an AsyncTask so Rust capacity waiting cannot block the Node event loop."
+      - "The TS shell uses only the narrow traffic-governor-host bridge and owns no admission policy."
+
+  - feature_id: vr.route_classifier
+    status: active
+    summary: "shared V2/V3 current-turn route classification contract"
+    owner_kind: rust_ssot
+    owner_scope: "shared current-turn/tool classification only; target selection remains owned by each Virtual Router"
+    owner_module: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core
+    resource_bindings:
+      writes:
+        - vr.route_classification_decision@VrRouteClassifier03Classified
+      reads:
+        - request.normal_payload@HubReqChatProcess03Governed
+        - metadata.runtime_control@MetaRoute03RouteCarrier
+        - vr.route_token_estimate@VrRouteClassifier03Classified
+      forbidden:
+        - vr.route_selection_decision@VrRoute04SelectedTarget
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@HubRespOutbound04ClientSemantic
+    canonical_types:
+      - RouteActiveTurnSignals
+      - RouteClassification
+    canonical_builders:
+      - extract_active_turn_signals
+      - classify_tool_call
+      - classify_shell_command
+      - classify_route
+    allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-virtual-router
+      - docs/goals/v3-v2-route-classifier-parity-test-design.md
+    forbidden_paths:
+      - sharedmodule/llmswitch-core/src/router
+      - src/providers/core/runtime
+      - src/server/runtime/http-server/executor
+      - v3/crates/routecodex-v3-provider-responses
+    required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+      - v3/crates/routecodex-v3-runtime/src/nodes.rs
+    required_gates:
+      - npm run test:route-classifier-semantics
+      - npm run verify:route-classifier-core-file-size
+      - npm run test:route-classifier-core-file-size-red-fixtures
+    migration_target: rust
+    notes:
+      - "Only current active-turn calls/outputs and strict fresh-user keywords produce route signals; tool declarations, tool_choice, schemas, descriptions, reasoning fields, and history contribute zero signal."
+      - "Multimodal consumes only the typed request-scoped hasImageAttachment carrier; payload image shapes are not a classifier input."
+      - "The classifier outputs an ordered route contract only and cannot select providers or mutate payloads."
 
   - feature_id: vr.route_selection
     status: active
     summary: "virtual router route classification and selected target truth"
     owner_kind: rust_ssot
-    owner_scope: "virtual router route classification and selected target truth"
+    owner_scope: "V2 Virtual Router target selection consumes the shared route classification contract"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
     resource_bindings:
       writes:
         - vr.route_selection_decision@VrRoute04SelectedTarget
       reads:
+        - vr.route_classification_decision@VrRouteClassifier03Classified
         - request.normal_payload@HubReqChatProcess03Governed
         - metadata.runtime_control@VrRoute04SelectedTarget
         - hub.route_metadata_carrier@MetaRoute03RouteCarrier
@@ -1453,6 +1581,7 @@ owners:
       - apply_route_selection
       - build_vr_route_04_from_hub_req_chatprocess_03
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
       - src/modules/llmswitch/bridge
@@ -1462,11 +1591,15 @@ owners:
       - src/client
       - src/server/runtime/http-server/executor
     required_tests:
+      - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
       - tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
     required_gates:
+      - npm run test:route-classifier-semantics
+      - npm run verify:route-classifier-core-file-size
+      - npm run test:route-classifier-core-file-size-red-fixtures
       - npm run verify:vr-no-ts-runtime
       - npm run verify:llmswitch-rustification-audit
       - npm run verify:repo-sanity
@@ -1474,7 +1607,8 @@ owners:
     migration_target: rust
     notes:
       - "VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair."
-      - "Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns."
+      - "Current-turn route semantics are consumed from vr.route_classifier; V2 selection must not reclassify declarations, history, or payload shapes."
+      - "Multimodal consumes only request-scoped hasImageAttachment metadata produced before Virtual Router; payload image shapes are not a second classifier."
 
   - feature_id: vr.route_token_estimation
     status: active
@@ -2145,7 +2279,6 @@ owners:
       - src/server/runtime/http-server/executor/request-executor-core-utils.ts
       - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
-      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
       - docs
     forbidden_paths:
@@ -2155,7 +2288,6 @@ owners:
     required_tests:
       - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
-      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     required_gates:
       - npm run verify:function-map-compile-gate
@@ -2167,7 +2299,7 @@ owners:
       - "Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership."
       - "When the current route has no backup tier, host must also pass routing-group default route tiers (`defaultRouteTiers`) so Rust can plan primary_exhausted -> group default pool."
       - "Unknown target and empty default-pool are explicit contract states, never fallback."
-      - "Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list."
+      - "Direct consumers execute the Rust ErrorErr05 action and must not synthesize a default-pool target list."
       - "Ordinary route-pool removal must not project terminal no-provider while default pool still retains its last provider; this guard is part of the Rust-owned plan/consumer contract, not a handler/executor-local reinterpretation."
 
   - feature_id: vr.route_availability_floor
@@ -3936,6 +4068,10 @@ owners:
       - src/providers/core/utils
       - src/modules/llmswitch/bridge/snapshot-recorder.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-lifecycle
+      - v3/crates/routecodex-v3-cli
+      - v3/crates/routecodex-v3-server
       - docs/architecture
     forbidden_paths:
       - src/providers/profile
@@ -3953,7 +4089,8 @@ owners:
       - npm run verify:resource-operation-map
     migration_target: rust
     notes:
-      - "Default `--snap` must record client/provider request/response boundaries only; module snaps require explicit selector or hub-snapshot switch."
+      - "V2 snapshot defaults remain governed by SnapshotStageSelector. V3 managed runtime writes no Codex samples without a snapshot flag; `--snap` captures Relay only; `--snapall` explicitly includes Direct."
+      - "V3 Codex sample persistence must redact provider artifacts before IO and retain at most 100 request directories per endpoint/port."
       - "Provider samples must not persist request metadata/internal carriers; only explicit non-sensitive meta fields may be written."
       - "Host bridge `snapshot-recorder.ts` public surface is factory-only (`createSnapshotRecorder`); internal recorder options/class must not be exported."
       - "Sharedmodule snapshot recorder runtime shell is deleted; host bridge owns IO/observation while payload normalization/trimming semantics remain native-owned."
@@ -7887,9 +8024,9 @@ owners:
 
   - feature_id: error.execution_decision_consumer
     status: active
-    summary: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions, including primary_exhausted and upstream_stream_incomplete reroute"
-    owner_kind: ts_runtime_owner
-    owner_scope: "Request/direct executor consumption of ErrorErr04 router policy into ErrorErr05 execution decisions"
+    summary: "Thin RequestExecutor, Router Direct, and Provider Direct consumers of Rust-owned typed ErrorErr05 actions"
+    owner_kind: ts_thin_consumer
+    owner_scope: "Apply typed ErrorErr05 actions and request-local exclusion effects without policy ownership"
     owner_module: src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
     resource_bindings:
       writes:
@@ -7905,21 +8042,22 @@ owners:
         - response.client_payload@HubRespOutbound04ClientSemantic
     canonical_types:
       - RequestExecutorErrorErr04RouterPolicyEnvelope
-      - ErrorErr05ExecutionDecision
       - ProviderRetryExecutionPlan
     canonical_builders:
       - resolveProviderRetryExecutionPlan
     allowed_paths:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/failure_policy.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
       - src/modules/llmswitch/bridge/error-execution-decision-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure.ts
       - src/server/runtime/http-server/index.ts
-      - src/server/runtime/http-server/direct-decision.ts
+      - src/server/runtime/http-server/provider-direct-pipeline.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
       - src/server/runtime/http-server/direct-client-disconnect.ts
       - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
-      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
       - docs
     forbidden_paths:
@@ -7936,8 +8074,8 @@ owners:
       - npm run verify:function-map-compile-gate
     migration_target: rust
     notes:
-      - "Request/direct executor may consume ErrorErr04 policy decisions and execute retry/reroute/fail-fast plans, but must not classify provider errors independently."
-      - "Primary exhausted -> default pool remains a VR/native contract; upstream_stream_incomplete is a standard reroute-capable policy outcome."
+      - "Rust failure_policy is the only semantic owner. TS Request/direct code may execute typed wait_then_retry_same, wait_then_reselect, project_terminal, client_disconnected, and reject_non_provider_error actions only."
+      - "Provider errors may project only from project_terminal after route and explicit default pools are both exhausted."
 
   - feature_id: error.client_projection
     status: active
@@ -8018,7 +8156,6 @@ owners:
     forbidden_paths:
       - src/providers
       - src/server/handlers
-      - src/server/runtime/http-server/direct-decision.ts
     required_tests:
       - tests/server/runtime/http-server/port-config-validator-provider-failure-exemption-removed.spec.ts
     required_gates:
@@ -9142,6 +9279,10 @@ owners:
     canonical_builders:
       - run_req_outbound_stage3_compat
       - run_resp_inbound_stage3_compat
+      - apply_request_compat
+    mainline_bindings:
+      - v3-model-bind-04
+      - v3-provider-compat-minimax-anthropic-01
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -9162,6 +9303,7 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/resp_process_stage1_tool_governance_blocks
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/minimax_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs
@@ -9178,6 +9320,8 @@ owners:
     notes:
       - "This entry registers the real Rust source anchor already present in provider-compat-core; it is not a runtime behavior change."
       - "Provider compat may perform provider-family profile tweaks only at ProviderReqCompat06ProviderCompat / ProviderRespCompat02ProviderCompat."
+      - "The chat:minimax Anthropic profile projects standard hosted web-search history to MiniMax-compatible ordinary tool_use/tool_result wire blocks only inside ProviderReqCompat06ProviderCompat; missing, duplicate, or orphan identities fail before provider send."
+      - "apply_request_compat is registered as provider-compat internal block edge v3-provider-compat-minimax-anthropic-01 under run_req_outbound_stage3_compat, not as a new Hub/VR transition."
       - "Tool governance, stopless, continuation, routing, retry/failure policy, and protocol lifecycle conversion remain owned by their existing Hub/VR/Error nodes."
 
   - feature_id: v3.v2_config_toml_compat_5555
@@ -9239,3 +9383,265 @@ owners:
       - "V2 literal apiKey values remain apiKey/auth-handle declarations in the V3 manifest and are resolved only at provider transport send time; V3 must not materialize them into .routecodex-v3-secret-handles or a second secret truth."
       - "The 5555 route contract is locked by config_store_compiles_v2_root_and_provider_toml_for_5555_contract: thinking/coding/longcontext = GLM 5.2 primary, GPT free backup, GPT paid backup; tools/search/web_search = MiniMax M3 primary, GLM 5.2 backup; multimodal = MiniMax M3 primary, GPT free backup, GPT paid gpt-5.4 fallback; default = de-duplicated ordered union of those targets and must stay non-empty."
       - "V2 provider `[provider.responses]` transport/websocket endpoint declarations are projected into the V3 provider manifest: omitted transport stays HTTP; `transport = \"websocket_v2\"` requires a `websocket_v2_url`/`websocketV2Url`; V2 model `remote_continuation` still requires `tool_outputs` and WebSocket v2 at compile time."
+
+  - feature_id: v3.console_human_readable_layering
+    status: active
+    summary: "V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail."
+    owner_kind: rust_v3_server_console_projection
+    owner_scope: "routecodex-v3-server owns console-only request/response/provider/Stopless/post-commit Error01/pre-commit Error06/startup/debug-sink presentation; it never creates runtime observability or mutates request, response, routing, provider health, or error truth."
+    owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      reads:
+        - request.protocol_context
+        - provider_runtime.observation
+        - error.chain
+        - runtime.http_lifecycle_context
+        - v3.runtime.responses_observability
+        - v3.server.request_identity
+      writes:
+        - debug.artifact
+        - console.terminal_output
+        - v3.console.terminal_output
+      forbidden:
+        - request.normal_payload
+        - response.client_payload
+        - route.selection
+    canonical_types:
+      - V3ConsoleEmissionContext
+      - V3ConsoleLogIdentity
+      - V3ConsoleRequestHeadline
+      - V3ConsoleResponseHeadline
+      - V3ConsoleRouteProjection
+      - V3ConsoleLayeredBlock
+    canonical_builders:
+      - emit_v3_observability_console_lines
+      - emit_v3_provider_observability_console_lines
+      - emit_v3_stopless_console_line
+      - emit_relay_sse_complete_console_lines
+      - emit_direct_sse_complete_console_lines
+      - emit_relay_sse_failure_console_line
+      - emit_direct_sse_failure_console_line
+      - merge_v3_runtime_stream_observation
+      - emit_v3_post_commit_sse_source_console_line_for_context
+      - emit_v3_error_console_line_for_context
+      - emit_v3_frame_error_console_line
+      - emit_v3_debug_sink_console_failure
+      - format_v3_startup_console_block
+      - resolve_v3_console_route_projection
+      - format_v3_console_layered_block_plain
+      - format_v3_console_human_prefix
+      - colorize_v3_layered_console_line
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+      - docs/goals/v3-console-human-readable-layering-test-design.md
+      - docs/goals/v3-console-human-readable-layering-plan.md
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-provider-responses
+      - sharedmodule/llmswitch-core
+      - src
+    required_tests:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+      - docs/goals/v3-console-human-readable-layering-test-design.md
+    required_gates:
+      - npm run test:v3-workspace
+      - npm run verify:v3-cargo-fmt
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+    migration_target: rust
+    notes:
+      - "The typed scoped formatter owns headline/detail structure; rendered console text is never reparsed to recover scope truth."
+      - "Pre-route pending request output is forbidden; one routed observability emission owns each Responses Direct/Relay request block when runtime observability is present."
+      - "Server-side provider-request dry-run observability synthesis is physically absent; retired dry-run observability fails fast before projection; OpenAI Chat, Anthropic, and Gemini Relay remain unconnected until their runtime owners publish real observability."
+      - "Human prefix and headline consume the same fail-fast V3ConsoleRouteProjection; route:selected is forbidden."
+      - "Relay/Direct SSE closeout failures retain typed Error01 and cannot fabricate Error06 after response commit; terminal Error06 requires Runtime-owned route/default exhaustion proof."
+      - "Direct SSE failures retain their original typed Error01 kind, stage, code, message, and links; client disconnect is sourced at V3ServerRespOutbound06ClientFrame and remains health-neutral."
+      - "HTTP body Drop first enters the Direct/Relay finalizer and consumes Runtime-owned V3RuntimeStreamObservation; terminal success remains success, terminal failure remains provider failure, and only a missing terminal observation raises client_disconnect."
+      - "The call map explicitly separates post-commit Error01 console output from non-stream and pre-commit terminal Error06 projection."
+      - "Authoritative elapsed and usage facts are merged into the one success response block; Responses terminal success requires Runtime-owned internal/external timing and missing timing is an explicit observability contract failure."
+      - "Bright human response headlines require typed response status and finish reason, include only published numeric usage/timing fields, and never display unreported placeholders; unavailable usage remains diagnostic-only."
+
+  - feature_id: v3.console_request_count_visibility
+    status: active
+    summary: "One aggregate-shared V3 request counter serializes every listener, and each atomic identity allocation carries total and local-day counts into both human request and response headlines."
+    owner_kind: rust_v3_server_console_projection
+    owner_scope: "File-scoped owner of the aggregate-shared V3RequestIdCounter typed allocation extension and its console projection; no per-listener lock, request-id parsing, second counter, or post-allocation reread."
+    owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      reads: [v3.server.request_identity]
+      writes: [v3.server.request_identity]
+      forbidden: [console.terminal_output, v3.console.terminal_output, request.normal_payload, response.client_payload]
+    canonical_types:
+      - V3AllocatedRequestIdentity
+    canonical_builders:
+      - spawn_v3_server_aggregate
+      - next_request_identity
+      - format_v3_console_request_count
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/goals/v3-console-request-count-visibility-test-design.md
+      - docs/architecture
+      - package.json
+      - .github/workflows/test.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - sharedmodule
+      - src
+    required_tests:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/goals/v3-console-request-count-visibility-test-design.md
+    required_gates:
+      - npm run verify:v3-architecture-docs
+    migration_target: rust
+    mainline_bindings:
+      - v3-console-count-01
+      - v3-console-count-02
+      - v3-console-count-03
+      - v3-console-count-04
+
+  - feature_id: v3.runtime_timing_observability
+    status: active
+    summary: "Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection."
+    owner_kind: rust_v3_runtime_observability
+    owner_scope: "One Runtime timing state spans all provider attempts and publishes only after governed terminal output or Direct SSE clean EOF."
+    owner_module: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    resource_bindings:
+      reads: [v3.runtime.responses_observability]
+      writes: [v3.runtime.responses_timing_observability]
+      forbidden: [request.normal_payload, response.client_payload, console.terminal_output]
+    canonical_types:
+      - V3RuntimeTimingState
+      - V3RuntimeTimingSummary
+    canonical_builders:
+      - start_external
+      - finish_external
+      - finish_runtime
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+      - v3/crates/routecodex-v3-runtime/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/tests
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/goals/v3-runtime-timing-observability-debug-contract.json
+      - docs/goals/v3-runtime-timing-observability-test-design.md
+      - docs/architecture
+      - scripts/architecture/verify-v3-runtime-timing-observability.mjs
+      - scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs
+      - package.json
+      - .github/workflows/test.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-sse
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - sharedmodule
+      - src
+    required_tests:
+      - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/goals/v3-runtime-timing-observability-test-design.md
+    required_gates:
+      - npm run verify:v3-runtime-timing-observability
+      - npm run test:v3-runtime-timing-observability-red-fixtures
+      - npm run verify:v3-architecture-docs
+    migration_target: rust
+    mainline_bindings:
+      - v3-runtime-timing-01
+      - v3-runtime-timing-02
+      - v3-runtime-timing-03
+      - v3-runtime-timing-04
+      - v3-runtime-timing-05
+      - v3-runtime-timing-06
+      - v3-runtime-timing-07
+      - v3-runtime-timing-08
+      - v3-runtime-timing-09
+      - v3-runtime-timing-10
+      - v3-runtime-timing-11
+      - v3-runtime-timing-12
+
+  - feature_id: v3.codex_sample_retention_snap_scope
+    status: active
+    summary: "V3 Codex-sample persistence requires explicit CLI authorization, Debug-bounded diagnostic copies, Server-only filesystem IO, and a 100-request endpoint/port cap."
+    owner_kind: rust_v3_bounded_debug_artifact_lifecycle
+    owner_scope: "File-scoped Server filesystem owner; Config owns the typed Direct switch, CLI/lifecycle publish authorization, and Debug owns redaction/budget."
+    owner_module: v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      reads:
+        - v3.debug.codex_sample_authorization
+        - v3.debug.payload_budget
+      writes:
+        - v3.debug.codex_sample_filesystem
+      forbidden:
+        - request.normal_payload
+        - provider.wire_payload
+        - response.client_payload
+        - metadata.runtime_control
+        - continuation.scope_state
+    canonical_types:
+      - V3DebugManifest
+      - V3DebugBoundedTextCapture
+      - V3LiveSnapClientResponseSseRecorder
+      - V3LiveSnapDirectClientResponseSseRecorder
+    canonical_builders:
+      - capture_v3_live_raw_request
+      - capture_v3_responses_relay_response
+      - capture_v3_responses_direct_response
+      - capture_v3_responses_relay_provider_snapshots
+      - persist_v3_codex_sample_payload
+      - resolve_v3_codex_samples_root
+      - enforce_v3_codex_sample_listener_retention
+      - enforce_v3_codex_sample_request_retention
+    allowed_paths:
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-cli
+      - v3/crates/routecodex-v3-lifecycle
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests
+      - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
+      - docs/architecture
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - sharedmodule
+      - src
+    required_tests:
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-cli/tests/foundation_cli.rs
+      - v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs
+      - v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+    required_gates:
+      - npm run verify:v3-debug-payload-budget
+      - npm run test:v3-debug-payload-budget-red-fixtures
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run test:v3-workspace
+      - npm run build:v3-cli
+    migration_target: rust

@@ -6,5 +6,6 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+routecodex-v3-route-classifier = { path = "../routecodex-v3-route-classifier" }
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 thiserror.workspace = true

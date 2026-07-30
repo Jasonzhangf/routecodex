@@ -9,6 +9,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ProviderRespInbound01Raw {
     pub(crate) payload: V3HubResponsePayload,
+    pub(crate) raw_sse_chunks: Option<Arc<Vec<Vec<u8>>>>,
     pub(crate) entry_protocol: V3HubEntryProtocol,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
     pub(crate) continuation: V3HubContinuationOwnership,
@@ -83,6 +84,7 @@ pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
 ) -> V3ProviderRespInbound01Raw {
     V3ProviderRespInbound01Raw {
         payload: V3HubResponsePayload(Arc::new(payload)),
+        raw_sse_chunks: None,
         entry_protocol: context.entry_protocol,
         provider_protocol: context.provider_protocol,
         continuation: context.continuation,
@@ -90,5 +92,29 @@ pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         invocation_source: context.invocation_source,
         transport_intent: context.transport_intent,
         compatibility_profile: context.compatibility_profile,
+    }
+}
+
+pub fn build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
+    chunks: Vec<Vec<u8>>,
+    context: V3ProviderRespInbound01RawContext,
+) -> V3ProviderRespInbound01Raw {
+    V3ProviderRespInbound01Raw {
+        payload: V3HubResponsePayload(Arc::new(Value::Null)),
+        raw_sse_chunks: Some(Arc::new(chunks)),
+        entry_protocol: context.entry_protocol,
+        provider_protocol: context.provider_protocol,
+        continuation: context.continuation,
+        execution: context.execution,
+        invocation_source: context.invocation_source,
+        transport_intent: context.transport_intent,
+        compatibility_profile: context.compatibility_profile,
+    }
+}
+
+impl V3ProviderRespInbound01Raw {
+    pub(crate) fn take_raw_sse_chunks(&mut self) -> Option<Vec<Vec<u8>>> {
+        let chunks = self.raw_sse_chunks.take()?;
+        Some(Arc::try_unwrap(chunks).unwrap_or_else(|chunks| chunks.as_ref().clone()))
     }
 }

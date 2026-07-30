@@ -27,6 +27,13 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.authoring_surface
+      produces:
+        - config.authoring_surface
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-load-02
     from_node: ConfigLoad02NativeBridge
     to_node: ConfigLoad03RustLoader
@@ -34,6 +41,13 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.authoring_surface
+      produces:
+        - config.authoring_surface
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-load-03
     from_node: ConfigLoad03RustLoader
     to_node: ConfigLoad04UserConfigParsed
@@ -41,6 +55,13 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.authoring_surface
+      produces:
+        - config.validated_manifest
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-load-04
     from_node: ConfigLoad04UserConfigParsed
     to_node: ConfigLoad05RuntimeManifestCompiled
@@ -48,6 +69,15 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.validated_manifest
+      produces:
+        - config.runtime_projection
+        - config.provider_profile_projection
+        - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-load-05
     from_node: ConfigLoad05RuntimeManifestCompiled
     to_node: ConfigLoad06LoadedConfigReturned
@@ -55,6 +85,16 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.validated_manifest
+        - config.runtime_projection
+        - config.provider_profile_projection
+      produces:
+        - config.runtime_projection
+        - config.provider_profile_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-runtime-vr-01
     from_node: ConfigLoad05RuntimeManifestCompiled
     to_node: VrConfig01RustBootstrapArtifact
@@ -62,6 +102,14 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.runtime_projection
+        - config.routing_policy_projection
+      produces:
+        - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-runtime-vr-02
     from_node: VrConfig01RustBootstrapArtifact
     to_node: VrConfig02NativeBootstrap
@@ -69,6 +117,13 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.routing_policy_projection
+      produces:
+        - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-runtime-hub-01
     from_node: ConfigLoad05RuntimeManifestCompiled
     to_node: HubConfig01PipelineRuntimeArtifact
@@ -76,6 +131,13 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.runtime_projection
+      produces:
+        - config.runtime_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-runtime-hub-02
     from_node: HubConfig01PipelineRuntimeArtifact
     to_node: HubConfig02RuntimePolicyArtifacts
@@ -83,6 +145,13 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.runtime_projection
+      produces:
+        - config.provider_profile_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: cfg-runtime-hub-03
     from_node: HubConfig01PipelineRuntimeArtifact
     to_node: HubConfig03RuntimeRouteTierArtifacts
@@ -90,6 +159,14 @@ edges:
     owner_feature_id: config.user_config_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.runtime_projection
+        - config.routing_policy_projection
+      produces:
+        - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

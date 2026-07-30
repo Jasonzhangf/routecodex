@@ -30,8 +30,8 @@ audit_truth_contract:
   audited_status_counts:
     covered: 160
     covered_but_target_dependent: 1
-    partial: 108
-    extension_declared: 217
+    partial: 112
+    extension_declared: 213
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -53,7 +53,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 217
+      affected_count: 213
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -75,7 +75,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 108
+      affected_count: 112
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -3989,6 +3989,12 @@ semantic_correspondence:
     canonical_path: chat.reasoning.items
     chat_extension: canonical_chat
     current_impl: partial
+    runtime_evidence:
+      - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs::anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasoning
+      - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs::responses_replay_reasoning_restores_anthropic_thinking_and_redacted_blocks
+      - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs::responses_reasoning_encrypted_content_projects_to_anthropic_thinking_identity
+      - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs::responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs::responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client
     paths:
       responses:
         - request.input[].reasoning.summary[].text
@@ -4579,7 +4585,10 @@ protocol_specific_chat_extensions:
         - request.messages[].content[].code_execution_tool_result
         - request.messages[].content[].tool_search_tool_result
       extension_owner: chat.extensions.anthropic.server_tools
-      current_impl: extension_declared
+      current_impl: partial
+      runtime_evidence:
+        - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs::responses_web_search_call_as_anthropic_server_tool_history
+        - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs::responses_hosted_web_search_between_tool_call_and_output_preserves_anthropic_adjacency
   gemini:
     tool_config:
       field_paths:
@@ -6777,7 +6786,7 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
+      current_impl: partial
       gap: runtime mapping partial or extension-only gap
       equivalent_fields: &a70
         responses: []
@@ -6792,7 +6801,7 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
+      current_impl: partial
       gap: runtime mapping partial or extension-only gap
       equivalent_fields: &a71
         responses: []
@@ -6897,7 +6906,7 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
+      current_impl: partial
       gap: runtime mapping partial or extension-only gap
       equivalent_fields: &a78
         responses: []
@@ -9398,7 +9407,7 @@ canonical_extension_registry:
     direction: request
     stratum: request_payload
     owner: chat.extension_semantics
-    current_impl: extension_declared
+    current_impl: partial
     source_fields: *a70
     projection_rule: runtime mapping partial or extension-only gap
   - field: request.messages_items.content_items.server_tool_use.name
@@ -9406,7 +9415,7 @@ canonical_extension_registry:
     direction: request
     stratum: request_payload
     owner: chat.extension_semantics
-    current_impl: extension_declared
+    current_impl: partial
     source_fields: *a71
     projection_rule: runtime mapping partial or extension-only gap
   - field: request.messages_items.content_items.text_editor_code_execution_tool_result.content
@@ -9462,7 +9471,7 @@ canonical_extension_registry:
     direction: request
     stratum: request_payload
     owner: chat.extension_semantics
-    current_impl: extension_declared
+    current_impl: partial
     source_fields: *a78
     projection_rule: runtime mapping partial or extension-only gap
   - field: request.output_config.effort

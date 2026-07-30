@@ -100,7 +100,16 @@ fn compile_v2_root(
     let (providers, provider_sources) = compile_v2_providers(config_dir, &forwarders)?;
     let available_protocols = available_entry_protocols(&providers);
     let servers = compile_v2_servers(router_ports, &available_protocols)?;
-    let route_groups = compile_v2_route_groups(root.virtualrouter.routing_policy_groups)?;
+    let long_context_threshold_tokens = root
+        .virtualrouter
+        .classifier
+        .as_ref()
+        .and_then(|classifier| classifier.long_context_threshold_tokens)
+        .unwrap_or(180_000);
+    let route_groups = compile_v2_route_groups(
+        root.virtualrouter.routing_policy_groups,
+        long_context_threshold_tokens,
+    )?;
 
     Ok(V3Config02AuthoringResolved {
         authoring: V3Config02AuthoringParsed {
@@ -242,6 +251,7 @@ fn compile_v2_forwarders(
 
 fn compile_v2_route_groups(
     groups: BTreeMap<String, V2RoutingPolicyGroup>,
+    long_context_threshold_tokens: u64,
 ) -> Result<BTreeMap<String, V3RouteGroupAuthoringConfig>, V3ConfigError> {
     groups
         .into_iter()
@@ -288,12 +298,17 @@ fn compile_v2_route_groups(
                 let match_rule = if route_id == "default" {
                     None
                 } else {
+                    let is_long_context = route_id == "longcontext";
                     Some(V3RoutePoolMatchAuthoringConfig {
                         precedence: Some(route_precedence(&route_id)),
                         entry_protocol: None,
                         models: Vec::new(),
-                        required_capabilities: vec![route_id.clone()],
-                        min_input_tokens: None,
+                        required_capabilities: if is_long_context {
+                            Vec::new()
+                        } else {
+                            vec![route_id.clone()]
+                        },
+                        min_input_tokens: is_long_context.then_some(long_context_threshold_tokens),
                         max_input_tokens: None,
                     })
                 };
@@ -655,10 +670,17 @@ struct V2HttpServerPort {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct V2VirtualRouter {
+    classifier: Option<V2ClassifierConfig>,
     #[serde(default)]
     forwarders: BTreeMap<String, V2ForwarderConfig>,
     #[serde(default)]
     routing_policy_groups: BTreeMap<String, V2RoutingPolicyGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct V2ClassifierConfig {
+    long_context_threshold_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

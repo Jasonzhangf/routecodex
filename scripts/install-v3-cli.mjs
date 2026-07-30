@@ -10,6 +10,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'v3', 'Cargo.toml');
 const packageJsonPath = path.join(repoRoot, 'package.json');
+const routeClassifierFileSizeGate = path.join(
+  repoRoot,
+  'scripts',
+  'architecture',
+  'verify-route-classifier-core-file-size.mjs',
+);
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
 const repoBin = path.join(repoRoot, 'dist', 'bin', binaryName);
 const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
@@ -17,6 +23,21 @@ const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME']
 function fail(message) {
   console.error(`[install-v3-cli] ${message}`);
   process.exit(2);
+}
+
+function requireSpawnSuccess(result, label) {
+  if (result.error) {
+    fail(`${label} could not start: ${result.error.message}`);
+  }
+  if (result.signal) {
+    fail(`${label} terminated by signal ${result.signal}`);
+  }
+  if (result.status === null) {
+    fail(`${label} exited without a status`);
+  }
+  if (result.status !== 0) {
+    fail(`${label} failed with status ${result.status}`);
+  }
 }
 
 function resolveHomeDir() {
@@ -41,6 +62,22 @@ function buildV3Cli() {
   if (!fs.existsSync(manifestPath)) {
     fail(`missing V3 manifest: ${manifestPath}`);
   }
+  const gateResult = spawnSync(process.execPath, [routeClassifierFileSizeGate], {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: 'inherit',
+  });
+  requireSpawnSuccess(gateResult, 'route classifier file-size gate');
+  const semanticGateResult = spawnSync(
+    process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    ['run', 'test:route-classifier-semantics'],
+    {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: 'inherit',
+    },
+  );
+  requireSpawnSuccess(semanticGateResult, 'route classifier semantic gate');
   const env = { ...process.env };
   if (!Object.prototype.hasOwnProperty.call(env, 'RUSTUP_TOOLCHAIN')) {
     env.RUSTUP_TOOLCHAIN = 'stable';
@@ -63,9 +100,7 @@ function buildV3Cli() {
     env,
     stdio: 'inherit',
   });
-  if ((result.status ?? 0) !== 0) {
-    fail('cargo build failed for routecodex-v3-cli');
-  }
+  requireSpawnSuccess(result, 'cargo build for routecodex-v3-cli');
   const sourceBin = path.join(cargoTargetDir, 'debug', binaryName);
   if (!fs.existsSync(sourceBin)) {
     fail(`built V3 CLI binary not found: ${sourceBin}`);

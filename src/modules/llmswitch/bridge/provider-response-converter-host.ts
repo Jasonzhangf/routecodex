@@ -19,7 +19,7 @@ import {
 } from './provider-response-effects.js';
 
 // feature_id: hub.response_post_servertool_client_projection
-// Server-side tool execution has been removed; CLI-owned tools must be projected by Rust.
+// server-side tool execution has been removed; CLI-owned tools must be projected by Rust.
 // Fail-fast enforcement is delegated to provider-response-effects.ts:
 // executeProviderResponseNativeServertoolEffects -> writeRustStopGatewayContextToMetadataCenter
 // -> applyNativeRuntimeControlWritePlan -> readBoundMetadataCenter.

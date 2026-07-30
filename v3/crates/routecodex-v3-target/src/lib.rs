@@ -18,6 +18,19 @@ mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use routecodex_v3_provider_responses::V3ProviderAvailabilityProjection;
+    use routecodex_v3_virtual_router::RouteClassification;
+
+    fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
+        RouteClassification {
+            route_name: route.to_string(),
+            reasoning: format!("test:{route}"),
+            candidates: candidates
+                .iter()
+                .map(|candidate| (*candidate).to_string())
+                .collect(),
+            required_capabilities: Vec::new(),
+        }
+    }
     use routecodex_v3_virtual_router::{V3RouterRequestFacts, V3VirtualRouter};
 
     struct Availability {
@@ -133,6 +146,7 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
                     client_model: Some("client".into()),
                     capabilities: BTreeSet::from(["tools".into()]),
                     input_tokens: 10,
+                    route_classification: test_route("tools", &["tools", "default"]),
                 },
             )
             .unwrap();
@@ -163,6 +177,7 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
                     client_model: Some(requested_model.into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    route_classification: RouteClassification::default(),
                 },
             )
             .unwrap();
@@ -208,6 +223,7 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
                     client_model: Some("a.m".into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    route_classification: RouteClassification::default(),
                 },
             )
             .unwrap();
@@ -295,6 +311,7 @@ targets = [
                     client_model: Some("MiniMax-M3".into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    route_classification: RouteClassification::default(),
                 },
             )
             .unwrap();
@@ -317,6 +334,64 @@ targets = [
             .unwrap();
         assert_eq!(selected.candidate.provider_id, "grok");
         assert_eq!(selected.candidate.model_id, "MiniMax-M3");
+    }
+
+    #[test]
+    fn requested_forwarder_model_can_differ_from_provider_model_id() {
+        let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.upstream]
+type = "responses"
+base_url = "http://upstream.invalid/v1"
+default_model = "wire-model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "UPSTREAM_KEY" }] }
+[providers.upstream.models.wire-model]
+capabilities = ["text"]
+[forwarders.client]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "upstream", model = "wire-model", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "client", priority = 1 }]
+"#;
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+        let router = V3VirtualRouter::default();
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client-model".into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                    route_classification: RouteClassification::default(),
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        let target = V3TargetInterpreter::default();
+        let expanded = target
+            .expand_candidates(&manifest, target.classify_kind(hit), 0)
+            .expect("forwarder.model is the client-visible target identity");
+
+        assert_eq!(expanded.candidates.len(), 1);
+        assert_eq!(expanded.candidates[0].provider_id, "upstream");
+        assert_eq!(expanded.candidates[0].model_id, "wire-model");
+        assert_eq!(
+            expanded.candidates[0].visible_model_ids,
+            vec!["client-model"]
+        );
     }
 
     #[test]
@@ -355,6 +430,7 @@ targets = [{ kind = "forwarder", id = "fwd_gpt", priority = 1 }]
                     client_model: Some("MiniMax-M3".into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    route_classification: RouteClassification::default(),
                 },
             )
             .unwrap();
@@ -407,6 +483,7 @@ targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.5
                     client_model: Some("MiniMax-M3".into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    route_classification: RouteClassification::default(),
                 },
             )
             .unwrap();
@@ -480,6 +557,7 @@ targets = [
                     client_model: Some("MiniMax-M3".into()),
                     capabilities: BTreeSet::new(),
                     input_tokens: 10,
+                    route_classification: RouteClassification::default(),
                 },
             )
             .unwrap();
@@ -700,6 +778,41 @@ targets = [
     }
 
     #[test]
+    fn default_floor_does_not_reselect_request_local_failed_candidate() {
+        struct RequestLocalFailureAvailability;
+        impl V3ProviderAvailabilityReader for RequestLocalFailureAvailability {
+            fn availability(
+                &self,
+                provider_id: &str,
+                auth_alias: Option<&str>,
+                model_id: Option<&str>,
+                _now_ms: u64,
+            ) -> V3ProviderAvailabilityProjection {
+                V3ProviderAvailabilityProjection {
+                    provider_id: provider_id.into(),
+                    auth_alias: auth_alias.map(Into::into),
+                    model_id: model_id.map(Into::into),
+                    available: false,
+                    blocked_scopes: vec!["request_local_provider_failure".into()],
+                }
+            }
+        }
+
+        let exhausted = V3TargetInterpreter::default()
+            .select_available(expanded(), &RequestLocalFailureAvailability, 0)
+            .expect_err(
+                "default floor must not override current-request provider failure exclusion",
+            );
+        assert_eq!(
+            exhausted.attempted_candidates,
+            vec![
+                "a:ka:m:availability(request_local_provider_failure)".to_string(),
+                "b:kb:m:availability(request_local_provider_failure)".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn duplicate_optional_candidate_retains_default_floor_provenance() {
         let expanded = expanded_tools();
         let first = expanded
@@ -763,6 +876,7 @@ targets = [
                     client_model: None,
                     capabilities: BTreeSet::from(["multimodal".into()]),
                     input_tokens: 10,
+                    route_classification: test_route("multimodal", &["multimodal", "default"]),
                 },
             )
             .unwrap();
@@ -839,6 +953,10 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
                     client_model: None,
                     capabilities: BTreeSet::from(["multimodal".into(), "vision".into()]),
                     input_tokens: 1000,
+                    route_classification: test_route(
+                        "multimodal",
+                        &["multimodal", "longcontext", "default"],
+                    ),
                 },
             )
             .unwrap();
@@ -875,28 +993,33 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
     }
 
     #[test]
-    fn route_owned_web_search_pool_does_not_require_model_web_search_capability() {
+    fn web_search_capability_filters_default_candidates_without_web_search_route_pool() {
         let source = r#"
 version = 3
 [servers.s]
 bind = "127.0.0.1"
 port = 1
 routing_group = "g"
-[providers.route_search]
+[providers.text]
 type = "responses"
-base_url = "http://route-search.invalid/v1"
+base_url = "http://text.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEXT_KEY" }] }
+[providers.text.models.m]
+capabilities = ["text"]
+[providers.search]
+type = "responses"
+base_url = "http://search.invalid/v1"
 default_model = "m"
 auth = { type = "api_key", entries = [{ alias = "key", env = "SEARCH_KEY" }] }
-[providers.route_search.models.m]
-capabilities = ["text"]
+[providers.search.models.m]
+capabilities = ["text", "web_search"]
 [route_groups.g.pools.default]
 selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "route_search", model = "m", key = "key", priority = 1 }]
-[route_groups.g.pools.web_search]
-selection = { strategy = "priority" }
-features = { route_owned_web_search = true }
-match = { precedence = 10, entry_protocol = "responses", required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "route_search", model = "m", key = "key", priority = 1 }]
+targets = [
+  { kind = "provider_model", provider = "text", model = "m", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "search", model = "m", key = "key", priority = 2 }
+]
 "#;
         let manifest =
             compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
@@ -911,6 +1034,7 @@ targets = [{ kind = "provider_model", provider = "route_search", model = "m", ke
                     client_model: None,
                     capabilities: BTreeSet::from(["web_search".into()]),
                     input_tokens: 10,
+                    route_classification: test_route("thinking", &["thinking", "default"]),
                 },
             )
             .unwrap();
@@ -918,7 +1042,7 @@ targets = [{ kind = "provider_model", provider = "route_search", model = "m", ke
             .resolve_route_pool_plan(&manifest, classified)
             .unwrap();
         let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-        assert_eq!(hit.pool_id, "web_search");
+        assert_eq!(hit.pool_id, "default");
         let target = V3TargetInterpreter::default();
         let expanded = target
             .expand_candidates(&manifest, target.classify_kind(hit), 0)
@@ -931,10 +1055,10 @@ targets = [{ kind = "provider_model", provider = "route_search", model = "m", ke
                 },
                 0,
             )
-            .expect("route-owned web_search must be selected even when the model does not advertise native web_search");
+            .expect("web_search is a target capability filter, not a VR route reason");
 
-        assert_eq!(selected.candidate.provider_id, "route_search");
-        assert!(!selected
+        assert_eq!(selected.candidate.provider_id, "search");
+        assert!(selected
             .candidate
             .required_capabilities
             .iter()
@@ -985,6 +1109,7 @@ targets = [
                     client_model: None,
                     capabilities: BTreeSet::new(),
                     input_tokens: 950,
+                    route_classification: test_route("longcontext", &["longcontext", "default"]),
                 },
             )
             .unwrap();
@@ -1019,6 +1144,7 @@ targets = [
                     client_model: None,
                     capabilities: BTreeSet::new(),
                     input_tokens: 950,
+                    route_classification: test_route("longcontext", &["longcontext", "default"]),
                 },
             )
             .unwrap();
@@ -1338,15 +1464,19 @@ impl V3TargetInterpreter {
                 ));
                 continue;
             }
-            if candidate.default_pool_member {
-                default_floor_candidate = Some((index, candidate.clone()));
-            }
             let projection = availability.availability(
                 &candidate.provider_id,
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
                 now_ms,
             );
+            let request_local_failed = projection
+                .blocked_scopes
+                .iter()
+                .any(|scope| scope == "request_local_provider_failure");
+            if candidate.default_pool_member && !request_local_failed {
+                default_floor_candidate = Some((index, candidate.clone()));
+            }
             if projection.available {
                 return Ok(V3Target10ConcreteProviderSelected {
                     route: expanded.route,
@@ -1440,9 +1570,9 @@ impl V3TargetInterpreter {
             .get(forwarder_id)
             .filter(|forwarder| forwarder.enabled)
             .ok_or_else(|| V3TargetError::ForwarderMissing(forwarder_id.to_string()))?;
-        // Forwarder layer: do NOT check requested_model here. Forwarder.model is just
-        // an abstract routing hint; the actual wire model is determined by nested provider
-        // targets. Model validation must only happen at the provider layer after expansion.
+        // The forwarder model is the configured client-visible target identity. Validation
+        // still happens at the provider layer after the nested wire model is resolved.
+        push_unique_visible_model_id(&mut scope.visible_model_ids, &forwarder.model);
         let order = self.policy_order(
             &forwarder.selection.strategy,
             &forwarder.targets,
@@ -1614,17 +1744,7 @@ fn selected_route_required_capabilities(
     route: &V3Router07OpaqueTargetHitOnce,
 ) -> Vec<String> {
     let mut capabilities = BTreeSet::new();
-    let route_owned_web_search = route.target_plan.iter().any(|entry| {
-        entry.pool_id != "default"
-            && group
-                .pools
-                .get(&entry.pool_id)
-                .is_some_and(route_pool_owns_web_search)
-    });
     for capability in &route.request_capabilities {
-        if route_owned_web_search && is_web_search_capability(capability) {
-            continue;
-        }
         capabilities.insert(capability.clone());
     }
     for entry in &route.target_plan {
@@ -1638,24 +1758,10 @@ fn selected_route_required_capabilities(
             continue;
         };
         for capability in &rule.required_capabilities {
-            if route_pool_owns_web_search(pool) && is_web_search_capability(capability) {
-                continue;
-            }
             capabilities.insert(capability.clone());
         }
     }
     capabilities.into_iter().collect()
-}
-
-fn route_pool_owns_web_search(pool: &routecodex_v3_config::V3RoutePoolManifest) -> bool {
-    pool.features
-        .get("route_owned_web_search")
-        .copied()
-        .unwrap_or(false)
-}
-
-fn is_web_search_capability(capability: &str) -> bool {
-    matches!(capability, "web_search" | "search")
 }
 
 fn selected_route_requested_model_filter(

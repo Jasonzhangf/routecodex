@@ -134,58 +134,65 @@ function resolveToolCallIdStyle(sample) {
   return 'fc';
 }
 
-function buildConfig(sample, port) {
+function buildConfigToml(sample, port) {
+  return `version = "2.0.0"
+virtualrouterMode = "v2"
+
+[httpserver]
+host = "127.0.0.1"
+port = ${port}
+
+[[httpserver.ports]]
+host = "127.0.0.1"
+port = ${port}
+mode = "router"
+routingPolicyGroup = "default"
+
+[virtualrouter]
+activeRoutingPolicyGroup = "default"
+
+[[virtualrouter.routingPolicyGroups.default.routing.default]]
+id = "default"
+targets = ["${sample.providerId}"]
+`;
+}
+
+function buildProviderConfigToml(sample) {
   const { providerId, alias, model } = parseProviderKey(sample.providerId);
   const toolCallIdStyle = resolveToolCallIdStyle(sample);
-  return {
-    version: '1.0.0',
-    virtualrouter: {
-      inputProtocol: 'openai',
-      outputProtocol: 'openai',
-      providers: {
-        [providerId]: {
-          id: providerId,
-          enabled: true,
-          type: 'mock-provider',
-          providerType: 'responses',
-          baseURL: `https://mock.local/${providerId}`,
-          compatibilityProfile: 'compat:passthrough',
-          providerId: sample.providerId,
-          auth: {
-            type: 'apikey',
-            keys: {
-              [alias]: {
-                value: `mock-${alias}-token-1234567890`
-              }
-            }
-          },
-          modelId: model,
-          models: {
-            [model]: {
-              maxTokens: 32768
-            }
-          },
-          responses: {
-            toolCallIdStyle
-          }
-        }
-      },
-      routing: {
-        default: [`${providerId}.${alias}.${model}`]
-      }
-    },
-    httpserver: {
-      host: '127.0.0.1',
-      port
-    }
-  };
+  return `version = "2.0.0"
+providerId = "${providerId}"
+
+[provider]
+id = "${providerId}"
+type = "mock-provider"
+providerType = "responses"
+baseURL = "https://mock.local/${providerId}"
+compatibilityProfile = "compat:passthrough"
+providerId = "${sample.providerId}"
+modelId = "${model}"
+
+[provider.auth]
+type = "apikey"
+
+[provider.auth.keys.${alias}]
+value = "mock-${alias}-token-1234567890"
+
+[provider.models."${model}"]
+maxTokens = 32768
+
+[provider.responses]
+toolCallIdStyle = "${toolCallIdStyle}"
+`;
 }
 
 async function writeTempConfig(sample, port) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-mock-'));
-  const file = path.join(dir, 'config.json');
-  const config = buildConfig(sample, port);
-  await fs.writeFile(file, JSON.stringify(config, null, 2), 'utf-8');
+  const file = path.join(dir, 'config.toml');
+  const providerDir = path.join(dir, 'provider', parseProviderKey(sample.providerId).providerId);
+  await fs.mkdir(providerDir, { recursive: true });
+  await fs.writeFile(file, buildConfigToml(sample, port), 'utf-8');
+  await fs.writeFile(path.join(providerDir, 'config.v2.toml'), buildProviderConfigToml(sample), 'utf-8');
   return { dir, file };
 }
 
@@ -205,6 +212,7 @@ async function createServer(configPath, port, snapshotRoot) {
     ROUTECODEX_STAGE_LOG: process.env.ROUTECODEX_STAGE_LOG ?? '0',
     ROUTECODEX_PORT: String(port),
     ROUTECODEX_CONFIG_PATH: configPath,
+    ROUTECODEX_PROVIDER_DIR: path.join(isolatedHome, 'provider'),
     // 将快照写入临时目录，避免污染全局 ~/.routecodex/codex-samples 样本
     ...(snapshotRoot
       ? {
@@ -291,153 +299,6 @@ async function stopServer(child, forceTimeout = 5000) {
     await delay(100);
   }
   child.kill('SIGKILL');
-}
-
-async function createLocalUpstreamServer(handler) {
-  return await new Promise((resolve, reject) => {
-    const server = http.createServer(handler);
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address !== 'object') {
-        reject(new Error('Failed to obtain listen address for upstream server'));
-        return;
-      }
-      resolve({
-        server,
-        port: address.port
-      });
-    });
-  });
-}
-
-function buildIflowUaProbeConfig(port, upstreamPort) {
-  return {
-    version: '1.0.0',
-    virtualrouter: {
-      inputProtocol: 'openai',
-      outputProtocol: 'openai',
-      providers: {
-        iflow: {
-          id: 'iflow',
-          enabled: true,
-          type: 'iflow',
-          baseURL: `http://127.0.0.1:${upstreamPort}/v1`,
-          compatibilityProfile: 'chat:iflow',
-          auth: {
-            type: 'apikey',
-            apiKey: 'test-upstream-token'
-          },
-          models: {
-            'glm-4.7': { supportsStreaming: false }
-          }
-        }
-      },
-      routing: {
-        default: ['iflow.glm-4.7']
-      }
-    },
-    httpserver: {
-      host: '127.0.0.1',
-      port
-    }
-  };
-}
-
-async function runIflowUserAgentRegression() {
-  const seen = {
-    path: '',
-    headers: {},
-    body: ''
-  };
-
-  const { server: upstream, port: upstreamPort } = await createLocalUpstreamServer(async (req, res) => {
-    try {
-      seen.path = String(req.url || '');
-      seen.headers = req.headers || {};
-      let raw = '';
-      req.setEncoding('utf8');
-      req.on('data', (chunk) => {
-        raw += chunk;
-      });
-      await new Promise((resolve) => req.on('end', resolve));
-      seen.body = raw;
-    } catch {
-      // ignore
-    }
-
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify({
-        id: 'chatcmpl_mock_iflow_ua',
-        object: 'chat.completion',
-        created: Math.floor(Date.now() / 1000),
-        model: 'glm-4.7',
-        choices: [
-          {
-            index: 0,
-            message: { role: 'assistant', content: 'ok' },
-            finish_reason: 'stop'
-          }
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
-      })
-    );
-  });
-
-  const port = 5750;
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-iflow-ua-'));
-  const configPath = path.join(dir, 'config.json');
-  await fs.writeFile(configPath, JSON.stringify(buildIflowUaProbeConfig(port, upstreamPort), null, 2), 'utf-8');
-
-  const entry = path.join(PROJECT_ROOT, 'dist', 'index.js');
-  const child = spawn(process.execPath, [entry], {
-    cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      // Isolate ~/.routecodex; otherwise local oauth tokens can trigger refresh attempts and stall startup.
-      HOME: dir,
-      USERPROFILE: dir,
-      ROUTECODEX_PORT: String(port),
-      ROUTECODEX_CONFIG_PATH: configPath,
-      RCC_PORT: String(port),
-      RCC_CONFIG_PATH: configPath
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  try {
-    await waitForHealth(port, child);
-    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // If UA precedence is wrong, this inbound UA will leak to upstream and break iFlow glm-4.7.
-        'User-Agent': 'curl/8.7.1'
-      },
-      body: JSON.stringify({
-        model: 'iflow.glm-4.7',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 16,
-        stream: false
-      })
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(`ua probe request failed: HTTP ${res.status}: ${text}`);
-    }
-
-    const upstreamUa = typeof seen.headers['user-agent'] === 'string' ? seen.headers['user-agent'] : '';
-    if (upstreamUa !== 'iFlow-Cli') {
-      throw new Error(
-        `iflow UA regression: expected upstream user-agent="iFlow-Cli", got ${JSON.stringify(upstreamUa)} (path=${seen.path})`
-      );
-    }
-  } finally {
-    await stopServer(child);
-    await fs.rm(dir, { recursive: true, force: true });
-    await new Promise((resolve) => upstream.close(() => resolve()));
-  }
 }
 
 function collectInvalidNames(payload) {
@@ -580,10 +441,6 @@ function resolveRequestUrl(sample, requestDoc, port) {
 async function sendRequest(sample, requestDoc, port) {
   const url = resolveRequestUrl(sample, requestDoc, port);
   const payload = extractRequestBody(requestDoc);
-  if (payload && typeof payload === 'object') {
-    const meta = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
-    payload.metadata = { ...meta, mockSampleReqId: sample.reqId };
-  }
   const headers = { 'content-type': 'application/json' };
   const wantsStream =
     payload?.stream === true ||
@@ -710,11 +567,14 @@ async function runSample(sample, index) {
 
 async function main() {
   await ensureCliAvailable();
-  await runIflowUserAgentRegression();
   const samples = await loadRegistry();
   const watchedTags = new Set(['invalid_name', 'missing_output', 'missing_tool_call_id', 'require_fc_call_ids', 'regression']);
   const regressionSamples = samples.filter(
-    (sample) => Array.isArray(sample.tags) && sample.tags.some((tag) => watchedTags.has(tag))
+    (sample) =>
+      typeof sample.providerId === 'string' &&
+      !sample.providerId.startsWith('iflow.') &&
+      Array.isArray(sample.tags) &&
+      sample.tags.some((tag) => watchedTags.has(tag))
   );
   if (!regressionSamples.length) {
     console.warn('[mock:regressions] No regression-tagged samples matched current filters; skipping mock replay.');

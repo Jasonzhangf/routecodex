@@ -3,6 +3,7 @@ members = [
   "crates/routecodex-v3-config",
   "crates/routecodex-v3-debug",
   "crates/routecodex-v3-error",
+  "crates/routecodex-v3-route-classifier",
   "crates/routecodex-v3-virtual-router",
   "crates/routecodex-v3-target",
   "crates/routecodex-v3-sse",

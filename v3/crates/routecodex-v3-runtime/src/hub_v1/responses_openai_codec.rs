@@ -1,4 +1,5 @@
 use serde_json::{json, Map, Value};
+use std::collections::BTreeSet;
 
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
@@ -86,12 +87,23 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 )?;
             }
             "web_search_call" => {
-                append_v3_openai_chat_web_search_call_history_pair(
+                append_v3_openai_chat_hosted_tool_call_history_pair(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     item,
                     input_index,
+                    V3OpenAiChatHostedToolHistoryKind::WebSearch,
+                )?;
+            }
+            "tool_search_call" => {
+                append_v3_openai_chat_hosted_tool_call_history_pair(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &mut pending_tool_call_ids,
+                    item,
+                    input_index,
+                    V3OpenAiChatHostedToolHistoryKind::ToolSearch,
                 )?;
             }
             other => {
@@ -99,6 +111,39 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     "unsupported Responses input item type for OpenAI Chat provider encoding: {other}"
                 ));
             }
+        }
+    }
+    let parse_failure_tool_result_ids = parse_failure_tool_result_ids(&messages);
+    for tool_call in messages
+        .iter_mut()
+        .filter_map(|message| message.get_mut("tool_calls").and_then(Value::as_array_mut))
+        .flatten()
+    {
+        let call_id = tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("<missing>");
+        let arguments = tool_call
+            .get("function")
+            .and_then(|function| function.get("arguments"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                format!(
+                    "OpenAI Chat provider encoding cannot losslessly project tool call {call_id} at ProviderReqCompat06ProviderCompat: arguments must be a JSON string"
+                )
+            })?;
+        if let Err(error) = serde_json::from_str::<Value>(arguments) {
+            let matching_parse_feedback = parse_failure_tool_result_ids.contains(call_id);
+            if matching_parse_feedback {
+                if let Some(function) = tool_call.get_mut("function").and_then(Value::as_object_mut)
+                {
+                    function.insert("arguments".to_string(), Value::String("{}".to_string()));
+                }
+                continue;
+            }
+            return Err(format!(
+                "OpenAI Chat provider encoding cannot losslessly project tool call {call_id} at ProviderReqCompat06ProviderCompat: arguments must be valid JSON; matching parse-failure tool result={matching_parse_feedback}: {error}"
+            ));
         }
     }
     if messages.is_empty() {
@@ -148,6 +193,28 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         request.insert("reasoning_effort".to_string(), reasoning_effort);
     }
     Ok(Value::Object(request))
+}
+
+fn parse_failure_tool_result_ids(messages: &[Value]) -> BTreeSet<String> {
+    messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+        .filter(|message| {
+            message
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|content| content.starts_with("failed to parse function arguments:"))
+        })
+        .filter_map(|message| {
+            message
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|call_id| !call_id.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .collect()
 }
 
 fn responses_reasoning_request_config_as_openai_chat_reasoning_effort(
@@ -460,7 +527,8 @@ fn responses_input_item_needs_req04_original_surface(item: &Value) -> bool {
         | "custom_tool_call_output"
         | "tool_result"
         | "tool_message"
-        | "web_search_call" => return true,
+        | "web_search_call"
+        | "tool_search_call" => return true,
         _ => {}
     }
     item.get("content")
@@ -595,18 +663,49 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
     Ok(json!({"role":"tool","tool_call_id":call_id,"content":content}))
 }
 
-fn append_v3_openai_chat_web_search_call_history_pair(
+#[derive(Clone, Copy)]
+enum V3OpenAiChatHostedToolHistoryKind {
+    WebSearch,
+    ToolSearch,
+}
+
+impl V3OpenAiChatHostedToolHistoryKind {
+    fn responses_item_type(self) -> &'static str {
+        match self {
+            Self::WebSearch => "web_search_call",
+            Self::ToolSearch => "tool_search_call",
+        }
+    }
+
+    fn openai_chat_function_name(self) -> &'static str {
+        match self {
+            Self::WebSearch => "web_search",
+            Self::ToolSearch => "tool_search",
+        }
+    }
+
+    fn synthetic_call_id_prefix(self) -> &'static str {
+        match self {
+            Self::WebSearch => "call_routecodex_web_search",
+            Self::ToolSearch => "call_routecodex_tool_search",
+        }
+    }
+}
+
+fn append_v3_openai_chat_hosted_tool_call_history_pair(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
     item: &Map<String, Value>,
     input_index: usize,
+    kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<(), String> {
-    ensure_v3_openai_chat_web_search_event_has_no_side_channel(item)?;
-    let call_id = build_v3_openai_chat_web_search_history_call_id(item, input_index);
+    ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(item, kind)?;
+    let call_id = build_v3_openai_chat_hosted_tool_history_call_id(item, input_index, kind);
     let assistant =
-        build_v3_openai_chat_web_search_assistant_tool_call_message(item, call_id.as_str())?;
-    let tool_result = build_v3_openai_chat_web_search_tool_result_message(item, call_id.as_str())?;
+        build_v3_openai_chat_hosted_tool_assistant_tool_call_message(item, call_id.as_str(), kind)?;
+    let tool_result =
+        build_v3_openai_chat_hosted_tool_result_message(item, call_id.as_str(), kind)?;
     append_v3_openai_chat_tool_call_message(
         messages,
         pending_tool_message_index,
@@ -621,24 +720,26 @@ fn append_v3_openai_chat_web_search_call_history_pair(
     )
 }
 
-fn ensure_v3_openai_chat_web_search_event_has_no_side_channel(
+fn ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
     item: &Map<String, Value>,
+    kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<(), String> {
     let event = Value::Object(item.clone());
+    let item_type = kind.responses_item_type();
     if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
         return Err(format!(
-            "Responses web_search_call contains RouteCodex side-channel field before OpenAI Chat provider encoding: {key}"
+            "Responses {item_type} contains RouteCodex side-channel field before OpenAI Chat provider encoding: {key}"
         ));
     }
-    if let Some(key) = find_v3_openai_chat_web_search_private_payload_key(&event) {
+    if let Some(key) = find_v3_openai_chat_hosted_tool_private_payload_key(&event) {
         return Err(format!(
-            "Responses web_search_call contains private debug field before OpenAI Chat provider encoding: {key}"
+            "Responses {item_type} contains private debug field before OpenAI Chat provider encoding: {key}"
         ));
     }
     Ok(())
 }
 
-fn find_v3_openai_chat_web_search_private_payload_key(value: &Value) -> Option<String> {
+fn find_v3_openai_chat_hosted_tool_private_payload_key(value: &Value) -> Option<String> {
     match value {
         Value::Object(object) => {
             for key in object.keys() {
@@ -648,32 +749,35 @@ fn find_v3_openai_chat_web_search_private_payload_key(value: &Value) -> Option<S
             }
             object
                 .values()
-                .find_map(find_v3_openai_chat_web_search_private_payload_key)
+                .find_map(find_v3_openai_chat_hosted_tool_private_payload_key)
         }
         Value::Array(items) => items
             .iter()
-            .find_map(find_v3_openai_chat_web_search_private_payload_key),
+            .find_map(find_v3_openai_chat_hosted_tool_private_payload_key),
         _ => None,
     }
 }
 
-fn build_v3_openai_chat_web_search_history_call_id(
+fn build_v3_openai_chat_hosted_tool_history_call_id(
     item: &Map<String, Value>,
     input_index: usize,
+    kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> String {
     read_v3_non_empty_str(item.get("call_id"))
         .or_else(|| read_v3_non_empty_str(item.get("tool_call_id")))
         .or_else(|| read_v3_non_empty_str(item.get("id")))
         .map(str::to_string)
-        .unwrap_or_else(|| format!("call_routecodex_web_search_{input_index}"))
+        .unwrap_or_else(|| format!("{}_{}", kind.synthetic_call_id_prefix(), input_index))
 }
 
-fn build_v3_openai_chat_web_search_assistant_tool_call_message(
+fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
     item: &Map<String, Value>,
     call_id: &str,
+    kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<Value, String> {
-    let arguments_value = build_v3_openai_chat_web_search_arguments_value(item.get("action"));
+    let arguments_value = build_v3_openai_chat_hosted_tool_arguments_value(item, kind);
     let arguments = serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?;
+    let function_name = kind.openai_chat_function_name();
     Ok(json!({
         "role": "assistant",
         "content": "",
@@ -681,31 +785,44 @@ fn build_v3_openai_chat_web_search_assistant_tool_call_message(
             "id": call_id,
             "type": "function",
             "function": {
-                "name": "web_search",
+                "name": function_name,
                 "arguments": arguments
             }
         }]
     }))
 }
 
-fn build_v3_openai_chat_web_search_arguments_value(action: Option<&Value>) -> Value {
-    match action {
+fn build_v3_openai_chat_hosted_tool_arguments_value(
+    item: &Map<String, Value>,
+    kind: V3OpenAiChatHostedToolHistoryKind,
+) -> Value {
+    let source = match kind {
+        V3OpenAiChatHostedToolHistoryKind::WebSearch => item.get("action"),
+        V3OpenAiChatHostedToolHistoryKind::ToolSearch => {
+            item.get("arguments").or_else(|| item.get("action"))
+        }
+    };
+    match source {
         Some(Value::Object(object)) => Value::Object(object.clone()),
-        Some(value) => json!({ "action": value }),
+        Some(value) => json!({ "value": value }),
         None => Value::Object(Map::new()),
     }
 }
 
-fn build_v3_openai_chat_web_search_tool_result_message(
+fn build_v3_openai_chat_hosted_tool_result_message(
     item: &Map<String, Value>,
     call_id: &str,
+    kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<Value, String> {
-    let event = build_v3_openai_chat_web_search_tool_result_event(item);
+    let event = build_v3_openai_chat_hosted_tool_result_event(item, kind);
     let content = serde_json::to_string(&event).map_err(|error| error.to_string())?;
     Ok(json!({"role":"tool","tool_call_id":call_id,"content":content}))
 }
 
-fn build_v3_openai_chat_web_search_tool_result_event(item: &Map<String, Value>) -> Value {
+fn build_v3_openai_chat_hosted_tool_result_event(
+    item: &Map<String, Value>,
+    kind: V3OpenAiChatHostedToolHistoryKind,
+) -> Value {
     let mut event = Map::new();
     for key in [
         "type",
@@ -714,6 +831,8 @@ fn build_v3_openai_chat_web_search_tool_result_event(item: &Map<String, Value>) 
         "tool_call_id",
         "status",
         "action",
+        "arguments",
+        "execution",
         "result",
         "result_items",
         "results",
@@ -734,7 +853,7 @@ fn build_v3_openai_chat_web_search_tool_result_event(item: &Map<String, Value>) 
     if !event.contains_key("type") {
         event.insert(
             "type".to_string(),
-            Value::String("web_search_call".to_string()),
+            Value::String(kind.responses_item_type().to_string()),
         );
     }
     Value::Object(event)
@@ -973,6 +1092,82 @@ mod tests {
         assert_eq!(result["status"], json!("failed"));
         assert_eq!(result["action"], arguments);
         assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+    }
+
+    #[test]
+    fn responses_tool_search_call_projects_to_openai_chat_tool_pair() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "call_id": "call_FTUTqdbVH4EQwpp0DWcX5q6M",
+                    "execution": "client",
+                    "status": "completed",
+                    "arguments": {
+                        "query": "multi-agent send message to existing agent status resume agent",
+                        "limit": 8
+                    }
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "继续"}]
+                }
+            ]
+        }))
+        .expect("tool_search_call history must project to legal OpenAI Chat tool pair");
+
+        let messages = request["messages"].as_array().expect("messages");
+        assert_eq!(
+            messages.len(),
+            3,
+            "must emit pair plus following user: {request}"
+        );
+        assert_eq!(messages[0]["role"], json!("assistant"));
+        assert_eq!(
+            messages[0]["tool_calls"][0]["id"],
+            json!("call_FTUTqdbVH4EQwpp0DWcX5q6M")
+        );
+        assert_eq!(
+            messages[0]["tool_calls"][0]["function"]["name"],
+            json!("tool_search")
+        );
+        let arguments: Value = serde_json::from_str(
+            messages[0]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .expect("tool_search arguments string"),
+        )
+        .expect("tool_search arguments must be JSON");
+        assert_eq!(
+            arguments,
+            json!({
+                "query": "multi-agent send message to existing agent status resume agent",
+                "limit": 8
+            })
+        );
+        assert_eq!(messages[1]["role"], json!("tool"));
+        assert_eq!(
+            messages[1]["tool_call_id"],
+            json!("call_FTUTqdbVH4EQwpp0DWcX5q6M")
+        );
+        let result: Value = serde_json::from_str(
+            messages[1]["content"]
+                .as_str()
+                .expect("tool result content string"),
+        )
+        .expect("tool result content must preserve tool_search event as JSON");
+        assert_eq!(result["type"], json!("tool_search_call"));
+        assert_eq!(result["execution"], json!("client"));
+        assert_eq!(result["status"], json!("completed"));
+        assert_eq!(result["arguments"], arguments);
+        assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+        assert!(
+            messages.iter().all(|message| {
+                message.get("type").and_then(Value::as_str) != Some("tool_search_call")
+            }),
+            "OpenAI Chat messages must not embed native Responses tool_search_call items: {request}"
+        );
     }
 
     #[test]

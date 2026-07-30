@@ -255,12 +255,12 @@
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>108</code></td>
+    <td><code>112</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>217</code></td>
+    <td><code>213</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -302,7 +302,7 @@
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>217</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>213</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -316,7 +316,7 @@
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>108</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>112</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -4638,7 +4638,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><ul class="field-list"><li><code>request.messages[].content[].server_tool_use.id</code></li></ul></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.messages_items.content_items.server_tool_use.name</code><br><span class="muted">added Chat extension field</span></td>
@@ -4648,7 +4648,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><ul class="field-list"><li><code>request.messages[].content[].server_tool_use.name</code></li></ul></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.messages_items.content_items.text_editor_code_execution_tool_result.content</code><br><span class="muted">added Chat extension field</span></td>
@@ -4718,7 +4718,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><ul class="field-list"><li><code>request.messages[].content[].web_search_tool_result.content</code></li></ul></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.output_config.effort</code><br><span class="muted">added Chat extension field</span></td>
@@ -9011,7 +9011,7 @@
         <td>Anthropic Messages</td>
         <td><code>server_tool_blocks</code></td>
         <td><code>chat.extensions.anthropic.server_tools</code></td>
-        <td><span class="badge extension_declared">extension_declared</span></td>
+        <td><span class="badge partial">partial</span></td>
         <td><ul class="field-list"><li><code>request.messages[].content[].server_tool_use</code></li><li><code>request.messages[].content[].web_search_tool_result</code></li><li><code>request.messages[].content[].web_fetch_tool_result</code></li><li><code>request.messages[].content[].code_execution_tool_result</code></li><li><code>request.messages[].content[].tool_search_tool_result</code></li></ul></td>
       </tr>
 <tr>

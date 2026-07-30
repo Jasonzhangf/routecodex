@@ -1,0 +1,46 @@
+{
+  "contract_id": "v3-5520-duplicate-response-tool-identity-not-rerouted",
+  "status": "source_fixed_and_live_entry_replayed",
+  "live_sample": {
+    "port": 5520,
+    "request_id": "openai-responses-router-gpt-5.5-20260729T220124715-675908-13545",
+    "client_error": "malformed tool call at output index 5: duplicate call_id/id",
+    "current_projection": "responses_relay_runtime_error",
+    "current_status": 500
+  },
+  "first_divergence": {
+    "validator_owner": "V3HubRespChatProcess03Governed",
+    "validator_symbol": "collect_v3_resp03_responses_tool_calls",
+    "validator_result": "correctly rejects duplicate provider tool identity",
+    "runtime_owner": "execute_v3_responses_relay_runtime_inner",
+    "runtime_classifier": "is_v3_responses_provider_response_failure",
+    "defect": "V3ResponsesRelayRuntimeError::Response(V3HubRelayResponseError::MalformedToolCall) is omitted from provider-response failure classification, so JSON and SSE hook errors bypass typed Error05 policy."
+  },
+  "unique_fix": {
+    "owner_file": "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+    "allowed": "Classify provider-origin V3HubRelayResponseError variants as provider response failures, preserve V3HubRespChatProcess03Governed as their source stage, and reuse the shared relay provider-failure policy whose build_v3_relay_provider_error_05_decision calls build_v3_error_01_source_raised_external.",
+    "forbidden": [
+      "weaken Resp03 duplicate identity validation",
+      "deduplicate or rewrite provider output",
+      "repair in SSE, Resp05, server handler, or client projection",
+      "project malformed provider output as success"
+    ]
+  },
+  "acceptance": [
+    "JSON provider response with duplicate call_id enters Error05 and reselects before client projection.",
+    "SSE-materialized provider response with duplicate call_id enters the same Error05 path.",
+    "A valid single tool call and two distinct call_id values remain successful.",
+    "When no candidate/default remains, client receives the typed standard Responses error projection with stage V3HubRespChatProcess03Governed rather than generic responses_relay_runtime_error.",
+    "A true provider response-body error remains staged at V3ProviderRespInbound01Raw."
+  ],
+  "verification": {
+    "controlled_duplicate_branch": "JSON/SSE reselect and terminal exhaustion tests pass with provider-origin duplicate call_id/id fixtures.",
+    "installed_build": "rccv3 0.90.4000 installed with identical binary SHA256 across repo and global install surfaces.",
+    "managed_restart": "One aggregate routecodex restart --port 5555 completed and ports 10000, 5520, and 5555 reported build_version 0.90.4000.",
+    "old_sample_replay": "The exact saved 5520 request returned HTTP 200 SSE through a live provider switch; the provider did not reproduce duplicate output in this replay, so the duplicate branch remains closed by controlled JSON/SSE black-box tests rather than a second live duplicate response."
+  },
+  "remaining_risk": [
+    "The live provider did not emit a second duplicate tool identity during old-sample replay.",
+    "No claim is made that upstream providers can no longer generate malformed duplicate identities; RouteCodex now rejects and routes that provider failure correctly."
+  ]
+}

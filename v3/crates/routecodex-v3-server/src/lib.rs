@@ -4103,6 +4103,8 @@ fn emit_v3_provider_failure_console_event(
     }
     let identity = resolve_v3_console_log_identity(context);
     let route = resolve_v3_console_route_projection(observability);
+    let event_observability =
+        build_v3_console_provider_failure_event_observability(observability, event);
     let error_content =
         format_v3_provider_failure_console_content(&context.request_identity.request_id, event);
     let error_content_str = error_content.as_str();
@@ -4110,7 +4112,7 @@ fn emit_v3_provider_failure_console_event(
         &context.state.server.port.to_string(),
         &context.entry_protocol,
         identity.project_path.as_deref(),
-        observability,
+        &event_observability,
         &route.label,
     );
     let colorized_error = colorize_v3_error_console_line(
@@ -4134,7 +4136,7 @@ fn emit_v3_provider_failure_console_event(
                 &context.state.server.port.to_string(),
                 &context.entry_protocol,
                 identity.project_path.as_deref(),
-                observability,
+                &event_observability,
                 &route.label,
             ),
             &identity.session_id,
@@ -4169,30 +4171,45 @@ fn format_v3_provider_failure_console_event_key(
     )
 }
 
+fn build_v3_console_provider_failure_event_observability(
+    observability: &V3RuntimeObservability,
+    event: &V3RuntimeProviderFailureObservation,
+) -> V3RuntimeObservability {
+    let mut event_observability = observability.clone();
+    event_observability.provider_id = Some(event.provider_id.clone());
+    event_observability.auth_alias = event.auth_alias.clone();
+    event_observability.provider_key = Some(event.provider_key.clone());
+    event_observability.model_id = Some(event.model_id.clone());
+    event_observability.wire_model = Some(event.model_id.clone());
+    event_observability.provider_status = Some(event.status);
+    event_observability
+}
+
 fn format_v3_provider_failure_console_content(
     request_id: &str,
     event: &V3RuntimeProviderFailureObservation,
 ) -> String {
+    let provider = format_v3_console_provider_key_label(&event.provider_key);
+    let next = event
+        .next_provider_key
+        .as_deref()
+        .map(format_v3_console_provider_key_label)
+        .unwrap_or_else(|| "-".to_string());
     let mut fields = format!(
-        "req={} provider={} status={} failures={} health={} action={}",
+        "req={} target={} result={} next={} causeStatus={} failures={} health={}",
         request_id,
-        format_v3_console_provider_key_label(&event.provider_key),
+        provider,
+        event.action,
+        next,
         event.status,
         event.failure_count,
-        event.health_state,
-        event.action
+        event.health_state
     );
     if let Some(cooldown_until_ms) = event.cooldown_until_ms {
         fields.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
     }
     if let Some(wait_ms) = event.wait_ms {
         fields.push_str(&format!(" waitMs={wait_ms}"));
-    }
-    if let Some(next) = event.next_provider_key.as_deref() {
-        fields.push_str(&format!(
-            " next={}",
-            format_v3_console_provider_key_label(next)
-        ));
     }
     if let Some(error_type) = event.error_type.as_deref() {
         fields.push_str(&format!(" type={error_type}"));
@@ -4228,11 +4245,11 @@ fn format_v3_provider_switch_console_content(
     format_v3_console_timed_content(
         "[provider-switch]",
         &format!(
-            "req={} from={} to={} action={} reason=provider_failure",
+            "req={} target={} result={} next={} reason=provider_failure",
             request_id,
             format_v3_console_provider_key_label(&event.provider_key),
-            next,
-            event.action
+            event.action,
+            next
         ),
     )
 }
@@ -9076,16 +9093,27 @@ mod tests {
         let error_content =
             format_v3_provider_failure_console_content("req-provider-switch", &event);
         assert!(error_content.contains("❌ [provider-error]"));
-        assert!(error_content.contains("provider=limited[key1].gpt-5.5"));
+        assert!(error_content.contains("target=limited[key1].gpt-5.5"));
+        assert!(error_content.contains("result=switch_provider"));
+        assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
+        assert!(
+            error_content.find("target=limited[key1].gpt-5.5").unwrap()
+                < error_content.find("causeStatus=502").unwrap()
+        );
+        assert!(
+            error_content.find("next=minimax[key1].MiniMax-M3").unwrap()
+                < error_content.find("causeStatus=502").unwrap()
+        );
         assert!(error_content.contains("failures=3"));
         assert!(error_content.contains("health=cooldown"));
-        assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
         assert!(error_content.contains("external=transport"));
         assert!(error_content.contains("externalCode=TRANSPORT_ERROR"));
         let switch_content =
             format_v3_provider_switch_console_content("req-provider-switch", &event);
         assert!(switch_content.contains("[provider-switch]"));
-        assert!(switch_content.contains("from=limited[key1].gpt-5.5 to=minimax[key1].MiniMax-M3"));
+        assert!(switch_content.contains(
+            "target=limited[key1].gpt-5.5 result=switch_provider next=minimax[key1].MiniMax-M3"
+        ));
 
         let colored = colorize_v3_layered_console_line(
             V3ConsoleLayeredBlock::new("", &error_content, &error_content, ""),
@@ -9183,6 +9211,22 @@ mod tests {
         assert!(
             after_realtime.contains("❌ [provider-error]"),
             "{after_realtime}"
+        );
+        let provider_error_line = after_realtime
+            .lines()
+            .find(|line| {
+                line.contains("❌ [provider-error]") && line.contains("target=first[key].gpt-5.5")
+            })
+            .unwrap_or_else(|| {
+                panic!("missing provider-error line for failed provider: {after_realtime}")
+            });
+        assert!(
+            provider_error_line.contains("[direct:first.gpt-5.5"),
+            "provider failure prefix must name the failed provider, not the selected next provider: {provider_error_line}"
+        );
+        assert!(
+            !provider_error_line.contains("[direct:second.gpt-5.5"),
+            "provider failure line must not be displayed under the next provider target: {provider_error_line}"
         );
         assert!(
             after_realtime.contains("[provider-switch]"),

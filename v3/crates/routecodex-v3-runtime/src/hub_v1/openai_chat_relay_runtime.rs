@@ -1,15 +1,17 @@
 use super::*;
+use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureDecision,
+    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -27,6 +29,18 @@ pub type V3OpenAiChatClientStream =
 pub enum V3OpenAiChatRelayClientBody {
     Json(Value),
     Sse(V3OpenAiChatClientStream),
+}
+
+impl V3OpenAiChatRelayClientBody {
+    pub fn is_sse(&self) -> bool {
+        matches!(self, Self::Sse(_))
+    }
+}
+
+impl From<String> for V3OpenAiChatRelayRuntimeError {
+    fn from(value: String) -> Self {
+        Self::Target(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -184,8 +198,8 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqExecution05Planned");
     let route_facts_body = req05.previous.previous.previous.previous.payload.0.clone();
     let mut failed_candidates = BTreeSet::new();
-    let mut pending_provider_failure: Option<V3OpenAiChatRelayProviderFailure> = None;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
+    let mut pending_provider_action_recovery = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
@@ -215,12 +229,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                 deterministic_sample,
             }) {
                 Ok(selected) => selected,
-                Err(error) => {
-                    if let Some(failure) = pending_provider_failure.take() {
-                        return Ok(provider_failure_output(failure, trace));
-                    }
-                    return Err(V3OpenAiChatRelayRuntimeError::Target(error));
-                }
+                Err(error) => return Err(V3OpenAiChatRelayRuntimeError::Target(error)),
             }
         };
         let selected_target_provider_id = selected.candidate.provider_id.clone();
@@ -240,19 +249,94 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         );
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target())?;
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)?;
+        macro_rules! handle_provider_request_failure {
+            ($stage:expr, $kind:expr, $error:expr) => {{
+                let terminal_failure = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    provider_request_failure($stage, $kind, $error),
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                )
+                .await?;
+                if let Some(failure) = terminal_failure {
+                    return Ok(provider_failure_output(failure, trace));
+                }
+                continue;
+            }};
+        }
+        let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
+            Ok(req_compat) => req_compat,
+            Err(error) => handle_provider_request_failure!(
+                "ProviderReqCompat06ProviderCompat",
+                "provider_request_compat_error",
+                error
+            ),
+        };
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
         let provider_semantic = req09.into_provider_semantic_payload();
-        let wire = build_v3_provider_12_responses_wire_payload(
+        let wire = match build_v3_provider_12_responses_wire_payload(
             &input.request_id,
             target,
             provider_semantic,
-        )?;
+        ) {
+            Ok(wire) => wire,
+            Err(error) => handle_provider_request_failure!(
+                "V3ProviderReqOutbound08WirePayload",
+                "provider_request_wire_error",
+                error
+            ),
+        };
         trace.push("V3ProviderReqOutbound08WirePayload");
-        let transport_request = build_v3_openai_chat_transport_09_from_v3_provider_08(wire)?;
+        let transport_request = match build_v3_openai_chat_transport_09_from_v3_provider_08(wire) {
+            Ok(request) => request,
+            Err(error) => handle_provider_request_failure!(
+                "V3ProviderReqOutbound09TransportRequest",
+                "provider_transport_request_error",
+                error
+            ),
+        };
         trace.push("V3ProviderReqOutbound09TransportRequest");
+        let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
+        if let Some(recovery) = pending_provider_action_recovery.take() {
+            match provider_health
+                .wait_for_error05_recovery(&recovery, &selected)
+                .await
+                .map_err(V3OpenAiChatRelayRuntimeError::Target)?
+            {
+                V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
+                    provider_action_permit = admission.take_permit();
+                    trace.push("V3ProviderActionGateAdmission");
+                }
+                V3ProviderActionRecoveryTransition::Superseded(ticket) => {
+                    pending_provider_action_recovery = Some(
+                        ticket
+                            .recovery_witness()
+                            .map_err(V3OpenAiChatRelayRuntimeError::Target)?,
+                    );
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateTerminalReevaluation");
+                    continue;
+                }
+                V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {
+                    pending_provider_action_recovery = Some(
+                        ticket
+                            .recovery_witness()
+                            .map_err(V3OpenAiChatRelayRuntimeError::Target)?,
+                    );
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateTerminalReevaluation");
+                    continue;
+                }
+            }
+        }
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(V3ProviderError::HttpStatus { response }) => {
@@ -261,6 +345,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                     &response.body,
                     &selected_target_provider_id,
                 );
+                drop(provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
                     selected,
@@ -271,7 +356,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                         trace: &mut trace,
                     },
                     &mut retry_selected,
-                    &mut pending_provider_failure,
+                    &mut pending_provider_action_recovery,
                 )
                 .await?
                 {
@@ -281,6 +366,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             }
             Err(error) => {
                 let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                drop(provider_action_permit.take());
                 if let Some(failure) = handle_provider_failure(
                     &failure_context,
                     selected,
@@ -291,7 +377,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                         trace: &mut trace,
                     },
                     &mut retry_selected,
-                    &mut pending_provider_failure,
+                    &mut pending_provider_action_recovery,
                 )
                 .await?
                 {
@@ -313,6 +399,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                             },
                             &selected_target_provider_id,
                         );
+                        drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
                             selected,
@@ -323,7 +410,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                                 trace: &mut trace,
                             },
                             &mut retry_selected,
-                            &mut pending_provider_failure,
+                            &mut pending_provider_action_recovery,
                         )
                         .await?
                         {
@@ -348,6 +435,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                             },
                             &selected_target_provider_id,
                         );
+                        drop(provider_action_permit.take());
                         if let Some(failure) = handle_provider_failure(
                             &failure_context,
                             selected,
@@ -358,7 +446,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                                 trace: &mut trace,
                             },
                             &mut retry_selected,
-                            &mut pending_provider_failure,
+                            &mut pending_provider_action_recovery,
                         )
                         .await?
                         {
@@ -368,7 +456,9 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                     }
                 };
                 provider_health
-                    .record_provider_success(
+                    .record_provider_success_in_scope(
+                        &input.server_id,
+                        server_routing_group(manifest, &input.server_id)?,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
@@ -385,11 +475,22 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             }
             V3ProviderResponseBody::Sse(stream) => {
                 push_sse_response_chain_trace(&mut trace);
+                let routing_group = server_routing_group(manifest, &input.server_id)?.to_string();
                 return Ok(V3OpenAiChatRelayRuntimeOutput {
                     status: 200,
                     client_body: V3OpenAiChatRelayClientBody::Sse(project_sse_stream(
                         stream,
                         selected_target_compatibility_profile,
+                        V3OpenAiChatSseProviderOutcome {
+                            provider_health: provider_health.clone(),
+                            server_id: input.server_id.clone(),
+                            routing_group,
+                            provider_id: selected_target_provider_id,
+                            auth_alias: selected_target_auth_alias,
+                            model_id: selected_target_model_id,
+                            recorded: false,
+                            _provider_action_permit: provider_action_permit.take(),
+                        },
                     )),
                     node_trace: trace,
                     error_chain: None,
@@ -484,11 +585,61 @@ struct V3OpenAiChatSseState {
     seen_done: bool,
     done: bool,
     compatibility_profile: Option<String>,
+    provider_outcome: V3OpenAiChatSseProviderOutcome,
+}
+
+struct V3OpenAiChatSseProviderOutcome {
+    provider_health: V3ProviderFailureRuntimeHealth,
+    server_id: String,
+    routing_group: String,
+    provider_id: String,
+    auth_alias: String,
+    model_id: String,
+    recorded: bool,
+    _provider_action_permit: Option<V3ProviderActionPermit>,
+}
+
+impl V3OpenAiChatSseProviderOutcome {
+    async fn record_failure(&mut self, reason: &str) -> Result<(), String> {
+        if self.recorded {
+            return Ok(());
+        }
+        drop(self._provider_action_permit.take());
+        self.provider_health
+            .record_post_commit_provider_stream_failure(
+                &self.server_id,
+                &self.routing_group,
+                &self.provider_id,
+                Some(&self.auth_alias),
+                Some(&self.model_id),
+                "provider_response_protocol",
+                reason,
+            )?;
+        self.recorded = true;
+        Ok(())
+    }
+
+    fn record_success(&mut self) -> Result<(), String> {
+        if self.recorded {
+            return Ok(());
+        }
+        self.provider_health.record_provider_success_in_scope(
+            &self.server_id,
+            &self.routing_group,
+            &self.provider_id,
+            Some(&self.auth_alias),
+            Some(&self.model_id),
+            v3_relay_provider_policy_now_epoch_ms()?,
+        )?;
+        self.recorded = true;
+        Ok(())
+    }
 }
 
 fn project_sse_stream(
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
+    provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3OpenAiChatClientStream {
     use futures_util::StreamExt;
     let state = V3OpenAiChatSseState {
@@ -501,6 +652,7 @@ fn project_sse_stream(
         seen_done: false,
         done: false,
         compatibility_profile,
+        provider_outcome,
     };
     Box::pin(futures_util::stream::unfold(
         state,
@@ -512,32 +664,62 @@ fn project_sse_stream(
                 if state.done {
                     return None;
                 }
-                if state.seen_done {
-                    return None;
-                }
                 let Some(chunk) = state.provider.next().await else {
                     state.done = true;
-                    if !state.terminal || !state.seen_done {
-                        return Some((
-                            Err(
-                                "OpenAI Chat SSE ended without terminal finish_reason or [DONE]"
-                                    .to_string(),
-                            ),
-                            state,
-                        ));
+                    let decoder = std::mem::replace(
+                        &mut state.decoder,
+                        routecodex_v3_sse::SseIncrementalDecoder::new(
+                            routecodex_v3_sse::SseTransportLimits::default(),
+                        ),
+                    );
+                    if let Err(error) = decoder.finish() {
+                        let error = error.to_string();
+                        let result = state
+                            .provider_outcome
+                            .record_failure(&error)
+                            .await
+                            .map(|()| error)
+                            .and_then(Err);
+                        return Some((result, state));
                     }
-                    return None;
+                    if !state.terminal || !state.seen_done {
+                        let error =
+                            "OpenAI Chat SSE ended without terminal finish_reason or [DONE]"
+                                .to_string();
+                        let result = state
+                            .provider_outcome
+                            .record_failure(&error)
+                            .await
+                            .map(|()| error)
+                            .and_then(Err);
+                        return Some((result, state));
+                    }
+                    return match state.provider_outcome.record_success() {
+                        Ok(()) => None,
+                        Err(error) => Some((Err(error), state)),
+                    };
                 };
-                let result = chunk
-                    .map_err(|error| error.to_string())
-                    .and_then(|chunk| {
+                let result = match chunk {
+                    Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        state.done = true;
+                        return Some((Err(error.to_string()), state));
+                    }
+                    Err(error) => Err(error.to_string()),
+                    Ok(chunk) => {
                         let raw = routecodex_v3_sse::build_v3_sse_transport_in_01_raw_chunk(&chunk);
                         state.decoder.push(raw).map_err(|error| error.to_string())
-                    })
-                    .and_then(|frames| enqueue_sse_client_chunks(&mut state, frames));
+                    }
+                }
+                .and_then(|frames| enqueue_sse_client_chunks(&mut state, frames));
                 if let Err(error) = result {
                     state.done = true;
-                    return Some((Err(error), state));
+                    let result = state
+                        .provider_outcome
+                        .record_failure(&error)
+                        .await
+                        .map(|()| error)
+                        .and_then(Err);
+                    return Some((result, state));
                 }
             }
         },
@@ -549,6 +731,9 @@ fn enqueue_sse_client_chunks(
     frames: Vec<routecodex_v3_sse::SseTransportIn03ValidatedFrameStream>,
 ) -> Result<(), String> {
     for frame in frames {
+        if state.seen_done && !frame.frame().fields().is_empty() {
+            return Err("OpenAI Chat SSE emitted a frame after [DONE]".into());
+        }
         let mut data = None;
         for field in frame.frame().fields() {
             if let routecodex_v3_sse::SseField::Named { name, value } = field {
@@ -558,9 +743,6 @@ fn enqueue_sse_client_chunks(
             }
         }
         let Some(data) = data else { continue };
-        if state.seen_done {
-            return Err("OpenAI Chat SSE emitted a frame after [DONE]".into());
-        }
         if data == "[DONE]" {
             if !state.terminal {
                 return Err("OpenAI Chat SSE emitted [DONE] before terminal finish_reason".into());
@@ -681,20 +863,25 @@ fn provider_target(
 struct V3OpenAiChatRelayProviderFailure {
     status: u16,
     client_response: Value,
-    provider_id: String,
+    source_stage: &'static str,
+    terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
 }
 
 async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    failure: V3OpenAiChatRelayProviderFailure,
+    mut failure: V3OpenAiChatRelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_provider_failure: &mut Option<V3OpenAiChatRelayProviderFailure>,
+    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
 ) -> Result<Option<V3OpenAiChatRelayProviderFailure>, V3OpenAiChatRelayRuntimeError> {
+    if failure.terminal_projection.is_some() {
+        return Ok(Some(failure));
+    }
     let result = run_v3_relay_provider_failure_policy(
         context,
         selected,
+        failure.source_stage,
         failure.status,
         failure
             .client_response
@@ -706,30 +893,59 @@ async fn handle_provider_failure(
     )
     .await
     .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
-    match result.decision {
-        V3RelayProviderFailureDecision::Reselect => {
-            *pending_provider_failure = Some(failure);
+    match result.decision.action {
+        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+            *retry_selected = result.retry_selected.map(|selected| *selected);
+            if result.event.wait_ms.is_some() {
+                *pending_recovery = Some(recovery);
+            } else {
+                *pending_recovery = None;
+            }
             Ok(None)
         }
-        V3RelayProviderFailureDecision::RetrySame(selected) => {
-            *retry_selected = Some(*selected);
+        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+            *retry_selected = result.retry_selected.map(|selected| *selected);
+            *pending_recovery = Some(recovery);
             Ok(None)
         }
-        V3RelayProviderFailureDecision::ProjectTerminal => Ok(Some(failure)),
+        V3Error05ExecutionAction::ProjectTerminal => {
+            failure.terminal_projection = result.terminal_projection;
+            Ok(Some(failure))
+        }
+        V3Error05ExecutionAction::ClientDisconnected
+        | V3Error05ExecutionAction::RejectNonProviderError => {
+            Err(V3OpenAiChatRelayRuntimeError::Target(
+                "provider failure entered a non-provider Error05 lane".to_string(),
+            ))
+        }
     }
 }
 
 fn provider_http_failure(
     status: u16,
     body: &[u8],
-    provider_id: &str,
+    _provider_id: &str,
 ) -> V3OpenAiChatRelayProviderFailure {
     let body = serde_json::from_slice::<Value>(body)
         .unwrap_or_else(|_| json!({"error":{"type":"provider_error","message":"provider error"}}));
     V3OpenAiChatRelayProviderFailure {
         status,
         client_response: body,
-        provider_id: provider_id.to_string(),
+        source_stage: "V3ProviderReqOutbound09TransportRequest",
+        terminal_projection: None,
+    }
+}
+
+fn provider_request_failure(
+    source_stage: &'static str,
+    error_type: &'static str,
+    error: impl std::fmt::Display,
+) -> V3OpenAiChatRelayProviderFailure {
+    V3OpenAiChatRelayProviderFailure {
+        status: 502,
+        client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
+        source_stage,
+        terminal_projection: None,
     }
 }
 
@@ -737,10 +953,23 @@ fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
 ) -> V3OpenAiChatRelayProviderFailure {
+    let terminal_projection =
+        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
+            project_v3_client_disconnect(
+                provider_id,
+                provider_runtime_failure_stage(&error),
+                error.to_string(),
+            )
+        });
     V3OpenAiChatRelayProviderFailure {
-        status: 502,
+        status: if terminal_projection.is_some() {
+            499
+        } else {
+            502
+        },
         client_response: json!({"error":{"type":"provider_error","message":error.to_string()}}),
-        provider_id: provider_id.to_string(),
+        source_stage: provider_runtime_failure_stage(&error),
+        terminal_projection,
     }
 }
 
@@ -762,41 +991,18 @@ fn provider_failure_message(failure: &V3OpenAiChatRelayProviderFailure) -> Strin
 
 fn provider_failure_output(
     failure: V3OpenAiChatRelayProviderFailure,
-    trace: Vec<&'static str>,
+    mut trace: Vec<&'static str>,
 ) -> V3OpenAiChatRelayRuntimeOutput {
-    let message = provider_failure_message(&failure);
-    let code = failure
-        .client_response
-        .pointer("/error/code")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            failure
-                .client_response
-                .pointer("/error/type")
-                .and_then(Value::as_str)
-        })
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            if failure.status == 502 {
-                "provider_transport_error".to_string()
-            } else {
-                format!("provider_http_{}", failure.status)
-            }
-        });
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderReqOutbound09TransportRequest",
-        code,
-        message,
-    );
-    error_output(
-        source,
-        failure.status,
-        failure.client_response,
-        &failure.provider_id,
-        trace,
-    )
+    let projected = failure
+        .terminal_projection
+        .expect("terminal OpenAI Chat provider failure must carry typed Error06 projection");
+    trace.push("V3Error06ClientProjected");
+    V3OpenAiChatRelayRuntimeOutput {
+        status: projected.status,
+        client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
+        node_trace: trace,
+        error_chain: Some(projected.chain.to_vec()),
+    }
 }
 
 fn error_output(

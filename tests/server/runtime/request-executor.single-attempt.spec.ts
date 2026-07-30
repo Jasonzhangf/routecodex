@@ -19,8 +19,20 @@ import {
   setRuntimeFlag,
   runtimeFlags,
 } from "../../../src/runtime/runtime-flags.js";
+import {
+  readRuntimeProviderObservationProjection,
+  readRuntimeRequestTruthSessionId,
+  writeRuntimeControlSlot,
+} from "../../../src/server/runtime/http-server/metadata-center/request-truth-readers.js";
+import { writeMetadataCenterSlot } from "../../../src/server/runtime/http-server/metadata-center/dualwrite-api.js";
+import {
+  captureResponsesRequestContext,
+  clearAllResponsesConversationState,
+} from "../../../src/modules/llmswitch/bridge/responses-conversation-store-host.js";
 
 const nodeRequire = createRequire(import.meta.url);
+
+jest.setTimeout(15_000);
 
 let requestExecutorLocalHubPipelineExecute:
   | ((input: unknown) => unknown)
@@ -30,7 +42,11 @@ let requestExecutorLocalLastHubPipelineResult: unknown;
 
 function createRequestExecutorLocalRuntimeIntegrationsMock() {
   return {
-    captureResponsesRequestContextForRequest: async () => undefined,
+    captureResponsesRequestContextForRequest: async (args: Parameters<
+      typeof captureResponsesRequestContext
+    >[0]) => {
+      captureResponsesRequestContext(args);
+    },
     clearResponsesConversationByRequestId: async () => undefined,
     reportProviderErrorToRouterPolicy: async (event: unknown) => event,
     reportProviderSuccessToRouterPolicy: async (event: unknown) => event,
@@ -194,8 +210,31 @@ jest.unstable_mockModule(
   }),
 );
 
-const { HubRequestExecutor, __requestExecutorTestables } =
+const {
+  HubRequestExecutor: HubRequestExecutorRaw,
+  __requestExecutorTestables,
+} =
   await import("../../../src/server/runtime/http-server/request-executor.js");
+
+class HubRequestExecutor extends HubRequestExecutorRaw {
+  constructor(
+    deps: ConstructorParameters<typeof HubRequestExecutorRaw>[0],
+  ) {
+    const onRequestStart = deps.onRequestStart;
+    super({
+      ...deps,
+      onRequestStart: async (args) => {
+        await onRequestStart?.(args);
+        if (
+          typeof args.metadata.routecodexRoutingPolicyGroup !== "string" ||
+          !args.metadata.routecodexRoutingPolicyGroup.trim()
+        ) {
+          args.metadata.routecodexRoutingPolicyGroup = "test-group";
+        }
+      },
+    });
+  }
+}
 
 function writeStopMessageState(sessionId: string, used: number): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -225,6 +264,88 @@ function readStopMessageUsed(sessionId: string): number | undefined {
     state?: { stopMessageUsed?: number };
   };
   return payload.state?.stopMessageUsed;
+}
+
+function normalizeMinimalSuccessResponse(result: unknown): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const record = result as Record<string, unknown>;
+  if (
+    typeof record.status === "number" ||
+    Object.prototype.hasOwnProperty.call(record, "data")
+  ) {
+    return result;
+  }
+  return {
+    status: 200,
+    data: result,
+  };
+}
+
+function buildMinimalResponsesSuccessBody(
+  id: string,
+  text = "ok",
+): Record<string, unknown> {
+  return {
+    id,
+    object: "response",
+    status: "completed",
+    output: [
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+      },
+    ],
+    usage: {
+      input_tokens: 1,
+      output_tokens: 1,
+      total_tokens: 2,
+    },
+  };
+}
+
+function seedStoplessRequestTruth(
+  metadata: Record<string, unknown>,
+  sessionId: string,
+): void {
+  const writer = {
+    module: "tests/server/runtime/request-executor.single-attempt.spec.ts",
+    symbol: "seedStoplessRequestTruth",
+    stage: "test_request_start",
+  };
+  metadata.sessionId = sessionId;
+  const existingSessionId = readRuntimeRequestTruthSessionId(metadata);
+  if (existingSessionId && existingSessionId !== sessionId) {
+    throw new Error(
+      `stopless fixture session truth conflict: ${existingSessionId} != ${sessionId}`,
+    );
+  }
+  if (!existingSessionId) {
+    writeMetadataCenterSlot({
+      target: metadata,
+      family: "request_truth",
+      key: "sessionId",
+      value: sessionId,
+      writer,
+      reason: "fixture binds current request session truth",
+    });
+  }
+  writeRuntimeControlSlot({
+    target: metadata,
+    key: "stopless",
+    value: {
+      active: true,
+      flowId: "stop_message_flow",
+      sessionId,
+      repeatCount: 0,
+      maxRepeats: 3,
+      triggerHint: "test_request_start",
+    },
+    writer,
+    reason: "fixture binds Rust-owned stopless runtime control",
+  });
 }
 
 const SESSION_DIR = path.join(
@@ -258,7 +379,9 @@ function createRuntimeHandle(
       },
     },
     instance: {
-      processIncoming: jest.fn().mockImplementation(processImpl),
+      processIncoming: jest.fn().mockImplementation(async () =>
+        normalizeMinimalSuccessResponse(await processImpl())
+      ),
       cleanup: jest.fn(),
     },
   } as unknown as ProviderHandle;
@@ -283,7 +406,9 @@ function createRuntimeHandleWithProtocol(
       outboundProfile: providerProtocol,
     },
     instance: {
-      processIncoming: jest.fn().mockImplementation(processImpl),
+      processIncoming: jest.fn().mockImplementation(async () =>
+        normalizeMinimalSuccessResponse(await processImpl())
+      ),
       cleanup: jest.fn(),
     },
   } as unknown as ProviderHandle;
@@ -292,9 +417,48 @@ function createRuntimeHandleWithProtocol(
 function createExecutor(
   pipelineResult: PipelineExecutionResult,
   handle: ProviderHandle,
+  options?: {
+    fallback?: {
+      pipelineResult: PipelineExecutionResult;
+      handle: ProviderHandle;
+    };
+    onRequestStart?: (args: {
+      requestId: string;
+      metadata: Record<string, unknown>;
+    }) => void | Promise<void>;
+  },
 ) {
   const fakePipeline: HubPipeline = {
-    execute: jest.fn().mockReturnValue(pipelineResult),
+    execute: jest.fn((input: PipelineExecutionInput) => {
+      const excluded = Array.isArray(input.metadata?.excludedProviderKeys)
+        ? input.metadata.excludedProviderKeys
+        : [];
+      const providerKey = pipelineResult.target?.providerKey;
+      if (providerKey && excluded.includes(providerKey)) {
+        if (options?.fallback) {
+          return options.fallback.pipelineResult;
+        }
+        const routingDecision = pipelineResult.routingDecision as
+          | Record<string, unknown>
+          | undefined;
+        const routeName =
+          typeof routingDecision?.routeName === "string"
+            ? routingDecision.routeName
+            : "test-route";
+        throw Object.assign(
+          new Error("No available providers after applying routing instructions"),
+          {
+            code: "PROVIDER_NOT_AVAILABLE",
+            details: {
+              route: routeName,
+              routeName,
+              exhaustedTargets: [...excluded],
+            },
+          },
+        );
+      }
+      return pipelineResult;
+    }),
   };
 
   const targetProtocol =
@@ -316,8 +480,24 @@ function createExecutor(
     : handle;
 
   const runtimeManager: ProviderRuntimeManager = {
-    resolveRuntimeKey: jest.fn().mockReturnValue("runtime:key"),
-    getHandleByRuntimeKey: jest.fn().mockReturnValue(runtimeHandle),
+    resolveRuntimeKey: jest.fn((providerKey?: string) => {
+      if (
+        options?.fallback?.pipelineResult.target?.providerKey === providerKey
+      ) {
+        return options.fallback.pipelineResult.target.runtimeKey;
+      }
+      if (pipelineResult.target?.providerKey === providerKey) {
+        return pipelineResult.target.runtimeKey ?? "runtime:key";
+      }
+      return undefined;
+    }),
+    getHandleByRuntimeKey: jest.fn((runtimeKey: string) => {
+      const fallbackRuntimeKey = options?.fallback?.pipelineResult.target?.runtimeKey;
+      if (fallbackRuntimeKey && runtimeKey === fallbackRuntimeKey) {
+        return options.fallback?.handle;
+      }
+      return runtimeHandle;
+    }),
     getHandleByProviderKey: jest.fn(),
     disposeAll: jest.fn(),
     initialize: jest.fn(),
@@ -343,6 +523,7 @@ function createExecutor(
       }) as ModuleDependencies,
     logStage: jest.fn(),
     stats,
+    onRequestStart: options?.onRequestStart,
   };
 
   const executor = new HubRequestExecutor(deps);
@@ -390,6 +571,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     requestExecutorLocalLastHubPipelineResult = undefined;
     convertProviderResponseSpy?.mockRestore();
     convertProviderResponseSpy = null;
+    clearAllResponsesConversationState();
     __requestExecutorTestables.resetRequestExecutorInternalStateForTests();
     __resetSnapshotLocalDiskGateForTests();
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
@@ -519,7 +701,14 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         ],
       },
     }));
-    const { executor, request } = createExecutor(relayPipelineResult, handle);
+    const { executor, request } = createExecutor(relayPipelineResult, handle, {
+      onRequestStart: ({ metadata }) => {
+        seedStoplessRequestTruth(
+          metadata,
+          "executor-minimax-relay-stopless",
+        );
+      },
+    });
     (executor as any).deps.executeNestedInput = nested;
 
     const response = await executor.execute({
@@ -549,17 +738,16 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       | undefined;
     expect(toolCall?.name).toBe("exec_command");
     expect(String(toolCall?.arguments)).toContain(
-      "routecodex servertool run stop_message_auto",
+      "routecodex hook run reasoningStop",
     );
-    expect(String(toolCall?.arguments)).toContain("当前用户目标");
+    expect(String(toolCall?.arguments)).not.toContain("当前用户目标");
   });
 
   it("does not bypass stopless for openai-responses prebuilt SSE stop response", async () => {
     const responseId = "resp_prebuilt_sse_stopless_red";
     const providerResponse = {
       status: 200,
-      body: {
-        __sse_responses: Readable.from([
+      sseStream: Readable.from([
           "event: response.created\n",
           `data: ${JSON.stringify({
             type: "response.created",
@@ -622,8 +810,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
             },
           })}\n\n`,
           "data: [DONE]\n\n",
-        ]),
-      },
+      ]),
     };
     const handle = createRuntimeHandleWithProtocol(
       async () => providerResponse,
@@ -647,7 +834,14 @@ describe("HubRequestExecutor single attempt behaviour", () => {
           "gateway-priority-5555-weighted-longcontext",
       },
     } as PipelineExecutionResult;
-    const { executor, request } = createExecutor(relayPipelineResult, handle);
+    const { executor, request } = createExecutor(relayPipelineResult, handle, {
+      onRequestStart: ({ metadata }) => {
+        seedStoplessRequestTruth(
+          metadata,
+          "executor-prebuilt-sse-stopless",
+        );
+      },
+    });
 
     const response = await executor.execute({
       ...request,
@@ -676,11 +870,11 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       | undefined;
     expect(toolCall?.name).toBe("exec_command");
     expect(String(toolCall?.arguments)).toContain(
-      "routecodex servertool run stop_message_auto",
+      "routecodex hook run reasoningStop",
     );
   });
 
-  it("resets stopless default budget after openai-responses relay tool_calls response", async () => {
+  it("does not mutate legacy session-file stopless budget after relay tool_calls", async () => {
     const sessionId = "executor-relay-tool-calls-reset";
     writeStopMessageState(sessionId, 3);
     const providerResponse = {
@@ -732,32 +926,29 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         routecodexRoutingPolicyGroup: "gateway_coding_10000",
       },
     } as PipelineExecutionResult;
-    const { executor, request } = createExecutor(relayPipelineResult, handle);
+    const { executor, request } = createExecutor(relayPipelineResult, handle, {
+      onRequestStart: ({ metadata }) => {
+        seedStoplessRequestTruth(metadata, sessionId);
+      },
+    });
 
-    try {
-      await executor.execute({
-        ...request,
-        requestId: "req_executor_minimax_relay_tool_calls_reset",
-        entryEndpoint: "/v1/responses",
-        body: { model: "gpt-5.4", input: "continue", stream: true },
-        metadata: {
-          stream: true,
-          inboundStream: true,
-          sessionId,
-          routecodexLocalPort: 10000,
-          routecodexPortMode: "router",
-          routecodexRoutingPolicyGroup: "gateway_coding_10000",
-        },
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "");
-      if (!message.includes("Must use import to load ES Module")) {
-        throw error;
-      }
-    }
+    const response = await executor.execute({
+      ...request,
+      requestId: "req_executor_minimax_relay_tool_calls_reset",
+      entryEndpoint: "/v1/responses",
+      body: { model: "gpt-5.4", input: "continue", stream: true },
+      metadata: {
+        stream: true,
+        inboundStream: true,
+        sessionId,
+        routecodexLocalPort: 10000,
+        routecodexPortMode: "router",
+        routecodexRoutingPolicyGroup: "gateway_coding_10000",
+      },
+    });
 
-    expect(readStopMessageUsed(sessionId)).toBe(0);
+    expect(response.status).toBe(200);
+    expect(readStopMessageUsed(sessionId)).toBe(3);
   });
 
   it("writes payload-contract-error errorsample for empty provider request payload by default", async () => {
@@ -975,14 +1166,17 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     const executor = new HubRequestExecutor(deps);
     const request: PipelineExecutionInput = {
       requestId: "req_retry",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "retry me" }] },
       metadata: { stream: false, inboundStream: false },
     };
     jest
       .spyOn(executor as any, "convertProviderResponseIfNeeded")
-      .mockReturnValue({ status: 200, body: { output_text: "ok" } });
+      .mockReturnValue({
+        status: 200,
+        body: buildMinimalResponsesSuccessBody("resp_retry_ok"),
+      });
 
     const response = await executor.execute(request);
 
@@ -995,7 +1189,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     expect(secondCallMetadata.retryAttempt).toBe(2);
   });
 
-  it("fails fast without excluding provider when converted response is finish_reason=stop with empty assistant payload", async () => {
+  it("waits and reroutes when converted response is finish_reason=stop with empty assistant payload", async () => {
     const firstHandle = createRuntimeHandle(async () => ({
       status: 200,
       data: { ok: true },
@@ -1013,6 +1207,10 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         runtimeKey: "runtime:one",
         processMode: "standard",
       },
+      routingDecision: {
+        routeName: "test-route",
+        routePool: ["provider-a.aliasA", "tab.aliasB"],
+      },
       processMode: "standard",
       metadata: {},
     };
@@ -1024,6 +1222,10 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         outboundProfile: "openai-chat",
         runtimeKey: "runtime:two",
         processMode: "standard",
+      },
+      routingDecision: {
+        routeName: "test-route",
+        routePool: ["provider-a.aliasA", "tab.aliasB"],
       },
       processMode: "standard",
       metadata: {},
@@ -1084,15 +1286,19 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       metadata: { stream: false, inboundStream: false },
     };
 
-    await expect(executor.execute(request)).rejects.toMatchObject({
-      code: "EMPTY_ASSISTANT_RESPONSE",
-      statusCode: 502,
-      requestExecutorProviderErrorStage: "host.response_contract",
-    });
+    const startedAt = Date.now();
+    const response = await executor.execute(request);
 
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
+    expect(response).toMatchObject({
+      status: 200,
+      body: {
+        choices: [{ finish_reason: "stop", message: { content: "ok" } }],
+      },
+    });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(firstHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(secondHandle.instance.processIncoming).toHaveBeenCalledTimes(0);
+    expect(secondHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
   it("writes payload-contract-error errorsample for empty assistant response by default", async () => {
@@ -1123,28 +1329,60 @@ describe("HubRequestExecutor single attempt behaviour", () => {
           runtimeKey: "runtime:one",
           processMode: "standard",
         },
+        routingDecision: {
+          routeName: "test-route",
+          routePool: ["provider-a.aliasA", "provider-b.aliasB"],
+        },
         processMode: "standard",
         metadata: {},
       };
-      const { executor } = createExecutor(pipelineResult, handle);
+      const fallbackHandle = createRuntimeHandle(async () => ({
+        status: 200,
+        data: { ok: true },
+      }));
+      const fallbackResult: PipelineExecutionResult = {
+        ...pipelineResult,
+        target: {
+          providerKey: "provider-b.aliasB",
+          providerType: "openai",
+          outboundProfile: "openai-chat",
+          runtimeKey: "runtime:two",
+          processMode: "standard",
+        },
+      };
+      const { executor } = createExecutor(pipelineResult, handle, {
+        fallback: {
+          pipelineResult: fallbackResult,
+          handle: fallbackHandle,
+        },
+      });
       jest
         .spyOn(executor as any, "convertProviderResponseIfNeeded")
-        .mockReturnValue({
+        .mockReturnValueOnce({
           status: 200,
           body: {
             choices: [{ finish_reason: "stop", message: { content: "" } }],
           },
+        })
+        .mockReturnValueOnce({
+          status: 200,
+          body: {
+            choices: [
+              { finish_reason: "stop", message: { content: "recovered" } },
+            ],
+          },
         });
 
-      await expect(
-        executor.execute({
-          requestId: "req_empty_assistant_errorsample",
-          entryEndpoint: "/v1/chat/completions",
-          headers: {},
-          body: { messages: [{ role: "user", content: "retry me" }] },
-          metadata: { stream: false, inboundStream: false },
-        }),
-      ).rejects.toThrow("Upstream returned empty assistant payload");
+      const response = await executor.execute({
+        requestId: "req_empty_assistant_errorsample",
+        entryEndpoint: "/v1/chat/completions",
+        headers: {},
+        body: { messages: [{ role: "user", content: "retry me" }] },
+        metadata: { stream: false, inboundStream: false },
+      });
+      expect(response.status).toBe(200);
+      expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+      expect(fallbackHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
       await __flushErrorsampleQueueForTests();
 
       const groupDir = path.join(errorsDir, "payload-contract-error");
@@ -1206,13 +1444,36 @@ describe("HubRequestExecutor single attempt behaviour", () => {
           runtimeKey: "runtime:one",
           processMode: "standard",
         },
+        routingDecision: {
+          routeName: "test-route",
+          routePool: ["provider-a.aliasA", "provider-b.aliasB"],
+        },
         processMode: "standard",
         metadata: {},
       };
-      const { executor } = createExecutor(pipelineResult, handle);
+      const fallbackHandle = createRuntimeHandle(async () => ({
+        status: 200,
+        data: { ok: true },
+      }));
+      const fallbackResult: PipelineExecutionResult = {
+        ...pipelineResult,
+        target: {
+          providerKey: "provider-b.aliasB",
+          providerType: "openai",
+          outboundProfile: "openai-chat",
+          runtimeKey: "runtime:two",
+          processMode: "standard",
+        },
+      };
+      const { executor } = createExecutor(pipelineResult, handle, {
+        fallback: {
+          pipelineResult: fallbackResult,
+          handle: fallbackHandle,
+        },
+      });
       jest
         .spyOn(executor as any, "convertProviderResponseIfNeeded")
-        .mockReturnValue({
+        .mockReturnValueOnce({
           status: 200,
           body: {
             choices: [
@@ -1225,21 +1486,26 @@ describe("HubRequestExecutor single attempt behaviour", () => {
               },
             ],
           },
+        })
+        .mockReturnValueOnce({
+          status: 200,
+          body: {
+            choices: [
+              { finish_reason: "stop", message: { content: "recovered" } },
+            ],
+          },
         });
 
-      await expect(
-        executor.execute({
-          requestId: "req_sanitized_placeholder_errorsample",
-          entryEndpoint: "/v1/chat/completions",
-          headers: {},
-          body: { messages: [{ role: "user", content: "retry me" }] },
-          metadata: { stream: false, inboundStream: false },
-        }),
-      ).rejects.toMatchObject({
-        code: "EMPTY_ASSISTANT_RESPONSE",
-        statusCode: 502,
-        requestExecutorProviderErrorStage: "host.response_contract",
+      const response = await executor.execute({
+        requestId: "req_sanitized_placeholder_errorsample",
+        entryEndpoint: "/v1/chat/completions",
+        headers: {},
+        body: { messages: [{ role: "user", content: "retry me" }] },
+        metadata: { stream: false, inboundStream: false, entryPort: 5555 },
       });
+      expect(response.status).toBe(200);
+      expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+      expect(fallbackHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
       await __flushErrorsampleQueueForTests();
       await __flushProviderSnapshotQueueForTests();
 
@@ -1258,7 +1524,8 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       const snapshotRequestDir = path.join(
         snapshotDir,
         "openai-chat",
-        "provider-a.aliasA",
+        "ports",
+        "5555",
         "req_sanitized_placeholder_errorsample",
       );
       expect(
@@ -1445,16 +1712,23 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     const executor = new HubRequestExecutor(deps);
     const request: PipelineExecutionInput = {
       requestId: "req_retry_log_fields",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "retry me" }] },
       metadata: { stream: false, inboundStream: false },
     };
     jest
       .spyOn(executor as any, "convertProviderResponseIfNeeded")
-      .mockReturnValue({ status: 200, body: { output_text: "ok" } });
+      .mockReturnValue({
+        status: 200,
+        body: buildMinimalResponsesSuccessBody("resp_retry_log_ok"),
+      });
 
-    const response = await executor.execute(request);
+    const response = await executor.execute({
+      ...request,
+      entryEndpoint: "/v1/chat/completions",
+      body: { messages: [{ role: "user", content: "retry me" }] },
+    });
     expect(response).toBeDefined();
 
     const warnLines = warnSpy.mock.calls.map((call) => String(call[0] ?? ""));
@@ -1465,7 +1739,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     expect(switchLine).toContain("status=429");
     expect(switchLine).toContain("code=SSE_TO_JSON_ERROR");
     expect(switchLine).toContain("upstreamCode=EPIPE");
-    expect(switchLine).not.toContain("reason=");
+    expect(switchLine).toContain('reason="decoder crashed"');
   });
 
   it("does not same-provider retry streaming pre-response failures when provider payload omits stream flag", async () => {
@@ -1550,11 +1824,33 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         }) as ModuleDependencies,
       logStage: jest.fn(),
       stats,
+      onRequestStart: ({
+        metadata,
+      }: {
+        metadata: Record<string, unknown>;
+      }) => {
+        writeRuntimeControlSlot({
+          target: metadata,
+          key: "streamIntent",
+          value: "stream",
+          writer: {
+            module:
+              "tests/server/runtime/request-executor.single-attempt.spec.ts",
+            symbol:
+              "does not same-provider retry streaming pre-response failures when provider payload omits stream flag",
+            stage: "test_request_start",
+          },
+          reason: "fixture declares client stream intent",
+        });
+      },
     };
     const executor = new HubRequestExecutor(deps);
     jest
       .spyOn(executor as any, "convertProviderResponseIfNeeded")
-      .mockReturnValue({ status: 200, body: { output_text: "ok" } });
+      .mockReturnValue({
+        status: 200,
+        body: buildMinimalResponsesSuccessBody("resp_stream_retry_ok"),
+      });
 
     const response = await executor.execute({
       requestId: "req_stream_metadata_payload_no_stream_reroute",
@@ -1583,7 +1879,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     expect(providerSendStart?.[2]).toMatchObject({
       providerRequestedStream: true,
       providerPayloadRequestedStream: undefined,
-      inboundStream: true,
+      metadataStreamIntent: "stream",
     });
     const warnLines = warnSpy.mock.calls.map((call) => String(call[0] ?? ""));
     const switchLine = warnLines.find(
@@ -1675,7 +1971,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
 
     const request: PipelineExecutionInput = {
       requestId: "req_retry_429_wrapped",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "retry me" }] },
       metadata: { stream: false, inboundStream: false },
@@ -1778,12 +2074,14 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       metadata: { stream: false, inboundStream: false },
     };
 
-    await expect(executor.execute(request)).rejects.toThrow(
-      "Upstream SSE error event [1302]",
-    );
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
+    const startedAt = Date.now();
+    const response = await executor.execute(request);
+
+    expect(response.status).toBe(200);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(rateLimitedHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(0);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
   it("reroutes when SSE wrapper carries Anthropic 500 upstream failure", async () => {
@@ -1871,12 +2169,14 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       metadata: { stream: false, inboundStream: false },
     };
 
-    await expect(executor.execute(request)).rejects.toThrow(
-      "Upstream SSE error event [500]",
-    );
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
+    const startedAt = Date.now();
+    const response = await executor.execute(request);
+
+    expect(response.status).toBe(200);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(failingHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(0);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
   it("prefers route-selected target compatibility profile for response conversion metadata", async () => {
@@ -1935,7 +2235,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       requestId: "req_profile_override",
       entryEndpoint: "/v1/responses",
       headers: {},
-      body: { messages: [{ role: "user", content: "ping" }] },
+      body: { input: "ping" },
       metadata: {
         stream: false,
         inboundStream: false,
@@ -1953,17 +2253,12 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     const convertOptions = convertSpy.mock.calls[0]?.[0] as {
       pipelineMetadata?: Record<string, unknown>;
     };
-    expect(convertOptions?.pipelineMetadata?.compatibilityProfile).toBe(
-      "chat:provider-a",
+    const observation = readRuntimeProviderObservationProjection(
+      convertOptions.pipelineMetadata,
     );
-    expect(
-      (convertOptions?.pipelineMetadata?.target as Record<string, unknown>)
-        ?.providerKey,
-    ).toBe("provider-a.3.model-a");
-    expect(
-      (convertOptions?.pipelineMetadata?.target as Record<string, unknown>)
-        ?.compatibilityProfile,
-    ).toBe("chat:provider-a");
+    expect(observation.compatibilityProfile).toBe("chat:provider-a");
+    expect(observation.target?.providerKey).toBe("provider-a.3.model-a");
+    expect(observation.target?.compatibilityProfile).toBe("chat:provider-a");
   });
 
   it("drops inherited compatibility profile when route target has no compatibility profile", async () => {
@@ -2039,17 +2334,12 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     const convertOptions = convertSpy.mock.calls[0]?.[0] as {
       pipelineMetadata?: Record<string, unknown>;
     };
-    expect(
-      convertOptions?.pipelineMetadata?.compatibilityProfile,
-    ).toBeUndefined();
-    expect(
-      (convertOptions?.pipelineMetadata?.target as Record<string, unknown>)
-        ?.providerKey,
-    ).toBe("tabglm.key1.glm-5");
-    expect(
-      (convertOptions?.pipelineMetadata?.target as Record<string, unknown>)
-        ?.compatibilityProfile,
-    ).toBeUndefined();
+    const observation = readRuntimeProviderObservationProjection(
+      convertOptions.pipelineMetadata,
+    );
+    expect(observation.compatibilityProfile).toBeUndefined();
+    expect(observation.target?.providerKey).toBe("tabglm.key1.glm-5");
+    expect(observation.target?.compatibilityProfile).toBeUndefined();
   });
 
   it("preserves session scope metadata when pipeline metadata contains undefined fields", async () => {
@@ -2102,6 +2392,15 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         }) as ModuleDependencies,
       logStage: jest.fn(),
       stats,
+      onRequestStart: ({
+        metadata,
+      }: {
+        metadata: Record<string, unknown>;
+      }) => {
+        metadata.sessionId = "session-abc";
+        metadata.tmuxSessionId = "tmux-main-1";
+        metadata.clientInjectReady = true;
+      },
     };
     const executor = new HubRequestExecutor(deps);
     const convertSpy = jest
@@ -2112,7 +2411,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       requestId: "req_preserve_session_scope",
       entryEndpoint: "/v1/responses",
       headers: {},
-      body: { messages: [{ role: "user", content: "ping" }] },
+      body: { input: "ping" },
       metadata: {
         stream: false,
         inboundStream: false,
@@ -2174,7 +2473,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     });
   });
 
-  it("does not retry DeepSeek file upload failures across same-runtime aliases", async () => {
+  it("waits and reroutes DeepSeek file upload failures to another provider", async () => {
     const fatal = Object.assign(
       new Error("DeepSeek file upload returned non-JSON payload"),
       {
@@ -2187,6 +2486,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     const handle = createRuntimeHandle(async () => {
       throw fatal;
     });
+    const fallbackHandle = createRuntimeHandle(async () => ({ ok: true }));
     const pipelineResult: PipelineExecutionResult = {
       providerPayload: { data: { messages: [] } },
       target: {
@@ -2198,36 +2498,52 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       },
       routingDecision: {
         routeName: "coding",
-        pool: [
-          "provider-a.berg.model-c",
-          "provider-a.spence.model-c",
-          "provider-a.sargent.model-c",
-        ],
+        routePool: ["provider-a.berg.model-c", "provider-b.key.model-c"],
       } as unknown as { routeName?: string },
       processMode: "standard",
       metadata: {},
     };
+    const fallbackResult: PipelineExecutionResult = {
+      ...pipelineResult,
+      target: {
+        providerKey: "provider-b.key.model-c",
+        providerType: "openai",
+        outboundProfile: "openai-responses",
+        runtimeKey: "provider-b.key",
+        processMode: "standard",
+      },
+    };
     const { executor, request, runtimeManager } = createExecutor(
       pipelineResult,
       handle,
+      {
+        fallback: {
+          pipelineResult: fallbackResult,
+          handle: fallbackHandle,
+        },
+      },
     );
     runtimeManager.resolveRuntimeKey = jest.fn((providerKey?: string) => {
       if (providerKey === "provider-a.berg.model-c") return "provider-a.berg";
-      if (providerKey === "provider-a.spence.model-c")
-        return "provider-a.spence";
-      if (providerKey === "provider-a.sargent.model-c")
-        return "provider-a.sargent";
+      if (providerKey === "provider-b.key.model-c") return "provider-b.key";
       return undefined;
     }) as unknown as ProviderRuntimeManager["resolveRuntimeKey"];
 
-    await expect(executor.execute(request)).rejects.toThrow(
-      "DeepSeek file upload returned non-JSON payload",
-    );
+    const startedAt = Date.now();
+    const response = await executor.execute({
+      ...request,
+      entryEndpoint: "/v1/chat/completions",
+      body: { messages: [{ role: "user", content: "retry me" }] },
+    });
+
+    expect(response.status).toBe(200);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(runtimeManager.getHandleByRuntimeKey).toHaveBeenCalledTimes(1);
+    expect(fallbackHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(runtimeManager.getHandleByRuntimeKey).toHaveBeenCalledTimes(2);
   });
 
-  it("does not host-retry on HTTP 400 signature-invalid errors (handled by llmswitch-core servertool)", async () => {
+  it("waits and reroutes HTTP 400 signature-invalid provider errors", async () => {
     const invalidSig = Object.assign(
       new Error("HTTP 400: thinking.signature invalid"),
       {
@@ -2240,6 +2556,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     const handle = createRuntimeHandle(async () => {
       throw invalidSig;
     });
+    const successHandle = createRuntimeHandle(async () => ({ ok: true }));
 
     const pipelineResultA: PipelineExecutionResult = {
       providerPayload: {
@@ -2253,20 +2570,39 @@ describe("HubRequestExecutor single attempt behaviour", () => {
         runtimeKey: "runtime:ag",
         processMode: "standard",
       },
+      routingDecision: {
+        routeName: "coding",
+        routePool: [
+          "gemini.models/gemini-2.5-pro",
+          "provider-b.models/coder",
+        ],
+      },
       processMode: "standard",
       metadata: {},
+    };
+    const pipelineResultB: PipelineExecutionResult = {
+      ...pipelineResultA,
+      target: {
+        providerKey: "provider-b.models/coder",
+        providerType: "openai",
+        outboundProfile: "openai-chat",
+        runtimeKey: "runtime:provider-b",
+        processMode: "standard",
+      },
     };
 
     const fakePipeline: HubPipeline = {
       execute: jest
         .fn()
         .mockReturnValueOnce(pipelineResultA)
-        .mockReturnValueOnce(pipelineResultA),
+        .mockReturnValueOnce(pipelineResultB),
     };
 
     const runtimeManager: ProviderRuntimeManager = {
       resolveRuntimeKey: jest.fn(),
-      getHandleByRuntimeKey: jest.fn().mockReturnValue(handle),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === "runtime:ag" ? handle : successHandle,
+      ),
       getHandleByProviderKey: jest.fn(),
       disposeAll: jest.fn(),
       initialize: jest.fn(),
@@ -2291,19 +2627,23 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       stats,
     };
     const executor = new HubRequestExecutor(deps);
+    stubConvertProviderResponse();
     const request: PipelineExecutionInput = {
       requestId: "req_invalid_sig",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "retry me" }] },
       metadata: { stream: false, inboundStream: false },
     };
 
-    await expect(executor.execute(request)).rejects.toThrow(
-      "thinking.signature",
-    );
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
+    const startedAt = Date.now();
+    const response = await executor.execute(request);
+
+    expect(response.status).toBe(200);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 
   it("excludes only the current provider on PROVIDER_TRAFFIC_SATURATED retry", async () => {
@@ -2395,7 +2735,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     stubConvertProviderResponse();
     const request: PipelineExecutionInput = {
       requestId: "req_runtime_scope_exclude",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "retry me" }] },
       metadata: { stream: false, inboundStream: false },
@@ -2412,7 +2752,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     expect(excluded).toEqual(["tab.key1"]);
   });
 
-  it("switches to the alternative provider immediately for a transport recoverable error", async () => {
+  it("waits before switching to the alternative provider for a transport recoverable error", async () => {
     const transientError = Object.assign(new Error("socket reset"), {
       code: "ECONNRESET",
       retryable: true,
@@ -2512,17 +2852,19 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     stubConvertProviderResponse();
     const request: PipelineExecutionInput = {
       requestId: "req_switch_immediately_on_alternative",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "retry me" }] },
       metadata: { stream: false, inboundStream: false },
     };
 
+    const startedAt = Date.now();
     const response = await executor.execute(request);
 
     expect(response).toBeDefined();
     expect(providerACalls).toHaveLength(1);
     expect(providerBCalls).toHaveLength(1);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
     expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(
       (fakePipeline.execute as jest.Mock).mock.calls[1][0].metadata,
@@ -2532,14 +2874,9 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       }),
     );
     const stages = logStage.mock.calls.map((call) => call[0]);
-    const secondPipelineStartIndex = stages.findIndex(
-      (stage, index) => index > 0 && stage === "hub.start",
-    );
-    expect(stages.slice(0, secondPipelineStartIndex)).not.toContain(
-      "provider.transport_backoff_wait",
-    );
+    expect(stages).toContain("provider.error_action_backoff_wait");
+    expect(stages).toContain("provider.error_action_backoff_wait.completed");
     expect(stages).not.toContain("provider.transport_backoff_wait");
-    expect(stages).toContain("provider.transport_backoff.recorded");
     expect(stages).not.toContain("server.global_error_backoff_wait");
   });
 
@@ -2617,6 +2954,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       bindProvider: jest.fn(),
       recordToolUsage: jest.fn(),
     };
+    const logStage = jest.fn();
     const deps = {
       runtimeManager,
       trafficGovernor,
@@ -2627,7 +2965,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
             handleError: jest.fn().mockReturnValue({ success: true }),
           },
         }) as ModuleDependencies,
-      logStage: jest.fn(),
+      logStage,
       stats,
     };
     const executor = new HubRequestExecutor(deps);
@@ -2635,7 +2973,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
 
     await executor.execute({
       requestId: "req_soft_wait_same_runtime",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "same runtime pool" }] },
       metadata: { stream: false, inboundStream: false },
@@ -2653,7 +2991,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
 
     await executor.execute({
       requestId: "req_soft_wait_cross_runtime",
-      entryEndpoint: "/v1/responses",
+      entryEndpoint: "/v1/chat/completions",
       headers: {},
       body: { messages: [{ role: "user", content: "cross runtime pool" }] },
       metadata: { stream: false, inboundStream: false },
@@ -2662,13 +3000,31 @@ describe("HubRequestExecutor single attempt behaviour", () => {
     expect(acquireArgs[1]).not.toHaveProperty("softWaitTimeoutMs");
   });
 
-  it("bypasses provider traffic governor for servertool followup hops", async () => {
+  it("runs servertool followup hops through the provider traffic governor", async () => {
     const trafficGovernor = {
-      acquire: jest.fn(async () => {
-        throw new Error(
-          "traffic governor should be bypassed for servertool followup",
-        );
-      }),
+      acquire: jest.fn(async () => ({
+        permit: {
+          runtimeKey: "runtime:one",
+          requestId: "req_stopmessage_disabled_single_attempt",
+          leaseId: "lease-followup",
+          stateKey: "state-followup",
+        },
+        policy: {
+          concurrency: {
+            maxInFlight: 2,
+            acquireTimeoutMs: 60_000,
+            staleLeaseMs: 300_000,
+          },
+          rpm: {
+            requestsPerMinute: 120,
+            acquireTimeoutMs: 60_000,
+            windowMs: 60_000,
+          },
+        },
+        waitedMs: 0,
+        activeInFlight: 1,
+        rpmInWindow: 1,
+      })),
       release: jest.fn(async () => ({ released: true, activeInFlight: 0 })),
       observeOutcome: jest.fn(async () => undefined),
     };
@@ -2706,6 +3062,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       bindProvider: jest.fn(),
       recordToolUsage: jest.fn(),
     };
+    const logStage = jest.fn();
     const deps = {
       runtimeManager,
       trafficGovernor,
@@ -2716,7 +3073,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
             handleError: jest.fn().mockReturnValue({ success: true }),
           },
         }) as ModuleDependencies,
-      logStage: jest.fn(),
+      logStage,
       stats,
     };
     const executor = new HubRequestExecutor(deps);
@@ -2726,7 +3083,7 @@ describe("HubRequestExecutor single attempt behaviour", () => {
       requestId: "req_stopmessage_disabled_single_attempt",
       entryEndpoint: "/v1/responses",
       headers: {},
-      body: { messages: [{ role: "user", content: "continue" }] },
+      body: { input: "continue" },
       metadata: {
         stream: false,
         inboundStream: false,
@@ -2736,8 +3093,10 @@ describe("HubRequestExecutor single attempt behaviour", () => {
 
     expect(response.status).toBe(200);
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(trafficGovernor.acquire).not.toHaveBeenCalled();
-    expect(trafficGovernor.observeOutcome).not.toHaveBeenCalled();
+    expect(trafficGovernor.acquire).toHaveBeenCalledTimes(1);
     expect(trafficGovernor.release).not.toHaveBeenCalled();
+    expect(logStage.mock.calls.map((call) => call[0])).toContain(
+      "provider.traffic.release.completed",
+    );
   });
 });

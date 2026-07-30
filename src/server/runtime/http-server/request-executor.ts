@@ -378,13 +378,14 @@ import {
   waitWithClientAbortSignal
 } from './executor/request-executor-abort.js';
 import {
+  recordErrorActionSuccessByLaneGroup,
   resetErrorActionBackoffByScopePrefix,
   resetErrorActionQueueStateForTests,
   recordErrorActionBackoff,
-  peekErrorActionBackoffWaitMs,
-  resolveProviderTransportBackoffScopeKey,
-  waitProviderTransportBackoffWithGate,
 } from './executor/request-executor-error-action-queue.js';
+import {
+  buildProviderErrorBackoffLaneGroup,
+} from './executor/request-executor-provider-failure-plan.js';
 import {
   detectAssistantSanitizationPlaceholder,
   detectEmptyProviderRequestPayload,
@@ -592,7 +593,7 @@ export class HubRequestExecutor implements RequestExecutor {
     const storeRoot = this.storeRoot;
     return {
       async acquire(options) {
-        const acquired = trafficGovernorAcquire({
+        const acquired = await trafficGovernorAcquire({
           runtimeKey: options.runtimeKey,
           providerKey: options.providerKey,
           requestId: options.requestId,
@@ -967,7 +968,7 @@ export class HubRequestExecutor implements RequestExecutor {
               allowPrimaryExhaustedReplayBeyondAttemptBudget = true;
               continue;
             }
-            if (lastError && excludedProviderKeys.size > 0) {
+            if (lastError) {
               throw lastError;
             }
             throw pipelineError;
@@ -996,6 +997,8 @@ export class HubRequestExecutor implements RequestExecutor {
           pipelineResult,
           clientHeadersForAttempt,
           clientRequestId,
+          sessionId,
+          conversationId,
           clientAbortSignal,
           initialRoutePool,
           routeTiersForAttempt,
@@ -1099,7 +1102,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 : undefined,
             providerProtocol: target.outboundProfile as ProviderProtocol,
             routeName: pipelineResult.routingDecision?.routeName,
-            routecodexRoutingPolicyGroup,
+            routecodexRoutingPolicyGroup: routingPolicyGroupForAttempt,
             runtimeKey,
             target: target as unknown as Record<string, unknown>,
             dependencies: this.deps.getModuleDependencies(),
@@ -1220,7 +1223,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerType: handle.providerType,
             providerFamily: handle.providerFamily,
             providerProtocol,
-            routecodexRoutingPolicyGroup,
+            routecodexRoutingPolicyGroup: routingPolicyGroupForAttempt,
             pipelineId: target.providerKey,
             routeName: pipelineResult.routingDecision?.routeName,
             runtimeKey,
@@ -1245,7 +1248,7 @@ export class HubRequestExecutor implements RequestExecutor {
                 : undefined,
             providerProtocol: target.outboundProfile as ProviderProtocol,
             routeName: pipelineResult.routingDecision?.routeName,
-            routecodexRoutingPolicyGroup,
+            routecodexRoutingPolicyGroup: routingPolicyGroupForAttempt,
             runtimeKey,
             target: target as unknown as Record<string, unknown>,
             dependencies: this.deps.getModuleDependencies(),
@@ -1328,34 +1331,6 @@ export class HubRequestExecutor implements RequestExecutor {
         let providerFailurePhase: 'provider_send' | 'provider_response_processing' = 'provider_send';
         try {
           throwIfClientAbortSignalAborted(clientAbortSignal);
-          const providerTransportBackoffScopeKey = resolveProviderTransportBackoffScopeKey({
-            portScope,
-            providerKey: target.providerKey
-          });
-          const providerTransportBackoffWaitMs = peekErrorActionBackoffWaitMs({
-            category: 'global_error',
-            scopeKey: providerTransportBackoffScopeKey
-          });
-          if (providerTransportBackoffWaitMs > 0) {
-            logStage('server.global_error_backoff_wait', input.requestId, {
-              providerKey: target.providerKey,
-              runtimeKey,
-              waitMs: providerTransportBackoffWaitMs,
-              attempt
-            });
-            await waitProviderTransportBackoffWithGate({
-              providerTransportBackoffKey: providerTransportBackoffScopeKey,
-              ms: providerTransportBackoffWaitMs,
-              signal: clientAbortSignal,
-              logNonBlockingError: logRequestExecutorNonBlockingError
-            });
-            logStage('server.global_error_backoff_wait.completed', input.requestId, {
-              providerKey: target.providerKey,
-              runtimeKey,
-              waitMs: providerTransportBackoffWaitMs,
-              attempt
-            });
-          }
           if (bypassTrafficGovernor) {
             logStage('provider.traffic.acquire.bypassed', input.requestId, {
               providerKey: target.providerKey,
@@ -1692,9 +1667,12 @@ export class HubRequestExecutor implements RequestExecutor {
           // direct/relay hops. Keep executor transport-only; handler owns responses store finalization.
 
           recordAttempt({ usage: aggregatedUsage, error: false });
-            resetErrorActionBackoffByScopePrefix({
+            recordErrorActionSuccessByLaneGroup({
               category: 'global_error',
-              scopePrefix: `${portScope}|${target.providerKey}|`
+              laneGroupKey: buildProviderErrorBackoffLaneGroup({
+                routecodexRoutingPolicyGroup: routingPolicyGroupForAttempt,
+              }),
+              actionScopeKey: logicalRequestChainKey,
             });
           return buildProviderExecutionSuccessResult({
             converted,
@@ -1733,7 +1711,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerModel,
             providerLabel,
             routeName: pipelineResult.routingDecision?.routeName,
-            routecodexRoutingPolicyGroup,
+            routecodexRoutingPolicyGroup: routingPolicyGroupForAttempt,
             runtimeKey,
             target: target as unknown as Record<string, unknown>,
             dependencies: this.deps.getModuleDependencies(),

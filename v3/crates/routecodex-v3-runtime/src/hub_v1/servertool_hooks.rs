@@ -53,8 +53,8 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
         .provider_payload()
         .as_object()
         .ok_or(V3HubRelayResponseError::ProviderResponseNotObject)?;
-    if let Some(arguments) = first_reasoning_stop_tool_call_arguments(object.get("output")) {
-        return match classify_reasoning_stop_arguments(arguments) {
+    if let Some(tool_call) = first_reasoning_stop_tool_call(object.get("output"))? {
+        return match classify_reasoning_stop_arguments(tool_call.arguments) {
             V3ReasoningStopDecision::Terminal { prefix } => {
                 let projected = build_stopless_terminal_visible_payload_from_reasoning_stop_prefix(
                     input.provider_payload(),
@@ -77,6 +77,7 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
                 .with_last_request_id(profile.stopless_transition_request_id())
                 .with_last_response_id(stopless_response_id(input.provider_payload()))
                 .with_last_transition_reason("reasoning_stop_continue_cli_projected")
+                .with_last_provider_stopless_call_id(Some(tool_call.call_id))
                 .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
                 if state.guard_exhausted() {
                     let projected =
@@ -106,6 +107,7 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
                 .with_last_request_id(profile.stopless_transition_request_id())
                 .with_last_response_id(stopless_response_id(input.provider_payload()))
                 .with_last_transition_reason("reasoning_stop_needs_evidence_cli_projected")
+                .with_last_provider_stopless_call_id(Some(tool_call.call_id))
                 .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
                 if state.guard_exhausted() {
                     let projected =
@@ -445,25 +447,48 @@ fn first_message_content_text(content: Option<&Value>) -> Option<&str> {
         })
 }
 
-fn first_reasoning_stop_tool_call_arguments(output: Option<&Value>) -> Option<&str> {
-    output?.as_array()?.iter().find_map(|item| {
+struct V3ReasoningStopToolCall<'a> {
+    call_id: &'a str,
+    arguments: &'a str,
+}
+
+fn first_reasoning_stop_tool_call(
+    output: Option<&Value>,
+) -> Result<Option<V3ReasoningStopToolCall<'_>>, V3HubRelayResponseError> {
+    let Some(output) = output.and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    for (index, item) in output.iter().enumerate() {
         let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
         if !matches!(
             item_type,
             "function_call" | "tool_call" | "custom_tool_call"
         ) {
-            return None;
+            continue;
         }
-        let name = item.get("name").and_then(Value::as_str).or_else(|| {
+        let Some(name) = item.get("name").and_then(Value::as_str).or_else(|| {
             item.get("function")
                 .and_then(Value::as_object)
                 .and_then(|function| function.get("name"))
                 .and_then(Value::as_str)
-        })?;
+        }) else {
+            continue;
+        };
         if !name.trim().eq_ignore_ascii_case("reasoningStop") {
-            return None;
+            continue;
         }
-        item.get("arguments")
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "reasoningStop tool call missing call_id",
+            })?;
+        let arguments = item
+            .get("arguments")
             .or_else(|| item.get("input"))
             .and_then(Value::as_str)
             .or_else(|| {
@@ -472,7 +497,13 @@ fn first_reasoning_stop_tool_call_arguments(output: Option<&Value>) -> Option<&s
                     .and_then(|function| function.get("arguments"))
                     .and_then(Value::as_str)
             })
-    })
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "reasoningStop tool call missing arguments",
+            })?;
+        return Ok(Some(V3ReasoningStopToolCall { call_id, arguments }));
+    }
+    Ok(None)
 }
 
 fn response_has_canonical_reasoning_summary(response: &Value) -> bool {

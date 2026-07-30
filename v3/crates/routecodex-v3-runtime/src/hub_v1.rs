@@ -32,6 +32,7 @@ mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
 mod request_outbound_format;
 pub(crate) use request_outbound_format::{
+    build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical,
     build_v3_openai_responses_standard_request_from_chat_canonical,
     build_v3_responses_original_input_surface_from_chat_canonical,

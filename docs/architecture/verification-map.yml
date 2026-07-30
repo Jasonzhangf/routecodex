@@ -657,35 +657,91 @@ verification:
       - "Run broader executor retry stack when classification semantics change."
       - "Provider availability/quota/transport errors must prove they do not enter session_storm truth."
 
-  - feature_id: error.backoff_action_queue
+  - feature_id: error.provider_action_gate
     change_risk: high
+    mainline_bindings:
+      - error-provider-action-gate-01
+      - error-provider-action-gate-02
+      - error-provider-action-gate-03
+      - error-provider-action-gate-04
+      - error-provider-action-gate-05
+      - error-provider-action-gate-06
+      - error-provider-action-gate-07
+      - error-provider-action-gate-08
     unit:
       - src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
-      - src/modules/traffic-governor/index.ts
-      - src/modules/llmswitch/bridge/traffic-governor-host.ts
-      - sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
     contract:
+      - docs/architecture/function-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/manifests/error.provider_action_gate.mainline.yml
+      - docs/architecture/wiki/error-provider-action-gate-mainline.md
       - tests/red-tests/server_module_help_contract.test.ts
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/tests/server_module_help.rs
-      - tests/modules/traffic-governor/traffic-governor-host.spec.ts
     integration:
       - tests/server/runtime/http-server/executor/request-executor-error-action-queue.spec.ts
+      - tests/server/runtime/http-server/executor/request-executor-error-action-queue.native.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-global-error-backoff.spec.ts
       - tests/server/runtime/request-executor.single-attempt.spec.ts
       - tests/sharedmodule/server-module-help.live.spec.ts
     smoke:
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
+      - npm run verify:v3-provider-action-gate
+      - npm run test:v3-provider-action-gate-red-fixtures
     build:
       - npm run build:base
     notes:
-      - "Minimal change stack must prove the fixed 3s delay for every error, blocking gate serialization, hook events, fixed waiter cap, provider traffic wait-then-saturate behavior, and server help visibility."
-      - "The traffic-governor TS shell must use the narrow `traffic-governor-host.ts` native bridge and must not bind directly to the broad `native-exports.js` surface."
+      - "Minimal change stack must prove isolated 1s, sustained 5s, one admission per generation, success reset, cancellation neutrality, hook events, and server help visibility."
+      - "An admitted action has no wall-clock lease and remains exclusive until matching success, failure, terminal commit, or explicit health-neutral abandon; five seconds is only the sustained spacing floor after a matching outcome or abandon."
       - "Runtime completion still needs a real request smoke if production routing/error behavior is claimed, not only unit tests."
+
+  - feature_id: error.traffic_admission_lane
+    change_risk: high
+    unit:
+      - src/modules/traffic-governor/index.ts
+      - src/modules/llmswitch/bridge/traffic-governor-host.ts
+      - sharedmodule/llmswitch-core/rust-core/crates/traffic-governor-core
+    contract:
+      - tests/modules/traffic-governor/traffic-governor-host.spec.ts
+      - tests/modules/traffic-governor/traffic-governor-provider-boundary.spec.ts
+    integration:
+      - tests/modules/traffic-governor/traffic-governor-async-admission.spec.ts
+    smoke:
+      - npm run verify:resource-operation-map
+      - npm run verify:function-map-compile-gate
+      - npm run verify:error-pipeline-contract
+    build:
+      - npm run build:base
+    notes:
+      - "Positive coverage proves a waiter is admitted after lease release while the Node timer remains live."
+      - "Negative coverage proves typed traffic backpressure does not report provider health, enter ErrorErr05, exclude a provider, reroute, or become provider 429."
+
+  - feature_id: vr.route_classifier
+    change_risk: high
+    unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
+      - v3/crates/routecodex-v3-runtime/src/nodes.rs
+    contract:
+      - docs/goals/v3-v2-route-classifier-parity-test-design.md
+    integration:
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/classifier.rs
+      - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    smoke:
+      - npm run test:route-classifier-semantics
+      - npm run verify:route-classifier-core-file-size
+      - npm run test:route-classifier-core-file-size-red-fixtures
+    build:
+      - npm run build:v3-cli
+    notes:
+      - "Positive cases lock active-turn coding/thinking/search/tools/web_search and typed attachment metadata; negative cases lock declared tools, tool_choice, descriptions, schemas, reasoning fields, history, payload images, and stringified JSON at zero signal."
+      - "The same gate must run in CI, build:v3-cli, and global installation before binaries are published."
 
   - feature_id: vr.route_selection
     change_risk: high
     unit:
+      - sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs
       - sharedmodule/llmswitch-core/native-hotpath-required-exports.json
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs
     contract:
@@ -694,6 +750,9 @@ verification:
       - tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts
       - tests/servertool/virtual-router-servertool-routing.spec.ts
     smoke:
+      - npm run test:route-classifier-semantics
+      - npm run verify:route-classifier-core-file-size
+      - npm run test:route-classifier-core-file-size-red-fixtures
       - npm run verify:resource-operation-map
       - npm run verify:vr-no-ts-runtime
       - npm run verify:repo-sanity
@@ -701,7 +760,7 @@ verification:
       - npm run build:base
     notes:
       - "If route instruction parsing changes, include routing instruction regression set."
-      - "Current-turn media routing must prove a user image in the active turn still routes multimodal even when trailing tool entries make latest_role non-user."
+      - "Current-turn route selection consumes the shared classifier result and must not infer routes from declarations, historical calls, payload image shapes, or reasoning fields."
 
   - feature_id: vr.route_token_estimation
     change_risk: high
@@ -1023,12 +1082,10 @@ verification:
     contract:
       - tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
-      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     integration:
       - cargo test -p router-hotpath-napi primary_exhausted_to_default_pool --lib
       - pnpm exec jest tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts
-      - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts
     smoke:
@@ -3925,31 +3982,27 @@ verification:
       - src/modules/llmswitch/bridge/error-execution-decision-host.ts
       - src/server/runtime/http-server/executor/request-executor-retry-execution-plan.ts
       - src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
-      - src/server/runtime/http-server/direct-decision.ts
+      - src/server/runtime/http-server/provider-direct-pipeline.ts
+      - src/server/runtime/http-server/router-direct-pipeline.ts
       - src/server/runtime/http-server/direct-client-disconnect.ts
     contract:
       - tests/red-tests/error_execution_decision_consumer_no_ts_orchestration.test.mjs
       - tests/server/runtime/http-server/error-pipeline-contract.spec.ts
-      - tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
     integration:
       - tests/server/runtime/http-server/executor/retry-execution-plan.spec.ts
       - tests/server/runtime/http-server/executor/request-executor-provider-failure-plan.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.spec.ts
       - tests/server/runtime/http-server/router-direct-pipeline.spec.ts
-      - tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
-      - tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
     smoke:
       - npm run verify:error-pipeline-contract
       - npm run verify:provider-failure-ban-blackbox
       - npm run verify:function-map-compile-gate
-      - pnpm exec jest tests/server/runtime/http-server/direct-decision.upstream-stream-incomplete.spec.ts
-      - pnpm exec jest tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts
       - pnpm exec jest tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts
     build:
       - npm run build:base
     notes:
-      - "Executor/direct code consumes ErrorErr04 policy into ErrorErr05 decisions only; classification stays in Error module/provider policy owners."
+      - "Rust failure_policy owns typed ErrorErr05 actions; executor/direct code consumes them without a second decision helper."
 
   - feature_id: error.client_projection
     change_risk: medium
@@ -4451,7 +4504,7 @@ verification:
       - cargo test --workspace --manifest-path v3/Cargo.toml
     notes:
       - "Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry, CRLF/LF, unknown fields, long streams, opaque `[DONE]`, and normal close."
-      - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and absence of synthetic terminal success."
+      - "Negative tests lock invalid UTF-8, unterminated EOF, frame/buffer limits, cancellation/upstream failure mapping, and absence of synthetic terminal success."
       - "V3 controlled-upstream Server blackbox and V2 installed-surface replay are required before runtime closure; current source-only gates cannot claim live completion."
 
   - feature_id: v3.sse_transport_core_independent
@@ -4478,7 +4531,7 @@ verification:
       - cargo test --workspace --manifest-path v3/Cargo.toml
     notes:
       - "Positive tests lock arbitrary UTF-8/chunk boundaries, multiline data, comment/id/retry, CRLF/LF, unknown fields, opaque `[DONE]`, and normal close inside the V3 workspace."
-      - "Negative tests lock invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation/upstream failure mapping, and no synthetic terminal success."
+      - "Negative tests lock invalid UTF-8, unterminated EOF, frame/buffer limits, cancellation/upstream failure mapping, and no synthetic terminal success."
       - "V3 crates must import `routecodex-v3-sse`, not `sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core`."
       - "Server closeout wrappers must not parse SSE event names or data JSON to decide terminal, required_action, continuation, tool, stopless, servertool, or provider failure semantics."
 
@@ -4488,6 +4541,7 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
     contract:
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src/lib.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
       - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
@@ -4502,8 +4556,8 @@ verification:
       - cargo test --workspace --manifest-path v3/Cargo.toml
     notes:
       - "This verification entry exists because provider-compat-core declares feature_id: v3.provider_compat_profile_loading."
-      - "Positive coverage must prove profile loading/application at ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat."
-      - "Negative coverage must prove provider compat does not own routing, stopless/tool governance, fallback, continuation, or SSE semantics."
+      - "Positive coverage must prove profile loading/application at ProviderReqCompat06ProviderCompat and ProviderRespCompat02ProviderCompat, including chat:minimax Anthropic hosted web-search projection to matching ordinary tool_use/tool_result blocks."
+      - "Negative coverage must reject missing, duplicate, orphan, and malformed hosted web-search identities/fields and prove provider compat does not own routing, stopless/tool governance, fallback, continuation, or SSE semantics."
 
   - feature_id: v3.v2_config_toml_compat_5555
     change_risk: high
@@ -4526,3 +4580,121 @@ verification:
       - "Positive contract locks V2 root + provider config.v2.toml input, canonical Hub V1 endpoint bindings and server execution declarations, Jason-defined 5555 route ordering, provider type mapping, local token_file handle materialization, and secret-free manifest debug output."
       - "Transport-bound V2 provider responses contract locks WebSocket v2 projection plus negative HTTP-only remote_continuation and missing websocket_v2_url cases."
       - "Live closure still requires global install, V3 managed restart on 5555, health, models, and same-entry route probes after source gates pass."
+
+  - feature_id: v3.runtime_timing_observability
+    change_risk: medium
+    unit:
+      - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    contract:
+      - docs/goals/v3-runtime-timing-observability-test-design.md
+      - docs/goals/v3-runtime-timing-observability-debug-contract.json
+      - docs/architecture/function-map.yml
+      - docs/architecture/resource-operation-map.yml
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime runtime_timing --lib
+    smoke:
+      - npm run verify:v3-runtime-timing-observability
+      - npm run test:v3-runtime-timing-observability-red-fixtures
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Runtime owns responses timing observability; Server may only project it into console/debug output."
+      - "A successful human response headline requires typed response status, finish reason, and Runtime timing; missing usage is omitted from the human line and retained only in dim diagnostics."
+    mainline_bindings:
+      - v3-runtime-timing-01
+      - v3-runtime-timing-02
+      - v3-runtime-timing-03
+      - v3-runtime-timing-04
+      - v3-runtime-timing-05
+      - v3-runtime-timing-06
+      - v3-runtime-timing-07
+      - v3-runtime-timing-08
+      - v3-runtime-timing-09
+      - v3-runtime-timing-10
+      - v3-runtime-timing-11
+      - v3-runtime-timing-12
+
+  - feature_id: v3.console_request_count_visibility
+    change_risk: low
+    unit:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/goals/v3-console-request-count-visibility-test-design.md
+      - docs/architecture/function-map.yml
+      - docs/architecture/resource-operation-map.yml
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity --lib -- --nocapture
+    smoke:
+      - npm run verify:v3-architecture-docs
+      - npm run verify:function-map-compile-gate
+    build:
+      - npm run build:min
+    notes:
+      - "Server owns one aggregate-shared request counter, the typed V3AllocatedRequestIdentity allocation extension, and request-count projection; listeners must not create independent locks for the shared persisted file, and console must not parse request ids, create a second counter, emit a duplicate pre-route placeholder block, or mutate request/response payloads."
+    mainline_bindings:
+      - v3-console-count-01
+      - v3-console-count-02
+      - v3-console-count-03
+      - v3-console-count-04
+
+  - feature_id: v3.console_human_readable_layering
+    change_risk: low
+    unit:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/goals/v3-console-human-readable-layering-test-design.md
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
+    smoke:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server console --lib
+      - cargo +stable check --manifest-path v3/Cargo.toml -p routecodex-v3-server
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - git diff --check
+    build:
+      - npm run install:v3
+    notes:
+      - "Positive tests lock one Responses Direct/Relay routed request block and one terminal response block when runtime observability is present, exact 24/20/36 human columns including oversized ASCII/CJK, fixed 52-column diagnostic scope, bright headline color, blank separator, complete diagnostics, plain output, and preservation of the original Direct SSE Error01 kind/stage/code/message."
+      - "Positive disconnect coverage locks source stage V3ServerRespOutbound06ClientFrame, console status 499, and health-neutral post-commit handling."
+      - "Positive terminal-observation coverage locks Direct and Relay body Drop after completed as success, and Drop without terminal observation as typed health-neutral 499."
+      - "Negative terminal-observation coverage locks Direct and Relay body Drop after failed as provider terminal failure 502, never success or client_disconnect."
+      - "Negative tests lock no fabricated post-commit Error06, no typed Error01-to-text reconstruction, no provider-stage attribution for client disconnect, no pre-route pending duplicate, no ANSI dim on the human line, no ANSI in plain mode, no diagnostic loss, stable machine-field alignment for oversized sessions, no synthesized internal/external timing, no Server-built dry-run runtime observability, fail-fast retired dry-run and missing route truth, no fabricated OpenAI Chat/Anthropic/Gemini Relay success observability, and no request/response/routing/error semantic mutation."
+
+  - feature_id: v3.codex_sample_retention_snap_scope
+    change_risk: medium
+    unit:
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - v3/crates/routecodex-v3-cli/tests/foundation_cli.rs
+      - v3/crates/routecodex-v3-debug/tests/debug_runtime_contract.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_full_snap_scope_persists_live_json_and_sse_responses
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_relay_only_snap_scope_writes_no_codex_sample
+    smoke:
+      - npm run verify:v3-debug-payload-budget
+      - npm run test:v3-debug-payload-budget-red-fixtures
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:function-map-compile-gate
+      - npm run verify:architecture-mainline-call-map
+      - npm run verify:v3-rust-only
+      - npm run verify:v3-module-boundaries
+    build:
+      - npm run install:v3
+    notes:
+      - "No flag disables persistence regardless of config; --snap authorizes Relay only; --snapall authorizes Relay and Direct; blank stage selectors are rejected."
+      - "Server persists only Debug-redacted/budgeted copies, captures live Direct JSON/SSE without changing transport semantics, propagates filesystem scan/write/eviction failures, and retains at most 100 request directories per endpoint/port."
+      - "Live closure requires final no-flag restart after controlled --snap and --snapall replays."

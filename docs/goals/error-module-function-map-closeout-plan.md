@@ -89,7 +89,9 @@ Owner：
 
 ### `error.backoff_action_queue`
 
-职责：统一 blocking wait 队列，固定 `1s -> 2s -> 3s -> repeat`，执行 wait 但不定义 provider classification。
+职责：统一 blocking wait 队列；provider action 通过 Rust gate 执行 isolated `1s` /
+sustained `5s`、FIFO、每 generation 单 admission 和 action-scope 显式释放，但不定义
+provider classification。
 
 Owner：
 

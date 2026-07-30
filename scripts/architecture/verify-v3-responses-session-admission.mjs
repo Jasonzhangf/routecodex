@@ -29,6 +29,11 @@ const admission = readRequired(
   "v3/crates/routecodex-v3-server/src/session_admission.rs",
 );
 const error = readRequired("v3/crates/routecodex-v3-error/src/lib.rs");
+const config = readRequired("v3/crates/routecodex-v3-config/src/lib.rs");
+const configTypes = readRequired("v3/crates/routecodex-v3-config/src/types.rs");
+const configTests = readRequired(
+  "v3/crates/routecodex-v3-config/tests/config_v3_contract.rs",
+);
 const tests = readRequired(
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
 );
@@ -63,8 +68,13 @@ requireMatch(
 );
 requireMatch(
   server,
-  /responses_session_admission_middleware[\s\S]*V3ResponsesSessionAdmissionGate::try_admit|responses_session_admission\.try_admit/,
-  "HTTP middleware must admit the explicit Responses scope before handler execution",
+  /read_json_payload\(request\)\.await[\s\S]*admit_v3_responses_session_after_json_parse[\s\S]*pending_endpoint_after_responses_admission/,
+  "Responses handler must admit the explicit scope after the canonical JSON parser and before Runtime execution",
+);
+forbidMatch(
+  server,
+  /responses_session_admission_middleware|V3ResponsesAdmissionParsedPayload/,
+  "Session admission must not create middleware JSON parsing or parsed-payload bypass owners",
 );
 requireMatch(
   server,
@@ -93,12 +103,37 @@ requireMatch(
 );
 requireMatch(
   server,
-  /build_v3_sse_transport_out_04_keepalive_comment\(" keepalive"\)[\s\S]*tokio::select!/,
+  /build_v3_sse_transport_out_04_keepalive_comment\(" keepalive"\)[\s\S]*keepalive_interval[\s\S]*tokio::select!/,
   "Successful V3 Responses SSE must schedule transport-only keepalive comments",
+);
+forbidMatch(
+  server,
+  /ROUTECODEX_HTTP_SSE_KEEPALIVE_MS|RCC_HTTP_SSE_KEEPALIVE_MS/,
+  "V3 Server must consume typed keepalive config instead of reading environment variables",
+);
+requireMatch(
+  configTypes,
+  /pub struct V3ServerManifest[\s\S]*pub http_sse_keepalive_ms:\s*u64/,
+  "Config05 server manifest must publish the validated HTTP SSE keepalive interval",
+);
+requireMatch(
+  config,
+  /pub fn resolve_v3_http_sse_keepalive_ms[\s\S]*RCC_HTTP_SSE_KEEPALIVE_MS is not supported[\s\S]*ROUTECODEX_HTTP_SSE_KEEPALIVE_MS/,
+  "Config owner must reject the retired legacy keepalive variable and compile only the canonical setting",
+);
+requireMatch(
+  config,
+  /http_sse_keepalive_environment_compiler_rejects_invalid_primary[\s\S]*http_sse_keepalive_environment_compiler_rejects_legacy_variable[\s\S]*http_sse_keepalive_environment_compiler_rejects_non_utf8_values/,
+  "Real environment compiler must have invalid-primary, retired-legacy, and non-UTF8 negative tests",
+);
+requireMatch(
+  configTests,
+  /http_sse_keepalive_config_rejects_empty_malformed_zero_and_legacy_values/,
+  "Config keepalive truth must have explicit negative tests",
 );
 requireMatch(
   server,
-  /v3_client_sse_body\(stream,\s*false\)/,
+  /v3_client_sse_body\(stream,\s*None\)/,
   "Error06/foundation SSE must bypass success keepalive injection",
 );
 forbidMatch(
@@ -140,13 +175,13 @@ for (const [source, pattern, label] of [
   ],
   [
     mainlineMap,
-    /chain_id:\s*v3\.sse\.http_keepalive_boundary\b/,
-    "V3 mainline map must bind the HTTP keepalive boundary without mutating the locked transport chain",
+    /chain_id:\s*v3\.sse\.http_keepalive_boundary[\s\S]*owner_feature_id:\s*v3\.sse_http_keepalive_boundary\b/,
+    "V3 mainline map must bind the HTTP keepalive boundary to its server-owned feature",
   ],
   [
     keepaliveManifest,
-    /lifecycle_id:\s*v3\.sse\.http_keepalive\.mainline\b/,
-    "HTTP keepalive lifecycle manifest must use the registered lifecycle id",
+    /lifecycle_id:\s*v3\.sse\.http_keepalive\.mainline[\s\S]*owner_feature_id:\s*v3\.sse_http_keepalive_boundary\b/,
+    "HTTP keepalive lifecycle manifest must use the registered server-owned feature",
   ],
   [
     keepaliveWiki,
@@ -157,6 +192,26 @@ for (const [source, pattern, label] of [
     tests,
     /responses_same_listener_same_session_overlap_is_rejected_before_provider_send/,
     "Controlled provider overlap blackbox must exist",
+  ],
+  [
+    tests,
+    /responses_client_drop_releases_same_session_before_provider_eof/,
+    "Controlled HTTP blackbox must prove client drop releases admission before provider EOF",
+  ],
+  [
+    functionMap,
+    /feature_id:\s*v3\.sse_http_keepalive_boundary[\s\S]*owner_crate:\s*routecodex-v3-server[\s\S]*entry_symbols:[\s\S]*v3_io_sse_body/,
+    "Function map must register keepalive scheduling under the V3 Server owner",
+  ],
+  [
+    resourceMap,
+    /resource_id:\s*v3\.config\.http_sse_keepalive_interval\b/,
+    "V3 resource map must register the typed keepalive config truth",
+  ],
+  [
+    mainlineMap,
+    /v3-sse-http-keepalive-01[\s\S]*side_channel_reads:\s*\[v3\.config\.http_sse_keepalive_interval\]/,
+    "HTTP keepalive edge must truthfully read the typed Config05 interval",
   ],
 ]) {
   requireMatch(source, pattern, label);
@@ -171,6 +226,16 @@ for (const scriptName of [
   if (typeof scripts[scriptName] !== "string") {
     failures.push(`package.json is missing ${scriptName}`);
   }
+}
+if (
+  typeof scripts["test:v3-responses-session-admission"] !== "string" ||
+  !scripts["test:v3-responses-session-admission"].includes(
+    "responses_client_drop_releases_same_session_before_provider_eof",
+  )
+) {
+  failures.push(
+    "Admission behavior gate must execute the controlled client-drop HTTP blackbox",
+  );
 }
 for (const scriptName of [
   "verify:v3-architecture-docs",
@@ -193,6 +258,26 @@ requireMatch(
   workflow,
   /npm run test:v3-responses-session-admission-red-fixtures/,
   "CI must run the admission red fixtures",
+);
+requireMatch(
+  workflow,
+  /^\s*run:\s*npm run test:v3-responses-session-admission\s*$/m,
+  "CI must run the actual admission and keepalive behavior gate",
+);
+requireMatch(
+  functionMap,
+  /<V3ResponsesSessionAdmissionPermit as Drop>::drop/,
+  "Function map must anchor the real Drop trait implementation symbol",
+);
+requireMatch(
+  resourceMap,
+  /<V3ResponsesSessionAdmissionPermit as Drop>::drop/,
+  "Resource map must anchor the real Drop trait implementation symbol",
+);
+forbidMatch(
+  `${functionMap}\n${resourceMap}`,
+  /V3ResponsesSessionAdmissionPermit::drop/,
+  "Maps must not claim a nonexistent inherent permit drop symbol",
 );
 
 if (failures.length > 0) {

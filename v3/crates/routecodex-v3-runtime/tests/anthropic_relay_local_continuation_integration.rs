@@ -46,6 +46,7 @@ impl ResponsesTransport for SequentialJsonTransport {
 
 #[tokio::test]
 async fn json_two_turn_save_restore_order_and_terminal_release() {
+    let server_id = "anthropic_local_json_two_turn";
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([
@@ -70,13 +71,13 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
         "session-local",
         "conversation-local",
         5555,
-        "controlled",
+        server_id,
     );
 
     let first = execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-local-1".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -96,9 +97,9 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
     assert_eq!(state.len().unwrap(), 1);
 
     let second = execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: server_id.into(),
             request_id: "req-local-2".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -161,10 +162,15 @@ impl ResponsesTransport for SseThenJsonTransport {
         self.captures.lock().unwrap().push(request.body().clone());
         if self.turn.fetch_add(1, Ordering::SeqCst) == 0 {
             let stream = futures_util::stream::iter([
-                Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"delta\":\"Need gamma\"}\n\n".to_vec()),
-                Ok(b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_local\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
-                Ok(b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\\\"gamma\\\"}\"}\n\n".to_vec()),
-                Ok(b"event: response.completed\ndata: {\"response\":{\"id\":\"resp_sse_local\",\"status\":\"completed\"}}\n\n".to_vec()),
+                Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse_local\",\"status\":\"in_progress\"}}\n\n".to_vec()),
+                Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"rs_sse_local\",\"type\":\"reasoning\",\"summary\":[]}}\n\n".to_vec()),
+                Ok(b"event: response.reasoning_summary_part.added\ndata: {\"type\":\"response.reasoning_summary_part.added\",\"output_index\":0,\"item_id\":\"rs_sse_local\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n".to_vec()),
+                Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_sse_local\",\"summary_index\":0,\"delta\":\"Need gamma\"}\n\n".to_vec()),
+                Ok(b"event: response.reasoning_summary_text.done\ndata: {\"type\":\"response.reasoning_summary_text.done\",\"output_index\":0,\"item_id\":\"rs_sse_local\",\"summary_index\":0,\"text\":\"Need gamma\"}\n\n".to_vec()),
+                Ok(b"event: response.reasoning_summary_part.done\ndata: {\"type\":\"response.reasoning_summary_part.done\",\"output_index\":0,\"item_id\":\"rs_sse_local\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"Need gamma\"}}\n\n".to_vec()),
+                Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_local\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
+                Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"call_id\":\"call_sse_local\",\"delta\":\"{\\\"q\\\":\\\"gamma\\\"}\"}\n\n".to_vec()),
+                Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse_local\",\"status\":\"completed\"}}\n\n".to_vec()),
             ]);
             return Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
@@ -197,6 +203,7 @@ impl ResponsesTransport for SseThenJsonTransport {
 
 #[tokio::test]
 async fn sse_first_turn_and_json_second_turn_share_the_same_immutable_lifecycle() {
+    let server_id = "anthropic_local_sse_json";
     let transport = SseThenJsonTransport {
         captures: Mutex::new(Vec::new()),
         turn: AtomicUsize::new(0),
@@ -207,11 +214,12 @@ async fn sse_first_turn_and_json_second_turn_share_the_same_immutable_lifecycle(
         "session-sse",
         "conversation-sse",
         5555,
-        "controlled",
+        server_id,
     );
     let first = execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-sse-1",
             json!([{"role":"user","content":"Lookup gamma"}]),
             true,
@@ -234,8 +242,9 @@ async fn sse_first_turn_and_json_second_turn_share_the_same_immutable_lifecycle(
     assert_eq!(state.len().unwrap(), 1);
 
     execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-sse-2",
             json!([{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_sse_local","content":"gamma"}]}]),
             false,
@@ -256,6 +265,7 @@ async fn sse_first_turn_and_json_second_turn_share_the_same_immutable_lifecycle(
 
 #[tokio::test]
 async fn scope_mismatch_fails_before_provider_send_and_preserves_saved_truth() {
+    let server_id = "anthropic_local_scope_mismatch";
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([json!({
@@ -270,11 +280,12 @@ async fn scope_mismatch_fails_before_provider_send_and_preserves_saved_truth() {
         "session-a",
         "conversation-a",
         5555,
-        "controlled",
+        server_id,
     );
     execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-scope-1",
             json!([{"role":"user","content":"lookup"}]),
             false,
@@ -291,11 +302,12 @@ async fn scope_mismatch_fails_before_provider_send_and_preserves_saved_truth() {
         "session-b",
         "conversation-a",
         5555,
-        "controlled",
+        server_id,
     );
     let error = execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-scope-2",
             json!([{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_scope_1","content":"x"}]}]),
             false,
@@ -350,6 +362,7 @@ impl ResponsesTransport for SaveThenErrorTransport {
 
 #[tokio::test]
 async fn provider_error_after_restore_does_not_release_or_project_success() {
+    let server_id = "anthropic_local_provider_error_after_restore";
     let transport = SaveThenErrorTransport {
         turn: AtomicUsize::new(0),
     };
@@ -359,11 +372,12 @@ async fn provider_error_after_restore_does_not_release_or_project_success() {
         "session-error",
         "conversation-error",
         5555,
-        "controlled",
+        server_id,
     );
     execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-error-1",
             json!([{"role":"user","content":"lookup"}]),
             false,
@@ -376,8 +390,9 @@ async fn provider_error_after_restore_does_not_release_or_project_success() {
     .await
     .unwrap();
     let output = execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-error-2",
             json!([{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_error_keep","content":"x"}]}]),
             false,
@@ -401,6 +416,7 @@ async fn provider_error_after_restore_does_not_release_or_project_success() {
 
 #[tokio::test]
 async fn multiple_pending_tool_calls_restore_one_canonical_context_and_release_all_aliases() {
+    let server_id = "anthropic_local_multi_pending";
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([
@@ -421,11 +437,12 @@ async fn multiple_pending_tool_calls_restore_one_canonical_context_and_release_a
         "session-multi",
         "conversation-multi",
         5555,
-        "controlled",
+        server_id,
     );
     execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-multi-1",
             json!([{"role":"user","content":"lookup both"}]),
             false,
@@ -439,8 +456,9 @@ async fn multiple_pending_tool_calls_restore_one_canonical_context_and_release_a
     .unwrap();
     assert_eq!(state.len().unwrap(), 2);
     execute_v3_anthropic_relay_runtime_with_local_continuation(
-        &manifest(),
+        &manifest(server_id),
         request(
+            server_id,
             "req-multi-2",
             json!([{"role":"user","content":[
                 {"type":"tool_result","tool_use_id":"call_multi_a","content":"a"},
@@ -464,9 +482,14 @@ async fn multiple_pending_tool_calls_restore_one_canonical_context_and_release_a
     assert_eq!(captures[1]["input"][3]["type"], "function_call_output");
 }
 
-fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayRuntimeInput {
+fn request(
+    server_id: &str,
+    request_id: &str,
+    messages: Value,
+    stream: bool,
+) -> V3AnthropicRelayRuntimeInput {
     V3AnthropicRelayRuntimeInput {
-        server_id: "controlled".into(),
+        server_id: server_id.into(),
         request_id: request_id.into(),
         payload: json!({
             "model":"claude-client-alias",
@@ -477,34 +500,34 @@ fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayR
     }
 }
 
-fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest(server_id: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
-            r#"
+            &format!(r#"
 version = 3
-[servers.controlled]
+[servers.{server_id}]
 bind = "127.0.0.1"
 port = 5555
-routing_group = "controlled"
+routing_group = "{server_id}"
 endpoints = ["anthropic"]
 [providers.controlled]
 type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "responses-wire-model"
-auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "CONTROLLED_KEY" }}] }}
 [providers.controlled.models.responses-wire-model]
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning"]
-[route_groups.controlled.pools.claude_client]
-selection = { strategy = "priority" }
-match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
-targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-[route_groups.controlled.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-"#,
+[route_groups.{server_id}.pools.claude_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }}
+targets = [{{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }}]
+[route_groups.{server_id}.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }}]
+"#),
         )
         .unwrap(),
     )

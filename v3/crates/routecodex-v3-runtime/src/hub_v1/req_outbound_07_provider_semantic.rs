@@ -1,4 +1,6 @@
-use super::{V3HubExecutionMode, V3HubProviderWireProtocol, V3HubReqTarget06Resolved};
+use super::{
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubProviderWireProtocol, V3HubReqTarget06Resolved,
+};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +26,16 @@ impl V3HubReqOutbound07ProviderSemantic {
 
     pub(crate) fn execution_mode(&self) -> V3HubExecutionMode {
         self.previous.previous.execution
+    }
+
+    pub(crate) fn entry_protocol(&self) -> V3HubEntryProtocol {
+        self.previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .previous
+            .entry_protocol
     }
 
     pub(crate) fn provider_semantic_payload(&self) -> &Value {

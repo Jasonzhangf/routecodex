@@ -26,6 +26,16 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - metadata.request_truth
+      produces:
+        - continuation.scope_state
+      side_channel_reads:
+        - metadata.request_truth
+      side_channel_writes:
+        - continuation.scope_state
   - step_id: rct-02
     from_node: ChatProcReqContinuation02OwnerResolved
     to_node: ChatProcReqContinuation03CanonicalRestored
@@ -33,6 +43,17 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - continuation.scope_state
+        - metadata.request_truth
+      produces:
+        - continuation.scope_state
+      side_channel_reads:
+        - continuation.scope_state
+        - metadata.request_truth
+      side_channel_writes:
+        - continuation.scope_state
   - step_id: rct-03
     from_node: ChatProcReqContinuation03CanonicalRestored
     to_node: ChatProcReqContinuation04HookRestored
@@ -40,6 +61,17 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - continuation.scope_state
+      produces:
+        - request.normal_payload
+        - servertool.followup_state
+      side_channel_reads:
+        - continuation.scope_state
+      side_channel_writes:
+        - servertool.followup_state
   - step_id: rct-04
     from_node: ChatProcReqContinuation04HookRestored
     to_node: ChatProcReqContinuation05Governed
@@ -47,6 +79,15 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - servertool.followup_state
+      produces:
+        - request.normal_payload
+      side_channel_reads:
+        - servertool.followup_state
+      side_channel_writes: []
   - step_id: rct-05
     from_node: ChatProcReqContinuation05Governed
     to_node: ChatProcRespContinuation06ResponseGoverned
@@ -54,6 +95,16 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - response.hub_semantic
+        - continuation.scope_state
+      produces:
+        - response.hub_semantic
+      side_channel_reads:
+        - continuation.scope_state
+      side_channel_writes: []
   - step_id: rct-06
     from_node: ChatProcRespContinuation06ResponseGoverned
     to_node: ChatProcRespContinuation07CanonicalSaved
@@ -61,6 +112,16 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+        - metadata.request_truth
+      produces:
+        - continuation.scope_state
+      side_channel_reads:
+        - metadata.request_truth
+      side_channel_writes:
+        - continuation.scope_state
   - step_id: rct-07
     from_node: ChatProcRespContinuation07CanonicalSaved
     to_node: ChatProcRespContinuation08Released
@@ -68,6 +129,15 @@ edges:
     owner_feature_id: hub.chat_process_responses_continuation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - continuation.scope_state
+        - metadata.response_observation
+      produces: []
+      side_channel_reads:
+        - continuation.scope_state
+        - metadata.response_observation
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

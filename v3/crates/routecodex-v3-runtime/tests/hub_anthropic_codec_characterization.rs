@@ -376,7 +376,119 @@ fn responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape(
 }
 
 #[test]
-fn responses_replay_safe_reasoning_null_content_does_not_enter_anthropic_messages() {
+fn anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasoning() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[
+                {"type":"thinking","thinking":"inspect cwd","signature":"sig-anthropic-1"},
+                {"type":"text","text":"calling pwd"},
+                {"type":"redacted_thinking","data":"redacted-anthropic-2"},
+                {"type":"tool_use","id":"call_pwd","name":"exec_command","input":{"cmd":"pwd"}}
+            ]
+        }]
+    }))
+    .expect("Anthropic thinking history must normalize into the Responses pipeline");
+
+    assert_eq!(
+        semantic["input"],
+        json!([
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"inspect cwd"}],
+                "encrypted_content":"sig-anthropic-1"
+            },
+            {
+                "role":"assistant",
+                "content":[{"type":"input_text","text":"calling pwd"}]
+            },
+            {
+                "type":"reasoning",
+                "encrypted_content":"redacted-anthropic-2"
+            },
+            {
+                "type":"function_call",
+                "call_id":"call_pwd",
+                "name":"exec_command",
+                "arguments":"{\"cmd\":\"pwd\"}"
+            }
+        ])
+    );
+}
+
+#[test]
+fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
+    let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{"type":"thinking","thinking":"","signature":"sig-without-thinking"}]
+        }]
+    }))
+    .expect_err("malformed Anthropic thinking must fail before entering Hub semantics");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "reasoning content"
+        }
+    ));
+}
+
+#[test]
+fn anthropic_thinking_history_rejects_cross_type_alias_fields() {
+    for content in [
+        json!({"type":"thinking","text":"alias text","data":"alias signature"}),
+        json!({"type":"redacted_thinking","signature":"alias redacted payload"}),
+        json!({"type":"reasoning","reasoning":"non-Anthropic alias"}),
+    ] {
+        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+            "model":"claude-sonnet",
+            "messages":[{"role":"assistant","content":[content]}]
+        }))
+        .expect_err("Anthropic history must reject cross-type reasoning aliases");
+
+        assert!(matches!(
+            error,
+            V3AnthropicCodecError::MalformedField {
+                field: "reasoning content"
+            }
+        ));
+    }
+}
+
+#[test]
+fn anthropic_thinking_history_rejects_native_and_alias_dual_truth() {
+    for content in [
+        json!({
+            "type":"thinking",
+            "thinking":"native thinking",
+            "text":"alias thinking"
+        }),
+        json!({
+            "type":"redacted_thinking",
+            "data":"native encrypted content",
+            "signature":"alias encrypted content"
+        }),
+    ] {
+        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+            "model":"claude-sonnet",
+            "messages":[{"role":"assistant","content":[content]}]
+        }))
+        .expect_err("Anthropic history must reject native and alias dual truth");
+
+        assert!(matches!(
+            error,
+            V3AnthropicCodecError::MalformedField {
+                field: "reasoning content"
+            }
+        ));
+    }
+}
+
+#[test]
+fn responses_replay_reasoning_restores_anthropic_thinking_and_redacted_blocks() {
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": false,
@@ -393,6 +505,11 @@ fn responses_replay_safe_reasoning_null_content_does_not_enter_anthropic_message
                 "encrypted_content":"opaque-openai-reasoning"
             },
             {
+                "type":"reasoning",
+                "summary":[],
+                "encrypted_content":"opaque-redacted-reasoning"
+            },
+            {
                 "type":"function_call",
                 "call_id":"call_pwd",
                 "name":"exec_command",
@@ -405,20 +522,107 @@ fn responses_replay_safe_reasoning_null_content_does_not_enter_anthropic_message
             }
         ]
     }))
-    .expect("Responses replay-safe reasoning with null content must not fail Anthropic encoding");
+    .expect("Responses replay-safe reasoning must restore Anthropic thinking history");
 
     let messages = provider_request["messages"]
         .as_array()
         .expect("Anthropic request messages");
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 5);
     assert_eq!(messages[0]["role"], "user");
     assert_eq!(messages[1]["role"], "assistant");
-    assert_eq!(messages[1]["content"][0]["type"], "tool_use");
-    assert_eq!(messages[2]["role"], "user");
-    assert_eq!(messages[2]["content"][0]["type"], "tool_result");
-    let serialized = serde_json::to_string(&provider_request).expect("Anthropic request JSON");
-    assert!(!serialized.contains("opaque-openai-reasoning"));
-    assert!(!serialized.contains("summary_text"));
+    assert_eq!(messages[1]["content"][0]["type"], "thinking");
+    assert_eq!(
+        messages[1]["content"][0]["thinking"],
+        "Need to inspect cwd first."
+    );
+    assert_eq!(
+        messages[1]["content"][0]["signature"],
+        "opaque-openai-reasoning"
+    );
+    assert_eq!(messages[2]["role"], "assistant");
+    assert_eq!(messages[2]["content"][0]["type"], "redacted_thinking");
+    assert_eq!(
+        messages[2]["content"][0]["data"],
+        "opaque-redacted-reasoning"
+    );
+    assert_eq!(messages[3]["role"], "assistant");
+    assert_eq!(messages[3]["content"][0]["type"], "tool_use");
+    assert_eq!(messages[4]["role"], "user");
+    assert_eq!(messages[4]["content"][0]["type"], "tool_result");
+}
+
+#[test]
+fn responses_reasoning_rejects_content_and_summary_dual_truth() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[{
+            "type":"reasoning",
+            "content":[{"type":"reasoning_text","text":"private content"}],
+            "summary":[{"type":"summary_text","text":"public summary"}]
+        }]
+    }))
+    .expect_err("Anthropic wire cannot preserve both Responses reasoning content and summary");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "reasoning item"
+        }
+    ));
+}
+
+#[test]
+fn responses_reasoning_null_encrypted_content_is_absent_identity() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[{
+            "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"visible thought"}],
+            "encrypted_content":null
+        }]
+    }))
+    .expect("Responses reasoning encrypted_content:null is equivalent to absent identity");
+
+    assert_eq!(provider_request["messages"][0]["role"], "assistant");
+    assert_eq!(
+        provider_request["messages"][0]["content"][0]["type"],
+        "thinking"
+    );
+    assert_eq!(
+        provider_request["messages"][0]["content"][0]["thinking"],
+        "visible thought"
+    );
+    assert!(
+        provider_request["messages"][0]["content"][0]
+            .get("signature")
+            .is_none(),
+        "null encrypted_content must not become an Anthropic signature"
+    );
+}
+
+#[test]
+fn responses_reasoning_rejects_malformed_encrypted_content() {
+    for encrypted_content in [json!(42), json!({}), json!("")] {
+        let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"MiniMax-M3",
+            "stream":false,
+            "input":[{
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"visible thought"}],
+                "encrypted_content":encrypted_content
+            }]
+        }))
+        .expect_err("malformed encrypted_content must not disappear from Anthropic wire");
+
+        assert!(matches!(
+            error,
+            V3AnthropicCodecError::MalformedField {
+                field: "reasoning item"
+            }
+        ));
+    }
 }
 
 #[test]
@@ -691,19 +895,22 @@ fn responses_consecutive_tool_calls_group_before_results_for_anthropic_order() {
     let messages = provider_request["messages"]
         .as_array()
         .expect("Anthropic request messages");
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 4);
     assert_eq!(messages[1]["role"], json!("assistant"));
-    assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
-    assert_eq!(messages[1]["content"][0]["id"], json!("call_one"));
-    assert_eq!(messages[1]["content"][1]["type"], json!("tool_use"));
-    assert_eq!(messages[1]["content"][1]["id"], json!("call_two"));
-    assert_eq!(messages[2]["role"], json!("user"));
-    assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
-    assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_one"));
-    assert_eq!(messages[2]["content"][1]["type"], json!("tool_result"));
-    assert_eq!(messages[2]["content"][1]["tool_use_id"], json!("call_two"));
-    let serialized = serde_json::to_string(&provider_request).expect("Anthropic request JSON");
-    assert!(!serialized.contains("opaque"));
+    assert_eq!(
+        messages[1]["content"][0],
+        json!({"type":"redacted_thinking","data":"opaque"})
+    );
+    assert_eq!(messages[2]["role"], json!("assistant"));
+    assert_eq!(messages[2]["content"][0]["type"], json!("tool_use"));
+    assert_eq!(messages[2]["content"][0]["id"], json!("call_one"));
+    assert_eq!(messages[2]["content"][1]["type"], json!("tool_use"));
+    assert_eq!(messages[2]["content"][1]["id"], json!("call_two"));
+    assert_eq!(messages[3]["role"], json!("user"));
+    assert_eq!(messages[3]["content"][0]["type"], json!("tool_result"));
+    assert_eq!(messages[3]["content"][0]["tool_use_id"], json!("call_one"));
+    assert_eq!(messages[3]["content"][1]["type"], json!("tool_result"));
+    assert_eq!(messages[3]["content"][1]["tool_use_id"], json!("call_two"));
 }
 
 #[test]
@@ -864,6 +1071,330 @@ fn responses_assistant_text_between_tool_call_and_output_preserves_anthropic_adj
 }
 
 #[test]
+fn responses_hosted_web_search_between_tool_call_and_output_preserves_anthropic_adjacency() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": false,
+        "input": [
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"search, then run the command"}]
+            },
+            {
+                "type":"function_call",
+                "call_id":"call_exec",
+                "name":"exec_command",
+                "arguments":"{\"cmd\":\"pwd\"}"
+            },
+            {
+                "type":"web_search_call",
+                "id":"ws_search_2",
+                "status":"completed",
+                "action":{
+                    "type":"search",
+                    "query":"Ubuntu 24.04 Snapdragon X Elite"
+                },
+                "result":{"title":"Ubuntu ARM64","url":"https://example.test"}
+            },
+            {
+                "type":"function_call_output",
+                "call_id":"call_exec",
+                "output":"/tmp"
+            }
+        ]
+    }))
+    .expect("hosted web-search history must preserve the surrounding Anthropic tool pair");
+
+    let messages = provider_request["messages"]
+        .as_array()
+        .expect("Anthropic messages");
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
+    assert_eq!(messages[1]["content"][0]["id"], json!("call_exec"));
+    assert_eq!(messages[1]["content"][1]["type"], json!("server_tool_use"));
+    assert_eq!(messages[1]["content"][1]["id"], json!("ws_search_2"));
+    assert_eq!(
+        messages[1]["content"][2]["type"],
+        json!("web_search_tool_result")
+    );
+    assert_eq!(
+        messages[1]["content"][2]["tool_use_id"],
+        json!("ws_search_2")
+    );
+    assert_eq!(messages[2]["role"], json!("user"));
+    assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
+    assert_eq!(messages[2]["content"][0]["tool_use_id"], json!("call_exec"));
+}
+
+#[test]
+fn responses_hosted_web_search_without_identity_gets_deterministic_anthropic_wire_id() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "status":"completed",
+            "action":{"type":"search","queries":["Ubuntu ARM64"],"query":""}
+        }]
+    }))
+    .expect("hosted web-search history may omit transport identity and outcome payload");
+
+    assert_eq!(
+        provider_request["messages"][0]["content"][0]["id"],
+        json!("call_routecodex_web_search_0")
+    );
+    assert_eq!(
+        provider_request["messages"][0]["content"][1]["tool_use_id"],
+        json!("call_routecodex_web_search_0")
+    );
+    assert_eq!(
+        provider_request["messages"][0]["content"][1]["content"]["status"],
+        json!("completed")
+    );
+    assert_eq!(
+        provider_request["messages"][0]["content"][1]["content"]["action"]["queries"][0],
+        json!("Ubuntu ARM64")
+    );
+}
+
+#[test]
+fn responses_hosted_web_search_conflicting_identity_aliases_fail_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_id",
+            "call_id":"ws_search_call",
+            "status":"completed",
+            "action":{"type":"search","query":"Ubuntu ARM64"}
+        }]
+    }))
+    .expect_err("hosted web-search conflicting transport identity aliases are ambiguous");
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.id"
+        }
+    ));
+}
+
+#[test]
+fn responses_hosted_web_search_action_side_channel_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"completed",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64",
+                "metadata_center":{"leak":true}
+            },
+            "result":{"title":"Ubuntu ARM64"}
+        }]
+    }))
+    .expect_err("nested RouteCodex side-channel must not reach Anthropic provider wire");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::SideChannelLeaked {
+            field: "metadata_center"
+        }
+    ));
+}
+
+#[test]
+fn responses_hosted_web_search_with_malformed_action_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "status":"completed",
+            "action":"not-an-object"
+        }]
+    }))
+    .expect_err("malformed hosted web-search history must not be silently dropped");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.action"
+        }
+    ));
+}
+
+#[test]
+fn responses_hosted_web_search_with_empty_action_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"completed",
+            "action":{}
+        }]
+    }))
+    .expect_err("hosted web-search action must include a supported discriminator");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.action.type"
+        }
+    ));
+}
+
+#[test]
+fn responses_hosted_web_search_with_result_preserves_outcome() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"completed",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64"
+            },
+            "result":{
+                "title":"Ubuntu ARM64",
+                "url":"https://example.test"
+            }
+        }]
+    }))
+    .expect("hosted web-search result-bearing history must preserve outcome");
+
+    let result_content = &provider_request["messages"][0]["content"][1]["content"];
+    assert_eq!(result_content["status"], json!("completed"));
+    assert_eq!(result_content["result"]["title"], json!("Ubuntu ARM64"));
+    assert_eq!(
+        provider_request["messages"][0]["content"][0]["input"]["query"],
+        json!("Ubuntu ARM64")
+    );
+}
+
+#[test]
+fn responses_failed_hosted_web_search_without_error_preserves_terminal_status() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"failed",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64"
+            }
+        }]
+    }))
+    .expect("failed hosted web-search may be status-only history");
+
+    let result_content = &provider_request["messages"][0]["content"][1]["content"];
+    assert_eq!(result_content["status"], json!("failed"));
+    assert_eq!(result_content["action"]["query"], json!("Ubuntu ARM64"));
+    assert!(result_content.get("error").is_none());
+}
+
+#[test]
+fn responses_failed_hosted_web_search_with_error_preserves_terminal_failure() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"failed",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64"
+            },
+            "error":{"code":"provider_error","message":"search failed"}
+        }]
+    }))
+    .expect("terminal failed hosted web-search with error must preserve failure outcome");
+
+    let result_content = &provider_request["messages"][0]["content"][1]["content"];
+    assert_eq!(result_content["status"], json!("failed"));
+    assert_eq!(result_content["error"]["code"], json!("provider_error"));
+}
+
+#[test]
+fn responses_nonterminal_hosted_web_search_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"in_progress",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64"
+            },
+            "result":{"title":"not terminal"}
+        }]
+    }))
+    .expect_err("nonterminal hosted web-search must not be projected as a completed result");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.status"
+        }
+    ));
+}
+
+#[test]
+fn responses_unknown_hosted_web_search_status_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"already_terminal",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64"
+            },
+            "result":{"title":"ambiguous"}
+        }]
+    }))
+    .expect_err("unknown hosted web-search status must fail before provider send");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.status"
+        }
+    ));
+}
+
+#[test]
+fn responses_completed_hosted_web_search_with_error_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[{
+            "type":"web_search_call",
+            "id":"ws_search_2",
+            "status":"completed",
+            "action":{
+                "type":"search",
+                "query":"Ubuntu ARM64"
+            },
+            "error":{"code":"unexpected"}
+        }]
+    }))
+    .expect_err("completed hosted web-search with error has contradictory terminal outcome");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "web_search_call.result"
+        }
+    ));
+}
+
+#[test]
 fn response_characterization_preserves_anthropic_json_tool_use_reasoning_and_client_projection() {
     let raw = json!({
         "id": "msg_1",
@@ -932,6 +1463,63 @@ fn response_characterization_preserves_anthropic_redacted_reasoning_as_encrypted
         "visible answer"
     );
     assert!(!response.to_string().contains("redacted_thinking"));
+}
+
+#[test]
+fn responses_reasoning_encrypted_content_projects_to_anthropic_thinking_identity() {
+    let projected = routecodex_v3_runtime::project_v3_responses_json_as_anthropic_message(&json!({
+        "id":"resp_reasoning_identity",
+        "status":"completed",
+        "output":[
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"visible thought"}],
+                "encrypted_content":"thinking-signature"
+            },
+            {
+                "type":"reasoning",
+                "summary":[],
+                "encrypted_content":"redacted-payload"
+            }
+        ]
+    }))
+    .expect("Responses reasoning identity must project to Anthropic client blocks");
+
+    assert_eq!(
+        projected["content"],
+        json!([
+            {
+                "type":"thinking",
+                "thinking":"visible thought",
+                "signature":"thinking-signature"
+            },
+            {
+                "type":"redacted_thinking",
+                "data":"redacted-payload"
+            }
+        ])
+    );
+}
+
+#[test]
+fn responses_client_projection_rejects_malformed_reasoning_encrypted_content() {
+    let error = routecodex_v3_runtime::project_v3_responses_json_as_anthropic_message(&json!({
+        "id":"resp_malformed_reasoning_identity",
+        "status":"completed",
+        "output":[{
+            "type":"reasoning",
+            "summary":[{"type":"summary_text","text":"visible thought"}],
+            "encrypted_content":{"unexpected":"object"}
+        }]
+    }))
+    .expect_err("malformed encrypted_content must fail before Anthropic client projection");
+
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField {
+            field: "reasoning item"
+        }
+    ));
 }
 
 #[test]
@@ -1014,6 +1602,28 @@ fn provider_error_characterization_is_explicit_and_protocol_bound() {
         ),
         Err(V3AnthropicCodecError::MalformedSseEvent)
     ));
+}
+
+#[test]
+fn nested_business_fields_named_like_side_channels_are_preserved() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "tools":[{
+            "type":"function",
+            "name":"echo_schema",
+            "parameters":{
+                "type":"object",
+                "properties":{"provider_protocol":{"type":"string"}}
+            }
+        }],
+        "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]
+    }))
+    .expect("business schema fields are not RouteCodex side-channel carriers");
+
+    assert_eq!(
+        provider_request["tools"][0]["input_schema"]["properties"]["provider_protocol"]["type"],
+        json!("string")
+    );
 }
 
 #[test]

@@ -37,6 +37,8 @@ finalized Direct/Relay client SSE stream
 - Keepalive encoding: existing
   `routecodex-v3-sse::build_v3_sse_transport_out_04_keepalive_comment`.
 - Keepalive scheduling: `routecodex-v3-server` HTTP SSE body transport wrapper.
+- Keepalive interval truth: `routecodex-v3-config` validates environment input
+  once and publishes a positive value through `V3ServerManifest`.
 
 Virtual Router, provider action gate, continuation stores, Provider Runtime,
 Anthropic/OpenAI codecs, Chat Process, and SSE payload codecs are forbidden
@@ -81,6 +83,10 @@ owners.
 7. Error06 SSE responses retain `event: error` as the first frame; keepalive is
    only added to successful streaming responses.
 8. No comment is encoded as `event: keepalive` or a Responses JSON event.
+9. An absent canonical environment input uses 3000 ms; empty, malformed, zero,
+   and non-UTF-8 values fail before listener startup. The retired
+   `RCC_HTTP_SSE_KEEPALIVE_MS` variable is rejected instead of acting as a
+   fallback or second truth.
 
 ## Project Blackbox
 

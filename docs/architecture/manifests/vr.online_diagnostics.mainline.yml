@@ -20,6 +20,16 @@ edges:
     owner_feature_id: vr.online_diagnostics
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - route.selection
+        - provider_runtime.observation
+      produces:
+        - vr.diagnostic_snapshot
+      side_channel_reads:
+        - route.selection
+        - provider_runtime.observation
+      side_channel_writes: []
   - step_id: vrd-02
     from_node: VrDiag02DryRunInput
     to_node: VrDiag03DryRunDecision
@@ -27,6 +37,15 @@ edges:
     owner_feature_id: vr.online_diagnostics
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - vr.diagnostic_snapshot
+        - route.selection
+      produces:
+        - vr.diagnostic_decision
+      side_channel_reads:
+        - route.selection
+      side_channel_writes: []
   - step_id: vrd-03
     from_node: VrDiag03DryRunDecision
     to_node: ServerRespOutbound05ClientFrame
@@ -34,6 +53,13 @@ edges:
     owner_feature_id: vr.online_diagnostics
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - vr.diagnostic_decision
+      produces:
+        - diagnostic.http_payload
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

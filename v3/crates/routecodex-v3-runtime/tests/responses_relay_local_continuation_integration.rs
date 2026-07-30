@@ -3487,6 +3487,190 @@ async fn responses_openai_chat_field_parity_request_matrix() {
 }
 
 #[tokio::test]
+async fn responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args(
+) {
+    let call_id = "call_e7896581c85649b58531dfc2";
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"chatcmpl-malformed-args-feedback",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{"role":"assistant","content":"continued"},
+                "finish_reason":"stop"
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-malformed-feedback",
+        "conversation-malformed-feedback",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            request_id: "req-malformed-feedback".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[
+                    {
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"find v2\"}{\"cmd\":\"cat bootstrap.mjs\"}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": "failed to parse function arguments: trailing characters at line 1 column 18"
+                    }
+                ]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("matched parse-failure feedback must keep OpenAI Chat provider wire valid");
+
+    assert_eq!(result.status, 200);
+    assert_eq!(result.error_chain, None);
+    assert!(
+        !result.node_trace.contains(&"V3TargetLocalReselected"),
+        "matched parse-failure feedback should not reselect away from OpenAI Chat: {:?}",
+        result.node_trace
+    );
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "OpenAI Chat provider must be sent once");
+    assert_eq!(
+        captures[0]["url"],
+        "http://chatwire.invalid/v1/chat/completions"
+    );
+    let provider_body = provider_projection_body(&captures[0]);
+    let tool_call = provider_body["messages"]
+        .as_array()
+        .expect("OpenAI Chat messages")
+        .iter()
+        .find_map(|message| message.get("tool_calls").and_then(Value::as_array))
+        .and_then(|tool_calls| tool_calls.first())
+        .expect("assistant tool call must be present");
+    assert_eq!(tool_call["id"], call_id);
+    assert_eq!(tool_call["function"]["name"], "exec_command");
+    assert_eq!(tool_call["function"]["arguments"], "{}");
+    assert_eq!(
+        provider_body["messages"]
+            .as_array()
+            .expect("OpenAI Chat messages")
+            .iter()
+            .find(|message| message["role"] == "tool")
+            .expect("parse-failure tool result must remain paired")["content"],
+        "failed to parse function arguments: trailing characters at line 1 column 18"
+    );
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send()
+{
+    let call_id = "call_unpaired_malformed";
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([json!({
+            "id":"resp-malformed-reselected-unpaired",
+            "object":"response",
+            "status":"completed",
+            "model":"responses-wire-model",
+            "finish_reason":"stop",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"reselected without corrupting history"}]
+            }]
+        })])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-malformed-unpaired",
+        "conversation-malformed-unpaired",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire_with_responses_reselect(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            request_id: "req-malformed-unpaired".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[{
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
+                }]
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect(
+        "unpaired malformed OpenAI Chat projection failure must reselect through typed Error05",
+    );
+
+    assert_eq!(result.status, 200);
+    assert_eq!(result.error_chain, None);
+    assert!(
+        result.node_trace.contains(&"V3TargetLocalReselected"),
+        "unpaired malformed OpenAI Chat arguments must trigger Error05 reselect: {:?}",
+        result.node_trace
+    );
+    let observability = result.observability.as_ref().expect("observability");
+    assert!(
+        observability.provider_failure_events.iter().any(|failure| {
+            failure.error_type.as_deref() == Some("provider_request_compat_error")
+                && failure.message.contains(call_id)
+                && failure.message.contains("valid JSON")
+                && failure.message.contains("ProviderReqCompat06ProviderCompat")
+                && failure
+                    .message
+                    .contains("matching parse-failure tool result=false")
+        }),
+        "unpaired malformed arguments must enter typed provider-failure chain before reselect: {observability:?}"
+    );
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(
+        captures.len(),
+        1,
+        "the incompatible OpenAI Chat target must fail before send; only the reselected provider may reach transport"
+    );
+    assert_eq!(
+        captures[0]["url"], "http://responseswire.invalid/v1/responses",
+        "the only provider send must target the reselected lossless Responses provider"
+    );
+    let provider_body = provider_projection_body(&captures[0]);
+    assert_eq!(
+        provider_body["input"][0]["arguments"],
+        "{\"cmd\":\"one\"}{\"cmd\":\"two\"}",
+        "reselect must preserve the original malformed arguments truth rather than deleting, replacing, or repairing it"
+    );
+}
+
+#[tokio::test]
 async fn responses_openai_chat_field_parity_web_search_call_history_projects_tool_pair() {
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
@@ -4162,6 +4346,50 @@ capabilities = ["text", "tools", "reasoning"]
 [route_groups.chatwire.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "chatwire", model = "chat-wire-model", key = "controlled", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn manifest_openai_chat_wire_with_responses_reselect(
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.chatwire]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "chatwire"
+endpoints = ["responses"]
+[providers.chatwire]
+type = "openai_chat"
+base_url = "http://chatwire.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+[providers.chatwire.models.chat-wire-model]
+wire_name = "chat-wire-model"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "reasoning"]
+[providers.responseswire]
+type = "responses"
+base_url = "http://responseswire.invalid/v1"
+default_model = "responses-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+[providers.responseswire.models.responses-wire-model]
+wire_name = "responses-wire-model"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "tool_outputs", "reasoning"]
+[route_groups.chatwire.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "chatwire", model = "chat-wire-model", key = "controlled", priority = 1 },
+  { kind = "provider_model", provider = "responseswire", model = "responses-wire-model", key = "controlled", priority = 2 }
+]
 "#,
         )
         .unwrap(),

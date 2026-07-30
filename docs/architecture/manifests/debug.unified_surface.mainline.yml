@@ -17,6 +17,13 @@ edges:
     owner_feature_id: debug.unified_surface
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.artifact
+      produces:
+        - debug.artifact
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

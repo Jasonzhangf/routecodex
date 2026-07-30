@@ -9,7 +9,6 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SseTransportLimits {
-    pub max_line_bytes: usize,
     pub max_frame_bytes: usize,
     pub max_buffer_bytes: usize,
 }
@@ -17,7 +16,6 @@ pub struct SseTransportLimits {
 impl Default for SseTransportLimits {
     fn default() -> Self {
         Self {
-            max_line_bytes: 64 * 1024,
             max_frame_bytes: 1024 * 1024,
             max_buffer_bytes: 2 * 1024 * 1024,
         }
@@ -30,8 +28,6 @@ pub enum SseTransportError {
     InvalidUtf8,
     #[error("SSE stream ended before the final frame delimiter")]
     UnterminatedFrame,
-    #[error("SSE line exceeds {limit} bytes")]
-    LineLimitExceeded { limit: usize },
     #[error("SSE frame exceeds {limit} bytes")]
     FrameLimitExceeded { limit: usize },
     #[error("SSE decoder buffer exceeds {limit} bytes")]
@@ -248,22 +244,9 @@ impl SseIncrementalDecoder {
                         b'\r' => 1,
                         _ => {
                             self.scan_index += 1;
-                            if self.scan_index.saturating_sub(self.line_start)
-                                > self.limits.max_line_bytes
-                            {
-                                return Err(SseTransportError::LineLimitExceeded {
-                                    limit: self.limits.max_line_bytes,
-                                });
-                            }
                             continue;
                         }
                     };
-                    if self.scan_index.saturating_sub(self.line_start) > self.limits.max_line_bytes
-                    {
-                        return Err(SseTransportError::LineLimitExceeded {
-                            limit: self.limits.max_line_bytes,
-                        });
-                    }
                     if self.scan_index == self.line_start {
                         frame_end = Some(self.scan_index + ending_len);
                         break;
@@ -391,17 +374,12 @@ pub fn build_v3_sse_transport_out_04_keepalive_comment(
 
 fn build_sse_transport_in_02_from_sse_transport_in_01(
     raw: &[u8],
-    limits: SseTransportLimits,
+    _limits: SseTransportLimits,
 ) -> Result<SseTransportIn02DecodedFrame, SseTransportError> {
     let text = std::str::from_utf8(raw).map_err(|_| SseTransportError::InvalidUtf8)?;
     let body = text.trim_end_matches(['\r', '\n']);
     let mut fields = Vec::new();
     for line in body.split(['\n', '\r']).filter(|line| !line.is_empty()) {
-        if line.len() > limits.max_line_bytes {
-            return Err(SseTransportError::LineLimitExceeded {
-                limit: limits.max_line_bytes,
-            });
-        }
         if let Some(comment) = line.strip_prefix(':') {
             fields.push(SseField::Comment(comment.to_string()));
             continue;
@@ -458,7 +436,6 @@ mod tests {
     #[test]
     fn long_chunk_is_drained_frame_by_frame_under_buffer_budget() {
         let limits = SseTransportLimits {
-            max_line_bytes: 16,
             max_frame_bytes: 16,
             max_buffer_bytes: 16,
         };
@@ -473,7 +450,43 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unterminated_invalid_utf8_and_limits() {
+    fn accepts_long_sse_data_lines_and_keeps_frame_buffer_limits() {
+        let long_payload = "x".repeat(80 * 1024);
+        let raw = format!("data: {long_payload}\n\n");
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let frames = decoder
+            .push(build_sse_transport_in_01_raw_chunk(raw.as_bytes()))
+            .unwrap();
+        decoder.finish().unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(
+            frames[0]
+                .frame
+                .fields
+                .iter()
+                .find_map(|field| match field {
+                    SseField::Named { name, value } if name == "data" => Some(value),
+                    _ => None,
+                })
+                .map(String::as_str),
+            Some(long_payload.as_str())
+        );
+
+        let limits = SseTransportLimits {
+            max_frame_bytes: 32,
+            max_buffer_bytes: 64,
+        };
+        let mut oversized_frame = SseIncrementalDecoder::new(limits);
+        assert_eq!(
+            oversized_frame.push(build_sse_transport_in_01_raw_chunk(
+                b"data: 1234567890123456789012345678901234567890\n\n"
+            )),
+            Err(SseTransportError::FrameLimitExceeded { limit: 32 })
+        );
+    }
+
+    #[test]
+    fn rejects_unterminated_invalid_utf8_and_buffer_limit() {
         let mut unfinished = SseIncrementalDecoder::new(SseTransportLimits::default());
         unfinished
             .push(build_sse_transport_in_01_raw_chunk(b"data: half"))
@@ -503,14 +516,13 @@ mod tests {
         );
 
         let limits = SseTransportLimits {
-            max_line_bytes: 4,
-            max_frame_bytes: 32,
-            max_buffer_bytes: 64,
+            max_frame_bytes: 1024,
+            max_buffer_bytes: 4,
         };
-        let mut oversized = SseIncrementalDecoder::new(limits);
+        let mut oversized_buffer = SseIncrementalDecoder::new(limits);
         assert_eq!(
-            oversized.push(build_sse_transport_in_01_raw_chunk(b"data: x\n\n")),
-            Err(SseTransportError::LineLimitExceeded { limit: 4 })
+            oversized_buffer.push(build_sse_transport_in_01_raw_chunk(b"datax")),
+            Err(SseTransportError::BufferLimitExceeded { limit: 4 })
         );
     }
 

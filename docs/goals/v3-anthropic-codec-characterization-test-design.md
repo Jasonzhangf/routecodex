@@ -41,12 +41,24 @@ registration must call these protocol-owned transformations through the fixed Hu
 - SSE response characterization preserves transport intent without materializing or reframing an
   event stream.
 - Provider response preserves text, thinking, and tool_use blocks.
+- Anthropic assistant-history `thinking/signature` and `redacted_thinking/data` normalize into ordered Responses reasoning items; malformed blocks fail explicitly.
+- Responses reasoning history restores Anthropic `thinking/signature` or `redacted_thinking/data` instead of being skipped.
+- Responses reasoning accepts exactly one visible truth surface (`content` or `summary`); simultaneous
+  surfaces fail because one Anthropic thinking block cannot preserve both semantics.
+- `encrypted_content` is either absent or a non-empty string; null, empty, numeric, array, and object
+  values fail before provider/client projection.
+- Responses JSON/SSE `reasoning.encrypted_content` reaches Anthropic JSON/SSE projection only from Resp04-finalized truth; provider SSE malformed `signature_delta` fails explicitly.
+- Anthropic `/v1/messages` remains Relay-only; no Direct lifecycle may bypass these codec owners.
 - Provider error preserves the Anthropic error envelope as explicit response semantics.
 
 ## Negative matrix
 
 - Non-Anthropic entry or provider protocol is rejected.
 - Non-object payloads, non-array messages/content, and malformed provider errors are rejected.
+- Anthropic `thinking` accepts only `thinking` plus optional `signature`; `redacted_thinking`
+  requires `data`. Cross-type aliases (`text`, `reasoning`, `encrypted_content`, or `signature`
+  standing in for `data`) are rejected both as replacements and when they coexist with native
+  fields.
 - Nameless non-builtin Responses tool declarations are rejected before provider wire instead of
   producing Anthropic `tools[].name = null`.
 - Orphan or non-immediate Responses tool outputs are rejected before provider wire instead of

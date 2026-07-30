@@ -6,22 +6,33 @@ pub(crate) fn v3_stopless_center_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
 ) -> bool {
-    v3_feature_enabled_for_server(manifest, server_id, "stopless_center")
+    v3_feature_enabled_for_server(manifest, server_id, "stopless_center", true)
 }
 
 pub(crate) fn v3_responses_direct_stopless_center_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
 ) -> bool {
-    v3_feature_enabled_for_server(manifest, server_id, "responses_direct_stopless_center")
+    v3_stopless_center_enabled_for_server(manifest, server_id)
+        && v3_feature_enabled_for_server(
+            manifest,
+            server_id,
+            "responses_direct_stopless_center",
+            false,
+        )
 }
 
 fn v3_feature_enabled_for_server(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     feature: &str,
+    default_enabled: bool,
 ) -> bool {
-    let global_enabled = manifest.features.get(feature).copied().unwrap_or(false);
+    let global_enabled = manifest
+        .features
+        .get(feature)
+        .copied()
+        .unwrap_or(default_enabled);
     manifest
         .servers
         .get(server_id)
@@ -206,8 +217,6 @@ pub enum V3StoplessCenterStopKind {
     NonStopProgress,
 }
 
-const V3_STOPLESS_PROVIDER_CALL_ID: &str = "call_stopless_reasoning";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3StoplessCenterNextRequestPolicy {
     ContinueDefault,
@@ -236,6 +245,7 @@ pub struct V3StoplessCenterState {
     last_request_id: Option<String>,
     last_response_id: Option<String>,
     last_transition_reason: Option<String>,
+    last_provider_stopless_call_id: Option<String>,
     updated_at: u64,
     steering: V3StoplessCenterSteering,
 }
@@ -305,6 +315,7 @@ impl V3StoplessCenterState {
             last_request_id: None,
             last_response_id: None,
             last_transition_reason: None,
+            last_provider_stopless_call_id: None,
             updated_at: 0,
             steering,
         }
@@ -392,13 +403,7 @@ impl V3StoplessCenterState {
     }
 
     pub fn last_provider_stopless_call_id(&self) -> Option<&str> {
-        match self.last_stop_kind {
-            V3StoplessCenterStopKind::ReasoningContinue
-            | V3StoplessCenterStopKind::ReasoningNeedsEvidence => {
-                Some(V3_STOPLESS_PROVIDER_CALL_ID)
-            }
-            _ => None,
-        }
+        self.last_provider_stopless_call_id.as_deref()
     }
 
     pub fn last_transition_reason(&self) -> Option<&str> {
@@ -430,6 +435,30 @@ impl V3StoplessCenterState {
 
     pub fn with_updated_at(mut self, updated_at: u64) -> Self {
         self.updated_at = updated_at;
+        self
+    }
+
+    pub fn with_last_provider_stopless_call_id(
+        mut self,
+        call_id: Option<impl Into<String>>,
+    ) -> Self {
+        self.last_provider_stopless_call_id = call_id.and_then(|value| {
+            let value = value.into();
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        });
+        self
+    }
+
+    pub fn with_max_stop_budget_floor(mut self, floor: u32) -> Self {
+        self.max_stop_budget = self.max_stop_budget.max(floor.max(1));
+        self.guard_exhausted = self.consecutive_stop_count > self.max_stop_budget;
+        if self.guard_exhausted {
+            self.terminal = true;
+            self.need_continue = false;
+            self.phase = V3StoplessCenterPhase::GuardTerminal;
+            self.next_request_policy = V3StoplessCenterNextRequestPolicy::StopForGuard;
+        }
         self
     }
 

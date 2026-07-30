@@ -19,6 +19,13 @@ edges:
     owner_feature_id: sse.transport_core_shared
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - sse.transport_raw_chunk
+      produces:
+        - sse.transport_decoded_frame
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: sse-transport-core-02
     from_node: SseTransportIn02DecodedFrame
     to_node: SseTransportIn03ValidatedFrameStream
@@ -26,6 +33,13 @@ edges:
     owner_feature_id: sse.transport_core_shared
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - sse.transport_decoded_frame
+      produces:
+        - sse.transport_validated_frame_stream
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: sse-transport-core-03-v2
     from_node: SseTransportIn03ValidatedFrameStream
     to_node: SseTransportOut04EncodedChunk
@@ -33,6 +47,13 @@ edges:
     owner_feature_id: sse.transport_core_shared
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - sse.transport_validated_frame_stream
+      produces:
+        - sse.transport_encoded_chunk
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: sse-transport-core-03-v3
     from_node: SseTransportIn03ValidatedFrameStream
     to_node: SseTransportOut04EncodedChunk
@@ -40,6 +61,13 @@ edges:
     owner_feature_id: sse.transport_core_shared
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - sse.transport_validated_frame_stream
+      produces:
+        - sse.transport_encoded_chunk
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

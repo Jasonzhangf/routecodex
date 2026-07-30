@@ -347,12 +347,8 @@ type NativeRouterHotpathJsonBinding = {
   findNestedErrorMarkerJson?: (inputJson: string) => string;
   extractBridgeProviderResponsePayloadJson?: (inputJson: string) => string | null;
 
-  // -- direct_decision batch #4 --
-  decideDirectRouterRetryJson?: (inputJson: string) => string;
-  decideDirectProviderRetryJson?: (inputJson: string) => string;
-
   // -- traffic-governor-core (独立基础设施) --
-  trafficGovernorAcquireJson?: (inputJson: string) => string;
+  trafficGovernorAcquireJson?: (inputJson: string) => Promise<string>;
   trafficGovernorReleaseJson?: (inputJson: string) => string;
   trafficGovernorIsAtCapacityJson?: (inputJson: string) => boolean;
   trafficGovernorObserveOutcomeJson?: (inputJson: string) => void;
@@ -365,6 +361,16 @@ type NativeRouterHotpathJsonBinding = {
   ) => string;
   classifyErrorErr02HostCapturedJson?: (inputJson: string) => string;
   resolveErrorErr05ExecutionDecisionJson?: (inputJson: string) => string;
+  providerActionGateContractJson?: () => string;
+  recordProviderActionFailureJson?: (inputJson: string) => string;
+  beginProviderActionWaitJson?: (inputJson: string) => string;
+  pollProviderActionAdmissionJson?: (inputJson: string) => string;
+  commitProviderActionTerminalJson?: (inputJson: string) => string;
+  abandonProviderActionAdmissionJson?: (inputJson: string) => string;
+  recordProviderActionSuccessJson?: (inputJson: string) => string;
+  cancelProviderActionWaitJson?: (inputJson: string) => string;
+  peekProviderActionWaitJson?: (inputJson: string) => number;
+  resetProviderActionGateJson?: (inputJson: string) => number;
   resolveProviderRetryExecutionPolicyJson?: (
     inputJson: string
   ) => string;

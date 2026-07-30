@@ -19,7 +19,7 @@ pub fn resolve_traffic_policy_from_context(ctx: &AcquireContext) -> TrafficPolic
         stale_lease_ms: ctx.stale_lease_ms.unwrap_or(300_000),
         requests_per_minute: ctx.requests_per_minute.unwrap_or(120),
         rpm_timeout_ms: ctx.rpm_timeout_ms.unwrap_or(60_000),
-        rpm_window_ms: 60_000,
+        rpm_window_ms: ctx.rpm_window_ms.unwrap_or(60_000),
     }
 }
 

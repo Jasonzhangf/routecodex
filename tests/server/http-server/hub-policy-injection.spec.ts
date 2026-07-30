@@ -94,6 +94,12 @@ function buildRoutingBridgeMock(captured: { policy?: unknown }) {
     markHubPipelineVirtualRouterConcurrencyScopeBusyNative: () => {},
     markHubPipelineVirtualRouterConcurrencyScopeIdleNative: () => {},
     disposeHubPipelineNative: () => {},
+    buildRequestStageRuntimeControlWritePlanNative: () => ({ runtimeControl: null }),
+    resolveEntryProtocolFromEndpointNative: (endpoint: string) => {
+      if (endpoint === '/v1/messages') return 'anthropic-messages';
+      if (endpoint === '/v1/chat/completions') return 'openai-chat';
+      return 'openai-responses';
+    },
   };
 }
 

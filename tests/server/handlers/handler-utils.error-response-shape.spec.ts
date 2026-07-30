@@ -1,4 +1,7 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import {
+  attachErrorErr05ExecutionDecision
+} from '../../../src/server/runtime/http-server/executor/request-executor-error-types.js';
 
 const mockReportRouteError = jest.fn();
 
@@ -11,6 +14,69 @@ const { resolveReportedRouteErrorHttpResponse } = await import(
 );
 
 describe('resolveReportedRouteErrorHttpResponse', () => {
+  it('blocks HTTP projection when attached provider Error05 is nonterminal', async () => {
+    const normalizedError = Object.assign(new Error('HTTP 503 provider unavailable'), {
+      code: 'HTTP_503',
+      status: 503,
+    }) as Error & Record<string, unknown>;
+    attachErrorErr05ExecutionDecision(normalizedError, {
+      action: 'wait_then_reselect',
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      allowRetryBeyondAttemptBudget: true,
+      routePoolRemainingAfterExclusion: [],
+      defaultPoolAvailable: true,
+      policyExhausted: false,
+      mayProject: false,
+    });
+
+    await expect(resolveReportedRouteErrorHttpResponse({
+      routePayload: {
+        code: 'HTTP_503',
+        message: normalizedError.message,
+        source: 'http-handler./v1/responses',
+        scope: 'http',
+        requestId: 'req_nonterminal_error05',
+        endpoint: '/v1/responses',
+        originalError: normalizedError
+      },
+      normalizedError
+    })).rejects.toMatchObject({ code: 'EARLY_PROJECTION_BLOCKED' });
+    expect(mockReportRouteError).not.toHaveBeenCalled();
+  });
+
+  it('projects attached provider Error05 only with terminal exhaustion proof', async () => {
+    const normalizedError = Object.assign(new Error('HTTP 503 provider unavailable'), {
+      code: 'HTTP_503',
+      status: 503,
+    }) as Error & Record<string, unknown>;
+    attachErrorErr05ExecutionDecision(normalizedError, {
+      action: 'project_terminal',
+      shouldRetry: false,
+      excludedCurrentProvider: true,
+      allowRetryBeyondAttemptBudget: false,
+      routePoolRemainingAfterExclusion: [],
+      defaultPoolAvailable: false,
+      policyExhausted: true,
+      mayProject: true,
+    });
+
+    const mapped = await resolveReportedRouteErrorHttpResponse({
+      routePayload: {
+        code: 'HTTP_503',
+        message: normalizedError.message,
+        source: 'http-handler./v1/responses',
+        scope: 'http',
+        requestId: 'req_terminal_error05',
+        endpoint: '/v1/responses',
+        originalError: normalizedError
+      },
+      normalizedError
+    });
+    expect(mapped.status).toBe(502);
+    expect(mapped.body.error.code).toBe('HTTP_503');
+  });
+
   it('falls back to local mapped payload when error hub returns malformed sparse http payload', async () => {
     mockReportRouteError.mockResolvedValueOnce({
       http: {

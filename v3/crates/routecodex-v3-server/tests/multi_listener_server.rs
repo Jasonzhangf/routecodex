@@ -12,8 +12,10 @@ use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc, time::Instant};
 use tokio::{
-    sync::{mpsc, oneshot, Mutex},
-    time::{timeout, Duration},
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    sync::{mpsc, oneshot, Mutex, Semaphore},
+    time::{sleep, timeout, Duration},
 };
 use tokio_tungstenite::{
     accept_hdr_async, connect_async,
@@ -109,6 +111,25 @@ fn read_single_responses_sample_response(samples_root: &std::path::Path) -> Valu
     );
     let response = fs::read_to_string(entries[0].path().join("response.json")).unwrap();
     serde_json::from_str(&response).unwrap()
+}
+
+fn read_responses_sample_response_by_request_marker(
+    samples_root: &std::path::Path,
+    request_marker: &str,
+) -> Value {
+    let entries = fs::read_dir(samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for entry in entries {
+        let request_path = entry.path().join("request.json");
+        let request = fs::read_to_string(&request_path).unwrap_or_default();
+        if request.contains(request_marker) {
+            let response = fs::read_to_string(entry.path().join("response.json")).unwrap();
+            return serde_json::from_str(&response).unwrap();
+        }
+    }
+    panic!("no Codex sample request contains marker {request_marker}");
 }
 
 const HUB_V1_TEST_DECLARATION: &str = r#"
@@ -635,6 +656,12 @@ struct ProviderState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
 }
 
+#[derive(Clone)]
+struct HeldProviderState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    release: Arc<Semaphore>,
+}
+
 async fn controlled_responses_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -660,6 +687,36 @@ async fn controlled_responses_upstream(
             .body(Body::from(r#"{"id":"resp_json","output_text":"ok"}"#))
             .unwrap()
     }
+}
+
+async fn controlled_held_responses_upstream(
+    State(state): State<Arc<HeldProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    let release = Arc::clone(&state.release);
+    let body = futures_util::stream::once(async {
+        Ok::<_, std::io::Error>(
+            b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_held\",\"status\":\"in_progress\"}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"held\"}\n\n"
+                .to_vec(),
+        )
+    })
+    .chain(futures_util::stream::once(async move {
+        let _permit = release.acquire_owned().await.unwrap();
+        Ok::<_, std::io::Error>(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+                .to_vec(),
+        )
+    }));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(body))
+        .unwrap()
 }
 
 async fn controlled_responses_relay_upstream(
@@ -766,6 +823,39 @@ async fn start_controlled_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_controlled_held_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<Semaphore>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_held_responses_upstream))
+        .with_state(Arc::new(HeldProviderState {
+            captures: captures_tx,
+            release: Arc::clone(&release),
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        release,
+        shutdown_tx,
+    )
 }
 
 async fn start_controlled_responses_relay_tool_upstream() -> (
@@ -1105,7 +1195,10 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             .unwrap();
         assert_eq!(health["server_id"], listener.server_id);
         assert_eq!(health["manifest_version"], 3);
-        assert_eq!(health["build_version"], env!("CARGO_PKG_VERSION"));
+        assert_ne!(health["build_version"], env!("CARGO_PKG_VERSION"));
+        assert!(health["build_version"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("0.90.")));
         let invalid_gemini = client
             .post(format!(
                 "http://{}/v1beta/models/test/generateContent",
@@ -1413,13 +1506,8 @@ async fn responses_relay_local_continuation_uses_body_client_metadata_without_in
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-relay-body-metadata");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let client_metadata = json!({
@@ -1735,13 +1823,9 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-relay-sse-sample");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    manifest.debug.codex_samples = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
 
     let response = client
@@ -1865,6 +1949,7 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
     assert!(!sse_trace.contains("V3ResponsesDirect11Policy"));
     assert!(!sse_trace.contains("V3TargetLocalReselected"));
     let sse_body = sse_response.text().await.unwrap();
+    assert!(sse_body.starts_with(": keepalive\n\n"), "{sse_body}");
     assert!(sse_body.contains("[DONE]"));
     let second_capture = captures.recv().await.unwrap();
     assert_eq!(second_capture.body["model"], "wire-test");
@@ -1998,6 +2083,264 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_same_listener_same_session_overlap_is_rejected_before_provider_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, release, shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
+    std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", "25");
+    let mut controlled_manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    controlled_manifest.debug.snapshots = false;
+    controlled_manifest.debug.codex_samples = false;
+    controlled_manifest.debug.snapshot_stages = None;
+    let handle = spawn_v3_server_aggregate(controlled_manifest)
+        .await
+        .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let second_listener_endpoint = format!("http://{}/v1/responses", handle.listeners[1].addr);
+    let request = json!({
+        "model": "client-test",
+        "input": "held",
+        "stream": true,
+        "client_metadata": {
+            "session_id": "session-overlap",
+            "thread_id": "conversation-overlap"
+        }
+    });
+
+    let first_client = client.clone();
+    let first_endpoint = endpoint.clone();
+    let first_request = request.clone();
+    let first_request_task = tokio::spawn(async move {
+        first_client
+            .post(first_endpoint)
+            .header("accept", "text/event-stream")
+            .json(&first_request)
+            .send()
+            .await
+            .unwrap()
+    });
+    let _first_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let different_session_client = client.clone();
+    let different_session_endpoint = endpoint.clone();
+    let different_session_task = tokio::spawn(async move {
+        different_session_client
+            .post(different_session_endpoint)
+            .header("accept", "text/event-stream")
+            .json(&json!({
+                "model": "client-test",
+                "input": "different session",
+                "stream": true,
+                "client_metadata": {
+                    "session_id": "session-control",
+                    "thread_id": "conversation-control"
+                }
+            }))
+            .send()
+            .await
+            .unwrap()
+    });
+    let _different_session_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let different_listener_client = client.clone();
+    let different_listener_request = request.clone();
+    let different_listener_task = tokio::spawn(async move {
+        different_listener_client
+            .post(second_listener_endpoint)
+            .header("accept", "text/event-stream")
+            .json(&different_listener_request)
+            .send()
+            .await
+            .unwrap()
+    });
+    let _different_listener_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    let second_response = timeout(
+        Duration::from_secs(2),
+        client
+            .post(&endpoint)
+            .header("accept", "text/event-stream")
+            .json(&request)
+            .send(),
+    )
+    .await
+    .expect("overlap rejection must be immediate")
+    .unwrap();
+    let second_status = second_response.status();
+    assert_eq!(second_status, StatusCode::CONFLICT);
+    let second_body = second_response.text().await.unwrap();
+    assert!(second_body.starts_with("event: error\n"), "{second_body}");
+    assert!(second_body.contains("\"code\":\"request_in_flight\""));
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "conflicting request must not create a fourth provider transport"
+    );
+
+    release.add_permits(3);
+    let first_response = timeout(Duration::from_secs(5), first_request_task)
+        .await
+        .unwrap()
+        .unwrap();
+    let different_session_response = timeout(Duration::from_secs(5), different_session_task)
+        .await
+        .unwrap()
+        .unwrap();
+    let different_listener_response = timeout(Duration::from_secs(5), different_listener_task)
+        .await
+        .unwrap()
+        .unwrap();
+    for response in [
+        first_response,
+        different_session_response,
+        different_listener_response,
+    ] {
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.text().await.unwrap();
+        assert!(body.starts_with(": keepalive\n\n"), "{body}");
+        assert!(body.contains("response.completed"), "{body}");
+    }
+
+    let retry_client = client.clone();
+    let retry_endpoint = endpoint.clone();
+    let retry_request = request.clone();
+    let retry_task = tokio::spawn(async move {
+        retry_client
+            .post(retry_endpoint)
+            .header("accept", "text/event-stream")
+            .json(&retry_request)
+            .send()
+            .await
+            .unwrap()
+    });
+    let _retry_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("EOF must release the original session for a later provider send")
+        .unwrap();
+    release.add_permits(1);
+    let retry_response = timeout(Duration::from_secs(5), retry_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retry_response.status(), StatusCode::OK);
+    assert!(retry_response
+        .text()
+        .await
+        .unwrap()
+        .starts_with(": keepalive\n\n"));
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
+}
+
+#[tokio::test]
+async fn responses_client_drop_releases_same_session_before_provider_eof() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, release, shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-drop");
+    std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", "25");
+    let mut controlled_manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    controlled_manifest.debug.snapshots = false;
+    controlled_manifest.debug.codex_samples = false;
+    controlled_manifest.debug.snapshot_stages = None;
+    let handle = spawn_v3_server_aggregate(controlled_manifest)
+        .await
+        .unwrap();
+    let client = reqwest::Client::new();
+    let listener_addr = handle.listeners[0].addr;
+    let endpoint = format!("http://{listener_addr}/v1/responses");
+    let request = json!({
+        "model": "client-test",
+        "input": "drop before provider eof",
+        "stream": true,
+        "client_metadata": {
+            "session_id": "session-client-drop",
+            "thread_id": "conversation-client-drop"
+        }
+    });
+
+    let request_body = serde_json::to_vec(&request).unwrap();
+    let request_head = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: {listener_addr}\r\nAccept: text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        request_body.len()
+    );
+    let mut dropped_socket = TcpStream::connect(listener_addr).await.unwrap();
+    dropped_socket
+        .write_all(request_head.as_bytes())
+        .await
+        .unwrap();
+    dropped_socket.write_all(&request_body).await.unwrap();
+    let _first_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let mut received = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    timeout(Duration::from_secs(2), async {
+        while !received
+            .windows(b": keepalive\n\n".len())
+            .any(|window| window == b": keepalive\n\n")
+        {
+            let read = dropped_socket.read(&mut buffer).await.unwrap();
+            assert!(read > 0, "server closed before the initial keepalive");
+            received.extend_from_slice(&buffer[..read]);
+        }
+    })
+    .await
+    .expect("client must receive the initial keepalive before disconnect");
+    drop(dropped_socket);
+    sleep(Duration::from_millis(100)).await;
+
+    let retry_client = client.clone();
+    let retry_endpoint = endpoint.clone();
+    let retry_request = request.clone();
+    let retry_task = tokio::spawn(async move {
+        retry_client
+            .post(retry_endpoint)
+            .header("accept", "text/event-stream")
+            .json(&retry_request)
+            .send()
+            .await
+            .unwrap()
+    });
+    let _retry_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("client drop must release admission before provider EOF")
+        .unwrap();
+    release.add_permits(1);
+    let retry_response = timeout(Duration::from_secs(5), retry_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retry_response.status(), StatusCode::OK);
+    assert!(retry_response
+        .text()
+        .await
+        .unwrap()
+        .starts_with(": keepalive\n\n"));
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
 #[tokio::test]
@@ -3229,14 +3572,214 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
 }
 
 #[tokio::test]
+async fn responses_without_snap_authorization_writes_no_codex_sample() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("no-snap-authorization");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = false;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "no snap authorization must not persist",
+            "max_output_tokens": 8
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let provider_hit = timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_ok();
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    assert!(
+        !samples_root.exists(),
+        "configured Debug snapshots cannot authorize Codex-sample filesystem writes"
+    );
+    assert!(
+        !provider_hit,
+        "provider-request dry-run must not send upstream"
+    );
+}
+
+#[tokio::test]
+async fn responses_direct_relay_only_snap_scope_writes_no_codex_sample() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("direct-relay-only-snap");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.codex_samples = true;
+    manifest.debug.snapshot_direct = false;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test",
+            "input": "direct relay-only snap must not persist",
+            "max_output_tokens": 8
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_body = response.text().await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let provider_hit = timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_ok();
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    assert!(
+        !samples_root.exists(),
+        "Relay-only snapshot scope must not create a Direct request directory"
+    );
+    assert!(
+        !provider_hit,
+        "provider-request dry-run must not send upstream"
+    );
+}
+
+#[tokio::test]
+async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("direct-full-snap-live-response");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    let json_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "input": "direct full snap json response",
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), 200);
+    assert_eq!(
+        json_response.json::<Value>().await.unwrap()["id"],
+        "resp_json"
+    );
+
+    let sse_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "input": "direct full snap sse response",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), 200);
+    let sse_body = sse_response.text().await.unwrap();
+    assert!(sse_body.contains("response.completed"), "{sse_body}");
+
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let json_sample = read_responses_sample_response_by_request_marker(
+        &samples_root,
+        "direct full snap json response",
+    );
+    let sse_sample = read_responses_sample_response_by_request_marker(
+        &samples_root,
+        "direct full snap sse response",
+    );
+
+    assert_eq!(json_sample["id"], "resp_json");
+    assert_eq!(sse_sample["bodyKind"], "sse");
+    assert!(sse_sample["rawSse"]
+        .as_str()
+        .is_some_and(|value| value.contains("response.completed")));
+    assert!(!serde_json::to_string(&json_sample)
+        .unwrap()
+        .contains("secret-key"));
+    assert!(!serde_json::to_string(&sse_sample)
+        .unwrap()
+        .contains("secret-key"));
+    assert!(captures.recv().await.is_some());
+    assert!(captures.recv().await.is_some());
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn server_start_enforces_codex_sample_retention_without_snapshot_authorization() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("startup-sample-retention");
+    let port_a = free_port();
+    let port_b = free_port();
+    let samples_root = home_guard.codex_samples_root(port_a);
+    fs::create_dir_all(&samples_root).unwrap();
+    for index in 0..=100 {
+        let request_dir = samples_root.join(format!("request-{index:03}"));
+        fs::create_dir_all(&request_dir).unwrap();
+        fs::write(request_dir.join("request.json"), b"{}\n").unwrap();
+    }
+    let mut manifest = p6_manifest(port_a, port_b, "http://127.0.0.1:1");
+    manifest.debug.snapshots = false;
+    manifest.debug.snapshot_direct = false;
+
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let retained = fs::read_dir(&samples_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .count();
+
+    handle.shutdown().await;
+
+    assert_eq!(
+        retained, 100,
+        "server startup must enforce the persisted-sample cap even when capture is disabled"
+    );
+    assert!(
+        !samples_root.join("request-000").exists(),
+        "startup retention must remove the oldest request directory"
+    );
+}
+
+#[tokio::test]
 async fn p6_provider_request_dry_run_header_returns_final_request_without_upstream_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("direct-dry-run-blackbox");
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
-    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
-        .await
-        .unwrap();
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.codex_samples = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -3469,13 +4012,10 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     let home_guard = TestHomeGuard::new("relay-dry-run-blackbox");
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.codex_samples = true;
+    manifest.debug.snapshot_direct = false;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))

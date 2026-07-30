@@ -1,104 +1,131 @@
-/**
- * Real red/green tests for provider-direct candidate-exhaustion contract.
- *
- * Provider-direct must consume the unified ErrorErr05 decision instead of doing
- * a raw 4xx/5xx early projection. The minimal contract is:
- *   1. client_disconnect → rethrow original error for final 204 projection,
- *      with no excluded-provider mutation.
- *   2. mayProject=false + defaultPoolAvailable=true → request reroute/re-entry,
- *      not rethrow.
- *   3. mayProject=false + routePoolRemainingAfterExclusion non-empty →
- *      request reroute/re-entry, not rethrow.
- *   4. mayProject=true + policyExhausted=true → rethrow/project is allowed.
- *
- * Owner: `decideDirectProviderRetry` in src/server/runtime/http-server/index.ts
- */
-
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import {
-  decideDirectProviderRetry,
-  isClientDisconnectLikeError,
-} from '../../../../src/server/runtime/http-server/direct-decision.js';
+  executeProviderDirectPipeline,
+  resolveInboundProtocolFromEntryPath
+} from '../../../../src/server/runtime/http-server/provider-direct-pipeline.js';
+import type { ProviderRetryExecutionPlan } from '../../../../src/server/runtime/http-server/executor/request-executor-error-types.js';
+import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types.js';
 
-type Plan = Parameters<typeof decideDirectProviderRetry>[0]['retryExecutionPlan'];
-
-function plan(over: Partial<Plan> = {}): Plan {
+function plan(
+  action: ProviderRetryExecutionPlan['action']
+): ProviderRetryExecutionPlan {
+  const waiting = action === 'wait_then_retry_same' || action === 'wait_then_reselect';
   return {
-    shouldRetry: true,
-    retrySwitchPlan: {
-      switchAction: 'exclude_and_reroute',
-    } as Plan['retrySwitchPlan'],
-    excludedCurrentProvider: true,
-    routePoolRemainingAfterExclusion: ['p2'],
-    defaultPoolAvailable: false,
-    policyExhausted: false,
-    mayProject: false,
-    ...over,
-  } as Plan;
+    action,
+    shouldRetry: waiting,
+    excludedCurrentProvider: action === 'wait_then_reselect',
+    allowRetryBeyondAttemptBudget: action === 'wait_then_retry_same',
+    ...(action === 'wait_then_reselect'
+      ? {
+          retrySwitchPlan: {
+            switchAction: 'exclude_and_reroute' as const,
+            decisionLabel: 'exclude_and_reroute',
+            runtimeScopeExcluded: ['provider-a'],
+            runtimeScopeExcludedCount: 1
+          }
+        }
+      : {}),
+    routePoolRemainingAfterExclusion:
+      action === 'wait_then_reselect' ? ['provider-b'] : [],
+    defaultPoolAvailable: waiting,
+    policyExhausted: action === 'project_terminal',
+    mayProject: action === 'project_terminal'
+  };
 }
 
-describe('provider-direct.candidate-exhaustion', () => {
-  it('[reverse] client_disconnect → caller receives original error; no synthetic retry / no mutation', () => {
-    const decision = decideDirectProviderRetry({
-      retryExecutionPlan: plan(),
-      error: { status: 499, code: 'HTTP_499', message: 'client abort request' },
-      providerKey: 'p1',
+function handleWith(
+  processIncomingDirect: ProviderHandle['instance']['processIncomingDirect']
+): ProviderHandle {
+  return {
+    runtimeKey: 'provider-a',
+    providerId: 'provider-a',
+    providerType: 'mock',
+    providerFamily: 'mock',
+    providerProtocol: 'openai-responses',
+    runtime: {} as never,
+    instance: {
+      initialize: async () => undefined,
+      cleanup: async () => undefined,
+      processIncoming: async () => {
+        throw new Error('unexpected non-direct send');
+      },
+      processIncomingDirect
+    }
+  };
+}
+
+const portConfig = {
+  port: 5007,
+  host: '127.0.0.1',
+  mode: 'provider' as const,
+  protocolBehavior: 'auto' as const,
+  providerBinding: 'provider-a'
+};
+
+describe('provider-direct typed ErrorErr05 action consumption', () => {
+  it('retries the same explicit default binding only after Rust returns WaitThenRetrySame', async () => {
+    const sourceError = Object.assign(new Error('upstream 503'), {
+      statusCode: 503,
+      code: 'HTTP_503'
     });
-    expect(isClientDisconnectLikeError(decision.error)).toBe(true);
-    expect(decision.action).toBe('rethrow');
-    expect(decision.shouldRecurse).toBe(false);
-    expect(decision.mutatedExcluded).toEqual(new Set());
+    const processIncomingDirect = jest.fn()
+      .mockRejectedValueOnce(sourceError)
+      .mockResolvedValueOnce({ status: 200, body: { id: 'ok' } });
+    const onProviderError = jest.fn(async () => plan('wait_then_retry_same'));
+
+    const result = await executeProviderDirectPipeline(
+      { model: 'gpt-5.5', input: 'hello' },
+      '/v1/responses',
+      {
+        portConfig,
+        resolveProvider: () => handleWith(processIncomingDirect),
+        resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
+        onProviderError
+      }
+    );
+
+    expect(result.response).toEqual({ status: 200, body: { id: 'ok' } });
+    expect(processIncomingDirect).toHaveBeenCalledTimes(2);
+    expect(onProviderError).toHaveBeenCalledTimes(1);
   });
 
-  it('[forward] current pool exhausted but defaultPoolAvailable=true → request reroute/re-entry, not rethrow', () => {
-    const decision = decideDirectProviderRetry({
-      retryExecutionPlan: plan({
-        routePoolRemainingAfterExclusion: [],
-        defaultPoolAvailable: true,
-        policyExhausted: false,
-        mayProject: false,
-      }),
-      error: { code: 'PROVIDER_TRANSPORT', message: 'upstream 5xx' },
-      providerKey: 'p1',
-    });
-    expect(decision.action).toBe('request_reroute');
-    expect(decision.shouldRecurse).toBe(true);
-    expect(decision.shouldRethrow).toBe(false);
-    expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
+  it('returns WaitThenReselect to the only caller instead of normalizing undefined', async () => {
+    const sourceError = new Error('provider-a unavailable');
+    const processIncomingDirect = jest.fn().mockRejectedValueOnce(sourceError);
+
+    const result = await executeProviderDirectPipeline(
+      { model: 'gpt-5.5', input: 'hello' },
+      '/v1/responses',
+      {
+        portConfig,
+        resolveProvider: () => handleWith(processIncomingDirect),
+        resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
+        onProviderError: async () => plan('wait_then_reselect')
+      }
+    );
+
+    expect(result.response).toBeUndefined();
+    expect(result.sourceError).toBe(sourceError);
+    expect(result.errorAction?.action).toBe('wait_then_reselect');
   });
 
-  it('[forward] routePoolRemainingAfterExclusion non-empty → request reroute/re-entry, not rethrow', () => {
-    const decision = decideDirectProviderRetry({
-      retryExecutionPlan: plan({
-        routePoolRemainingAfterExclusion: ['p2'],
-        defaultPoolAvailable: false,
-        policyExhausted: false,
-        mayProject: false,
-      }),
-      error: { statusCode: 503, code: 'HTTP_503', message: 'upstream unavailable' },
-      providerKey: 'p1',
-    });
-    expect(decision.action).toBe('request_reroute');
-    expect(decision.shouldRecurse).toBe(true);
-    expect(decision.shouldRethrow).toBe(false);
-    expect(decision.mutatedExcluded).toEqual(new Set(['p1']));
-  });
+  it.each([
+    'project_terminal',
+    'client_disconnected',
+    'reject_non_provider_error'
+  ] as const)('rethrows the source for terminal typed action %s', async (action) => {
+    const sourceError = new Error(action);
+    const processIncomingDirect = jest.fn().mockRejectedValueOnce(sourceError);
 
-  it('[reverse] mayProject=true + policyExhausted=true → rethrow/project allowed', () => {
-    const decision = decideDirectProviderRetry({
-      retryExecutionPlan: {
-        shouldRetry: false,
-        retrySwitchPlan: undefined,
-        excludedCurrentProvider: true,
-        routePoolRemainingAfterExclusion: [],
-        defaultPoolAvailable: false,
-        policyExhausted: true,
-        mayProject: true,
-      } as Plan,
-      error: { code: 'HTTP_503', message: 'all candidates exhausted' },
-      providerKey: 'p1',
-    });
-    expect(decision.action).toBe('rethrow');
-    expect(decision.shouldRecurse).toBe(false);
+    await expect(executeProviderDirectPipeline(
+      { model: 'gpt-5.5', input: 'hello' },
+      '/v1/responses',
+      {
+        portConfig,
+        resolveProvider: () => handleWith(processIncomingDirect),
+        resolveInboundProtocol: resolveInboundProtocolFromEntryPath,
+        onProviderError: async () => plan(action)
+      }
+    )).rejects.toBe(sourceError);
   });
 });

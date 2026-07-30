@@ -18,6 +18,16 @@ edges:
     owner_feature_id: v3.v2_config_toml_compat_5555
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.authoring_surface
+        - config.provider_config_text_codec
+      produces:
+        - config.runtime_projection
+        - config.provider_profile_projection
+        - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: v3-v2-config-02
     from_node: V3Config02AuthoringParsed
     to_node: V3Config05ManifestPublished
@@ -25,6 +35,17 @@ edges:
     owner_feature_id: v3.v2_config_toml_compat_5555
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - config.runtime_projection
+        - config.provider_profile_projection
+        - config.routing_policy_projection
+      produces:
+        - config.runtime_projection
+        - config.provider_profile_projection
+        - config.routing_policy_projection
+      side_channel_reads: []
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

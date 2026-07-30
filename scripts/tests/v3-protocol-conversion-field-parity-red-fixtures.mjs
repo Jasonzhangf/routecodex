@@ -326,8 +326,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 217\n',
-    to: '    extension_declared: 216\n',
+    from: '    extension_declared: 213\n',
+    to: '    extension_declared: 212\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -347,9 +347,9 @@ const cases = [
   {
     name: 'Textual truth audited extension count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
-    from: '| `extension_declared` | 217 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    to: '| `extension_declared` | 218 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    diagnostic: /`extension_declared` \| 217|v3-protocol-semantic-matrix-review/u,
+    from: '| `extension_declared` | 213 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    to: '| `extension_declared` | 214 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    diagnostic: /`extension_declared` \| 213|v3-protocol-semantic-matrix-review/u,
   },
   {
     name: 'Gap audit drops runtime extension closeout row',
@@ -503,9 +503,16 @@ const cases = [
   {
     name: 'Anthropic provider compat drops original Responses reasoning surface',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-    from: 'V3HubProviderWireProtocol::Anthropic => {\n            if let Some(original_surface) =\n                build_v3_responses_original_input_surface_from_chat_canonical(\n                    input.provider_semantic_payload(),\n                    input.original_responses_payload(),\n                )',
-    to: 'V3HubProviderWireProtocol::Anthropic => {\n            if let Some(original_surface) = None',
-    diagnostic: /original_responses_payload|build_v3_responses_original_input_surface_from_chat_canonical|Anthropic/u,
+    from: 'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
+    to: 'let source = build_v3_anthropic_provider_request_source_removed(',
+    diagnostic: /anthropic_original_responses_surface|build_v3_anthropic_provider_request_source_from_chat_canonical|Anthropic/u,
+  },
+  {
+    name: 'Anthropic provider request source drops governed current Responses input',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: 'if payload.get("input").and_then(Value::as_array).is_some() {\n                return Ok(normalize_responses_payload_for_provider_standard(payload));',
+    to: 'if false {\n                return Ok(normalize_responses_payload_for_provider_standard(payload));',
+    diagnostic: /anthropic_provider_request_source|payload\.get\("input"\)|Responses input/u,
   },
   {
     name: 'Original Responses reasoning surface is array-input only again',
@@ -567,6 +574,57 @@ const cases = [
     from: '      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs\n      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
     to: '      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs\n      - MetadataCenter\n      - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
     diagnostic: /MetadataCenter|metadata_center/,
+  },
+  {
+    name: 'Malformed arguments mainline edge names the test as runtime caller',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: `caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07`,
+    to: `caller_symbol: responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send
+    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+    callee_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07`,
+    diagnostic: /malformed-arguments runtime edge caller_symbol|execute_v3_responses_relay_runtime_inner/u,
+  },
+  {
+    name: 'Provider compat failure no longer enters typed Error05',
+    file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: `step_id: v3-protocol-field-parity-responses-chat-req-negative-02
+    from_node: ProviderReqCompat06ProviderCompat
+    to_node: V3Error05ExecutionDecision`,
+    to: `step_id: v3-protocol-field-parity-responses-chat-req-negative-02-removed
+    from_node: ProviderReqCompat06ProviderCompat
+    to_node: V3Error05ExecutionDecision`,
+    diagnostic: /ProviderReqCompat06 typed failure edge|v3-protocol-field-parity-responses-chat-req-negative-02/u,
+  },
+  {
+    name: 'Protocol parity aggregate gate is disconnected from CI and build',
+    file: 'package.json',
+    from: ' && npm run verify:v3-protocol-conversion-field-parity-ci',
+    to: '',
+    diagnostic: /architecture-review-surface-light must run verify:v3-protocol-conversion-field-parity-ci/u,
+  },
+  {
+    name: 'OpenAI Chat malformed arguments fail-fast removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
+    from: 'if let Err(error) = serde_json::from_str::<Value>(arguments) {',
+    to: 'if false { let error = serde_json::from_str::<Value>(arguments).expect_err("disabled validator");',
+    diagnostic: /valid JSON|losslessly project|ProviderReqCompat06ProviderCompat|serde_json::from_str/u,
+  },
+  {
+    name: 'Malformed OpenAI Chat arguments no longer assert Error05 reselect',
+    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+    from: `assert!(
+        result.node_trace.contains(&"V3TargetLocalReselected"),
+        "unpaired malformed OpenAI Chat arguments must trigger Error05 reselect: {:?}",
+        result.node_trace
+    );`,
+    to: `assert!(
+        result.node_trace.contains(&"V3ProviderReqOutbound09TransportRequest"),
+        "unpaired malformed OpenAI Chat arguments must trigger Error05 reselect: {:?}",
+        result.node_trace
+    );`,
+    diagnostic: /V3TargetLocalReselected|responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send/u,
   },
   {
     name: 'Protocol parity source adds fallback branch',

@@ -20,6 +20,15 @@ edges:
     owner_feature_id: hub.response_provider_sse_materialization
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.provider_raw
+      produces:
+        - response.hub_semantic
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes:
+        - metadata.response_observation
   - step_id: resp-02
     from_node: HubRespInbound02Parsed
     to_node: HubRespChatProcess03Governed
@@ -27,6 +36,14 @@ edges:
     owner_feature_id: hub.response_responses_chat_projection
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+      produces:
+        - response.hub_semantic
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes: []
   - step_id: resp-03
     from_node: HubRespChatProcess03Governed
     to_node: HubRespOutbound04ClientSemantic
@@ -34,6 +51,15 @@ edges:
     owner_feature_id: hub.response_responses_client_projection
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.hub_semantic
+      produces:
+        - response.client_payload
+      side_channel_reads:
+        - metadata.request_truth
+        - metadata.runtime_control
+      side_channel_writes: []
   - step_id: resp-04
     from_node: HubRespOutbound04ClientSemantic
     to_node: ServerRespOutbound05ClientFrame
@@ -41,6 +67,14 @@ edges:
     owner_feature_id: server.responses_response_handler_bridge_surface
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - response.client_payload
+      produces:
+        - sse.transport_frame
+      side_channel_reads:
+        - metadata.response_observation
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

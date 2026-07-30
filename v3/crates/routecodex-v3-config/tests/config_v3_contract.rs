@@ -1,8 +1,9 @@
 // feature_id: v3.v2_config_toml_compat_5555
 use routecodex_v3_config::{
     compile_v3_config_05_manifest, default_v3_config_path, parse_v3_config_02_authoring,
-    V3ConfigStore, V3HubFixedNode, V3HubHookPhase, V3HubHookProfile, V3HubHookRequirement,
-    V3RouteTargetKind, V3SelectionStrategy,
+    resolve_v3_http_sse_keepalive_ms, V3ConfigStore, V3HubFixedNode, V3HubHookPhase,
+    V3HubHookProfile, V3HubHookRequirement, V3RouteTargetKind, V3SelectionStrategy,
+    V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS,
 };
 use std::fs;
 
@@ -18,6 +19,7 @@ log_console = true
 log_file = "/tmp/routecodex-v3.log"
 snapshots = true
 snapshot_stages = "client-request,provider-request"
+snapshot_direct = false
 dry_run = true
 retention = { raw_requests = 10, raw_responses = 10 }
 
@@ -138,6 +140,39 @@ targets = [
 "#;
 
 #[test]
+fn http_sse_keepalive_config_defaults_when_canonical_environment_input_is_absent() {
+    assert_eq!(
+        resolve_v3_http_sse_keepalive_ms(None, None).unwrap(),
+        V3_DEFAULT_HTTP_SSE_KEEPALIVE_MS
+    );
+}
+
+#[test]
+fn http_sse_keepalive_config_accepts_the_canonical_explicit_value() {
+    assert_eq!(
+        resolve_v3_http_sse_keepalive_ms(Some("25"), None).unwrap(),
+        25
+    );
+}
+
+#[test]
+fn http_sse_keepalive_config_rejects_empty_malformed_zero_and_legacy_values() {
+    for invalid in ["", " ", "abc", "0"] {
+        let error = resolve_v3_http_sse_keepalive_ms(Some(invalid), None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS"),
+            "{error}"
+        );
+    }
+    for (primary, legacy) in [(None, Some("25")), (Some("25"), Some("25"))] {
+        let error = resolve_v3_http_sse_keepalive_ms(primary, legacy).unwrap_err();
+        assert!(error.to_string().contains("not supported"), "{error}");
+    }
+}
+
+#[test]
 fn parses_full_config_v3_without_interpreting_targets() {
     let authoring = parse_v3_config_02_authoring(FULL_CONFIG).unwrap();
     let manifest = compile_v3_config_05_manifest(authoring).unwrap();
@@ -192,6 +227,14 @@ fn parses_full_config_v3_without_interpreting_targets() {
         manifest.debug.snapshot_stages.as_deref(),
         Some("client-request,provider-request")
     );
+    assert!(
+        !manifest.debug.snapshot_direct,
+        "explicit snapshot_direct=false must disable Direct sample persistence"
+    );
+    assert!(
+        !manifest.debug.codex_samples,
+        "Config compilation cannot authorize live Codex-sample persistence"
+    );
     assert_eq!(
         manifest.error.policies["provider_unavailable"].max_attempts,
         Some(3)
@@ -242,6 +285,22 @@ fn parses_full_config_v3_without_interpreting_targets() {
     assert_eq!(pool_match.required_capabilities, vec!["tools"]);
     assert_eq!(pool_match.precedence, 10);
     assert_eq!(pool_match.entry_protocol.as_deref(), Some("responses"));
+}
+
+#[test]
+fn omitted_snapshot_direct_preserves_config_compatibility() {
+    let source = FULL_CONFIG.replace("snapshot_direct = false\n", "");
+    let authoring = parse_v3_config_02_authoring(&source).unwrap();
+    let manifest = compile_v3_config_05_manifest(authoring).unwrap();
+
+    assert!(
+        manifest.debug.snapshot_direct,
+        "config authoring that omits snapshot_direct must preserve prior full-capture semantics"
+    );
+    assert!(
+        !manifest.debug.codex_samples,
+        "per-start CLI/lifecycle authorization must remain absent after Config compilation"
+    );
 }
 
 #[test]
@@ -970,6 +1029,23 @@ fn rejects_invalid_pool_match_and_capability_combinations() {
 }
 
 #[test]
+fn rejects_longcontext_pool_without_min_input_tokens() {
+    let longcontext_without_threshold = FULL_CONFIG
+        .replace(
+            "[route_groups.primary.pools.search]",
+            "[route_groups.primary.pools.longcontext]",
+        )
+        .replace("min_input_tokens = 1, ", "");
+    let error = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&longcontext_without_threshold).unwrap(),
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("longcontext pool must declare min_input_tokens"));
+}
+
+#[test]
 fn enforces_default_and_non_default_pool_match_contracts() {
     let default_match = FULL_CONFIG.replace(
         "[route_groups.primary.pools.default]\nselection = { strategy = \"priority\" }",
@@ -1231,6 +1307,24 @@ fn config_store_compiles_v2_root_and_provider_toml_for_5555_contract() {
             .unwrap()
             .precedence,
         30
+    );
+    assert_eq!(
+        group.pools["longcontext"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .min_input_tokens,
+        Some(123_456),
+        "V2 classifier longContextThresholdTokens must compile into the V3 longcontext pool match"
+    );
+    assert!(
+        group.pools["longcontext"]
+            .match_rule
+            .as_ref()
+            .unwrap()
+            .required_capabilities
+            .is_empty(),
+        "longcontext is token-threshold routing, not a declared capability"
     );
     assert_eq!(
         group.pools["tools"].match_rule.as_ref().unwrap().precedence,
@@ -1821,6 +1915,9 @@ mode = "router"
 routingPolicyGroup = "gateway_priority_5555"
 
 [virtualrouter]
+
+[virtualrouter.classifier]
+longContextThresholdTokens = 123456
 
 [virtualrouter.forwarders."fwd.glm.glm-5.2"]
 protocol = "openai"

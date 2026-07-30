@@ -33,6 +33,42 @@ jobs:
         run: npm run verify:file-line-limit
       - name: V3 file-size ratchet gate (<=1500)
         run: npm run verify:v3-file-size
+      - name: V3 and shared classifier file-size red fixtures
+        run: npm run test:v3-file-size-red-fixtures
+      - name: V3 provider action gate
+        run: npm run test:v3-provider-action-gate
+      - name: V3 provider action architecture gate
+        run: npm run verify:v3-provider-action-gate
+      - name: V3 provider action red fixtures
+        run: npm run test:v3-provider-action-gate-red-fixtures
+      - name: V3 5520 duplicate response tool identity
+        run: npm run test:v3-5520-duplicate-tool-identity
+      - name: V3 Runtime timing observability
+        run: npm run verify:v3-runtime-timing-observability
+      - name: V3 Runtime timing red fixtures
+        run: npm run test:v3-runtime-timing-observability-red-fixtures
+      - name: V3 debug side-channel contract
+        run: npm run test:v3-debug-contract
+      - name: V3 debug payload budget
+        run: npm run verify:v3-debug-payload-budget
+      - name: V3 debug payload budget red fixtures
+        run: npm run test:v3-debug-payload-budget-red-fixtures
+      - name: V3 console request count visibility
+        run: npm run verify:v3-console-request-count-visibility
+      - name: V3 console request count red fixtures
+        run: npm run test:v3-console-request-count-visibility-red-fixtures
+      - name: V3 Responses session admission
+        run: npm run verify:v3-responses-session-admission
+      - name: V3 Responses session admission red fixtures
+        run: npm run test:v3-responses-session-admission-red-fixtures
+      - name: V3 Responses session admission behavior
+        run: npm run test:v3-responses-session-admission
+      - name: V2 and V3 route-classifier semantic gate
+        run: npm run test:route-classifier-semantics
+      - name: V3 route classifier local owner gate
+        run: npm run verify:v3-route-classifier-local-owner
+      - name: V3 route classifier local owner red fixtures
+        run: npm run test:v3-route-classifier-local-owner-red-fixtures
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Ensure release llms module
@@ -71,6 +107,38 @@ jobs:
         run: npm run verify:file-line-limit
       - name: V3 file-size ratchet gate (<=1500)
         run: npm run verify:v3-file-size
+      - name: V3 and shared classifier file-size red fixtures
+        run: npm run test:v3-file-size-red-fixtures
+      - name: V3 provider action gate
+        run: npm run test:v3-provider-action-gate
+      - name: V3 provider action architecture gate
+        run: npm run verify:v3-provider-action-gate
+      - name: V3 provider action red fixtures
+        run: npm run test:v3-provider-action-gate-red-fixtures
+      - name: V3 5520 duplicate response tool identity
+        run: npm run test:v3-5520-duplicate-tool-identity
+      - name: V3 Runtime timing observability
+        run: npm run verify:v3-runtime-timing-observability
+      - name: V3 Runtime timing red fixtures
+        run: npm run test:v3-runtime-timing-observability-red-fixtures
+      - name: V3 debug side-channel contract
+        run: npm run test:v3-debug-contract
+      - name: V3 debug payload budget
+        run: npm run verify:v3-debug-payload-budget
+      - name: V3 debug payload budget red fixtures
+        run: npm run test:v3-debug-payload-budget-red-fixtures
+      - name: V3 console request count visibility
+        run: npm run verify:v3-console-request-count-visibility
+      - name: V3 console request count red fixtures
+        run: npm run test:v3-console-request-count-visibility-red-fixtures
+      - name: V3 Responses session admission
+        run: npm run verify:v3-responses-session-admission
+      - name: V3 Responses session admission red fixtures
+        run: npm run test:v3-responses-session-admission-red-fixtures
+      - name: V3 Responses session admission behavior
+        run: npm run test:v3-responses-session-admission
+      - name: V2 and V3 route-classifier semantic gate
+        run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
       - name: Ensure release llms module

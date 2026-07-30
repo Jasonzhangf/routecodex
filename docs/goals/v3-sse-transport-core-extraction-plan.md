@@ -71,7 +71,7 @@ Claim：`feature_id:sse.transport_core_shared`
 
 - 红测先行：证明当前 parser/writer owner 分散或缺少共享 contract。
 - 正向：JSON data、多行 data、comment、id/retry、CRLF/LF、UTF-8 任意切割、unknown event、长流、backpressure、正常 close。
-- 反向：半帧 EOF、非法 UTF-8、超大 line/frame/buffer、disconnect、timeout、writer/upstream failure、不得合成 terminal/`[DONE]`。
+- 反向：半帧 EOF、非法 UTF-8、超大 frame/buffer、disconnect、timeout、writer/upstream failure、不得合成 terminal/`[DONE]`。
 - 模块黑盒：V2 与 V3 adapter 通过相同 transport core；不存在第二套 framing。
 - 项目黑盒：真实 V2 旧 SSE 样本重放；受控 V3 SSE upstream 重放。未授权不得动 live 5555。
 - 必跑 Rust workspace、fmt、clippy、architecture/resource/function/mainline gates、diff check。

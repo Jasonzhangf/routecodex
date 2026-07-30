@@ -18,6 +18,15 @@ edges:
     owner_feature_id: vr.route_token_estimation
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+      produces:
+        - vr.route_token_estimate
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes:
+        - vr.route_token_estimate
   - step_id: vrt-02
     from_node: VrRouteTokenEstimate03Derived
     to_node: VrRoute04SelectedTarget
@@ -25,6 +34,15 @@ edges:
     owner_feature_id: vr.route_selection
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - vr.route_token_estimate
+      produces:
+        - route.selection
+      side_channel_reads:
+        - vr.route_token_estimate
+      side_channel_writes:
+        - route.selection
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

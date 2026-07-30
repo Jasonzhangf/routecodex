@@ -1,4 +1,4 @@
-use super::{encode_v3_responses_semantic_as_anthropic_request, V3HubProviderWireProtocol};
+use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
@@ -59,8 +59,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
     let request_id = wire.request_id().to_string();
     let target = wire.target().clone();
     let stream_intent = wire.stream_intent();
-    let body = encode_v3_responses_semantic_as_anthropic_request(wire.body().clone())
-        .map_err(|error| format!("anthropic messages request codec failed: {error}"))?;
+    let body = wire.body().clone();
     let url_text = anthropic_messages_url(&target.base_url);
     if provider_headers.is_empty() {
         return build_v3_transport_13_responses_http_request_from_parts(

@@ -1,0 +1,29 @@
+# V3 5520 Duplicate Response Tool Identity Error05 Test Design
+
+## Lifecycle
+
+`ProviderRespInbound01Raw -> ProviderRespCompat02ProviderCompat -> V3HubRespInbound02Normalized -> V3HubRespChatProcess03Governed -> V3Error01SourceRaised -> V3Error02Classified -> V3Error03TargetLocalAction -> V3Error04TargetExhaustionDecision -> V3Error05ExecutionDecision -> reselect or V3Error06ClientProjected`
+
+## White-Box
+
+- Keep `duplicate_response_tool_identity_fails_inside_response_chat_process` proving Resp03 rejects duplicate `call_id`.
+- Lock `is_v3_responses_provider_response_failure` to classify provider-origin `V3HubRelayResponseError` variants, excluding local execution-mode and stopless projection defects.
+- Lock `provider_response_hook_failure` to preserve `V3HubRespChatProcess03Governed` as the first-failure stage for Resp03 malformed provider output.
+- Negative control: a real `V3ProviderError::ResponseBody` remains owned by `V3ProviderRespInbound01Raw`; do not change the shared raw provider-stage classifier.
+
+## Module Black-Box
+
+- JSON: first provider returns two function calls with the same `call_id`; second provider returns a valid response. Assert two sends, one provider failure event, Error05 reselection trace, and HTTP 200 from the second provider.
+- SSE: first provider streams two output items with the same `call_id`; second provider streams a valid terminal response. Assert the same Error05 reselection behavior.
+- Positive controls: one valid function call and two distinct tool identities do not emit provider failure events.
+- Terminal control: a single-provider/default-floor fixture projects typed Responses error after policy exhaustion, reports `/error/stage=V3HubRespChatProcess03Governed`, and never projects malformed output as success.
+
+## Project Black-Box
+
+- Build and globally install the reviewed V3 runtime.
+- Restart only with `routecodex restart --port 5555`; verify 10000/5520/5555 health and identical build version.
+- Replay the saved 5520 request sample. Accept only provider switch/reselection or typed terminal Responses `event: error`; reject generic `responses_relay_runtime_error` caused directly by Resp03.
+
+## Known Gap Before Fix
+
+JSON and SSE both call `run_json_response_hooks`, but `V3ResponsesRelayRuntimeError::Response` currently falls through the non-provider branch. The existing Resp03 unit test proves detection only; it does not prove Error05 routing.

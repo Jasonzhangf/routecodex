@@ -40,19 +40,22 @@ describe('server module help live NAPI verification (Phase Server-E)', () => {
     });
   });
 
-  it('describes the unified error action queue policy', () => {
+  it('describes the Rust-owned isolated 1s / sustained 5s provider action gate', () => {
     const one = describeServerModuleHelpDirectNative('server.error_action_queue');
     expect(one).toMatchObject({
       contractVersion: '2026-06-03.server-module-help.v1',
       module: {
         moduleId: 'server.error_action_queue',
-        ownerBuilder: 'describeErrorActionQueueContract',
+        ownerBuilder: 'contract',
         effects: expect.arrayContaining([
           'record_error_action_backoff',
-          'blocking_wait_1s_2s_3s_cycle',
+          'blocking_wait_isolated_1s_sustained_5s',
+          'single_admission_fifo',
+          'action_scope_owned_release',
         ]),
       },
     });
-    expect(String(one.module?.help ?? '')).toContain('1s -> 2s -> 3s -> repeat');
+    expect(String(one.module?.help ?? '')).toContain('at least 1000ms');
+    expect(String(one.module?.help ?? '')).toContain('at least 5000ms');
   });
 });

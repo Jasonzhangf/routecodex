@@ -89,6 +89,7 @@ description: RouteCodex 调试与架构路由入口
 
 ## 全局安装 / release 验证硬规则
 
+- 交付顺序固定：定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> Codex review -> 精准 commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。
 - 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
 - Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <locator-port>` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
 - 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` 确认版本，用任一成员端口作为 locator 执行一次 `routecodex restart --port <locator-port>`，然后验证该 aggregate instance 的全部配置成员端口。禁止逐端口循环 restart。
@@ -261,3 +262,9 @@ description: RouteCodex 调试与架构路由入口
 - First inspect `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request.json` and `provider-response.json`. `attempts[]` is the routing truth; the human `[virtual-router-hit]` line may show only the final successful provider after retry/switch.
 - If an earlier priority candidate has `streamError` or malformed/incomplete raw SSE, debug provider response event codec / provider stream completeness before changing route priority. SSE transport is only framing; missing terminal `finish_reason`, `[DONE]`, or Anthropic `message_stop` is provider event-codec/response-owner evidence.
 - For OpenAI Chat streaming usage, verify provider-bound `stream_options.include_usage=true` and raw final chunks. If requests omit `stream_options`, upstream may emit `usage:null`, causing console `usage=unreported`; fix provider-standard request formatting, not server console fallback.
+
+## V3 provider-error console prefix invariant
+- 触发信号：human console line prefix `route:provider.model` 和同一行 `provider=...` 不一致，尤其是 switch 后显示 next provider 但错误来自 previous provider。
+- 关键判断：route/started 行使用 selected target observability；`[provider-error]` / `[provider-switch]` 是 Error05 event 投影，必须使用 `V3RuntimeProviderFailureObservation` 的 failed provider 生成 prefix；字段顺序固定为本轮 `target`、`result`、`next` 在前，`causeStatus/type/message` 等原因在后。
+- 可复用动作：先用 live log 按 request id 对比 route -> provider-error -> switch -> completion；再用 focused server console test 锁 provider-error prefix；最后安装重启后扫描 human provider-error 行 prefix/target 是否一致，并确认 `target -> result -> next -> causeStatus` 顺序。
+- 反模式/边界：不要改 VR、provider wire、Error05 policy 或 provider health 来修显示；这是 server console projection side-channel，不得影响 request/response payload 或 reroute 语义。

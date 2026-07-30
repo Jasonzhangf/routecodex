@@ -1,5 +1,10 @@
 # 2026-04-27 Provider Failure Policy SSOT 审计
 
+> Historical audit. The active provider-action timing and admission contract is
+> `docs/architecture/manifests/error.provider_action_gate.mainline.yml`: Rust-owned
+> isolated `1s`, sustained `5s`, FIFO, one admission per generation, and explicit
+> action-scope release. Any older timing statement below is superseded by that contract.
+
 ## 索引概要
 - L1-L8 `purpose`：审计目标与范围。
 - L10-L28 `live-evidence`：线上证据与已确认现象。
@@ -66,8 +71,10 @@
 - generic `500`：`recoverable=false`、`affectsHealth=true`
 - 短期 `429`：`recoverable=true`、但 `affectsHealth=true`
 
-这与当前全局规则冲突（2026-06-09 修正）：
-- recoverable => blocking wait through unified error action queue (`1s -> 2s -> 3s -> repeat`)
+这与当前全局规则冲突（2026-07-29 修正）：
+- recoverable provider action => blocking wait through the Rust-owned provider action gate
+  (isolated first action `>=1s`; overlapping/continuous failures enter sustained mode,
+  with subsequent actions `>=5s` apart)
 - recoverable => health-neutral
 - unrecoverable => direct return
 

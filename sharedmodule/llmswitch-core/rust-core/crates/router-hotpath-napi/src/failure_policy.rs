@@ -4,7 +4,6 @@
 use serde::{Deserialize, Serialize};
 
 const BLOCKING_RECOVERABLE_CODES: &[&str] = &[
-    "PROVIDER_TRAFFIC_SATURATED",
     "HTTP_429",
     "HTTP_500",
     "HTTP_502",
@@ -238,8 +237,19 @@ pub struct ErrorErr05RetrySwitchPlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorErr05ExecutionAction {
+    WaitThenRetrySame,
+    WaitThenReselect,
+    ProjectTerminal,
+    ClientDisconnected,
+    RejectNonProviderError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorErr05ExecutionDecision {
+    pub action: ErrorErr05ExecutionAction,
     pub should_retry: bool,
     pub excluded_current_provider: bool,
     pub allow_retry_beyond_attempt_budget: bool,
@@ -277,24 +287,20 @@ fn error_err05_switch_plan() -> ErrorErr05RetrySwitchPlan {
 pub fn resolve_error_err05_execution_decision(
     input: ErrorErr05ExecutionDecisionInput,
 ) -> ErrorErr05ExecutionDecision {
+    let captured_classification = input
+        .error_err02_host_captured
+        .clone()
+        .map(classify_error_err02_host_captured);
     let classification = input.classification.or_else(|| {
-        input
-            .error_err02_host_captured
-            .clone()
-            .and_then(|captured| classify_error_err02_host_captured(captured).classification)
+        captured_classification
+            .as_ref()
+            .and_then(|captured| captured.classification)
     });
     let provider_key = input
         .provider_key
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let route_name = input
-        .route_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase());
-    let on_default_route = route_name.as_deref() == Some("default");
     let route_pool = normalized_unique(&input.route_pool);
     let mut excluded = normalized_unique(&input.excluded_provider_keys);
     let remaining = |excluded_values: &[String]| {
@@ -304,8 +310,27 @@ pub fn resolve_error_err05_execution_decision(
             .cloned()
             .collect::<Vec<_>>()
     };
+    if captured_classification
+        .as_ref()
+        .is_some_and(|captured| captured.client_disconnect)
+    {
+        return ErrorErr05ExecutionDecision {
+            action: ErrorErr05ExecutionAction::ClientDisconnected,
+            should_retry: false,
+            excluded_current_provider: false,
+            allow_retry_beyond_attempt_budget: false,
+            retry_switch_plan: None,
+            retry_execution_policy_reason: None,
+            route_pool_remaining_after_exclusion: remaining(&excluded),
+            default_pool_available: input.default_pool_available,
+            policy_exhausted: false,
+            may_project: false,
+            excluded_provider_keys: excluded,
+        };
+    }
     if input.protocol_boundary_failure {
         return ErrorErr05ExecutionDecision {
+            action: ErrorErr05ExecutionAction::RejectNonProviderError,
             should_retry: false,
             excluded_current_provider: false,
             allow_retry_beyond_attempt_budget: false,
@@ -342,6 +367,7 @@ pub fn resolve_error_err05_execution_decision(
         && retryable;
     if may_retry_verified_last_provider {
         return ErrorErr05ExecutionDecision {
+            action: ErrorErr05ExecutionAction::WaitThenRetrySame,
             should_retry: true,
             excluded_current_provider: false,
             allow_retry_beyond_attempt_budget: false,
@@ -361,7 +387,6 @@ pub fn resolve_error_err05_execution_decision(
     let may_retry_default_pool_singleton_provider = default_pool_singleton_provider
         && !input.prompt_too_long
         && !input.provider_owned_continuation
-        && input.attempt < input.max_attempts
         && eligible_last_provider_stage
         && retryable;
     if may_retry_default_pool_singleton_provider {
@@ -369,9 +394,10 @@ pub fn resolve_error_err05_execution_decision(
             excluded.retain(|value| value != key);
         }
         return ErrorErr05ExecutionDecision {
+            action: ErrorErr05ExecutionAction::WaitThenRetrySame,
             should_retry: true,
             excluded_current_provider: false,
-            allow_retry_beyond_attempt_budget: false,
+            allow_retry_beyond_attempt_budget: input.attempt >= input.max_attempts,
             retry_switch_plan: None,
             retry_execution_policy_reason: Some("default_pool_singleton_provider_retry"),
             route_pool_remaining_after_exclusion: remaining(&excluded),
@@ -434,12 +460,18 @@ pub fn resolve_error_err05_execution_decision(
         && !continuing_reroute_chain;
     let has_reroute_target = !remaining_after_exclusion.is_empty() || input.default_pool_available;
     if input.provider_owned_continuation && should_exclude {
+        let should_retry = !terminal_policy_exhausted;
         return ErrorErr05ExecutionDecision {
-            should_retry: false,
+            action: if terminal_policy_exhausted {
+                ErrorErr05ExecutionAction::ProjectTerminal
+            } else {
+                ErrorErr05ExecutionAction::WaitThenReselect
+            },
+            should_retry,
             excluded_current_provider: true,
-            allow_retry_beyond_attempt_budget: false,
-            retry_switch_plan: None,
-            retry_execution_policy_reason: None,
+            allow_retry_beyond_attempt_budget: should_retry && input.attempt >= input.max_attempts,
+            retry_switch_plan: should_retry.then(error_err05_switch_plan),
+            retry_execution_policy_reason: should_retry.then_some(native_policy.reason),
             route_pool_remaining_after_exclusion: remaining_after_exclusion,
             default_pool_available: input.default_pool_available,
             policy_exhausted: terminal_policy_exhausted,
@@ -449,19 +481,34 @@ pub fn resolve_error_err05_execution_decision(
     }
     let should_retry_candidate = should_exclude
         && (has_reroute_target || unproven_last_provider || continuing_reroute_chain);
-    let default_route_exhausted_after_exclusion =
-        on_default_route && remaining_after_exclusion.is_empty();
     let allow_retry_beyond_attempt_budget = should_retry_candidate
-        && !default_route_exhausted_after_exclusion
         && input.attempt >= input.max_attempts
         && (!remaining_after_exclusion.is_empty()
-            || (!on_default_route && input.default_pool_available)
+            || input.default_pool_available
             || unproven_last_provider
             || continuing_reroute_chain);
     let should_retry = should_retry_candidate
-        && !default_route_exhausted_after_exclusion
         && (input.attempt < input.max_attempts || allow_retry_beyond_attempt_budget);
+    let action = if should_retry {
+        if should_retry_candidate && remaining_after_exclusion.is_empty() && !should_exclude {
+            ErrorErr05ExecutionAction::WaitThenRetrySame
+        } else {
+            ErrorErr05ExecutionAction::WaitThenReselect
+        }
+    } else if terminal_policy_exhausted {
+        ErrorErr05ExecutionAction::ProjectTerminal
+    } else if retryable
+        && (!remaining_after_exclusion.is_empty()
+            || input.default_pool_available
+            || unproven_last_provider
+            || continuing_reroute_chain)
+    {
+        ErrorErr05ExecutionAction::WaitThenReselect
+    } else {
+        ErrorErr05ExecutionAction::RejectNonProviderError
+    };
     ErrorErr05ExecutionDecision {
+        action,
         should_retry,
         excluded_current_provider: should_exclude,
         allow_retry_beyond_attempt_budget,
@@ -1609,6 +1656,7 @@ mod tests {
     #[test]
     fn error_err05_explicit_alternative_excludes_and_reroutes() {
         let decision = resolve_error_err05_execution_decision(error_err05_input());
+        assert_eq!(decision.action, ErrorErr05ExecutionAction::WaitThenReselect);
         assert!(decision.should_retry);
         assert!(decision.excluded_current_provider);
         assert_eq!(
@@ -1639,6 +1687,10 @@ mod tests {
         input.default_pool_available = true;
         input.default_pool_singleton_provider = true;
         let decision = resolve_error_err05_execution_decision(input);
+        assert_eq!(
+            decision.action,
+            ErrorErr05ExecutionAction::WaitThenRetrySame
+        );
         assert!(decision.should_retry);
         assert!(!decision.excluded_current_provider);
         assert!(!decision.policy_exhausted);
@@ -1693,7 +1745,7 @@ mod tests {
     }
 
     #[test]
-    fn error_err05_default_route_exhausted_floor_stops_reroute_loop() {
+    fn error_err05_default_route_floor_continues_until_availability_is_exhausted() {
         let mut input = error_err05_input();
         input.route_name = Some("default".to_string());
         input.route_pool = vec!["p1.model".to_string(), "p2.model".to_string()];
@@ -1702,9 +1754,10 @@ mod tests {
         input.attempt = 6;
         input.max_attempts = 6;
         let decision = resolve_error_err05_execution_decision(input);
-        assert!(!decision.should_retry);
+        assert_eq!(decision.action, ErrorErr05ExecutionAction::WaitThenReselect);
+        assert!(decision.should_retry);
         assert!(decision.excluded_current_provider);
-        assert!(!decision.allow_retry_beyond_attempt_budget);
+        assert!(decision.allow_retry_beyond_attempt_budget);
         assert!(decision.route_pool_remaining_after_exclusion.is_empty());
         assert_eq!(
             decision.excluded_provider_keys,
@@ -1735,6 +1788,10 @@ mod tests {
         let mut input = error_err05_input();
         input.route_pool = vec!["p1.model".to_string()];
         let decision = resolve_error_err05_execution_decision(input);
+        assert_eq!(
+            decision.action,
+            ErrorErr05ExecutionAction::WaitThenRetrySame
+        );
         assert!(decision.should_retry);
         assert!(!decision.excluded_current_provider);
         assert!(!decision.may_project);
@@ -1745,6 +1802,10 @@ mod tests {
         let mut input = error_err05_input();
         input.protocol_boundary_failure = true;
         let decision = resolve_error_err05_execution_decision(input);
+        assert_eq!(
+            decision.action,
+            ErrorErr05ExecutionAction::RejectNonProviderError
+        );
         assert!(!decision.should_retry);
         assert!(!decision.excluded_current_provider);
         assert!(decision.may_project);
@@ -1757,9 +1818,32 @@ mod tests {
         input.route_pool.clear();
         input.route_pool_is_authoritative = true;
         let decision = resolve_error_err05_execution_decision(input);
+        assert_eq!(decision.action, ErrorErr05ExecutionAction::ProjectTerminal);
         assert!(!decision.should_retry);
         assert!(decision.policy_exhausted);
         assert!(decision.may_project);
+    }
+
+    #[test]
+    fn error_err05_client_disconnect_is_typed_and_health_neutral() {
+        let mut input = error_err05_input();
+        input.classification = None;
+        input.error_err02_host_captured = Some(ErrorErr02HostCapturedInput {
+            stage: Some("provider.send".to_string()),
+            status_code: Some(499),
+            error_code: Some("HTTP_499".to_string()),
+            error_message: Some("client abort request".to_string()),
+            ..Default::default()
+        });
+        let decision = resolve_error_err05_execution_decision(input);
+        assert_eq!(
+            decision.action,
+            ErrorErr05ExecutionAction::ClientDisconnected
+        );
+        assert!(!decision.should_retry);
+        assert!(!decision.excluded_current_provider);
+        assert!(!decision.policy_exhausted);
+        assert!(!decision.may_project);
     }
 
     #[test]

@@ -115,9 +115,11 @@
    - 直接客户端可见
    - 不切 provider
 3. `recoverable`
-   - 进入统一错误动作队列阻塞等待；V3 provider/runtime 执行期错误当前固定为每次 5 秒
+   - 进入统一错误动作队列和 Rust provider action gate 阻塞等待；isolated 首次动作
+     `>=1s`，重叠 waiter / 连续失败进入 sustained mode，后续动作间隔 `>=5s`
    - 若当前 pool 仍有候选，优先 `exclude_and_reroute`
-   - 仅最后 default provider 可同 provider retry；第 1/2 次失败后等待 5 秒，第 3 次失败后才投影给客户端
+   - 仅最后 default provider 可同 provider retry；每次 provider action 都必须先取得
+     FIFO generation admission，终态耗尽后才允许投影给客户端
 4. `unrecoverable / periodic_recovery`
    - 同 provider 连续第 3 次失败后，非最后 default provider 从当前可选池排除并冷却 15 分钟；成功清零连续错误
    - 若当前 route pool 或 default pool 仍有候选继续切；只有可选池耗尽且最后 default 当前请求 attempt budget 耗尽后才返客户端
@@ -211,12 +213,16 @@ Provider 执行期错误只允许归一到以下三类，禁止新增第四类�
 
 固定规则：
 
-1. provider/runtime 执行期错误 backoff 固定为每次 5 秒；旧 `1s -> 2s -> 3s` 循环语义已废弃。
+1. provider/runtime 执行期错误动作由 Rust provider action gate 统一限流：
+   isolated 首次动作等待至少 1 秒；重叠 waiter 或连续失败进入 sustained mode，
+   后续动作间隔至少 5 秒。旧 `1s -> 2s -> 3s` 循环和“每次固定 5 秒”语义均已废弃。
 2. backoff 必须是 blocking wait，并通过同一 category/scope gate 排队。
 3. 不允许调用点自带 env/base/max/jitter/Retry-After/exponential 配置。
 4. 错误动作通过 queue hook 观测：`record` / `wait_start` / `wait_end`。
 5. 支持 category 固定为：`global_error`、`session_storm`、`servertool_followup`。
-6. waiter cap 固定在统一队列内；超过 cap 显式抛 `PROVIDER_TRAFFIC_SATURATED`，不得吞异常。
+6. provider action waiter 使用 FIFO ticket；每 generation 只允许一次 admission。
+7. admitted action 无墙钟租约，只允许匹配 `actionScopeKey` 的 failure / success /
+   terminal / abandon 释放；abandon 必须 health-neutral。
 
 并发/RPM 饱和规则：
 

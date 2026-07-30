@@ -54,6 +54,21 @@ impl ResponsesTransport for PassthroughTransport {
     }
 }
 
+struct ClientDisconnectTransport;
+
+#[async_trait]
+impl ResponsesTransport for ClientDisconnectTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Err(V3ProviderError::ClientDisconnect {
+            request_id: request.request_id().to_string(),
+            provider_id: request.provider_id().to_string(),
+        })
+    }
+}
+
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -106,6 +121,36 @@ fn scope() -> V3ResponsesDirectContinuationScope {
         5555,
         "g",
     )
+}
+
+#[tokio::test]
+async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait() {
+    let manifest = manifest();
+    for index in 0..3 {
+        let started = std::time::Instant::now();
+        let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+            &V3ResponsesDirectContinuationState::default(),
+            &manifest,
+            build_v3_server_03_http_request_raw(
+                "s".into(),
+                format!("req-direct-disconnect-{index}"),
+                format!("exec-direct-disconnect-{index}"),
+                "POST".into(),
+                "/v1/responses".into(),
+                json!({"model":"gpt-5.5","input":"disconnect","stream":false}),
+            ),
+            scope(),
+            register_responses_direct_hooks(),
+            &ClientDisconnectTransport,
+            index,
+        )
+        .await;
+        assert_eq!(output.client_payload.status, 499);
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "Direct client disconnect entered provider health retry or action wait"
+        );
+    }
 }
 
 async fn assert_direct_response_request_does_not_inject_stopless(response: Value, label: &str) {

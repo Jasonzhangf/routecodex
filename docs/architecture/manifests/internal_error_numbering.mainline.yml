@@ -24,6 +24,14 @@ edges:
     owner_feature_id: debug.internal_error_numbering
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.artifact
+      produces:
+        - debug.internal_error_envelope
+      side_channel_reads: []
+      side_channel_writes:
+        - debug.internal_error_envelope
   - step_id: ien-02
     from_node: IntErrNum02ModuleBlockResolved
     to_node: IntErrNum03SubcodeAssigned
@@ -31,6 +39,15 @@ edges:
     owner_feature_id: debug.internal_error_numbering
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.internal_error_envelope
+      produces:
+        - debug.internal_error_envelope
+      side_channel_reads:
+        - debug.internal_error_envelope
+      side_channel_writes:
+        - debug.internal_error_envelope
   - step_id: ien-03
     from_node: IntErrNum03SubcodeAssigned
     to_node: IntErrNum04EnvelopeBuilt
@@ -38,6 +55,15 @@ edges:
     owner_feature_id: debug.internal_error_numbering
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.internal_error_envelope
+      produces:
+        - debug.internal_error_envelope
+      side_channel_reads:
+        - debug.internal_error_envelope
+      side_channel_writes:
+        - debug.internal_error_envelope
   - step_id: ien-04
     from_node: IntErrNum04EnvelopeBuilt
     to_node: IntErrNum05DebugArtifactProjected
@@ -45,6 +71,14 @@ edges:
     owner_feature_id: debug.internal_error_numbering
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.internal_error_envelope
+      produces:
+        - debug.artifact
+      side_channel_reads:
+        - debug.internal_error_envelope
+      side_channel_writes: []
   - step_id: ien-05
     from_node: IntErrNum05DebugArtifactProjected
     to_node: IntErrNum06ExternalLinked
@@ -52,6 +86,14 @@ edges:
     owner_feature_id: debug.internal_error_numbering
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.artifact
+      produces:
+        - debug.external_error_link
+      side_channel_reads: []
+      side_channel_writes:
+        - debug.external_error_link
   - step_id: ien-06
     from_node: IntErrNum06ExternalLinked
     to_node: IntErrNum07ClientBoundaryPreserved
@@ -59,6 +101,16 @@ edges:
     owner_feature_id: debug.internal_error_numbering
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - debug.artifact
+        - debug.external_error_link
+      produces:
+        - debug.client_boundary_proof
+      side_channel_reads:
+        - debug.external_error_link
+      side_channel_writes:
+        - debug.client_boundary_proof
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

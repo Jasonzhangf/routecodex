@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 futures-util.workspace = true
+routecodex-v3-route-classifier = { path = "../routecodex-v3-route-classifier" }
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }

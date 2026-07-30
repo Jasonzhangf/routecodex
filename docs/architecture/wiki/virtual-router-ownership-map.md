@@ -13,7 +13,8 @@ Feature scope: `vr.* / virtual_router.*`
 
 | feature_id | summary | owner kind | owner module | required gates |
 | --- | --- | --- | --- | --- |
-| `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity`<br/>`npm run verify:resource-operation-map` |
+| `vr.route_classifier` | shared V2/V3 current-turn route classification contract | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core` | `npm run test:route-classifier-semantics`<br/>`npm run verify:route-classifier-core-file-size`<br/>`npm run test:route-classifier-core-file-size-red-fixtures` |
+| `vr.route_selection` | virtual router route classification and selected target truth | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src` | `npm run test:route-classifier-semantics`<br/>`npm run verify:route-classifier-core-file-size`<br/>`npm run test:route-classifier-core-file-size-red-fixtures`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run verify:repo-sanity`<br/>`npm run verify:resource-operation-map` |
 | `vr.route_token_estimation` | Virtual Router request token counting uses the retired tiktoken semantics in Rust | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs` | `npm run verify:vr-token-estimation-rust`<br/>`npm run test:vr-token-estimation-red-fixtures`<br/>`npm run verify:resource-operation-map`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run build:native-hotpath` |
 | `vr.shared_function_library_helpers` | Virtual Router exact duplicate pure helper mechanics are centralized in Rust helper owners | `rust_helper` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run test:vr-shared-function-library-helpers-red-fixtures`<br/>`npm run verify:vr-shared-function-library-helpers`<br/>`npm run test:vr-shared-function-library-helpers-cargo`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:llmswitch-rustification-audit`<br/>`npm run build:base` |
 | `vr.metadata_center_surface` | Virtual Router read-only metadata-center-backed route surface | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/metadata.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:architecture-owner-queryability`<br/>`npm run verify:vr-no-ts-runtime` |
@@ -25,13 +26,59 @@ Feature scope: `vr.* / virtual_router.*`
 | `vr.provider_forwarder_runtime` | ProviderForwarder config load, capability filtering, internal target selection, in-process health/cooldown truth, and runtime diagnostics stay in Rust Virtual Router | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine` | `npm run verify:vr-forwarder-runtime`<br/>`npm run verify:function-map-compile-gate` |
 | `vr.online_diagnostics` | Virtual Router online status and dry-run route diagnostics stay Rust-owned | `rust_ssot` | `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine/status.rs` | `npm run verify:function-map-compile-gate`<br/>`npm run verify:architecture-mainline-call-map`<br/>`npm run verify:vr-no-ts-runtime`<br/>`npm run verify:vr-forwarder-runtime` |
 
+## vr.route_classifier
+
+Summary: shared V2/V3 current-turn route classification contract
+
+Owner kind: `rust_ssot`
+Owner module: `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core`
+Owner scope: shared current-turn/tool classification only; target selection remains owned by each Virtual Router
+
+Canonical types:
+- `RouteActiveTurnSignals`
+- `RouteClassification`
+
+Canonical builders:
+- `extract_active_turn_signals`
+- `classify_tool_call`
+- `classify_shell_command`
+- `classify_route`
+
+Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
+- `v3/crates/routecodex-v3-runtime`
+- `v3/crates/routecodex-v3-virtual-router`
+- `docs/goals/v3-v2-route-classifier-parity-test-design.md`
+
+Forbidden paths:
+- `sharedmodule/llmswitch-core/src/router`
+- `src/providers/core/runtime`
+- `src/server/runtime/http-server/executor`
+- `v3/crates/routecodex-v3-provider-responses`
+
+Required tests:
+- `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs`
+- `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
+- `v3/crates/routecodex-v3-runtime/src/nodes.rs`
+
+Required gates:
+- `npm run test:route-classifier-semantics`
+- `npm run verify:route-classifier-core-file-size`
+- `npm run test:route-classifier-core-file-size-red-fixtures`
+
+Notes:
+- Only current active-turn calls/outputs and strict fresh-user keywords produce route signals; tool declarations, tool_choice, schemas, descriptions, reasoning fields, and history contribute zero signal.
+- Multimodal consumes only the typed request-scoped hasImageAttachment carrier; payload image shapes are not a classifier input.
+- The classifier outputs an ordered route contract only and cannot select providers or mutate payloads.
+
 ## vr.route_selection
 
 Summary: virtual router route classification and selected target truth
 
 Owner kind: `rust_ssot`
 Owner module: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
-Owner scope: virtual router route classification and selected target truth
+Owner scope: V2 Virtual Router target selection consumes the shared route classification contract
 
 Canonical types:
 - `VrRoute04SelectedTarget`
@@ -41,6 +88,7 @@ Canonical builders:
 - `build_vr_route_04_from_hub_req_chatprocess_03`
 
 Allowed paths:
+- `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src`
 - `src/modules/llmswitch/bridge`
@@ -52,12 +100,16 @@ Forbidden paths:
 - `src/server/runtime/http-server/executor`
 
 Required tests:
+- `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core/src/tests.rs`
 - `tests/red-tests/hub_pipeline_vr_provider_boundary_contract.test.ts`
 - `tests/sharedmodule/virtual-router-provider-unavailable-cooldown-native.spec.ts`
 - `tests/servertool/virtual-router-servertool-routing.spec.ts`
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/features.rs`
 
 Required gates:
+- `npm run test:route-classifier-semantics`
+- `npm run verify:route-classifier-core-file-size`
+- `npm run test:route-classifier-core-file-size-red-fixtures`
 - `npm run verify:vr-no-ts-runtime`
 - `npm run verify:llmswitch-rustification-audit`
 - `npm run verify:repo-sanity`
@@ -65,7 +117,8 @@ Required gates:
 
 Notes:
 - VR selects target/policy only; no payload patch, no tool semantics, no provider-specific repair.
-- Current-turn multimodal intent must read media from the active turn segment's user carrier, not from the last non-user entry and not from historical turns.
+- Current-turn route semantics are consumed from vr.route_classifier; V2 selection must not reclassify declarations, history, or payload shapes.
+- Multimodal consumes only request-scoped hasImageAttachment metadata produced before Virtual Router; payload image shapes are not a second classifier.
 
 ## vr.route_token_estimation
 
@@ -393,7 +446,6 @@ Allowed paths:
 - `src/server/runtime/http-server/executor/request-executor-core-utils.ts`
 - `tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts`
 - `tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts`
-- `tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts`
 - `tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts`
 - `docs`
 
@@ -405,7 +457,6 @@ Forbidden paths:
 Required tests:
 - `tests/server/http-server/http-server-bootstrap.routing-policy-group.spec.ts`
 - `tests/server/runtime/http-server/executor/request-executor-primary-exhausted-plan.spec.ts`
-- `tests/server/runtime/http-server/router-direct-pipeline.candidate-exhaustion.spec.ts`
 - `tests/server/runtime/http-server/provider-direct-pipeline.candidate-exhaustion.spec.ts`
 
 Required gates:
@@ -418,7 +469,7 @@ Notes:
 - Host may extract route-scoped tier shape from runtime config and pass it to Rust unchanged; this is config plumbing, not planner ownership.
 - When the current route has no backup tier, host must also pass routing-group default route tiers (`defaultRouteTiers`) so Rust can plan primary_exhausted -> group default pool.
 - Unknown target and empty default-pool are explicit contract states, never fallback.
-- Host decision helpers (e.g. src/server/runtime/http-server/direct-decision.ts) live under error.execution_decision_consumer; they must not synthesize a default-pool target list.
+- Direct consumers execute the Rust ErrorErr05 action and must not synthesize a default-pool target list.
 - Ordinary route-pool removal must not project terminal no-provider while default pool still retains its last provider; this guard is part of the Rust-owned plan/consumer contract, not a handler/executor-local reinterpretation.
 
 ## vr.route_availability_floor

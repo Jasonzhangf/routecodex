@@ -7,7 +7,7 @@
  * - ErrorErr05 execution decision: default pool singleton with prior exclusions must
  *   retry same-provider (excluded_current_provider=false) rather than exclude and reroute.
  * - Request executor: singleton exhaustion wait must clear excludedProviderKeys before replay.
- * - Server contracts: describe_server_contracts must document this invariant.
+ * - Server contracts: provider recovery uses the Rust-owned 1s/5s action gate.
  *
  * Owner: vr.route_availability_floor + error.provider_failure_policy + error.execution_decision_consumer
  */
@@ -51,7 +51,7 @@ describe('Default pool last provider no-remove', () => {
   it('TS executor: singleton exhaustion wait must clear excludedProviderKeys before replay', () => {
     const src = readSrc(TS_EXECUTOR);
     const blockStart = src.indexOf('if (singletonPoolDecision.shouldBlock)');
-    const blockEnd = src.indexOf('if (lastError && excludedProviderKeys.size > 0)', blockStart);
+    const blockEnd = src.indexOf('if (lastError)', blockStart);
     expect(blockStart).toBeGreaterThanOrEqual(0);
     expect(blockEnd).toBeGreaterThan(blockStart);
     const block = src.slice(blockStart, blockEnd);
@@ -60,10 +60,13 @@ describe('Default pool last provider no-remove', () => {
     );
   });
 
-  // Gap 4: server_contracts.rs documents the fixed blocking-wait cycle
-  it('Server contracts: documents the 1s/2s/3s fixed cycle', () => {
+  // Gap 4: server_contracts.rs must not revive the retired 1s/2s/3s cycle.
+  it('Server contracts: documents the Rust-owned isolated 1s / sustained 5s gate', () => {
     const src = readSrc(RUST_SERVER_CONTRACTS);
-    expect(src).toContain('blocking_wait_1s_2s_3s_cycle');
-    expect(src).toContain('1s -> 2s -> 3s -> repeat');
+    expect(src).toContain('blocking_wait_isolated_1s_sustained_5s');
+    expect(src).toContain('single_admission_fifo');
+    expect(src).toContain('action_scope_owned_release');
+    expect(src).not.toContain('blocking_wait_1s_2s_3s_cycle');
+    expect(src).not.toContain('1s -> 2s -> 3s -> repeat');
   });
 });

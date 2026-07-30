@@ -5,11 +5,14 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_anthropic_relay_runtime, project_v3_responses_json_as_anthropic_message,
-    project_v3_responses_sse_as_anthropic_events, V3AnthropicRelayRuntimeInput,
+    execute_v3_anthropic_relay_runtime,
+    materialize_v3_responses_provider_sse_as_canonical_response,
+    project_v3_anthropic_events_after_resp04, project_v3_responses_json_as_anthropic_events,
+    project_v3_responses_json_as_anthropic_message, V3AnthropicRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
+use std::time::Duration;
 
 struct JsonTransport {
     captured: Mutex<Option<serde_json::Value>>,
@@ -70,13 +73,14 @@ impl ResponsesTransport for MatrixJsonTransport {
 
 #[tokio::test]
 async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
+    let scope = "anthropic_json_lifecycle";
     let transport = JsonTransport {
         captured: Mutex::new(None),
     };
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(scope),
         V3AnthropicRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: scope.into(),
             request_id: "req-json".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -115,6 +119,7 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
 
 #[tokio::test]
 async fn anthropic_responses_field_parity_request_matrix() {
+    let scope = "anthropic_request_matrix";
     let transport = MatrixJsonTransport {
         captured: Mutex::new(None),
         response: json!({
@@ -125,9 +130,9 @@ async fn anthropic_responses_field_parity_request_matrix() {
         }),
     };
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(scope),
         V3AnthropicRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: scope.into(),
             request_id: "req-anthropic-field-matrix".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -256,8 +261,7 @@ fn anthropic_responses_field_parity_response_matrix() {
     assert_eq!(
         projected["content"],
         json!([
-            {"type":"thinking","thinking":"first thought"},
-            {"type":"thinking","thinking":"second thought"},
+            {"type":"thinking","thinking":"first thought\n\nsecond thought"},
             {"type":"text","text":"hello"},
             {"type":"text","text":" world"},
             {"type":"tool_use","id":"call_lookup","name":"lookup","input":{"q":"beta"}},
@@ -369,23 +373,33 @@ impl ResponsesTransport for ReselectTransport {
 
 #[tokio::test]
 async fn provider_http_failure_reselects_next_candidate_before_client_projection() {
+    let scope = "anthropic_provider_reselect";
     let transport = ReselectTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
-    let output = execute_v3_anthropic_relay_runtime(
-        &manifest_with_two_providers(),
-        V3AnthropicRelayRuntimeInput {
-            server_id: "controlled".into(),
-            request_id: "req-provider-reselect".into(),
-            payload: json!({
-                "model":"claude-client-alias",
-                "messages":[{"role":"user","content":"use the available provider"}],
-                "stream":false
-            }),
-        },
-        &transport,
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        execute_v3_anthropic_relay_runtime(
+            &manifest_with_two_providers(scope),
+            V3AnthropicRelayRuntimeInput {
+                server_id: scope.into(),
+                request_id: "req-provider-reselect".into(),
+                payload: json!({
+                    "model":"claude-client-alias",
+                    "messages":[{"role":"user","content":"use the available provider"}],
+                    "stream":false
+                }),
+            },
+            &transport,
+        ),
     )
     .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "provider reselect remained blocked after 30s; sends={:?}",
+            transport.provider_ids.lock().unwrap().as_slice()
+        )
+    })
     .unwrap();
 
     assert_eq!(
@@ -410,10 +424,11 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
+    let scope = "anthropic_provider_terminal";
     let output = execute_v3_anthropic_relay_runtime(
-        &manifest(),
+        &manifest(scope),
         V3AnthropicRelayRuntimeInput {
-            server_id: "controlled".into(),
+            server_id: scope.into(),
             request_id: "req-error".into(),
             payload: json!({"model":"claude-client-alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
         },
@@ -479,20 +494,22 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
         .to_vec()),
         Ok(b"data: [DONE]\n\n".to_vec()),
     ]);
-    let projection = project_v3_responses_sse_as_anthropic_events(Box::pin(stream))
-        .await
-        .unwrap();
-    let (canonical_response, client_events) = projection.into_parts();
-    assert_eq!(canonical_response["output"][0]["type"], "output_text");
+    let canonical_response =
+        materialize_v3_responses_provider_sse_as_canonical_response(Box::pin(stream))
+            .await
+            .unwrap();
+    assert_eq!(canonical_response["output"][0]["type"], "message");
+    assert_eq!(canonical_response["output"][1]["type"], "output_text");
     assert_eq!(
-        canonical_response["output"][0]["text"],
+        canonical_response["output"][1]["text"],
         "V3_COMPAT_ANTHROPIC_SSE_OK"
     );
+    let client_events = project_v3_responses_json_as_anthropic_events(&canonical_response).unwrap();
     assert!(client_events.iter().any(|event| {
         event
             .pointer("/data/delta/text")
             .and_then(|value| value.as_str())
-            == Some("ANTHROPIC_SSE_OK")
+            == Some("V3_COMPAT_ANTHROPIC_SSE_OK")
     }));
     assert_eq!(client_events.last().unwrap()["event"], "message_stop");
 }
@@ -500,33 +517,211 @@ async fn sse_projection_accepts_live_data_only_text_delta_frames() {
 #[tokio::test]
 async fn structured_sse_contract_preserves_reasoning_tool_and_terminal_order() {
     let stream = futures_util::stream::iter([
-        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"delta\":\"Need".to_vec()),
-        Ok(b" beta\"}\n\n".to_vec()),
+        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"Need\"}\n\n".to_vec()),
+        Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\" beta\"}\n\n".to_vec()),
         Ok(b"event: response.output_item.added\ndata: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_sse_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n".to_vec()),
         Ok(b"event: response.function_call_arguments.delta\ndata: {\"delta\":\"{\\\"q\\\":\\\"beta\\\"}\"}\n\n".to_vec()),
         Ok(b"event: response.completed\ndata: {\"response\":{\"id\":\"resp_sse_1\",\"status\":\"completed\"}}\n\n".to_vec()),
     ]);
-    let projection = project_v3_responses_sse_as_anthropic_events(Box::pin(stream))
-        .await
-        .unwrap();
-    let (canonical_response, client_events) = projection.into_parts();
+    let canonical_response =
+        materialize_v3_responses_provider_sse_as_canonical_response(Box::pin(stream))
+            .await
+            .unwrap();
     assert_eq!(canonical_response["output"].as_array().unwrap().len(), 2);
-    let client =
-        routecodex_v3_runtime::V3AnthropicRelaySseProjection::project_after_resp04(client_events);
+    let client_events = project_v3_responses_json_as_anthropic_events(&canonical_response).unwrap();
+    let client = project_v3_anthropic_events_after_resp04(client_events);
     let events = client["events"].as_array().unwrap();
-    assert_eq!(events.len(), 5);
+    let reasoning_starts = events
+        .iter()
+        .filter(|event| {
+            event["event"] == "content_block_start"
+                && event["data"]["content_block"]["type"] == "thinking"
+        })
+        .collect::<Vec<_>>();
+    let reasoning_deltas = events
+        .iter()
+        .filter(|event| event["data"]["delta"]["type"] == "thinking_delta")
+        .collect::<Vec<_>>();
+    let reasoning_stops = events
+        .iter()
+        .filter(|event| {
+            event["event"] == "content_block_stop" && event["data"]["index"] == json!(0)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reasoning_starts.len(), 1);
+    assert_eq!(reasoning_deltas.len(), 1);
+    assert!(reasoning_deltas
+        .iter()
+        .all(|event| event["data"]["index"] == json!(0)));
+    assert_eq!(
+        reasoning_deltas[0]["data"]["delta"]["thinking"],
+        "Need beta"
+    );
+    assert_eq!(reasoning_stops.len(), 1);
     assert_eq!(events.last().unwrap()["event"], "message_stop");
 }
 
-fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+struct ResponsesThinkingSseTransport;
+
+#[async_trait]
+impl ResponsesTransport for ResponsesThinkingSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_thinking_sse","status":"in_progress","output":[]}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"item_id":"rs_thinking","summary_index":0,"delta":"signed thought"}
+
+"#
+            .to_vec()),
+            Ok(br#"event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_thinking_sse","status":"completed","output":[{"type":"reasoning","id":"rs_thinking","summary":[{"type":"summary_text","text":"signed thought"}],"encrypted_content":"resp04-signature"}]}}
+
+"#
+            .to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+struct ResponsesThinkingSseWithoutTerminalTransport;
+
+#[async_trait]
+impl ResponsesTransport for ResponsesThinkingSseWithoutTerminalTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_thinking_no_terminal","status":"in_progress","output":[]}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"item_id":"rs_thinking","summary_index":0,"delta":"must not become success"}
+
+"#
+            .to_vec()),
+            Ok(b"data: [DONE]\n\n".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth() {
+    let scope = "anthropic_thinking_sse";
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest(scope),
+        V3AnthropicRelayRuntimeInput {
+            server_id: scope.into(),
+            request_id: "req-thinking-sse".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "messages":[{"role":"user","content":"think"}],
+                "stream":true
+            }),
+        },
+        &ResponsesThinkingSseTransport,
+    )
+    .await
+    .expect("Responses SSE thinking must close through Resp04");
+
+    let events = output.client_response["events"]
+        .as_array()
+        .expect("Anthropic SSE events");
+    assert!(events.iter().any(|event| {
+        event["event"] == "content_block_delta"
+            && event["data"]["delta"]
+                == json!({
+                    "type":"signature_delta",
+                    "signature":"resp04-signature"
+                })
+    }));
+    assert_eq!(
+        output.node_trace.last(),
+        Some(&"V3ServerRespOutbound06ClientFrame")
+    );
+}
+
+#[tokio::test]
+async fn responses_sse_without_terminal_fails_before_anthropic_success_projection() {
+    let scope = "anthropic_terminal_missing";
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest(scope),
+        V3AnthropicRelayRuntimeInput {
+            server_id: scope.into(),
+            request_id: "req-thinking-no-terminal".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "messages":[{"role":"user","content":"think"}],
+                "stream":true
+            }),
+        },
+        &ResponsesThinkingSseWithoutTerminalTransport,
+    )
+    .await
+    .expect("provider codec failure must project through the standard error chain");
+
+    assert_eq!(output.status, 502);
+    assert!(
+        output
+            .client_response
+            .to_string()
+            .contains("before response.completed"),
+        "incomplete provider stream must not be wrapped as Anthropic success: {}",
+        output.client_response
+    );
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(
+            &[
+                "V3Error01SourceRaised",
+                "V3Error02Classified",
+                "V3Error03TargetLocalAction",
+                "V3Error04TargetExhaustionDecision",
+                "V3Error05ExecutionDecision",
+                "V3Error06ClientProjected",
+            ][..]
+        )
+    );
+}
+
+fn manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
-            r#"
+            &r#"
 version = 3
-[servers.controlled]
+[servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
-routing_group = "controlled"
+routing_group = "__SCOPE__"
 endpoints = ["anthropic"]
 [providers.controlled]
 type = "responses"
@@ -537,30 +732,31 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
-[route_groups.controlled.pools.claude_client]
+capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision", "web_search"]
+[route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-[route_groups.controlled.pools.default]
+[route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
-"#,
+"#
+            .replace("__SCOPE__", scope),
         )
         .unwrap(),
     )
     .unwrap()
 }
 
-fn manifest_with_two_providers() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest_with_two_providers(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
-            r#"
+            &r#"
 version = 3
-[servers.controlled]
+[servers.__SCOPE__]
 bind = "127.0.0.1"
 port = 1
-routing_group = "controlled"
+routing_group = "__SCOPE__"
 endpoints = ["anthropic"]
 [providers.primary]
 type = "responses"
@@ -584,20 +780,21 @@ aliases = ["claude-client-alias"]
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
-[route_groups.controlled.pools.claude_client]
+[route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
 targets = [
   { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 1 },
   { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 2 }
 ]
-[route_groups.controlled.pools.default]
+[route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
   { kind = "provider_model", provider = "primary", model = "responses-wire-model", key = "primary", priority = 1 },
   { kind = "provider_model", provider = "secondary", model = "responses-wire-model", key = "secondary", priority = 2 }
 ]
-"#,
+"#
+            .replace("__SCOPE__", scope),
         )
         .unwrap(),
     )

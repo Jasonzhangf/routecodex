@@ -4,6 +4,8 @@ import YAML from 'yaml';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs';
 const responsesRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
+const responsesProviderEventCodecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs';
+const responsesProviderStreamMaterializationPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs';
 const openaiChatRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs';
 const geminiRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs';
 const providerFailurePolicyPath = 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs';
@@ -17,9 +19,15 @@ const mainlinePath = 'docs/architecture/v3-mainline-call-map.yml';
 const verificationPath = 'docs/architecture/v3-verification-map.yml';
 const wikiPath = 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md';
 const packagePath = 'package.json';
+const workflowPath = '.github/workflows/test.yml';
 
 const runtime = readFileSync(runtimePath, 'utf8');
 const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8');
+const responsesProviderEventCodec = readFileSync(responsesProviderEventCodecPath, 'utf8');
+const responsesProviderStreamMaterialization = readFileSync(
+  responsesProviderStreamMaterializationPath,
+  'utf8',
+);
 const openaiChatRuntime = readFileSync(openaiChatRuntimePath, 'utf8');
 const geminiRuntime = readFileSync(geminiRuntimePath, 'utf8');
 const providerFailurePolicy = readFileSync(providerFailurePolicyPath, 'utf8');
@@ -30,9 +38,11 @@ const localContinuationTests = readFileSync(localContinuationTestPath, 'utf8');
 const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
 const functionMap = readFileSync(functionMapPath, 'utf8');
 const mainline = readFileSync(mainlinePath, 'utf8');
+const mainlineMap = YAML.parse(mainline);
 const verification = readFileSync(verificationPath, 'utf8');
 const wiki = readFileSync(wikiPath, 'utf8');
 const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
+const workflow = readFileSync(workflowPath, 'utf8');
 const failures = [];
 
 const expectedNodes = [
@@ -88,8 +98,22 @@ if (manifest.completion_boundary?.live_replay_5555 !== true
   || manifest.completion_boundary?.p6_deletion !== false) {
   failures.push(`${manifestPath}: completion boundary must record live 5555 replay/global install with P6 deletion still false`);
 }
+if (manifest.error_path?.entry_edge?.step_id !== 'v3-hub-relay-response-failure-01'
+  || manifest.error_path?.entry_edge?.from_node !== 'V3HubRespChatProcess03Governed'
+  || manifest.error_path?.entry_edge?.to_node !== 'V3Error01SourceRaised'
+  || JSON.stringify(manifest.error_path?.canonical_nodes) !== JSON.stringify([
+    'V3Error01SourceRaised',
+    'V3Error02Classified',
+    'V3Error03TargetLocalAction',
+    'V3Error04TargetExhaustionDecision',
+    'V3Error05ExecutionDecision',
+    'V3Error06ClientProjected',
+  ])) {
+  failures.push(`${manifestPath}: Resp03 failure must enter the complete adjacent Error01-Error06 path`);
+}
 
 for (const script of [
+  'test:v3-5520-duplicate-tool-identity',
   'test:v3-hub-relay-runtime-closeout',
   'verify:v3-hub-relay-runtime-closeout',
   'test:v3-hub-relay-runtime-closeout-red-fixtures',
@@ -99,33 +123,38 @@ for (const script of [
 ]) {
   if (!packageJson.scripts?.[script]) failures.push(`${packagePath}: missing script ${script}`);
 }
+const focusedGate = packageJson.scripts?.['test:v3-5520-duplicate-tool-identity'] ?? '';
+for (const phrase of [
+  'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
+  'responses_relay_provider_duplicate_tool_identity',
+]) requireText(focusedGate, `${packagePath}: test:v3-5520-duplicate-tool-identity`, phrase);
+requireCount(workflow, workflowPath, 'run: npm run test:v3-5520-duplicate-tool-identity', 2);
 
 requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile');
 requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHookProfile');
 requireRelayRuntimeUsesSharedProviderFailurePolicy(runtime, runtimePath, 'anthropic');
 requireText(runtime, runtimePath, 'fn closeout_anthropic_relay_response<F>(');
-requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 3);
-requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 1);
+requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 1);
+requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 2);
 requireCount(runtime, runtimePath, 'let resp03 = hooks.govern(resp02, response_hook_profile)?;', 1);
 requireCount(runtime, runtimePath, 'let resp04 = hooks.commit(resp03)?;', 1);
-requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)', 1);
+requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(', 1);
 requireCount(runtime, runtimePath, 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)', 1);
 requireOrderedSequence(runtime, runtimePath, [
-  'fn closeout_anthropic_relay_response<F>(',
+  'fn closeout_anthropic_relay_normalized_response<F>(',
   'let hooks = compile_v3_hub_relay_response_hooks();',
-  'let resp02 = hooks.normalize(resp01)?;',
   'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
   'let resp04 = hooks.commit(resp03)?;',
   'commit_or_release_local_continuation(',
-  'let client_response = project_client_response(resp04.finalized_payload())?;',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)',
+  'let client_payload = project_client_response(resp04.finalized_payload())?;',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)',
 ]);
 requireOrdered(
   runtime,
   runtimePath,
   'let resp04 = hooks.commit(resp03)?;',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04)',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(',
   1,
 );
 requireText(runtime, runtimePath, 'servertool_followup_required');
@@ -138,7 +167,7 @@ forbid(runtime, runtimePath, [
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
-  /build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04[\s\S]{0,240}hooks\.commit\(resp03\)/,
+  /build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload[\s\S]{0,240}hooks\.commit\(resp03\)/,
 ]);
 
 for (const phrase of [
@@ -161,7 +190,7 @@ forbid(tests, testPath, [
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /read_dir|libloading|dynamic[_ -]?hook/i,
-  /collect\s*::<\s*Vec|full_buffer|materiali[sz]e/i,
+  /full_buffer/i,
 ]);
 
 for (const phrase of [
@@ -187,10 +216,42 @@ for (const phrase of [
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
+]) requireText(responsesRuntime, responsesRuntimePath, phrase);
+for (const phrase of [
   'fn observe_v3_runtime_responses_sse_transport_chunk(',
   'fn apply_responses_stream_protocol_events_to_terminal_response(',
-]) requireText(responsesRuntime, responsesRuntimePath, phrase);
+]) requireText(responsesProviderEventCodec, responsesProviderEventCodecPath, phrase);
+for (const phrase of [
+  'build_v3_hub_resp_inbound_02_from_responses_provider_stream_events',
+  'observe_v3_runtime_responses_sse_transport_chunk(',
+]) {
+  requireText(
+    responsesProviderStreamMaterialization,
+    responsesProviderStreamMaterializationPath,
+    phrase,
+  );
+}
 requireRelayRuntimeUsesSharedProviderFailurePolicy(responsesRuntime, responsesRuntimePath, 'responses');
+for (const phrase of [
+  'fn is_v3_responses_provider_response_failure(',
+  'fn provider_response_hook_failure(',
+  'source_stage: "V3HubRespChatProcess03Governed"',
+  'provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
+]) requireText(responsesRuntime, responsesRuntimePath, phrase);
+const providerResponseHookFailureBody = functionBody(
+  responsesRuntime,
+  responsesRuntimePath,
+  'fn provider_response_hook_failure(',
+);
+requireText(
+  providerResponseHookFailureBody,
+  `${responsesRuntimePath}: provider_response_hook_failure`,
+  'source_stage: "V3HubRespChatProcess03Governed"',
+);
+for (const phrase of [
+  'responses_relay_provider_duplicate_tool_identity_reselects_before_projection_for_json_and_sse',
+  'responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion',
+]) requireText(tests, testPath, phrase);
 for (const node of expectedNodes) requireText(responsesRuntime, responsesRuntimePath, node);
 for (const node of expectedNodes.slice(10)) {
   requireCount(responsesRuntime, responsesRuntimePath, `trace.push("${node}");`, 1);
@@ -221,6 +282,8 @@ forbid(responsesRuntime, responsesRuntimePath, [
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /collect\s*::<\s*Vec|full_buffer/i,
   /\bproject_sse_stream\b|\bV3ObservedSseState\b|\bproject_finalized_response_sse_stream\b/,
+  /\bfn\s+observe_v3_runtime_responses_sse_transport_chunk\s*\(/,
+  /\bfn\s+apply_responses_stream_protocol_events_to_terminal_response\s*\(/,
 ]);
 
 for (const [text, path, label] of [
@@ -242,10 +305,20 @@ for (const phrase of [
   'pub(crate) fn resolve_v3_relay_target',
   'struct V3RelayExcludedAvailability',
   'pub struct V3ProviderFailureRuntimeHealth',
-  'V3RelayProviderFailureDecision::Reselect',
-  'V3RelayProviderFailureDecision::RetrySame',
-  'V3RelayProviderFailureDecision::ProjectTerminal',
+  'V3RelayProviderFailurePolicyResult',
+  'build_v3_relay_provider_error_05_decision',
+  'terminal_projection_for',
 ]) requireText(providerFailurePolicy, providerFailurePolicyPath, phrase);
+const relayError05BuilderBody = functionBody(
+  providerFailurePolicy,
+  providerFailurePolicyPath,
+  'fn build_v3_relay_provider_error_05_decision(',
+);
+requireText(
+  relayError05BuilderBody,
+  `${providerFailurePolicyPath}: build_v3_relay_provider_error_05_decision`,
+  'build_v3_error_01_source_raised_external(',
+);
 
 for (const phrase of [
   'execute_v3_responses_relay_request',
@@ -303,6 +376,45 @@ for (const phrase of [
   requireText(mainline, mainlinePath, phrase);
 }
 for (const phrase of [
+  'v3.hub_relay.response_failure_entry',
+  'v3-hub-relay-response-failure-01',
+  'V3HubRespChatProcess03Governed',
+  'V3Error01SourceRaised',
+  'build_v3_relay_provider_error_05_decision',
+  'build_v3_error_01_source_raised_external',
+]) {
+  requireText(mainline, mainlinePath, phrase);
+}
+const responseFailureChain = (mainlineMap?.chains ?? []).find(
+  (chain) => chain?.chain_id === 'v3.hub_relay.response_failure_entry',
+);
+const responseFailureEdge = responseFailureChain?.edges?.find(
+  (edge) => edge?.step_id === 'v3-hub-relay-response-failure-01',
+);
+for (const [field, expected] of Object.entries({
+  from_node: 'V3HubRespChatProcess03Governed',
+  to_node: 'V3Error01SourceRaised',
+  caller_symbol: 'build_v3_relay_provider_error_05_decision',
+  caller_file: providerFailurePolicyPath,
+  callee_symbol: 'build_v3_error_01_source_raised_external',
+  callee_file: 'v3/crates/routecodex-v3-error/src/lib.rs',
+})) {
+  if (responseFailureEdge?.[field] !== expected) {
+    failures.push(`${mainlinePath}: v3-hub-relay-response-failure-01 ${field} must equal ${expected}`);
+  }
+}
+for (const phrase of [
+  'v3-hub-relay-response-failure-01',
+  'is_v3_responses_provider_response_failure',
+  'provider_response_hook_failure',
+  'build_v3_relay_provider_error_05_decision',
+  'build_v3_error_01_source_raised_external',
+  'responses_relay_runtime::provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate',
+]) {
+  requireText(functionMap, functionMapPath, phrase);
+}
+requireText(verification, verificationPath, 'npm run test:v3-5520-duplicate-tool-identity');
+for (const phrase of [
   'source_entry_bindings',
   'execute_v3_responses_relay_runtime_with_default_transport',
   'live_replay_5555',
@@ -332,6 +444,27 @@ function requireCount(text, owner, phrase, expected) {
   if (actual !== expected) {
     failures.push(`${owner}: expected ${expected} occurrences of ${phrase}, found ${actual}`);
   }
+}
+
+function functionBody(source, owner, marker) {
+  const start = source.indexOf(marker);
+  if (start < 0) {
+    failures.push(`${owner}: missing function ${marker}`);
+    return '';
+  }
+  const open = source.indexOf('{', start);
+  if (open < 0) {
+    failures.push(`${owner}: missing body for ${marker}`);
+    return '';
+  }
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') depth -= 1;
+    if (depth === 0) return source.slice(start, index + 1);
+  }
+  failures.push(`${owner}: unterminated body for ${marker}`);
+  return '';
 }
 
 function requireOrdered(text, owner, earlier, later, expected) {
@@ -369,9 +502,9 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     'resolve_v3_relay_target(',
     'V3RelayProviderFailurePolicyContext',
     'V3RelayProviderFailurePolicyState',
-    'V3RelayProviderFailureDecision::Reselect',
-    'V3RelayProviderFailureDecision::RetrySame',
-    'V3RelayProviderFailureDecision::ProjectTerminal',
+    'V3Error05ExecutionAction::WaitThenReselect',
+    'V3Error05ExecutionAction::WaitThenRetrySame',
+    'V3Error05ExecutionAction::ProjectTerminal',
     'V3ProviderFailureRuntimeHealth',
     `entry_kind: "${entryKind}"`,
   ]) {
@@ -387,18 +520,18 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     requireOrderedSequence(text, owner, [
       'let result = run_v3_relay_provider_failure_policy(',
       '&mut V3RelayProviderFailurePolicyState {',
-      'V3RelayProviderFailureDecision::Reselect',
-      'V3RelayProviderFailureDecision::RetrySame',
-      'V3RelayProviderFailureDecision::ProjectTerminal',
+      'V3Error05ExecutionAction::WaitThenReselect',
+      'V3Error05ExecutionAction::WaitThenRetrySame',
+      'V3Error05ExecutionAction::ProjectTerminal',
     ]);
     return;
   }
   const handleSlice = text.slice(handleStart);
   requireOrderedSequence(handleSlice, `${owner}: handle_provider_failure`, [
     'let result = run_v3_relay_provider_failure_policy(',
-    'V3RelayProviderFailureDecision::Reselect',
-    'V3RelayProviderFailureDecision::RetrySame',
-    'V3RelayProviderFailureDecision::ProjectTerminal',
+    'V3Error05ExecutionAction::WaitThenReselect',
+    'V3Error05ExecutionAction::WaitThenRetrySame',
+    'V3Error05ExecutionAction::ProjectTerminal',
   ]);
   requireText(text, owner, '&mut V3RelayProviderFailurePolicyState {');
 }

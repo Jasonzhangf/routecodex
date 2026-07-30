@@ -73,8 +73,13 @@ import { normalizeProviderResponse } from './executor/provider-response-utils.js
 import { extractStatusCodeFromError } from './executor/utils.js';
 import { processProviderResolveFailure } from './executor/request-executor-provider-resolve-failure.js';
 import { processProviderSendFailure } from './executor/request-executor-provider-send-failure.js';
-import { resolveRequestExecutorProviderFailurePlan } from './executor/request-executor-provider-failure-plan.js';
-import { decideDirectProviderRetry, decideDirectRouterRetry } from './direct-decision.js';
+import {
+  buildProviderErrorBackoffLaneGroup,
+  resolveRequestExecutorProviderFailurePlan,
+} from './executor/request-executor-provider-failure-plan.js';
+import {
+  recordErrorActionSuccessByLaneGroup,
+} from './executor/request-executor-error-action-queue.js';
 import { isClientDisconnectLikeError } from './direct-client-disconnect.js';
 import { extractRetryErrorSnapshot } from './executor/retry-payload-snapshot.js';
 import { resolveMaxProviderAttempts } from './executor/retry-engine.js';
@@ -2287,18 +2292,14 @@ export class RouteCodexHttpServer {
             });
           },
         });
-        const directRetryDecision = decideDirectRouterRetry({
-          retryExecutionPlan: providerSendFailureResult.retryExecutionPlan ?? { shouldRetry: false },
-          excludedProviderKeys: retryState.excludedProviderKeys,
-          directAttempt,
-          maxAttempts: retryState.maxAttempts,
-          providerKey: ctx.providerKey,
-          error,
-          routeName: routingDecisionRouteName,
-        });
-        retryState.excludedProviderKeys = directRetryDecision.mutatedExcluded;
+        const directRetryDecision = providerSendFailureResult.retryExecutionPlan;
+        if (!directRetryDecision) {
+          throw new Error(
+            'router-direct provider failure missing ErrorErr05 execution decision'
+          );
+        }
         const routePoolRemainingAfterExclusion =
-          providerSendFailureResult.retryExecutionPlan?.routePoolRemainingAfterExclusion ?? [];
+          directRetryDecision.routePoolRemainingAfterExclusion;
         if (
           defaultTierAvailableForDecision
           && routingDecisionRouteName
@@ -2335,9 +2336,11 @@ export class RouteCodexHttpServer {
             });
           }
         }
-        retryState.lastError = directRetryDecision.error;
-        directRetryRequested = directRetryDecision.shouldRecurse;
-        directRetryBeyondAttemptBudget = providerSendFailureResult.allowRetryBeyondAttemptBudget === true;
+        retryState.lastError = error;
+        directRetryRequested =
+          directRetryDecision.action === 'wait_then_retry_same'
+          || directRetryDecision.action === 'wait_then_reselect';
+        directRetryBeyondAttemptBudget = directRetryDecision.allowRetryBeyondAttemptBudget === true;
         retryState.retryProviderKey = undefined;
         this.logStage('router-direct.retry.requested', input.requestId, {
           providerKey: ctx.providerKey,
@@ -2349,8 +2352,8 @@ export class RouteCodexHttpServer {
           ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
           ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
         });
-        if (directRetryDecision.shouldRethrow) {
-          throw directRetryDecision.error;
+        if (!directRetryRequested) {
+          throw error;
         }
       },
       });
@@ -2828,8 +2831,6 @@ export class RouteCodexHttpServer {
         },
         onProviderError: async (error, context) => {
           // feature_id: error.execution_decision_consumer
-          // 2026-06-14 D1: provider-direct onProviderError consumes the unified
-          // ErrorErr05 plan via `decideDirectProviderRetry`; no synthetic reroute.
           const handle = this.resolveProviderHandleForBinding(context.providerKey, metadata);
           const directRuntimeKey = this.resolveRuntimeKeyForProviderBinding(context.providerKey, metadata);
           const retryError = extractRetryErrorSnapshot(error);
@@ -2848,6 +2849,22 @@ export class RouteCodexHttpServer {
             message: publicErrorMessage,
           });
           const runtimeScope = readRuntimeScopeFromMetadata(metadata ?? {});
+          const failedProviderExclusions = new Set<string>([context.providerKey]);
+          const providerDirectDefaultTier = {
+            id: `provider-direct-default:${context.port}`,
+            targets: [context.providerKey],
+            priority: 0,
+            backup: true,
+          };
+          const providerDirectAvailability = resolveErrorErr05RouteAvailabilityDecision({
+            routeName: 'default',
+            routePool: [context.providerKey],
+            routeTiers: [providerDirectDefaultTier],
+            defaultRouteTiers: [providerDirectDefaultTier],
+            excludedProviderKeys: failedProviderExclusions,
+            providerKey: context.providerKey,
+            routingDecisionRoutePoolPresent: true,
+          });
           const directFailurePlan = await resolveRequestExecutorProviderFailurePlan({
             error,
             retryError,
@@ -2857,7 +2874,7 @@ export class RouteCodexHttpServer {
             providerType: handle?.providerType,
             providerFamily: handle?.providerFamily,
             providerProtocol: context.providerProtocol,
-            routeName: 'port.provider-direct',
+            routeName: 'default',
             routecodexRoutingPolicyGroup: readTrimmedString(metadata?.routecodexRoutingPolicyGroup),
             runtimeKey: directRuntimeKey,
             target: {
@@ -2872,9 +2889,10 @@ export class RouteCodexHttpServer {
             logicalRequestChainKey: input.requestId,
             logicalChainRetryLimitStageRequestId: input.requestId,
             routePool: [context.providerKey],
-            routePoolIsAuthoritative: true,
-            defaultTierAvailable: false,
-            excludedProviderKeys: new Set<string>(),
+            routePoolIsAuthoritative: providerDirectAvailability.routePoolAuthoritative,
+            defaultTierAvailable: providerDirectAvailability.defaultPoolAvailable,
+            defaultPoolSingletonProvider: providerDirectAvailability.defaultPoolSingletonProvider,
+            excludedProviderKeys: failedProviderExclusions,
             recordAttempt: () => {},
             logStage: (stage, requestId, details) => this.logStage(stage, requestId, details),
             routeHint: readRuntimeControlProjection(metadata).routeHint,
@@ -2894,15 +2912,33 @@ export class RouteCodexHttpServer {
               ...(typeof statusCode === 'number' ? { statusCode } : {}),
             },
           });
-          return decideDirectProviderRetry({
-            retryExecutionPlan: directFailurePlan.retryExecutionPlan,
-            error,
-            providerKey: context.providerKey,
-          });
+          return directFailurePlan.retryExecutionPlan;
         },
       },
     );
 
+    if (directResult.errorAction) {
+      throw Object.assign(
+        new Error('provider-direct received reselect action without a routable provider pool'),
+        {
+          code: 'ERR_PROVIDER_DIRECT_RESELECT_WITHOUT_ROUTE_POOL',
+          requestId: input.requestId,
+          providerBinding,
+          sourceError: directResult.sourceError,
+          errorErr05Action: directResult.errorAction.action,
+        },
+      );
+    }
+    recordErrorActionSuccessByLaneGroup({
+      category: 'global_error',
+      laneGroupKey: buildProviderErrorBackoffLaneGroup({
+        routecodexRoutingPolicyGroup:
+          typeof metadata?.routecodexRoutingPolicyGroup === 'string'
+            ? metadata.routecodexRoutingPolicyGroup
+            : undefined,
+      }),
+      actionScopeKey: input.requestId,
+    });
     return await this.buildProviderDirectResult(
       directResult,
       input,

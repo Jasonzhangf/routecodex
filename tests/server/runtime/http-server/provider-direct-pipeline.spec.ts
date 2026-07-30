@@ -164,11 +164,20 @@ describe('provider-direct-pipeline', () => {
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }] }],
     } as Record<string, unknown>;
     const action = {
-      action: 'request_reroute',
-      shouldRecurse: true,
-      shouldRethrow: false,
-      mutatedExcluded: new Set(['mock.model']),
-      error,
+      action: 'wait_then_reselect',
+      shouldRetry: true,
+      excludedCurrentProvider: true,
+      allowRetryBeyondAttemptBudget: true,
+      retrySwitchPlan: {
+        switchAction: 'exclude_and_reroute',
+        decisionLabel: 'exclude_and_reroute',
+        runtimeScopeExcluded: ['mock.model'],
+        runtimeScopeExcludedCount: 1,
+      },
+      routePoolRemainingAfterExclusion: ['next.model'],
+      defaultPoolAvailable: false,
+      policyExhausted: false,
+      mayProject: false,
     };
     onProviderError.mockResolvedValueOnce(action as never);
 
@@ -191,9 +200,9 @@ describe('provider-direct-pipeline', () => {
       ),
     ).resolves.toMatchObject({
       errorAction: expect.objectContaining({
-        action: 'request_reroute',
-        shouldRecurse: true,
-        shouldRethrow: false,
+        action: 'wait_then_reselect',
+        shouldRetry: true,
+        mayProject: false,
       }),
     });
 

@@ -7,7 +7,14 @@
  * MetadataCenter runtime_control.trafficGovernor.* 作为唯一配置入口。
  */
 
-import { getRouterHotpathJsonBindingSync } from '../llmswitch/bridge/traffic-governor-host.js';
+import {
+  trafficGovernorAcquireNativeJson,
+  trafficGovernorIsAtCapacityNativeJson,
+  trafficGovernorObserveOutcomeNativeJson,
+  trafficGovernorReleaseNativeJson,
+} from '../llmswitch/bridge/traffic-governor-host.js';
+
+export const TRAFFIC_ADMISSION_LANE_FEATURE_ID = 'feature_id: error.traffic_admission_lane';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,6 +51,47 @@ export interface TrafficGovernorAcquireResult {
   rpmInWindow: number;
 }
 
+export type TrafficAdmissionLane = 'concurrency' | 'rpm';
+
+export interface TrafficAdmissionBackpressure {
+  code: 'TRAFFIC_ADMISSION_BACKPRESSURE';
+  lane: TrafficAdmissionLane;
+  runtimeKey: string;
+  stateKey: string;
+  timeoutMs: number;
+  waitedMs: number;
+  current: number;
+  limit: number;
+}
+
+export class TrafficAdmissionBackpressureError extends Error {
+  readonly code = 'TRAFFIC_ADMISSION_BACKPRESSURE' as const;
+  readonly routecodexErrorKind = 'traffic_admission_backpressure' as const;
+  readonly retryable = false;
+  readonly lane: TrafficAdmissionLane;
+  readonly runtimeKey: string;
+  readonly stateKey: string;
+  readonly timeoutMs: number;
+  readonly waitedMs: number;
+  readonly current: number;
+  readonly limit: number;
+
+  constructor(backpressure: TrafficAdmissionBackpressure) {
+    super(
+      `traffic admission timed out in ${backpressure.lane} lane for `
+      + `${backpressure.runtimeKey} after ${backpressure.waitedMs}ms`
+    );
+    this.name = 'TrafficAdmissionBackpressureError';
+    this.lane = backpressure.lane;
+    this.runtimeKey = backpressure.runtimeKey;
+    this.stateKey = backpressure.stateKey;
+    this.timeoutMs = backpressure.timeoutMs;
+    this.waitedMs = backpressure.waitedMs;
+    this.current = backpressure.current;
+    this.limit = backpressure.limit;
+  }
+}
+
 export interface TrafficGovernorReleaseResult {
   released: boolean;
   activeInFlight: number;
@@ -59,6 +107,7 @@ export interface TrafficGovernorAcquireOptions {
   staleLeaseMs?: number;
   requestsPerMinute?: number;
   rpmTimeoutMs?: number;
+  rpmWindowMs?: number;
   storeRoot?: string;
 }
 
@@ -71,39 +120,66 @@ export interface TrafficGovernorReleaseOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Traffic Governor — 全局单例接口
+// Traffic Governor — Rust-owned process-shared admission interface
 // ---------------------------------------------------------------------------
 
 const DEFAULT_STORE_ROOT = '/tmp/routecodex-traffic';
 
-function getBinding() {
-  return getRouterHotpathJsonBindingSync();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-export function trafficGovernorAcquire(
-  options: TrafficGovernorAcquireOptions
-): TrafficGovernorAcquireResult {
-  const binding = getBinding();
-  const fn = binding.trafficGovernorAcquireJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[traffic-governor] trafficGovernorAcquireJson not available');
+function parseBackpressure(value: unknown): TrafficAdmissionBackpressure | undefined {
+  if (!isRecord(value)) return undefined;
+  const lane = value.lane;
+  if (
+    value.code !== 'TRAFFIC_ADMISSION_BACKPRESSURE'
+    || (lane !== 'concurrency' && lane !== 'rpm')
+    || typeof value.runtimeKey !== 'string'
+    || typeof value.stateKey !== 'string'
+    || typeof value.timeoutMs !== 'number'
+    || typeof value.waitedMs !== 'number'
+    || typeof value.current !== 'number'
+    || typeof value.limit !== 'number'
+  ) {
+    throw new Error('[traffic-governor] malformed traffic admission backpressure');
   }
-  const raw = fn(JSON.stringify({
+  return value as unknown as TrafficAdmissionBackpressure;
+}
+
+export function isTrafficAdmissionBackpressureError(
+  error: unknown
+): error is TrafficAdmissionBackpressureError {
+  return error instanceof TrafficAdmissionBackpressureError
+    || (
+      isRecord(error)
+      && error.code === 'TRAFFIC_ADMISSION_BACKPRESSURE'
+      && error.routecodexErrorKind === 'traffic_admission_backpressure'
+    );
+}
+
+export async function trafficGovernorAcquire(
+  options: TrafficGovernorAcquireOptions
+): Promise<TrafficGovernorAcquireResult> {
+  const raw = await trafficGovernorAcquireNativeJson(JSON.stringify({
     ...options,
     storeRoot: options.storeRoot ?? DEFAULT_STORE_ROOT,
   }));
-  return JSON.parse(raw) as TrafficGovernorAcquireResult;
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error('[traffic-governor] malformed traffic governor acquire result');
+  }
+  const backpressure = parseBackpressure(parsed.backpressure);
+  if (backpressure) {
+    throw new TrafficAdmissionBackpressureError(backpressure);
+  }
+  return parsed as unknown as TrafficGovernorAcquireResult;
 }
 
 export function trafficGovernorRelease(
   options: TrafficGovernorReleaseOptions
 ): TrafficGovernorReleaseResult {
-  const binding = getBinding();
-  const fn = binding.trafficGovernorReleaseJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[traffic-governor] trafficGovernorReleaseJson not available');
-  }
-  const raw = fn(JSON.stringify({
+  const raw = trafficGovernorReleaseNativeJson(JSON.stringify({
     ...options,
     storeRoot: options.storeRoot ?? DEFAULT_STORE_ROOT,
   }));
@@ -112,15 +188,14 @@ export function trafficGovernorRelease(
 
 export function trafficGovernorIsAtCapacity(
   runtimeKey: string,
-  storeRoot?: string
+  storeRoot?: string,
+  scopeKey?: string,
+  maxInFlight?: number
 ): boolean {
-  const binding = getBinding();
-  const fn = binding.trafficGovernorIsAtCapacityJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[traffic-governor] trafficGovernorIsAtCapacityJson not available');
-  }
-  return fn(JSON.stringify({
+  return trafficGovernorIsAtCapacityNativeJson(JSON.stringify({
     runtimeKey,
+    ...(scopeKey ? { scopeKey } : {}),
+    ...(typeof maxInFlight === 'number' ? { maxInFlight } : {}),
     storeRoot: storeRoot ?? DEFAULT_STORE_ROOT,
   }));
 }
@@ -137,12 +212,7 @@ export function trafficGovernorObserveOutcome(options: {
   activeInFlight?: number;
   storeRoot?: string;
 }): void {
-  const binding = getBinding();
-  const fn = binding.trafficGovernorObserveOutcomeJson;
-  if (typeof fn !== 'function') {
-    throw new Error('[traffic-governor] trafficGovernorObserveOutcomeJson not available');
-  }
-  fn(JSON.stringify({
+  trafficGovernorObserveOutcomeNativeJson(JSON.stringify({
     ...options,
     storeRoot: options.storeRoot ?? DEFAULT_STORE_ROOT,
   }));

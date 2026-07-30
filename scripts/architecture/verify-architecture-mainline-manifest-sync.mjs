@@ -2,7 +2,7 @@
  * verify-architecture-mainline-manifest-sync
  *
  * Checks:
- * 1. All 7 chain manifests exist in docs/architecture/manifests/
+ * 1. Core chain manifests and mirrored active V3 lifecycle manifests exist
  * 2. Each manifest has valid schema
  * 3. owner_feature_id exists in function-map
  * 4. call_map_chain_id exists in mainline-call-map
@@ -25,6 +25,7 @@ function loadYaml(absPath) {
 }
 
 const mainline = loadYaml(path.join(root, 'docs/architecture/mainline-call-map.yml'));
+const v3Mainline = loadYaml(path.join(root, 'docs/architecture/v3-mainline-call-map.yml'));
 const functionMap = loadYaml(path.join(root, 'docs/architecture/function-map.yml'));
 const pkg = JSON.parse(readAbs(path.join(root, 'package.json')));
 const scripts = pkg.scripts ?? {};
@@ -49,6 +50,13 @@ const expectedChains = [
   'runtime.lifecycle.mainline',
   'stopless.session.mainline', 'metadata.center.mainline',
 ];
+const mirroredV3Chains = [
+  'v3.console_request_count_visibility.mainline',
+  'v3.runtime_timing_observability.mainline',
+];
+const manifestResourceFlowChains = new Set([
+  'v3.runtime_timing_observability.mainline',
+]);
 
 for (const chainId of expectedChains) {
   const manifestPath = path.join(root, 'docs/architecture/manifests', `${chainId.replace(/\//g, '_')}.yml`);
@@ -123,6 +131,89 @@ for (const chainId of expectedChains) {
   }
 }
 
+for (const chainId of mirroredV3Chains) {
+  const manifestPath = path.join(root, 'docs/architecture/manifests', `${chainId}.yml`);
+  if (!fs.existsSync(manifestPath)) {
+    failures.push(`missing manifest: ${path.relative(root, manifestPath)}`);
+    continue;
+  }
+  const manifest = loadYaml(manifestPath);
+  const globalChain = (mainline?.chains ?? []).find(chain => chain?.chain_id === chainId);
+  const v3Chain = (v3Mainline?.chains ?? []).find(chain => chain?.chain_id === chainId);
+  if (!globalChain) {
+    failures.push(`docs/architecture/mainline-call-map.yml: missing mirrored V3 chain '${chainId}'`);
+    continue;
+  }
+  if (!v3Chain) {
+    failures.push(`docs/architecture/v3-mainline-call-map.yml: missing mirrored V3 chain '${chainId}'`);
+    continue;
+  }
+  if (manifest?.entrypoint?.call_map_chain_id !== chainId) {
+    failures.push(`${path.relative(root, manifestPath)}: call_map_chain_id must equal '${chainId}'`);
+  }
+  const manifestEdges = Array.isArray(manifest?.edges) ? manifest.edges : [];
+  const globalEdges = Array.isArray(globalChain?.edges) ? globalChain.edges : [];
+  const v3Edges = Array.isArray(v3Chain?.edges) ? v3Chain.edges : [];
+  const edgeBinding = edge => [
+    edge?.step_id,
+    edge?.from_node,
+    edge?.to_node,
+    edge?.caller_symbol,
+    edge?.caller_file,
+    edge?.callee_symbol,
+    edge?.callee_file,
+    edge?.owner_feature_id,
+  ];
+  const manifestTopology = edge => [
+    edge?.step_id,
+    edge?.from_node,
+    edge?.to_node,
+    edge?.owner_feature_id,
+  ];
+  if (JSON.stringify(globalEdges.map(edgeBinding)) !== JSON.stringify(v3Edges.map(edgeBinding))) {
+    failures.push(`${chainId}: global and V3 mainline callable bindings differ`);
+  }
+  const resourceFlowBinding = edge => [
+    edge?.step_id,
+    edge?.resource_flow?.consumes ?? [],
+    edge?.resource_flow?.produces ?? [],
+    edge?.resource_flow?.side_channel_reads ?? [],
+    edge?.resource_flow?.side_channel_writes ?? [],
+  ];
+  if (
+    JSON.stringify(globalEdges.map(resourceFlowBinding)) !==
+    JSON.stringify(v3Edges.map(resourceFlowBinding))
+  ) {
+    failures.push(`${chainId}: global and V3 mainline resource flows differ`);
+  }
+  if (
+    manifestResourceFlowChains.has(chainId) &&
+    JSON.stringify(globalEdges.map(resourceFlowBinding)) !==
+      JSON.stringify(manifestEdges.map(resourceFlowBinding))
+  ) {
+    failures.push(`${chainId}: global mainline resource flows differ from lifecycle manifest`);
+  }
+  if (
+    manifestResourceFlowChains.has(chainId) &&
+    JSON.stringify(v3Edges.map(resourceFlowBinding)) !==
+      JSON.stringify(manifestEdges.map(resourceFlowBinding))
+  ) {
+    failures.push(`${chainId}: V3 mainline resource flows differ from lifecycle manifest`);
+  }
+  if (
+    JSON.stringify(globalEdges.map(manifestTopology)) !==
+    JSON.stringify(manifestEdges.map(manifestTopology))
+  ) {
+    failures.push(`${chainId}: global mainline topology differs from lifecycle manifest`);
+  }
+  if (
+    JSON.stringify(v3Edges.map(manifestTopology)) !==
+    JSON.stringify(manifestEdges.map(manifestTopology))
+  ) {
+    failures.push(`${chainId}: V3 mainline topology differs from lifecycle manifest`);
+  }
+}
+
 if (failures.length > 0) {
   console.error('[verify:architecture-mainline-manifest-sync] failed');
   for (const f of failures) console.error(`- ${f}`);
@@ -130,5 +221,5 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:architecture-mainline-manifest-sync] ok');
-console.log(`- checked ${expectedChains.length} chain manifests`);
-console.log('- schema, function-map owner, call-map chain, node_ids, wiki_page, required_gates all consistent');
+console.log(`- checked ${expectedChains.length + mirroredV3Chains.length} chain manifests`);
+console.log('- schema, function-map owner, global/V3 call-map bindings, node_ids, wiki_page, required_gates all consistent');

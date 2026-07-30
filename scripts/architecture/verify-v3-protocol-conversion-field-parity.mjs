@@ -40,6 +40,9 @@ const paths = {
 const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(path, 'utf8')]));
 const failures = [];
 const fieldMatrix = YAML.parse(text.fieldMatrix);
+const functionMap = YAML.parse(text.functionMap);
+const mainlineMap = YAML.parse(text.mainlineMap);
+const verificationMap = YAML.parse(text.verificationMap);
 
 for (const phrase of [
   'Responses entry -> OpenAI Chat provider wire -> Responses client projection',
@@ -90,6 +93,10 @@ for (const phrase of [
   'responses_reasoning_policy_as_target_valid_system_marker',
   '<routecodex_reasoning_request',
   '"reasoning_effort"',
+  'if let Err(error) = serde_json::from_str::<Value>(arguments) {',
+  'cannot losslessly project tool call',
+  'ProviderReqCompat06ProviderCompat',
+  'matching parse-failure tool result=',
 ]) requireText(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, phrase);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
   '"metadata"',
@@ -187,15 +194,38 @@ const providerReqCompat = functionSlice(
   text.providerReqCompat,
   paths.providerReqCompat,
   'fn build_v3_provider_standard_protocol_payload_from_req07',
-  'fn __v3_provider_req_compat_slice_end__',
+  '#[cfg(test)]',
 );
 for (const phrase of [
   'V3HubProviderWireProtocol::Anthropic',
-  'V3HubProviderWireProtocol::Anthropic => {\n            if let Some(original_surface) =\n                build_v3_responses_original_input_surface_from_chat_canonical(\n                    input.provider_semantic_payload(),\n                    input.original_responses_payload(),\n                )',
-  'build_v3_responses_original_input_surface_from_chat_canonical',
+  'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
+  'encode_v3_responses_semantic_as_anthropic_request(source)',
   'input.original_responses_payload()',
+  'input.entry_protocol()',
 ]) requireText(providerReqCompat, `${paths.providerReqCompat}::anthropic_original_responses_surface`, phrase);
 forbid(providerReqCompat, `${paths.providerReqCompat}::anthropic_original_responses_surface`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
+
+const anthropicProviderRequestSource = functionSlice(
+  text.requestOutboundFormat,
+  paths.requestOutboundFormat,
+  'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical',
+  'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
+);
+for (const phrase of [
+  'V3HubEntryProtocol::Responses',
+  'build_v3_responses_original_input_surface_from_chat_canonical(',
+  'if payload.get("input").and_then(Value::as_array).is_some()',
+  'if payload.get("messages").and_then(Value::as_array).is_some()',
+  'Responses entry to Anthropic provider wire requires governed messages or Responses input',
+  'V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat',
+  'Anthropic provider wire requires governed Chat/Anthropic messages',
+]) requireText(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, phrase);
+const governedCurrentResponsesInputBranch =
+  'if payload.get("input").and_then(Value::as_array).is_some()';
+if (anthropicProviderRequestSource.split(governedCurrentResponsesInputBranch).length - 1 !== 2) {
+  failures.push(`${paths.requestOutboundFormat}::anthropic_provider_request_source must preserve governed current Responses input in both Responses and Chat/Anthropic entry branches`);
+}
+forbid(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
 
 const responsesOriginalInputSurface = functionSlice(
   text.requestOutboundFormat,
@@ -218,13 +248,13 @@ const responsesToAnthropic = functionSlice(
   text.anthropicProjection,
   paths.anthropicProjection,
   'pub fn project_v3_responses_json_as_anthropic_message',
-  'pub fn project_v3_responses_sse_as_anthropic_events',
+  'pub fn project_v3_responses_json_as_anthropic_events',
 );
 for (const phrase of [
   'pub fn project_v3_responses_json_as_anthropic_message',
+  'project_v3_responses_reasoning_item_as_anthropic_content',
   'parse_responses_function_call_arguments',
   'responses_custom_tool_call_input',
-  '"thinking"',
   '"usage"',
   'responses_stop_reason_as_anthropic_stop_reason',
 ]) requireText(responsesToAnthropic, `${paths.anthropicProjection}::responses_to_anthropic`, phrase);
@@ -240,6 +270,14 @@ for (const [owner, body, phrases] of [
     'body["max_completion_tokens"]',
     'OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort',
     'OpenAI Chat provider wire must not forward non-standard client_metadata',
+    'responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args',
+    'responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send',
+    'provider_request_compat_error',
+    'V3TargetLocalReselected',
+    'matched parse-failure feedback should not reselect away from OpenAI Chat',
+    'parse-failure tool result must remain paired',
+    'unpaired malformed OpenAI Chat arguments must trigger Error05 reselect',
+    'reselect must preserve the original malformed arguments truth',
   ]],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
     'responses_relay_reasoning_request_config_projects_anthropic_system_marker',
@@ -261,10 +299,23 @@ for (const [owner, body, phrases] of [
   ]],
 ]) for (const phrase of phrases) requireText(body, owner, phrase);
 
+const unpairedMalformedOpenAiChatTest = functionSlice(
+  text.responsesTests,
+  paths.responsesTests,
+  'async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send',
+  'async fn responses_openai_chat_field_parity_web_search_call_history_projects_tool_pair',
+);
+requireText(
+  unpairedMalformedOpenAiChatTest,
+  `${paths.responsesTests}::responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send`,
+  'result.node_trace.contains(&"V3TargetLocalReselected")',
+);
+
 for (const [owner, body, phrases] of [
   [paths.functionMap, text.functionMap, [
     'feature_id: v3.protocol_conversion_field_parity',
     'v3-protocol-field-parity-responses-chat-req-01',
+    'v3-protocol-field-parity-responses-chat-req-negative-01',
     'v3-protocol-field-parity-responses-chat-resp-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-anthropic-responses-req-01',
@@ -279,6 +330,7 @@ for (const [owner, body, phrases] of [
     'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
     'Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
     'build_v3_chat_canonical_request_from_responses_payload',
+    'execute_v3_responses_relay_runtime_inner',
     'build_v3_openai_chat_standard_request_from_chat_canonical',
     'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
   ]],
@@ -286,14 +338,19 @@ for (const [owner, body, phrases] of [
     'chain_id: v3.protocol_conversion_field_parity',
     'binding_kind: protocol_field_parity_test_over_existing_relay_chain',
     'v3-protocol-field-parity-responses-chat-req-01',
+    'v3-protocol-field-parity-responses-chat-req-negative-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
   ]],
   [paths.verificationMap, text.verificationMap, [
     'feature_id: v3.protocol_conversion_field_parity',
     'Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop',
+    'Responses history with paired malformed function arguments projects OpenAI Chat function.arguments as {} while preserving parse-failure tool feedback',
+    'Responses history with unpaired malformed function arguments fails explicitly at ProviderReqCompat06 before the incompatible OpenAI Chat target can send',
     'Anthropic thinking is preserved under Responses reasoning.thinking',
     'Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker',
+    'responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args',
+    'responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send',
     'npm run render:v3-protocol-semantic-field-matrix',
     'npm run test:v3-protocol-conversion-field-parity',
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
@@ -306,6 +363,72 @@ for (const [owner, body, phrases] of [
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   ]],
 ]) for (const phrase of phrases) requireText(body, owner, phrase);
+
+const parityFeature = (functionMap?.features ?? []).find(
+  (feature) => feature?.feature_id === 'v3.protocol_conversion_field_parity',
+);
+if (!parityFeature) {
+  failures.push(`${paths.functionMap}: missing v3.protocol_conversion_field_parity feature`);
+} else {
+  if (!(parityFeature.entry_symbols ?? []).includes('execute_v3_responses_relay_runtime_inner')) {
+    failures.push(`${paths.functionMap}: protocol parity runtime entry must be execute_v3_responses_relay_runtime_inner`);
+  }
+  if ((parityFeature.entry_symbols ?? []).includes('responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send')) {
+    failures.push(`${paths.functionMap}: malformed-arguments test belongs in verification map, not runtime entry_symbols`);
+  }
+}
+
+const parityChain = (mainlineMap?.chains ?? []).find(
+  (chain) => chain?.chain_id === 'v3.protocol_conversion_field_parity',
+);
+const malformedArgumentsEdge = (parityChain?.edges ?? []).find(
+  (edge) => edge?.step_id === 'v3-protocol-field-parity-responses-chat-req-negative-01',
+);
+for (const [key, expected] of [
+  ['from_node', 'V3HubReqOutbound07ProviderSemantic'],
+  ['to_node', 'ProviderReqCompat06ProviderCompat'],
+  ['caller_symbol', 'execute_v3_responses_relay_runtime_inner'],
+  ['caller_file', paths.responsesRuntime],
+  ['callee_symbol', 'build_provider_req_compat_06_from_v3_hub_req_outbound_07'],
+  ['callee_file', paths.providerReqCompat],
+]) {
+  if (malformedArgumentsEdge?.[key] !== expected) {
+    failures.push(`${paths.mainlineMap}: malformed-arguments runtime edge ${key} must be ${expected}`);
+  }
+}
+if ((malformedArgumentsEdge?.resource_flow?.side_channel_writes ?? []).length !== 0) {
+  failures.push(`${paths.mainlineMap}: ProviderReqCompat06 builder edge must not claim direct error side-channel writes`);
+}
+
+const providerActionGateChain = (mainlineMap?.chains ?? []).find(
+  (chain) => chain?.chain_id === 'v3.provider_action_gate.mainline',
+);
+const providerCompatErrorEdge = (providerActionGateChain?.edges ?? []).find(
+  (edge) => edge?.step_id === 'v3-provider-action-gate-01',
+) ?? (parityChain?.edges ?? []).find(
+  (edge) => edge?.step_id === 'v3-protocol-field-parity-responses-chat-req-negative-02',
+);
+for (const [key, expected] of [
+  ['from_node', 'ProviderReqCompat06ProviderCompat'],
+  ['to_node', 'V3Error05ExecutionDecision'],
+  ['caller_symbol', 'execute_v3_responses_relay_runtime_inner'],
+  ['caller_file', paths.responsesRuntime],
+  ['callee_symbol', 'handle_v3_responses_relay_provider_failure'],
+  ['callee_file', paths.responsesRuntime],
+]) {
+  if (providerCompatErrorEdge?.[key] !== expected) {
+    failures.push(`${paths.mainlineMap}: ProviderReqCompat06 typed failure edge ${key} must be ${expected}`);
+  }
+}
+
+const parityVerification = (verificationMap?.features ?? []).find(
+  (feature) => feature?.feature_id === 'v3.protocol_conversion_field_parity',
+);
+if (!(parityVerification?.required_blackbox ?? []).some(
+  (entry) => String(entry).includes('responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send'),
+)) {
+  failures.push(`${paths.verificationMap}: unpaired malformed-arguments runtime test must be registered under required_blackbox`);
+}
 
 const parityFeatureBlock = featureBlock(text.functionMap, 'feature_id: v3.protocol_conversion_field_parity');
 const allowedBlock = sectionSlice(parityFeatureBlock, 'allowed_paths:', 'forbidden_paths:');
@@ -325,12 +448,12 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 217',
+  '`extension_declared` | 213',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
-  '`partial` | 108',
+  '`partial` | 112',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
   'gap.semantic_declared_runtime_closeout',
@@ -514,6 +637,21 @@ for (const scriptName of [
   'test:v3-protocol-conversion-field-parity-red-fixtures',
 ]) {
   if (!pkg.scripts?.[scriptName]) failures.push(`${paths.packageJson}: missing script ${scriptName}`);
+}
+const parityCiScript = String(pkg.scripts?.['verify:v3-protocol-conversion-field-parity-ci'] ?? '');
+for (const command of [
+  'npm run verify:v3-protocol-conversion-field-parity',
+  'npm run test:v3-protocol-conversion-field-parity-red-fixtures',
+  'npm run test:v3-protocol-conversion-field-parity',
+]) {
+  if (!parityCiScript.includes(command)) {
+    failures.push(`${paths.packageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
+  }
+}
+if (!String(pkg.scripts?.['verify:architecture-review-surface-light'] ?? '').includes(
+  'npm run verify:v3-protocol-conversion-field-parity-ci',
+)) {
+  failures.push(`${paths.packageJson}: verify:architecture-review-surface-light must run verify:v3-protocol-conversion-field-parity-ci`);
 }
 if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
   failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);

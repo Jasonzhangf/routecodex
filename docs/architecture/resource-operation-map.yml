@@ -81,6 +81,85 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
 
+
+  - resource_id: v3.server.request_identity
+    resource_kind: runtime_identity_counter
+    lifecycle: v3.console_request_count_visibility.mainline
+    identity: [serverId, localDay, sequence, requestId]
+    owner_feature_id: v3.console_request_count_visibility
+    owner_node: V3RequestCounter01AggregateOwned
+    allowed_readers: [format_v3_console_request_count, V3ConsoleRequestHeadline, V3ConsoleResponseHeadline]
+    allowed_writers: [spawn_v3_server_aggregate, V3RequestIdCounter::next_request_identity]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-target, routecodex-v3-virtual-router, provider_runtime.observation, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.runtime.responses_observability
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.responses.console_projection
+    identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
+    owner_feature_id: v3.console_human_readable_layering
+    owner_node: V3RuntimeObservability
+    allowed_readers: [emit_v3_observability_console_lines, emit_v3_request_route_hit_console_line_for_observability, emit_v3_request_complete_console_line, emit_v3_provider_observability_console_lines, emit_v3_stopless_console_line, emit_relay_sse_complete_console_lines, emit_direct_sse_complete_console_lines, emit_v3_error_console_line_for_context]
+    allowed_writers: [build_v3_relay_observability_from_selected, build_v3_direct_runtime_observability, record_timing]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:resource-operation-map]
+
+  - resource_id: v3.runtime.responses_timing_observability
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.runtime_timing_observability.mainline
+    identity: [requestId, attempt, timingPhase]
+    owner_feature_id: v3.runtime_timing_observability
+    owner_node: V3RuntimeTimingSummary
+    allowed_readers: [record_timing, emit_v3_request_complete_console_line]
+    allowed_writers: [V3RuntimeTimingState::start, start_external, finish_external, finish_runtime]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:resource-operation-map]
+
+  - resource_id: v3.debug.codex_sample_authorization
+    resource_kind: diagnostic_control
+    lifecycle: v3.codex_sample_retention_snap_scope
+    identity: [managedInstanceId, codexSamplesEnabled, directSnapshotsEnabled, snapshotStages]
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_node: V3CodexSample02ManifestAuthorizationPublished
+    allowed_readers: [V3DebugRuntime::should_capture_snapshot_stage, v3_codex_sample_scope_allows]
+    allowed_writers: [configure_v3_snapshot_flags, apply_snapshot_authorization_to_manifest]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.debug.payload_budget
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    identity: [serverId, requestId, executionId, artifactKind]
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_node: V3DebugPayloadBudgetApplied
+    allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
+    allowed_writers: [V3DebugRuntime::redact_payload_for_side_channel, redact_debug_value_at_key, V3DebugBoundedTextCapture::append]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-debug-payload-budget, npm run test:v3-debug-payload-budget-red-fixtures, npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.debug.codex_sample_filesystem
+    resource_kind: bounded_diagnostic_artifact
+    lifecycle: v3.codex_sample_retention_snap_scope
+    identity: [entryProtocol, endpoint, port, requestId, artifactName]
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_node: V3CodexSample06RetentionEnforced
+    allowed_readers: [developer_diagnostics, replay-codex-sample]
+    allowed_writers: [persist_v3_codex_sample_payload, enforce_v3_codex_sample_listener_retention, enforce_v3_codex_sample_request_retention]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-resource-map, npm run verify:function-map-compile-gate]
+
   - resource_id: provider.wire_payload
     resource_kind: provider_wire
     lifecycle: request.mainline
@@ -250,18 +329,46 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:architecture-mainline-call-map]
 
-  - resource_id: error.action_backoff_queue
+  - resource_id: error.provider_action_gate
     resource_kind: side_channel
-    lifecycle: error.control_surface.mainline
-    identity: [category, scopeKey, queueKey]
-    owner_feature_id: error.backoff_action_queue
-    owner_node: ErrorActionQueueState
-    allowed_readers: [RequestExecutorRetryState, RetryEngine, TrafficGovernorHost]
-    allowed_writers: [describeErrorActionQueueContract, recordErrorActionBackoff, waitErrorActionBackoffWithGate]
+    lifecycle: error.provider_action_gate.mainline
+    identity: [serverScope, routingGroup, providerRuntime, normalizedErrorFamily, generation, actionScopeKey]
+    owner_feature_id: error.provider_action_gate
+    owner_node: ProviderActionGateState
+    allowed_readers: [ErrorErr05ExecutionDecision, RequestExecutorRetryState, RouterDirectConsumer, ProviderDirectConsumer]
+    allowed_writers: [record_failure, begin_wait, poll_admission, commit_terminal, record_success, abandon_admission, cancel_wait, reset]
+    admission_ownership: { release_writers: [record_failure, record_success, commit_terminal, abandon_admission], wall_clock_expiry_forbidden: true, abandon_increments_failure_count: false }
     forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:error-pipeline-contract, npm run verify:v3-provider-action-gate, npm run test:v3-provider-action-gate-red-fixtures]
+    binding_status: anchored
+
+  - resource_id: error.traffic_admission_lane
+    resource_kind: side_channel
+    lifecycle: traffic.admission.mainline
+    identity: [runtimeKey, requestId, lane, leaseId]
+    owner_feature_id: error.traffic_admission_lane
+    owner_node: TrafficAdmissionBackpressure
+    allowed_readers: [RequestExecutor, TrafficGovernorHost]
+    allowed_writers: [traffic_governor_acquire, traffic_governor_release]
+    forbidden_writers: [ErrorErr03RuntimeClassified, ErrorErr04RouterPolicyApplied, ErrorErr05ExecutionDecision, provider_runtime.observation, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate, npm run verify:error-pipeline-contract]
+
+  - resource_id: vr.route_classification_decision
+    resource_kind: side_channel
+    lifecycle: vr.route_control_surface.mainline
+    identity: [requestId, entryEndpoint, routeName, orderedRouteCandidates]
+    owner_feature_id: vr.route_classifier
+    owner_node: VrRouteClassifier03Classified
+    allowed_readers: [virtual_router_engine.classifier, V3VirtualRouter::classify_request_with_facts]
+    allowed_writers: [extract_active_turn_signals, classify_tool_call, classify_shell_command, classify_route]
+    forbidden_writers: [apply_route_selection, build_vr_route_04_from_hub_req_chatprocess_03, ProviderReqOutbound06WirePayload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run test:route-classifier-semantics, npm run verify:route-classifier-core-file-size, npm run verify:resource-operation-map]
 
   - resource_id: vr.route_selection_decision
     resource_kind: side_channel
@@ -274,7 +381,7 @@ resources:
     forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, provider_runtime.observation]
     may_enter_provider_body: false
     may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
+    required_gates: [npm run test:route-classifier-semantics, npm run verify:route-classifier-core-file-size, npm run verify:resource-operation-map, npm run verify:vr-no-ts-runtime]
 
   - resource_id: vr.route_token_estimate
     resource_kind: derived_measurement
@@ -1341,6 +1448,32 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:debug-unified-surface]
+
+  - resource_id: console.terminal_output
+    resource_kind: diagnostic
+    lifecycle: v3.responses.console_projection
+    identity: [serverId, requestId, entryProtocol, severity]
+    owner_feature_id: v3.console_human_readable_layering
+    owner_node: V3ConsoleTerminalOutput
+    allowed_readers: [developer_terminal]
+    allowed_writers: [emit_v3_colorized_request_console_line, emit_v3_error_console_line_for_context, emit_v3_error_console_line_for_state, emit_v3_error_console_line_with_port, emit_v3_startup_console_line, emit_v3_debug_sink_console_failure]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
+
+  - resource_id: v3.console.terminal_output
+    resource_kind: diagnostic
+    lifecycle: v3.responses.console_projection
+    identity: [serverId, requestId, entryProtocol, severity]
+    owner_feature_id: v3.console_human_readable_layering
+    owner_node: V3ConsoleTerminalOutput
+    allowed_readers: [developer_terminal]
+    allowed_writers: [emit_v3_colorized_request_console_line, emit_v3_error_console_line_for_context, emit_v3_error_console_line_for_state, emit_v3_error_console_line_with_port, emit_v3_startup_console_line, emit_v3_debug_sink_console_failure]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
 
   - resource_id: debug.diagnostic_alarm_effect
     resource_kind: diagnostic

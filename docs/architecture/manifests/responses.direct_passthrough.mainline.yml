@@ -20,6 +20,16 @@ edges:
     owner_feature_id: responses.direct_tool_shape_contract
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - metadata.runtime_control
+      produces:
+        - route.selection
+      side_channel_reads:
+        - metadata.runtime_control
+      side_channel_writes:
+        - route.selection
   - step_id: rdp-02
     from_node: VrRoute04SelectedTarget
     to_node: ProviderReqOutbound06WirePayload
@@ -27,6 +37,16 @@ edges:
     owner_feature_id: responses.direct_tool_shape_contract
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - request.normal_payload
+        - route.selection
+      produces:
+        - provider.wire_payload
+      side_channel_reads:
+        - metadata.runtime_control
+        - route.selection
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

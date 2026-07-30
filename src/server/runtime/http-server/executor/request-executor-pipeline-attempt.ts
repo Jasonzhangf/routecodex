@@ -143,6 +143,8 @@ export function resolveRequestExecutorPipelineAttempt(args: {
   pipelineResult: HubPipelineResult;
   clientHeadersForAttempt: Record<string, string> | undefined;
   clientRequestId: string;
+  sessionId?: string;
+  conversationId?: string;
   clientAbortSignal: AbortSignal | undefined;
   initialRoutePool: string[] | null;
   routeTiersForAttempt?: Array<{ id?: string; targets: string[]; priority?: number; backup?: boolean }>;
@@ -160,7 +162,9 @@ export function resolveRequestExecutorPipelineAttempt(args: {
     metadataForAttempt: args.metadataForAttempt,
     pipelineResult: args.pipelineResult,
     clientHeadersForAttempt: args.clientHeadersForAttempt,
-    clientRequestId: args.clientRequestId
+    clientRequestId: args.clientRequestId,
+    sessionId: args.sessionId,
+    conversationId: args.conversationId
   });
   args.throwIfClientAbortSignalAborted(args.clientAbortSignal);
   args.logStage(`${args.pipelineLabel}.completed`, args.providerRequestId, {

@@ -103,17 +103,10 @@ pub(crate) fn route_has_targets(routing: &RoutingPools, route: &str) -> bool {
 pub(crate) fn build_route_queue(
     requested_route: &str,
     candidates: &[String],
-    features: &RoutingFeatures,
-    routing: &RoutingPools,
+    _features: &RoutingFeatures,
+    _routing: &RoutingPools,
 ) -> Vec<String> {
     let mut queue: Vec<String> = Vec::new();
-    let requested_route_trimmed = requested_route.trim();
-    let has_multimodal_targets = route_has_targets(routing, "multimodal");
-    let has_vision_targets = route_has_targets(routing, "vision");
-    let has_video_targets = route_has_targets(routing, "video");
-    let has_tools_targets = route_has_targets(routing, "tools");
-    let has_remote_video_attachment =
-        features.has_video_attachment && features.has_remote_video_attachment;
 
     if !requested_route.trim().is_empty() {
         queue.push(requested_route.to_string());
@@ -121,39 +114,6 @@ pub(crate) fn build_route_queue(
     for route in candidates {
         if !queue.contains(route) {
             queue.push(route.clone());
-        }
-    }
-
-    if has_remote_video_attachment && has_video_targets && !queue.iter().any(|v| v == "video") {
-        queue.insert(0, "video".to_string());
-    }
-
-    if features.has_image_attachment && (has_multimodal_targets || has_vision_targets) {
-        queue.retain(|route| route != "multimodal" && route != "vision");
-        if has_vision_targets {
-            queue.insert(0, "vision".to_string());
-        }
-        if has_multimodal_targets {
-            queue.insert(0, "multimodal".to_string());
-        }
-    }
-
-    let should_insert_tools_route =
-        should_insert_tools_route_after_current_route(requested_route_trimmed, features)
-            && has_tools_targets;
-    if should_insert_tools_route && !queue.iter().any(|v| v == "tools") {
-        if let Some(requested_index) = queue
-            .iter()
-            .position(|route| route == requested_route_trimmed)
-        {
-            queue.insert(requested_index + 1, "tools".to_string());
-        } else if let Some(default_index) = queue
-            .iter()
-            .position(|route| route == super::super::classifier::DEFAULT_ROUTE)
-        {
-            queue.insert(default_index, "tools".to_string());
-        } else {
-            queue.push("tools".to_string());
         }
     }
 
@@ -167,13 +127,6 @@ pub(crate) fn build_route_queue(
         deduped.push(super::super::classifier::DEFAULT_ROUTE.to_string());
     }
     deduped
-}
-
-fn should_insert_tools_route_after_current_route(route: &str, features: &RoutingFeatures) -> bool {
-    matches!(route, "search" | "read" | "write" | "web_search")
-        || (!features.latest_message_from_user
-            && features.has_tool_call_responses
-            && matches!(route, "tools" | "thinking"))
 }
 
 pub(crate) fn filter_pools_by_capability(
@@ -447,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn search_route_inserts_tools_before_default() {
+    fn search_route_does_not_invent_tools_candidate() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "tools".to_string(),
@@ -472,18 +425,11 @@ mod tests {
             &RoutingFeatures::default(),
             &routing,
         );
-        assert_eq!(
-            queue,
-            vec![
-                "search".to_string(),
-                "tools".to_string(),
-                "default".to_string()
-            ]
-        );
+        assert_eq!(queue, vec!["search".to_string(), "default".to_string()]);
     }
 
     #[test]
-    fn search_tool_continuation_inserts_tools_before_default() {
+    fn search_tool_continuation_uses_classifier_candidates_only() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "tools".to_string(),
@@ -508,18 +454,11 @@ mod tests {
             ..Default::default()
         };
         let queue = build_route_queue("search", &["default".to_string()], &features, &routing);
-        assert_eq!(
-            queue,
-            vec![
-                "search".to_string(),
-                "tools".to_string(),
-                "default".to_string()
-            ]
-        );
+        assert_eq!(queue, vec!["search".to_string(), "default".to_string()]);
     }
 
     #[test]
-    fn image_attachment_prefers_multimodal_then_vision_before_text_routes() {
+    fn route_queue_does_not_reclassify_image_attachment() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "multimodal".to_string(),
@@ -553,19 +492,11 @@ mod tests {
 
         let queue = build_route_queue("coding", &["default".to_string()], &features, &routing);
 
-        assert_eq!(
-            queue,
-            vec![
-                "multimodal".to_string(),
-                "vision".to_string(),
-                "coding".to_string(),
-                "default".to_string()
-            ]
-        );
+        assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
     }
 
     #[test]
-    fn image_attachment_without_multimodal_targets_routes_to_vision() {
+    fn route_queue_does_not_invent_vision_candidate() {
         let routing = parse_routing(&Map::from_iter([
             (
                 "vision".to_string(),
@@ -591,14 +522,7 @@ mod tests {
 
         let queue = build_route_queue("coding", &["default".to_string()], &features, &routing);
 
-        assert_eq!(
-            queue,
-            vec![
-                "vision".to_string(),
-                "coding".to_string(),
-                "default".to_string()
-            ]
-        );
+        assert_eq!(queue, vec!["coding".to_string(), "default".to_string()]);
     }
 
     #[test]

@@ -238,8 +238,10 @@ jest.unstable_mockModule(
   createRequestExecutorLocalHubPipelineHandleMock,
 );
 
-const { __requestExecutorTestables, createRequestExecutor } =
-  await import("../../../../src/server/runtime/http-server/request-executor");
+const {
+  __requestExecutorTestables,
+  createRequestExecutor: createRequestExecutorRaw,
+} = await import("../../../../src/server/runtime/http-server/request-executor");
 const { resolveProviderFailureActionPlan } =
   await import("../../../../src/providers/core/runtime/provider-failure-policy.js");
 const { getServerToolRuntimeState, setServerToolEnabled } =
@@ -248,6 +250,24 @@ const { StatsManager } =
   await import("../../../../src/server/runtime/http-server/stats-manager");
 const { MetadataCenter } =
   await import("../../../../src/server/runtime/http-server/metadata-center/metadata-center.js");
+
+type RequestExecutorTestDeps = Parameters<typeof createRequestExecutorRaw>[0];
+
+function createRequestExecutor(deps: RequestExecutorTestDeps) {
+  const onRequestStart = deps.onRequestStart;
+  return createRequestExecutorRaw({
+    ...deps,
+    onRequestStart: async (args) => {
+      await onRequestStart?.(args);
+      if (
+        typeof args.metadata.routecodexRoutingPolicyGroup !== "string" ||
+        !args.metadata.routecodexRoutingPolicyGroup.trim()
+      ) {
+        args.metadata.routecodexRoutingPolicyGroup = "test-group";
+      }
+    },
+  });
+}
 
 function normalizeMinimalSuccessResponse(result: unknown): unknown {
   if (!result || typeof result !== "object") {
@@ -365,6 +385,7 @@ describe("HubRequestExecutor failover", () => {
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     setServerToolEnabled(
       previousServerToolState.enabled,
       previousServerToolState.updatedBy,
@@ -2900,8 +2921,12 @@ describe("HubRequestExecutor failover", () => {
         logStage: () => undefined,
         status: 401,
       }),
-    ).rejects.toThrow(
-      "[request-executor] provider failure classification missing",
+    ).resolves.toEqual(
+      expect.objectContaining({
+        action: "reject_non_provider_error",
+        shouldRetry: false,
+        mayProject: false,
+      }),
     );
   });
 
@@ -3011,7 +3036,7 @@ describe("HubRequestExecutor failover", () => {
     });
   });
 
-  test("retries when runtime resolution fails before provider send and then succeeds", async () => {
+  test("uses initialized attempt routing-group truth when runtime resolution fails before provider send", async () => {
     const firstProviderKey = "runtime-missing.alias.model-a";
     const secondProviderKey = "runtime-ready.alias.model-b";
     const successProcess = jest.fn(async () => ({
@@ -3065,6 +3090,9 @@ describe("HubRequestExecutor failover", () => {
     const deps = {
       runtimeManager,
       getHubPipeline: () => pipeline,
+      onRequestStart: ({ metadata }: { metadata: Record<string, unknown> }) => {
+        metadata.routecodexRoutingPolicyGroup = "test-group";
+      },
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => undefined),
@@ -3077,8 +3105,11 @@ describe("HubRequestExecutor failover", () => {
     const executor = createRequestExecutor(deps);
     const result = await executor.execute({
       requestId: "req-runtime-retry",
-      entryEndpoint: "/v1/responses",
-      body: {},
+      entryEndpoint: "/v1/chat/completions",
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
       headers: {},
       metadata: {},
     });
@@ -3466,7 +3497,6 @@ describe("HubRequestExecutor failover", () => {
   });
 
   test("fails fast on singleton recoverable pool exhaustion without local cooldown hold", async () => {
-    jest.useFakeTimers();
     const providerKey = "dbittai.key1.MiniMax-M2.7";
     const handle = buildHandle(providerKey, async () => ({
       status: 200,
@@ -3496,11 +3526,6 @@ describe("HubRequestExecutor failover", () => {
               code: "PROVIDER_NOT_AVAILABLE",
               details: {
                 routeName: "coding",
-                minRecoverableCooldownMs: 1000,
-                candidateProviderCount: 1,
-                recoverableCooldownHints: [
-                  { providerKey, waitMs: 1000, source: "concurrency.busy" },
-                ],
               },
             },
           );
@@ -3556,35 +3581,29 @@ describe("HubRequestExecutor failover", () => {
         },
       });
 
-    try {
-      const pending = executor.execute({
+    await expect(
+      executor.execute({
         requestId: "req-singleton-cooldown-budget",
         entryEndpoint: "/v1/responses",
         body: {},
         headers: {},
         metadata: {},
-      });
-      const expectation = expect(pending).rejects.toMatchObject({
-        code: "PROVIDER_NOT_AVAILABLE",
-      });
+      }),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NOT_AVAILABLE",
+    });
 
-      await jest.advanceTimersByTimeAsync(1_000);
-      await expectation;
-
-      expect(pipeline.execute).toHaveBeenCalledTimes(1);
-      expect(
-        logStage.mock.calls.filter(
-          (call) => call[0] === "provider.route_pool_cooldown_wait",
-        ),
-      ).toHaveLength(0);
-      expect(
-        logStage.mock.calls.filter(
-          (call) => call[0] === "provider.route_pool_cooldown_wait.completed",
-        ),
-      ).toHaveLength(0);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.filter(
+        (call) => call[0] === "provider.route_pool_cooldown_wait",
+      ),
+    ).toHaveLength(0);
+    expect(
+      logStage.mock.calls.filter(
+        (call) => call[0] === "provider.route_pool_cooldown_wait.completed",
+      ),
+    ).toHaveLength(0);
   });
 
   test("default-pool singleton exhaustion waits, clears exclusions, and replays the sole provider", async () => {
@@ -3763,7 +3782,6 @@ describe("HubRequestExecutor failover", () => {
   }, 20_000);
 
   test("switches recoverable 429 to an alternative provider when available", async () => {
-    jest.useFakeTimers();
     const firstProviderKey = "gemini.primary.gemini-2.5-pro";
     const secondProviderKey = "gemini.backup.gemini-2.5-flash";
     const failingError = new Error("HTTP 429: quota exhausted");
@@ -3885,7 +3903,6 @@ describe("HubRequestExecutor failover", () => {
         expect.objectContaining({ status: 200 }),
       );
 
-      await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
@@ -3906,8 +3923,7 @@ describe("HubRequestExecutor failover", () => {
     }
   });
 
-  test("records transport backoff and waits before switching priority providers", async () => {
-    jest.useFakeTimers();
+  test("records the provider action and waits before switching priority providers", async () => {
     const providerA = "tab.key1.gpt-5.4";
     const providerB = "tab.key2.gpt-5.4";
     const retryable429 = Object.assign(new Error("HTTP 429: quota exhausted"), {
@@ -4014,41 +4030,35 @@ describe("HubRequestExecutor failover", () => {
         },
       });
 
-    try {
-      const firstPending = executor.execute({
-        requestId: "req-backoff-first",
-        entryEndpoint: "/v1/responses",
-        body: {},
-        headers: {},
-        metadata: {},
-      });
+    const startedAt = Date.now();
+    const result = await executor.execute({
+      requestId: "req-backoff-first",
+      entryEndpoint: "/v1/chat/completions",
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+      headers: {},
+      metadata: {},
+    });
 
-      await jest.advanceTimersByTimeAsync(0);
-      expect(providerAProcess).toHaveBeenCalledTimes(1);
-      expect(providerBProcess).not.toHaveBeenCalled();
-      expect(
-        logStage.mock.calls.some(
-          (call) => call[0] === "provider.switch_backoff_wait",
-        ),
-      ).toBe(true);
-
-      await jest.advanceTimersByTimeAsync(1_000);
-      const firstResult = await firstPending;
-      expect(firstResult).toEqual(expect.objectContaining({ status: 200 }));
-      expect(providerAProcess).toHaveBeenCalledTimes(1);
-      expect(providerBProcess).toHaveBeenCalledTimes(1);
-      expect(
-        logStage.mock.calls.some(
-          (call) => call[0] === "provider.transport_backoff.recorded",
-        ),
-      ).toBe(true);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(providerAProcess).toHaveBeenCalledTimes(1);
+    expect(providerBProcess).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === "provider.error_action_backoff_wait",
+      ),
+    ).toBe(true);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === "provider.error_action_backoff_wait.completed",
+      ),
+    ).toBe(true);
   });
 
   test("prints retry switch reason and error code to console on provider switch", async () => {
-    jest.useFakeTimers();
     const firstProviderKey = "crs.key2.gpt-5.3-codex";
     const secondProviderKey = "crs.key1.gpt-5.3-codex";
     const failingError = new Error("Upstream SSE parser terminated");
@@ -4132,8 +4142,11 @@ describe("HubRequestExecutor failover", () => {
       const executor = createRequestExecutor(deps);
       const pending = executor.execute({
         requestId: "req-switch-log",
-        entryEndpoint: "/v1/responses",
-        body: {},
+        entryEndpoint: "/v1/chat/completions",
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: {},
       });
@@ -4141,7 +4154,6 @@ describe("HubRequestExecutor failover", () => {
         expect.objectContaining({ status: 200 }),
       );
 
-      await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(failingProcess).toHaveBeenCalledTimes(1);
@@ -4310,7 +4322,9 @@ describe("HubRequestExecutor failover", () => {
         ],
       },
       headers: {},
-      metadata: {},
+      metadata: {
+        routecodexRoutingPolicyGroup: "test-group",
+      },
     });
 
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
@@ -4414,7 +4428,6 @@ describe("HubRequestExecutor failover", () => {
   });
 
   test("switches 429 to alternative provider when route pool exposes one", async () => {
-    jest.useFakeTimers();
     const firstProviderKey = "tabglm.key1.glm-5.1";
     const secondProviderKey = "crs.key2.gpt-5.3-codex";
     const failingError = Object.assign(
@@ -4506,8 +4519,11 @@ describe("HubRequestExecutor failover", () => {
         });
       const pending = executor.execute({
         requestId: "req-singleton-429-reroute",
-        entryEndpoint: "/v1/responses",
-        body: {},
+        entryEndpoint: "/v1/chat/completions",
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: {},
       });
@@ -4515,7 +4531,6 @@ describe("HubRequestExecutor failover", () => {
         expect.objectContaining({ status: 200 }),
       );
 
-      await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
@@ -4538,7 +4553,6 @@ describe("HubRequestExecutor failover", () => {
   });
 
   test("forces longcontext routeHint on prompt-too-long retry", async () => {
-    jest.useFakeTimers();
     const firstProviderKey = "tabglm.key1.glm-5";
     const secondProviderKey = "tabglm.longcontext.glm-5";
     const failingError = new Error(
@@ -4600,6 +4614,8 @@ describe("HubRequestExecutor failover", () => {
           routingDecision: {
             routeName: useLongcontext ? "longcontext" : "tools",
             providerProtocol: "gemini-chat",
+            pool: [firstProviderKey, secondProviderKey],
+            routePool: [firstProviderKey, secondProviderKey],
           },
           metadata: {},
         };
@@ -4640,7 +4656,10 @@ describe("HubRequestExecutor failover", () => {
       const pending = executor.execute({
         requestId: "req-context-overflow",
         entryEndpoint: "/v1/chat/completions",
-        body: {},
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: {},
       });
@@ -4648,7 +4667,6 @@ describe("HubRequestExecutor failover", () => {
         expect.objectContaining({ status: 200 }),
       );
 
-      await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(pipeline.execute).toHaveBeenCalledTimes(2);
@@ -4732,8 +4750,11 @@ describe("HubRequestExecutor failover", () => {
     const executor = createRequestExecutor(deps);
     const result = await executor.execute({
       requestId: "req-403-reauth",
-      entryEndpoint: "/v1/responses",
-      body: {},
+      entryEndpoint: "/v1/chat/completions",
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
       headers: {},
       metadata: {},
     });
@@ -4745,7 +4766,6 @@ describe("HubRequestExecutor failover", () => {
     expect(successProcess).toHaveBeenCalledTimes(1);
   });
   test("preserves first upstream error when retry-exhausted routing reports provider unavailable", async () => {
-    jest.useFakeTimers();
     const firstProviderKey = "glm.1-186.kimi-k2.5";
     const firstError = Object.assign(new Error("HTTP 429: quota exhausted"), {
       statusCode: 429,
@@ -4831,7 +4851,6 @@ describe("HubRequestExecutor failover", () => {
         code: "HTTP_429",
       });
 
-      await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       expect(pipeline.execute).toHaveBeenCalledTimes(1);
@@ -4844,20 +4863,18 @@ describe("HubRequestExecutor failover", () => {
       jest.useRealTimers();
     }
   }, 20_000);
-  test("does not use route-pool cooldown wait when singleton 429 reroute reports provider unavailable", async () => {
+  test("projects the original 429 without route-pool cooldown after singleton exhaustion", async () => {
     const firstProviderKey = "glm.key1.glm-4.7";
+    const defaultProviderKeys = [
+      "default.key1.MiniMax-M3",
+      "default.key2.gpt-5.5",
+    ];
     const firstError = Object.assign(new Error("HTTP 429: quota exhausted"), {
       statusCode: 429,
       code: "HTTP_429",
     });
 
-    const failingProcess = jest
-      .fn()
-      .mockRejectedValueOnce(firstError)
-      .mockReturnValueOnce({
-        status: 200,
-        data: { id: "ok-after-blocking-hold" },
-      });
+    const failingProcess = jest.fn().mockRejectedValueOnce(firstError);
     const failureHandle = buildHandle(
       firstProviderKey,
       failingProcess,
@@ -4874,68 +4891,11 @@ describe("HubRequestExecutor failover", () => {
         runtimeKey ? handles.get(runtimeKey) : undefined,
     };
 
-    let pipelineCalls = 0;
+    let pipelineCall = 0;
     const pipeline = {
-      execute: jest
-        .fn()
-        .mockReturnValueOnce({
-          requestId: "req-single-pool-unavailable",
-          providerPayload: {},
-          target: {
-            providerKey: firstProviderKey,
-            providerType: "openai",
-            outboundProfile: "openai-chat",
-            runtimeKey: firstProviderKey,
-          },
-          routingDecision: {
-            routeName: "direct",
-            providerProtocol: "openai-chat",
-            pool: [firstProviderKey],
-            routePool: [firstProviderKey],
-          },
-          metadata: {},
-        })
-        .mockImplementation(async () => {
-          pipelineCalls += 1;
-          if (pipelineCalls === 1) {
-            return {
-              requestId: "req-single-pool-unavailable",
-              providerPayload: {},
-              target: {
-                providerKey: firstProviderKey,
-                providerType: "openai",
-                outboundProfile: "openai-chat",
-                runtimeKey: firstProviderKey,
-              },
-              routingDecision: {
-                routeName: "direct",
-                providerProtocol: "openai-chat",
-                pool: [firstProviderKey],
-                routePool: [firstProviderKey],
-              },
-              metadata: {},
-            };
-          }
-          if (pipelineCalls === 2) {
-            throw Object.assign(
-              new Error("All providers unavailable for model glm.glm-4.7"),
-              {
-                code: "PROVIDER_NOT_AVAILABLE",
-                details: {
-                  routeName: "direct",
-                  candidateProviderCount: 1,
-                  minRecoverableCooldownMs: 1000,
-                  recoverableCooldownHints: [
-                    {
-                      providerKey: firstProviderKey,
-                      waitMs: 1000,
-                      source: "provider.error",
-                    },
-                  ],
-                },
-              },
-            );
-          }
+      execute: jest.fn(() => {
+        pipelineCall += 1;
+        if (pipelineCall === 1) {
           return {
             requestId: "req-single-pool-unavailable",
             providerPayload: {},
@@ -4953,16 +4913,68 @@ describe("HubRequestExecutor failover", () => {
             },
             metadata: {},
           };
-        }),
+        }
+        if (pipelineCall === 2) {
+          throw Object.assign(
+            new Error("All providers unavailable for route direct"),
+            {
+              code: "PROVIDER_NOT_AVAILABLE",
+              details: {
+                primaryExhaustedRouteName: "direct",
+                primaryExhaustedTargets: [firstProviderKey],
+                unavailableRoutePools: [
+                  {
+                    routeName: "direct",
+                    poolId: "direct-primary",
+                    poolTargets: [firstProviderKey],
+                  },
+                  {
+                    routeName: "default",
+                    poolId: "default-primary",
+                    poolTargets: defaultProviderKeys,
+                  },
+                ],
+              },
+            },
+          );
+        }
+        throw Object.assign(
+          new Error("All providers unavailable for route default"),
+          {
+            code: "PROVIDER_NOT_AVAILABLE",
+            details: {
+              routeName: "default",
+              candidateProviderCount: defaultProviderKeys.length,
+              exhaustedTargets: defaultProviderKeys,
+            },
+          },
+        );
+      }),
       updateVirtualRouterConfig: jest.fn(),
     };
 
     const deps = {
       runtimeManager,
       getHubPipeline: () => pipeline,
-      getRoutingTiers: () => [
-        { id: "direct-singleton", targets: [firstProviderKey], priority: 100 },
-      ],
+      getRoutingTiers: (
+        _routingPolicyGroup: string,
+        routeName: string,
+      ) =>
+        routeName === "default"
+          ? [
+              {
+                id: "default-primary",
+                targets: defaultProviderKeys,
+                priority: 100,
+              },
+            ]
+          : [
+              {
+                id: "direct-primary",
+                targets: [firstProviderKey],
+                priority: 200,
+              },
+            ],
       getModuleDependencies: () => ({
         errorHandlingCenter: {
           handleError: jest.fn(async () => undefined),
@@ -4973,31 +4985,30 @@ describe("HubRequestExecutor failover", () => {
     };
 
     const executor = createRequestExecutor(deps);
-    jest.useFakeTimers();
-    try {
-      const pending = executor.execute({
+    await expect(
+      executor.execute({
         requestId: "req-single-pool-unavailable",
         entryEndpoint: "/v1/chat/completions",
-        body: {},
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: { routecodexRoutingPolicyGroup: "test-group" },
-      });
-      const expectation = expect(pending).resolves.toEqual(
-        expect.objectContaining({ status: 200 }),
-      );
+      }),
+    ).rejects.toMatchObject({
+      message: "HTTP 429: quota exhausted",
+      statusCode: 429,
+      code: "HTTP_429",
+    });
 
-      await jest.advanceTimersByTimeAsync(1_000);
-      await expectation;
-
-      expect(pipeline.execute).toHaveBeenCalledTimes(2);
-      expect(
-        deps.logStage.mock.calls.some(
-          (call: unknown[]) => call[0] === "provider.route_pool_cooldown_wait",
-        ),
-      ).toBe(false);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(pipeline.execute).toHaveBeenCalledTimes(3);
+    expect(failingProcess).toHaveBeenCalledTimes(1);
+    expect(
+      deps.logStage.mock.calls.some(
+        (call: unknown[]) => call[0] === "provider.route_pool_cooldown_wait",
+      ),
+    ).toBe(false);
   });
 
   test("reroutes 429 instead of same-provider retry when route pool still exposes an alternative candidate", async () => {
@@ -5216,8 +5227,11 @@ describe("HubRequestExecutor failover", () => {
       await expect(
         executor.execute({
           requestId: "req-last-provider-429",
-          entryEndpoint: "/v1/responses",
-          body: {},
+          entryEndpoint: "/v1/chat/completions",
+          body: {
+            model: "test-model",
+            messages: [{ role: "user", content: "hello" }],
+          },
           headers: {},
           metadata: {},
         }),
@@ -5252,9 +5266,9 @@ describe("HubRequestExecutor failover", () => {
         process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
       }
     }
-  });
+  }, 15_000);
 
-  test("BLACKBOX: converted HTTP 503 keeps same provider with recoverable backoff before success", async () => {
+  test("BLACKBOX: converted HTTP 503 reroutes after provider-action wait", async () => {
     const providerA = "sdfv.key1.gpt-5.5";
     const providerB = "mimo.mimo-v2.5-pro";
     const processA = jest
@@ -5351,8 +5365,11 @@ describe("HubRequestExecutor failover", () => {
 
       await executor.execute({
         requestId: "req-blackbox-converted-503-reroute",
-        entryEndpoint: "/v1/responses",
-        body: {},
+        entryEndpoint: "/v1/chat/completions",
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: {},
       });
@@ -5386,7 +5403,6 @@ describe("HubRequestExecutor failover", () => {
     }
   });
   test("reroutes generic recoverable 500 immediately when route pool exposes alternatives", async () => {
-    jest.useFakeTimers();
     const providerA = "tabglm.key1.glm-5.1";
     const providerB = "crs.key2.gpt-5.3-codex";
     const providerC = "ali-coding-plan.key1.model-a";
@@ -5472,8 +5488,11 @@ describe("HubRequestExecutor failover", () => {
 
       const pending = executor.execute({
         requestId: "req-immediate-reroute-500",
-        entryEndpoint: "/v1/responses",
-        body: {},
+        entryEndpoint: "/v1/chat/completions",
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: {},
       });
@@ -5481,7 +5500,6 @@ describe("HubRequestExecutor failover", () => {
         expect.objectContaining({ status: 200 }),
       );
 
-      await jest.advanceTimersByTimeAsync(1_000);
       await expectation;
 
       const switchLines = warnSpy.mock.calls
@@ -5503,13 +5521,11 @@ describe("HubRequestExecutor failover", () => {
     }
   });
 
-  test("retries same provider when upstream SSE error event is retryable network failure", async () => {
+  test("reroutes retryable upstream SSE error event to an alternative provider", async () => {
     const firstProviderKey = "provider-a.primary.model-a";
     const secondProviderKey = "provider-a.backup.model-a";
 
-    const failingProcess = jest
-      .fn()
-      .mockReturnValueOnce({
+    const failingProcess = jest.fn(async () => ({
         status: 200,
         data: {
           mode: "sse",
@@ -5521,8 +5537,7 @@ describe("HubRequestExecutor failover", () => {
             },
           },
         },
-      })
-      .mockReturnValueOnce({ status: 200, data: { id: "resp_ok" } });
+      }));
     const successProcess = jest.fn(async () => ({
       status: 200,
       data: { id: "resp_ok" },
@@ -5546,22 +5561,33 @@ describe("HubRequestExecutor failover", () => {
     };
 
     const pipeline = {
-      execute: jest.fn((input: any) => ({
-        requestId: input.id,
-        providerPayload: {},
-        target: {
-          providerKey: firstProviderKey,
-          providerType: "openai",
-          outboundProfile: "openai-chat",
-          runtimeKey: firstProviderKey,
-        },
-        routingDecision: {
-          routeName: "deepseek",
-          providerProtocol: "openai-chat",
-          pool: [firstProviderKey, secondProviderKey],
-        },
-        metadata: {},
-      })),
+      execute: jest.fn((input: any) => {
+        const excluded = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : [],
+        );
+        const providerKey = excluded.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: "openai",
+            outboundProfile: "openai-chat",
+            runtimeKey: providerKey,
+          },
+          routingDecision: {
+            routeName: "deepseek",
+            providerProtocol: "openai-chat",
+            pool: [firstProviderKey, secondProviderKey],
+            routePool: [firstProviderKey, secondProviderKey],
+          },
+          metadata: {},
+        };
+      }),
       updateVirtualRouterConfig: jest.fn(),
     };
 
@@ -5578,19 +5604,21 @@ describe("HubRequestExecutor failover", () => {
     };
 
     const executor = createRequestExecutor(deps);
-    await expect(
-      executor.execute({
-        requestId: "req-sse-network-retry",
-        entryEndpoint: "/v1/messages",
-        body: {},
-        headers: {},
-        metadata: {},
-      }),
-    ).rejects.toThrow("Upstream SSE error event [api_error]");
+    const result = await executor.execute({
+      requestId: "req-sse-network-retry",
+      entryEndpoint: "/v1/chat/completions",
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+      headers: {},
+      metadata: {},
+    });
 
-    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(200);
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
     expect(failingProcess).toHaveBeenCalledTimes(1);
-    expect(successProcess).toHaveBeenCalledTimes(0);
+    expect(successProcess).toHaveBeenCalledTimes(1);
   });
 
   test("reroutes converted HTTP 401 when provider pool has an alternative", async () => {
@@ -5673,8 +5701,11 @@ describe("HubRequestExecutor failover", () => {
     const executor = createRequestExecutor(deps);
     const result = await executor.execute({
       requestId: "req-401-failover",
-      entryEndpoint: "/v1/responses",
-      body: {},
+      entryEndpoint: "/v1/chat/completions",
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
       headers: {},
       metadata: {},
     });
@@ -5687,12 +5718,21 @@ describe("HubRequestExecutor failover", () => {
   });
 
   test("surfaces HTTP 401 only after pool is exhausted", async () => {
-    const providerKey = "opencode-zen-free.key1.mimo-v2-pro-free";
+    const firstProviderKey = "opencode-zen-free.key1.mimo-v2-pro-free";
+    const secondProviderKey = "opencode-zen-free.key2.mimo-v2-pro-free";
     const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "1";
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = "2";
 
     try {
-      const unauthorizedProcess = jest.fn(async () => ({
+      const firstUnauthorizedProcess = jest.fn(async () => ({
+        status: 401,
+        data: {
+          error: {
+            message: "Upstream authentication failed",
+          },
+        },
+      }));
+      const secondUnauthorizedProcess = jest.fn(async () => ({
         status: 401,
         data: {
           error: {
@@ -5703,8 +5743,20 @@ describe("HubRequestExecutor failover", () => {
 
       const handles = new Map<string, ProviderHandle>([
         [
-          providerKey,
-          buildHandle(providerKey, unauthorizedProcess, "openai-chat"),
+          firstProviderKey,
+          buildHandle(
+            firstProviderKey,
+            firstUnauthorizedProcess,
+            "openai-chat",
+          ),
+        ],
+        [
+          secondProviderKey,
+          buildHandle(
+            secondProviderKey,
+            secondUnauthorizedProcess,
+            "openai-chat",
+          ),
         ],
       ]);
 
@@ -5714,23 +5766,48 @@ describe("HubRequestExecutor failover", () => {
           runtimeKey ? handles.get(runtimeKey) : undefined,
       };
 
+      const routePool = [firstProviderKey, secondProviderKey];
       const pipeline = {
-        execute: jest.fn((input: any) => ({
-          requestId: input.id,
-          providerPayload: {},
-          target: {
-            providerKey,
-            providerType: "openai",
-            outboundProfile: "openai-chat",
-            runtimeKey: providerKey,
-          },
-          routingDecision: {
-            routeName: "default",
-            providerProtocol: "openai-chat",
-            pool: [providerKey],
-          },
-          metadata: {},
-        })),
+        execute: jest.fn((input: any) => {
+          const excluded = new Set<string>(
+            Array.isArray(input.metadata?.excludedProviderKeys)
+              ? input.metadata.excludedProviderKeys
+              : [],
+          );
+          if (routePool.every((providerKey) => excluded.has(providerKey))) {
+            throw Object.assign(
+              new Error("All providers unavailable for route default"),
+              {
+                code: "PROVIDER_NOT_AVAILABLE",
+                details: {
+                  routeName: "default",
+                  candidateProviderCount: routePool.length,
+                  exhaustedTargets: routePool,
+                },
+              },
+            );
+          }
+          const providerKey = excluded.has(firstProviderKey)
+            ? secondProviderKey
+            : firstProviderKey;
+          return {
+            requestId: input.id,
+            providerPayload: {},
+            target: {
+              providerKey,
+              providerType: "openai",
+              outboundProfile: "openai-chat",
+              runtimeKey: providerKey,
+            },
+            routingDecision: {
+              routeName: "default",
+              providerProtocol: "openai-chat",
+              pool: routePool,
+              routePool,
+            },
+            metadata: {},
+          };
+        }),
         updateVirtualRouterConfig: jest.fn(),
       };
 
@@ -5750,8 +5827,11 @@ describe("HubRequestExecutor failover", () => {
       await expect(
         executor.execute({
           requestId: "req-401-exhausted",
-          entryEndpoint: "/v1/responses",
-          body: {},
+          entryEndpoint: "/v1/chat/completions",
+          body: {
+            model: "test-model",
+            messages: [{ role: "user", content: "hello" }],
+          },
           headers: {},
           metadata: {},
         }),
@@ -5761,8 +5841,9 @@ describe("HubRequestExecutor failover", () => {
         message: "Upstream authentication failed",
       });
 
-      expect(pipeline.execute).toHaveBeenCalledTimes(1);
-      expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
+      expect(pipeline.execute).toHaveBeenCalledTimes(3);
+      expect(firstUnauthorizedProcess).toHaveBeenCalledTimes(1);
+      expect(secondUnauthorizedProcess).toHaveBeenCalledTimes(1);
     } finally {
       if (previousAttempts === undefined) {
         delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
@@ -5770,9 +5851,9 @@ describe("HubRequestExecutor failover", () => {
         process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
       }
     }
-  });
+  }, 15_000);
 
-  test("surfaces readable SSE error message when upstream error event is non-retryable", async () => {
+  test("surfaces readable deterministic SSE client error without provider reroute", async () => {
     const providerKey = "provider-a.primary.model-a";
 
     const failingProcess = jest.fn(async () => ({
@@ -5832,16 +5913,21 @@ describe("HubRequestExecutor failover", () => {
 
     const executor = createRequestExecutor(deps);
 
-    await expect(
-      executor.execute({
+    const projectedSseError = await executor.execute({
         requestId: "req-sse-readable",
-        entryEndpoint: "/v1/messages",
-        body: {},
+        entryEndpoint: "/v1/chat/completions",
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: {},
-      }),
-    ).rejects.toMatchObject({
-      code: "SSE_DECODE_ERROR",
+      }).then(
+        () => undefined,
+        (error) => error,
+      );
+    expect(projectedSseError).toMatchObject({
+      errorCode: "invalid_request_error",
       message: expect.stringContaining(
         "Upstream SSE error event [invalid_request_error]: Invalid request payload",
       ),
@@ -5983,8 +6069,11 @@ describe("HubRequestExecutor failover", () => {
 
       const result = await executor.execute({
         requestId: "req-storm-root:reasoning_stop_guard",
-        entryEndpoint: "/v1/responses",
-        body: {},
+        entryEndpoint: "/v1/chat/completions",
+        body: {
+          model: "test-model",
+          messages: [{ role: "user", content: "hello" }],
+        },
         headers: {},
         metadata: { routecodexRoutingPolicyGroup: "test-group" },
       });
@@ -6025,7 +6114,7 @@ describe("HubRequestExecutor failover", () => {
       };
     });
     const handles = new Map<string, ProviderHandle>([
-      [providerA, buildHandle(providerA, processIncoming, "openai-responses")],
+      [providerA, buildHandle(providerA, processIncoming, "openai-chat")],
     ]);
 
     const pool = [providerA];
@@ -6042,12 +6131,12 @@ describe("HubRequestExecutor failover", () => {
         target: {
           providerKey: providerA,
           providerType: "openai",
-          outboundProfile: "openai-responses",
+          outboundProfile: "openai-chat",
           runtimeKey: providerA,
         },
         routingDecision: {
           routeName: "tools",
-          providerProtocol: "openai-responses",
+          providerProtocol: "openai-chat",
           pool,
           routePool: pool,
         },
@@ -6087,8 +6176,11 @@ describe("HubRequestExecutor failover", () => {
       await expect(
         executor.execute({
           requestId: "req-fetch-failed-cap",
-          entryEndpoint: "/v1/responses",
-          body: {},
+          entryEndpoint: "/v1/chat/completions",
+          body: {
+            model: "test-model",
+            messages: [{ role: "user", content: "hello" }],
+          },
           headers: {},
           metadata: { routecodexRoutingPolicyGroup: "test-group" },
         }),
@@ -6107,7 +6199,7 @@ describe("HubRequestExecutor failover", () => {
         process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = prevAttempts;
       }
     }
-  });
+  }, 15_000);
 
   test("RED: 2056 single-attempt 429 excludes current provider instead of retrying same provider", () => {
     const excluded = new Set<string>();

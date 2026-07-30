@@ -21,6 +21,17 @@ edges:
     owner_feature_id: vr.provider_forwarder_runtime
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - route.selection
+        - provider_runtime.observation
+      produces:
+        - route.selection
+      side_channel_reads:
+        - route.selection
+        - provider_runtime.observation
+      side_channel_writes:
+        - route.selection
   - step_id: vra-02
     from_node: VrAvail02PoolFiltered
     to_node: VrAvail03DefaultFloorEvaluated
@@ -28,6 +39,17 @@ edges:
     owner_feature_id: vr.route_availability_floor
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - route.selection
+        - provider_runtime.observation
+      produces:
+        - provider_runtime.observation
+      side_channel_reads:
+        - route.selection
+        - provider_runtime.observation
+      side_channel_writes:
+        - provider_runtime.observation
   - step_id: vra-03
     from_node: VrAvail03DefaultFloorEvaluated
     to_node: VrAvail04PrimaryExhaustedPlanned
@@ -35,6 +57,17 @@ edges:
     owner_feature_id: virtual_router.primary_exhausted_to_default_pool
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - route.selection
+        - provider_runtime.observation
+      produces:
+        - route.selection
+      side_channel_reads:
+        - route.selection
+        - provider_runtime.observation
+      side_channel_writes:
+        - route.selection
   - step_id: vra-04
     from_node: VrAvail04PrimaryExhaustedPlanned
     to_node: ErrorErr05ExecutionDecision
@@ -42,6 +75,17 @@ edges:
     owner_feature_id: vr.route_availability_floor
     binding_pending: null
     split_binding_id: null
+    resource_flow:
+      consumes:
+        - route.selection
+        - provider_runtime.observation
+      produces:
+        - error.chain
+      side_channel_reads:
+        - route.selection
+        - provider_runtime.observation
+      side_channel_writes:
+        - error.chain
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

@@ -103,8 +103,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
-    last_manual_authorization_id: auth-20260726-v3-internal-external-error-identity
+    fingerprint: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
+    last_manual_authorization_id: auth-20260729-v3-debug-payload-budget
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -114,6 +114,13 @@ locked_items:
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
     fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
 manual_authorizations:
+  - authorization_id: auth-20260729-v3-debug-payload-budget
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-29T20:30:00+08:00'
+    reason: "Jason requested fixing live V3 sessions that appeared stuck while debug snapshots were enabled. This authorizes adding the debug payload-budget resource to the existing debug foundation edge so side-channel request snapshots redact media, aggregate arrays, object entries, keys, strings, and total artifact size without mutating business payloads."
+    fingerprint_before: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+    fingerprint_after: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
   - authorization_id: auth-20260726-vr-target-protocol-decision
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason
@@ -128,6 +135,13 @@ manual_authorizations:
     reason: "Jason requested separating V3 internal RouteCodex errors from external provider/client errors; this adds internal 500-* identity and external_error side-channel edges to the locked debug/error foundation chain while preserving Error01-06 policy ownership."
     fingerprint_before: sha256:ba5dd08feae0703033651f1199f1ab191d3dca70d6883e2143468be86bb81f9f
     fingerprint_after: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+  - authorization_id: auth-20260729-v3-terminal-error05-availability-proof
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-29T09:40:00+08:00'
+    reason: "Jason approved fixing, reviewing, and committing the overlapping V3 error, console, and provider-action work. Error04 now requires caller-owned route-pool, default-pool, and same-provider availability proof; the builder that inferred exhaustion from candidate count alone was physically removed, and Error06 now consumes only typed terminal Error05. The Error01-06 topology and edge count remain unchanged; only the owning builder contract and symbol changed."
+    fingerprint_before: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
+    fingerprint_after: sha256:38b56257ab7b4ec2d6b79e3a46132f759434b438b9fedbff7953ec6d0a9af7ce
   - authorization_id: auth-20260726-direct-history-tool-image-placeholder
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason

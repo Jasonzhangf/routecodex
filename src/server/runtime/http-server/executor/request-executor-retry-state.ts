@@ -2,10 +2,6 @@ import {
   readString,
 } from './request-executor-error-shared.js';
 import {
-  type ErrorActionCategory,
-  peekErrorActionBackoffConsecutiveForTests,
-  resetErrorActionBackoff,
-  resetErrorActionBackoffByScopePrefix,
   resetErrorActionQueueStateForTests,
 } from './request-executor-error-action-queue.js';
 

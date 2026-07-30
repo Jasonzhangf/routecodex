@@ -75,16 +75,20 @@ describe('Server module help contract (Phase Server-A)', () => {
     }
   });
 
-  it('documents unified error action queue fixed 3s blocking policy', () => {
+  it('documents the Rust-owned isolated 1s / sustained 5s provider action gate', () => {
     const src = fs.readFileSync('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/server_contracts.rs', 'utf8');
     const queue = readSrc('src/server/runtime/http-server/executor/request-executor-error-action-queue.ts');
+    const gate = readSrc('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs');
     expect(src).toContain('module_id: "server.error_action_queue"');
-    expect(src).toContain('owner_builder: Some("describeErrorActionQueueContract")');
-    for (const token of ['fixed 3000ms for every error', 'servertool_followup']) {
+    expect(src).toContain('owner_builder: Some("contract")');
+    for (const token of ['at least 1000ms', 'at least 5000ms', 'servertool_followup']) {
       expect(src).toContain(token);
     }
-    expect(queue).toContain('feature_id: error.backoff_action_queue');
+    expect(queue).toContain('feature_id: error.provider_action_gate');
     expect(queue).toContain('describeErrorActionQueueContract');
-    expect(queue).toContain('ERROR_ACTION_DELAY_SEQUENCE_MS = [3_000]');
+    expect(queue).not.toContain('ERROR_ACTION_DELAY_SEQUENCE_MS');
+    expect(queue).not.toContain('PROVIDER_TRAFFIC_SATURATED');
+    expect(gate).toContain('PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000');
+    expect(gate).toContain('PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000');
   });
 });

@@ -30,6 +30,34 @@ pub fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(
     })
 }
 
+pub async fn build_provider_resp_compat_02_from_v3_provider_resp_inbound_01_sse(
+    mut input: V3ProviderRespInbound01Raw,
+) -> Result<ProviderRespCompat02ProviderCompat, V3ProviderCompatError> {
+    let provider_protocol = input.provider_protocol;
+    let chunks = input
+        .take_raw_sse_chunks()
+        .ok_or_else(|| V3ProviderCompatError {
+            stage: "response",
+            profile: input.compatibility_profile.as_str().to_string(),
+            reason: "ProviderRespInbound01Raw missing SSE chunks".to_string(),
+        })?;
+    let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
+    let payload =
+        super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+            provider_protocol,
+            provider,
+        )
+        .await
+        .map_err(|error| V3ProviderCompatError {
+            stage: "response",
+            profile: input.compatibility_profile.as_str().to_string(),
+            reason: error.to_string(),
+        })?;
+    input.payload = V3HubResponsePayload(Arc::new(payload));
+    input.provider_protocol = super::V3HubProviderWireProtocol::Responses;
+    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input)
+}
+
 impl ProviderRespCompat02ProviderCompat {
     pub fn profile(&self) -> &V3ProviderCompatProfileId {
         &self.profile

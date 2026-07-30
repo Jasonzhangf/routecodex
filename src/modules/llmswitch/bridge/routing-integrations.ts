@@ -11,12 +11,24 @@ import {
   requireNativeFunction,
   stringifyNativeJsonArg,
 } from './native-json-invoker.js';
-import { getRouterHotpathJsonBindingSync } from './routing-native-host.js';
-
-export {
-  buildRequestStageRuntimeControlWritePlanNative,
-  resolveEntryProtocolFromEndpointNative,
+import {
+  buildRequestStageRuntimeControlWritePlanNative as buildRequestStageRuntimeControlWritePlanFromHost,
+  getRouterHotpathJsonBindingSync,
+  resolveEntryProtocolFromEndpointNative as resolveEntryProtocolFromEndpointFromHost,
 } from './routing-native-host.js';
+
+
+export function buildRequestStageRuntimeControlWritePlanNative(input: {
+  outputMetadata: Record<string, unknown>;
+}): {
+  runtimeControl?: Record<string, unknown> | null;
+} {
+  return buildRequestStageRuntimeControlWritePlanFromHost(input);
+}
+
+export function resolveEntryProtocolFromEndpointNative(endpoint: string): string {
+  return resolveEntryProtocolFromEndpointFromHost(endpoint);
+}
 
 // feature_id: hub.runtime_ingress_bridge
 // Rust owner symbols:

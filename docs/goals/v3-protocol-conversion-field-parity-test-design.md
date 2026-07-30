@@ -123,6 +123,7 @@ tests exist and pass.
 | Responses field | OpenAI Chat provider wire | Required test |
 | --- | --- | --- |
 | `reasoning.effort` / `reasoning.summary` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
+| Historical malformed `function_call.arguments`, with or without matching `function_call_output` parse-failure truth | explicit `ProviderReqCompat06ProviderCompat` projection error naming the call id and parse-feedback presence before the incompatible OpenAI Chat target can send; enter typed Error05, reselect the lossless Responses target, and preserve the original arguments exactly; forbid deletion, replacement, empty-object repair, Error05 bypass, or send to the incompatible target | `responses_openai_chat_field_parity_malformed_arguments_fail_before_provider_send` |
 
 ### OpenAI Chat provider response -> Responses projection
 
@@ -146,6 +147,9 @@ tests exist and pass.
 | `reasoning.thinking` | exact top-level `thinking` object preserved for Anthropic-compatible local projection | `responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape` |
 | original Responses request surface after Req04 governance | preserved through `ProviderReqCompat06ProviderCompat` before Anthropic wire codec for both `input[]` and string `input` request forms | `responses_relay_reasoning_request_config_projects_anthropic_system_marker` and `responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker` |
 | Anthropic provider `thinking` JSON response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` |
+| Anthropic request history `thinking/signature` and `redacted_thinking/data` | ordered Responses `reasoning.summary/encrypted_content`; malformed blocks fail before Hub semantic | `anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasoning`, `anthropic_malformed_thinking_history_fails_instead_of_disappearing` |
+| Responses reasoning history `summary/content/encrypted_content` | Anthropic `thinking/signature` or `redacted_thinking/data`; no silent skip | `responses_replay_reasoning_restores_anthropic_thinking_and_redacted_blocks` |
+| Responses SSE reasoning | materialized canonical response -> Resp03/Resp04 -> Anthropic events; no pre-Resp04 client projection | `structured_sse_contract_preserves_reasoning_tool_and_terminal_order`, `responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth` |
 
 ### Anthropic request -> Responses provider semantic
 

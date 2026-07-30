@@ -107,6 +107,12 @@ export type ExecutionDecisionBridgeInput = {
 };
 
 export type ExecutionDecisionBridgeResult = {
+  action:
+    | 'wait_then_retry_same'
+    | 'wait_then_reselect'
+    | 'project_terminal'
+    | 'client_disconnected'
+    | 'reject_non_provider_error';
   shouldRetry: boolean;
   excludedCurrentProvider: boolean;
   allowRetryBeyondAttemptBudget: boolean;
@@ -133,7 +139,14 @@ export function resolveErrorErr05ExecutionDecisionNative(
   }
   const parsed = JSON.parse(fn(JSON.stringify(input))) as Partial<ExecutionDecisionBridgeResult>;
   if (
-    typeof parsed.shouldRetry !== 'boolean'
+    ![
+      'wait_then_retry_same',
+      'wait_then_reselect',
+      'project_terminal',
+      'client_disconnected',
+      'reject_non_provider_error'
+    ].includes(String(parsed.action))
+    || typeof parsed.shouldRetry !== 'boolean'
     || typeof parsed.excludedCurrentProvider !== 'boolean'
     || typeof parsed.allowRetryBeyondAttemptBudget !== 'boolean'
     || !Array.isArray(parsed.routePoolRemainingAfterExclusion)

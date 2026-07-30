@@ -1,89 +1,79 @@
-import { describe, expect, jest, test, beforeEach, afterEach } from '@jest/globals';
-import {
+import { describe, expect, jest, test } from '@jest/globals';
+
+jest.unstable_mockModule(
+  '../../../../../src/modules/llmswitch/bridge/provider-action-gate-host',
+  () => ({
+    readProviderActionGateContractNative: jest.fn(),
+    recordProviderActionFailureNative: jest.fn(),
+    beginProviderActionWaitNative: jest.fn(),
+    pollProviderActionAdmissionNative: jest.fn(),
+    commitProviderActionTerminalNative: jest.fn(),
+    abandonProviderActionAdmissionNative: jest.fn(),
+    recordProviderActionSuccessNative: jest.fn(),
+    cancelProviderActionWaitNative: jest.fn(),
+    peekProviderActionWaitNative: jest.fn(),
+    resetProviderActionGateNative: jest.fn()
+  })
+);
+
+const providerActionGateHost = await import(
+  '../../../../../src/modules/llmswitch/bridge/provider-action-gate-host'
+);
+const {
   peekErrorActionBackoffWaitMs,
   recordErrorActionBackoff,
   resetErrorActionBackoff,
-  resetErrorActionBackoffByScopePrefix,
-  resetErrorActionQueueStateForTests,
-  waitErrorActionBackoffWithGate
-} from '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue';
+  resetErrorActionBackoffByScopePrefix
+} = await import(
+  '../../../../../src/server/runtime/http-server/executor/request-executor-error-action-queue'
+);
 
-const GLOBAL_ERROR_CATEGORY = 'global_error' as const;
+const mockRecordFailure = jest.mocked(providerActionGateHost.recordProviderActionFailureNative);
+const mockPeekWait = jest.mocked(providerActionGateHost.peekProviderActionWaitNative);
+const mockReset = jest.mocked(providerActionGateHost.resetProviderActionGateNative);
 
-describe('request-executor-global-error-backoff', () => {
-  const scopeA = '5520|openai.key1.gpt-5.3-codex-low|upstream_transient';
-  const scopeB = '5555|openai.key1.gpt-5.3-codex-low|upstream_transient';
-  const scopeC = '5520|glm.key1.gpt-5.3-codex-low|upstream_transient';
-  const scopeD = '5520|openai.key1.gpt-5.3-codex-low|status_429';
+describe('request-executor global provider action scope bridge', () => {
+  test('preserves port/provider/error-family scope isolation in the Rust lane key', () => {
+    mockRecordFailure.mockReturnValue({
+      generation: 2,
+      mode: 'sustained',
+      minimumDelayMs: 5000
+    });
+    mockPeekWait.mockReturnValue(5000);
+    expect(recordErrorActionBackoff({
+      category: 'global_error',
+      scopeKey: '5520|provider-a|upstream_transient'
+    })).toBe(5000);
+    expect(mockRecordFailure).toHaveBeenCalledWith(
+      'global_error|5520|provider-a|upstream_transient',
+      undefined,
+      undefined
+    );
 
-  beforeEach(() => {
-    resetErrorActionQueueStateForTests();
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-05-15T00:00:00.000Z'));
+    expect(peekErrorActionBackoffWaitMs({
+      category: 'global_error',
+      scopeKey: '5555|provider-a|upstream_transient'
+    })).toBe(5000);
+    expect(mockPeekWait).toHaveBeenCalledWith(
+      'global_error|5555|provider-a|upstream_transient'
+    );
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-    resetErrorActionQueueStateForTests();
-  });
-
-  test('applies a fixed 3s wait after the first error in the same scope', () => {
-    const delayMs = recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA });
-    expect(delayMs).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-  });
-
-  test('keeps a fixed 3s delay for consecutive same-scope errors and resets on success', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-
-    resetErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA });
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
-  });
-
-  test('does not accumulate delayed debt after the current backoff window elapses in same scope', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-
-    jest.advanceTimersByTime(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
-
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-  });
-
-  test('resets consecutive scoped errors after provider-scope success', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(3000);
+  test('success resets only the exact lane or explicit provider prefix', () => {
+    resetErrorActionBackoff({
+      category: 'global_error',
+      scopeKey: '5520|provider-a|status_429'
+    });
     resetErrorActionBackoffByScopePrefix({
-      category: GLOBAL_ERROR_CATEGORY,
-      scopePrefix: '5520|openai.key1.gpt-5.3-codex-low|'
+      category: 'global_error',
+      scopePrefix: '5520|provider-a|'
     });
 
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(0);
-  });
-
-  test('isolates scopes by port / provider / error-code', () => {
-    expect(recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeB })).toBe(0);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeC })).toBe(0);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeD })).toBe(0);
-  });
-
-  test('wait gate blocks only the same scope until timer elapses', async () => {
-    recordErrorActionBackoff({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA });
-    const waiting = waitErrorActionBackoffWithGate({
-      category: GLOBAL_ERROR_CATEGORY,
-      scopeKey: scopeA
+    expect(mockReset).toHaveBeenNthCalledWith(1, {
+      laneKey: 'global_error|5520|provider-a|status_429'
     });
-    await jest.advanceTimersByTimeAsync(3000);
-    await expect(waiting).resolves.toBe(3000);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeA })).toBe(0);
-    expect(peekErrorActionBackoffWaitMs({ category: GLOBAL_ERROR_CATEGORY, scopeKey: scopeB })).toBe(0);
+    expect(mockReset).toHaveBeenNthCalledWith(2, {
+      lanePrefix: 'global_error|5520|provider-a|'
+    });
   });
 });

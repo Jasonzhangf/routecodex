@@ -247,6 +247,8 @@ pub struct V3DebugAuthoringConfig {
     #[serde(default)]
     pub snapshot_stages: Option<String>,
     #[serde(default)]
+    pub snapshot_direct: Option<bool>,
+    #[serde(default)]
     pub dry_run: bool,
     #[serde(default)]
     pub retention: BTreeMap<String, u64>,
@@ -891,6 +893,7 @@ pub struct V3ServerManifest {
     pub endpoints: Vec<String>,
     pub features: BTreeMap<String, bool>,
     pub execution: Option<V3ServerExecutionManifest>,
+    pub http_sse_keepalive_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -990,7 +993,9 @@ pub struct V3DebugManifest {
     pub log_console: bool,
     pub log_file: Option<String>,
     pub snapshots: bool,
+    pub codex_samples: bool,
     pub snapshot_stages: Option<String>,
+    pub snapshot_direct: bool,
     pub dry_run: bool,
     pub retention: BTreeMap<String, u64>,
 }

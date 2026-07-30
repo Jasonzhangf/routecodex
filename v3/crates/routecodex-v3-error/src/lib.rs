@@ -260,6 +260,7 @@ pub struct V3ExternalErrorLink {
 #[serde(rename_all = "snake_case")]
 pub enum V3ErrorSourceKind {
     InvalidRequest,
+    RequestConflict,
     UnsupportedMediaType,
     PayloadTooLarge,
     MethodNotAllowed,
@@ -327,14 +328,158 @@ pub struct V3Error03TargetLocalAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3Error04TargetExhaustionDecision {
     pub local_action: V3Error03TargetLocalAction,
-    pub candidates_remaining: usize,
+    pub route_pool_remaining_after_exclusion: usize,
+    pub default_pool_available: bool,
+    pub same_provider_retry_available: bool,
     pub target_exhausted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V3Error05RecoveryAdmissionWitness {
+    server_id: String,
+    routing_group: String,
+    provider_runtime_identity: String,
+    normalized_error_family: String,
+    generation: u64,
+}
+
+impl V3Error05RecoveryAdmissionWitness {
+    pub fn new(
+        server_id: impl Into<String>,
+        routing_group: impl Into<String>,
+        provider_runtime_identity: impl Into<String>,
+        normalized_error_family: impl Into<String>,
+        generation: u64,
+    ) -> Result<Self, String> {
+        fn required(value: String, field: &str) -> Result<String, String> {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(format!("Error05 recovery witness {field} cannot be empty"));
+            }
+            Ok(value.to_string())
+        }
+
+        if generation == 0 {
+            return Err("Error05 recovery witness generation must be positive".to_string());
+        }
+        Ok(Self {
+            server_id: required(server_id.into(), "server_id")?,
+            routing_group: required(routing_group.into(), "routing_group")?,
+            provider_runtime_identity: required(
+                provider_runtime_identity.into(),
+                "provider_runtime_identity",
+            )?,
+            normalized_error_family: required(
+                normalized_error_family.into(),
+                "normalized_error_family",
+            )?,
+            generation,
+        })
+    }
+
+    pub fn server_id(&self) -> &str {
+        &self.server_id
+    }
+
+    pub fn routing_group(&self) -> &str {
+        &self.routing_group
+    }
+
+    pub fn provider_runtime_identity(&self) -> &str {
+        &self.provider_runtime_identity
+    }
+
+    pub fn normalized_error_family(&self) -> &str {
+        &self.normalized_error_family
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum V3Error05ExecutionAction {
+    WaitThenRetrySame {
+        recovery: V3Error05RecoveryAdmissionWitness,
+    },
+    WaitThenReselect {
+        recovery: V3Error05RecoveryAdmissionWitness,
+    },
+    ProjectTerminal,
+    ClientDisconnected,
+    RejectNonProviderError,
+}
+
+impl V3Error05ExecutionAction {
+    pub const fn observability_label(&self) -> &'static str {
+        match self {
+            Self::WaitThenRetrySame { .. } => "retry_same_provider",
+            Self::WaitThenReselect { .. } => "target_local_reselect",
+            Self::ProjectTerminal | Self::RejectNonProviderError => "project_client_error",
+            Self::ClientDisconnected => "project_client_disconnect",
+        }
+    }
+
+    pub const fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::ProjectTerminal | Self::ClientDisconnected | Self::RejectNonProviderError
+        )
+    }
+
+    pub fn recovery_witness(&self) -> Option<&V3Error05RecoveryAdmissionWitness> {
+        match self {
+            Self::WaitThenRetrySame { recovery } | Self::WaitThenReselect { recovery } => {
+                Some(recovery)
+            }
+            Self::ProjectTerminal | Self::ClientDisconnected | Self::RejectNonProviderError => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3Error05ExecutionDecision {
     pub exhaustion: V3Error04TargetExhaustionDecision,
-    pub decision: &'static str,
+    pub action: V3Error05ExecutionAction,
+}
+
+impl V3Error05ExecutionDecision {
+    pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
+        let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
+        let valid_terminal = match source_kind {
+            V3ErrorSourceKind::ProviderFailure => {
+                self.action == V3Error05ExecutionAction::ProjectTerminal
+                    && self.exhaustion.route_pool_remaining_after_exclusion == 0
+                    && !self.exhaustion.default_pool_available
+                    && !self.exhaustion.same_provider_retry_available
+                    && self.exhaustion.target_exhausted
+            }
+            V3ErrorSourceKind::ClientDisconnect => {
+                self.action == V3Error05ExecutionAction::ClientDisconnected
+            }
+            _ => self.action == V3Error05ExecutionAction::RejectNonProviderError,
+        };
+        if valid_terminal {
+            Ok(V3Error05TerminalDecision(self))
+        } else {
+            Err(self)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3Error05TerminalDecision(V3Error05ExecutionDecision);
+
+impl V3Error05TerminalDecision {
+    pub fn execution(&self) -> &V3Error05ExecutionDecision {
+        &self.0
+    }
+
+    fn into_execution(self) -> V3Error05ExecutionDecision {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -408,6 +553,7 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
             panic!("ProviderFailure cannot carry a RouteCodex internal error code")
         }
         V3ErrorSourceKind::InvalidRequest
+        | V3ErrorSourceKind::RequestConflict
         | V3ErrorSourceKind::UnsupportedMediaType
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
@@ -440,6 +586,7 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
     }
     let (class, terminal_state) = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest
+        | V3ErrorSourceKind::RequestConflict
         | V3ErrorSourceKind::UnsupportedMediaType
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
@@ -501,15 +648,25 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
     }
 }
 
-pub fn build_v3_error_04_target_exhaustion_decision_from_v3_error_03(
+pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
     local_action: V3Error03TargetLocalAction,
-    candidates_remaining: usize,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
 ) -> V3Error04TargetExhaustionDecision {
-    let target_exhausted = candidates_remaining == 0
+    let provider_failure = matches!(
+        local_action.classified.source.source_kind,
+        V3ErrorSourceKind::ProviderFailure
+    );
+    let target_exhausted = (provider_failure
+        && route_pool_remaining_after_exclusion == 0
+        && !default_pool_available
+        && !same_provider_retry_available)
         || matches!(
             local_action.classified.source.source_kind,
             V3ErrorSourceKind::PendingEndpoint
                 | V3ErrorSourceKind::InvalidRequest
+                | V3ErrorSourceKind::RequestConflict
                 | V3ErrorSourceKind::UnsupportedMediaType
                 | V3ErrorSourceKind::PayloadTooLarge
                 | V3ErrorSourceKind::MethodNotAllowed
@@ -521,42 +678,59 @@ pub fn build_v3_error_04_target_exhaustion_decision_from_v3_error_03(
         );
     V3Error04TargetExhaustionDecision {
         local_action,
-        candidates_remaining,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
         target_exhausted,
     }
 }
 
 pub fn build_v3_error_05_execution_decision_from_v3_error_04(
     exhaustion: V3Error04TargetExhaustionDecision,
+    recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> V3Error05ExecutionDecision {
-    let decision = if matches!(
-        exhaustion.local_action.classified.source.source_kind,
-        V3ErrorSourceKind::ClientDisconnect
-    ) {
-        "project_client_disconnect"
-    } else if !exhaustion.target_exhausted && exhaustion.local_action.action.retry_eligible {
-        "target_local_reselect"
-    } else {
-        "project_client_error"
+    let action = match exhaustion.local_action.classified.source.source_kind {
+        V3ErrorSourceKind::ClientDisconnect => V3Error05ExecutionAction::ClientDisconnected,
+        V3ErrorSourceKind::ProviderFailure if exhaustion.same_provider_retry_available => {
+            V3Error05ExecutionAction::WaitThenRetrySame {
+                recovery: recovery
+                    .expect("retry-same Error05 requires an exact recovery admission witness"),
+            }
+        }
+        V3ErrorSourceKind::ProviderFailure
+            if exhaustion.route_pool_remaining_after_exclusion > 0
+                || exhaustion.default_pool_available =>
+        {
+            V3Error05ExecutionAction::WaitThenReselect {
+                recovery: recovery
+                    .expect("reselect Error05 requires an exact recovery admission witness"),
+            }
+        }
+        V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,
+        _ => V3Error05ExecutionAction::RejectNonProviderError,
     };
-    V3Error05ExecutionDecision {
-        exhaustion,
-        decision,
-    }
+    V3Error05ExecutionDecision { exhaustion, action }
 }
 
 pub fn build_v3_error_06_client_projected_from_v3_error_05(
-    execution: V3Error05ExecutionDecision,
+    terminal: V3Error05TerminalDecision,
 ) -> V3Error06ClientProjected {
+    let execution = terminal.into_execution();
     let source = &execution.exhaustion.local_action.classified.source;
     let status = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest => 400,
+        V3ErrorSourceKind::RequestConflict => 409,
         V3ErrorSourceKind::UnsupportedMediaType => 415,
         V3ErrorSourceKind::PayloadTooLarge => 413,
         V3ErrorSourceKind::MethodNotAllowed => 405,
         V3ErrorSourceKind::PathNotFound => 404,
         V3ErrorSourceKind::PendingEndpoint => 501,
-        V3ErrorSourceKind::ProviderFailure => 502,
+        V3ErrorSourceKind::ProviderFailure => source
+            .external_error
+            .as_ref()
+            .and_then(|external| external.status)
+            .filter(|status| *status >= 400)
+            .unwrap_or(502),
         V3ErrorSourceKind::TargetPoolExhausted => 503,
         V3ErrorSourceKind::RuntimeFailure => 500,
         V3ErrorSourceKind::ClientDisconnect => 499,
@@ -573,9 +747,11 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         "message": source.message,
         "stage": source.source_stage,
         "class": execution.exhaustion.local_action.classified.class,
-        "decision": execution.decision,
+        "decision": execution.action.observability_label(),
         "target_exhausted": execution.exhaustion.target_exhausted,
-        "candidates_remaining": execution.exhaustion.candidates_remaining,
+        "candidates_remaining": execution.exhaustion.route_pool_remaining_after_exclusion,
+        "route_pool_remaining_after_exclusion": execution.exhaustion.route_pool_remaining_after_exclusion,
+        "default_pool_available": execution.exhaustion.default_pool_available,
         "error_node": "V3Error06ClientProjected"
     });
     if let Some(internal_error) = &source.internal_error {
@@ -619,27 +795,48 @@ pub struct V3ErrorHandlingCenterInput {
 pub struct V3ErrorHandlingCenter;
 
 impl V3ErrorHandlingCenter {
-    pub fn handle(input: V3ErrorHandlingCenterInput) -> V3Error06ClientProjected {
+    pub fn decide_provider(
+        input: V3ErrorHandlingCenterInput,
+        default_pool_available: bool,
+        same_provider_retry_available: bool,
+        recovery: Option<V3Error05RecoveryAdmissionWitness>,
+    ) -> V3Error05ExecutionDecision {
         let classified = build_v3_error_02_classified_from_v3_error_01(input.source);
         let action = build_v3_error_03_target_local_action_from_v3_error_02(
             classified,
             input.action_scope,
             input.candidates_remaining,
         );
-        let exhaustion = build_v3_error_04_target_exhaustion_decision_from_v3_error_03(
+        let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
             action,
             input.candidates_remaining,
+            default_pool_available,
+            same_provider_retry_available,
         );
-        let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion);
-        let mut projected = build_v3_error_06_client_projected_from_v3_error_05(execution);
+        build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, recovery)
+    }
+
+    pub fn handle(input: V3ErrorHandlingCenterInput) -> V3Error06ClientProjected {
+        assert!(
+            input.source.source_kind != V3ErrorSourceKind::ProviderFailure,
+            "provider failure projection requires caller-owned route/default availability proof"
+        );
+        let source_status = input.source_status;
+        let execution = Self::decide_provider(input, false, false, None);
+        let terminal = execution.try_into_terminal().unwrap_or_else(|decision| {
+            panic!(
+                "nonterminal {:?} Error05 cannot enter V3Error06ClientProjected",
+                decision.action
+            )
+        });
+        let mut projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
         let linked_status = projected
             .body
             .pointer("/error/external_error/status")
             .and_then(serde_json::Value::as_u64)
             .and_then(|status| u16::try_from(status).ok())
             .filter(|status| *status >= 400);
-        if let Some(status) = input
-            .source_status
+        if let Some(status) = source_status
             .filter(|status| *status >= 400)
             .or(linked_status)
         {
@@ -656,6 +853,7 @@ impl V3ErrorHandlingCenter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HttpBoundaryErrorKind {
     MalformedJson,
+    RequestInFlight,
     ContentTypeRequired,
     ContentTypeUnsupported,
     BodyTooLarge,
@@ -673,6 +871,9 @@ pub fn project_v3_http_boundary_error(
     let (source_kind, code) = match kind {
         V3HttpBoundaryErrorKind::MalformedJson => {
             (V3ErrorSourceKind::InvalidRequest, "malformed_json")
+        }
+        V3HttpBoundaryErrorKind::RequestInFlight => {
+            (V3ErrorSourceKind::RequestConflict, "request_in_flight")
         }
         V3HttpBoundaryErrorKind::ContentTypeRequired => (
             V3ErrorSourceKind::UnsupportedMediaType,
@@ -710,6 +911,48 @@ pub fn project_v3_http_boundary_error(
         candidates_remaining: 0,
         source_status: None,
     })
+}
+
+pub fn raise_v3_sse_provider_failure(
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        code,
+        message,
+    )
+}
+
+pub fn raise_v3_sse_client_disconnect() -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ClientDisconnect,
+        "V3ServerRespOutbound06ClientFrame",
+        "client_disconnect",
+        "client disconnected before provider SSE stream completed",
+    )
+}
+
+pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DebugArtifact",
+        "codex_sample_persistence_failed",
+        message,
+        V3InternalErrorCode::V3DebugArtifact,
+    )
+}
+
+pub fn raise_v3_runtime_observability_contract_failure(
+    message: impl Into<String>,
+) -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3RuntimeObservability",
+        "runtime_observability_contract",
+        message,
+    )
 }
 
 pub fn project_v3_pending_endpoint_error(
@@ -753,5 +996,45 @@ mod tests {
         assert_eq!(projected.chain, V3_ERROR_CHAIN_NODE_IDS);
         assert_eq!(projected.body["error"]["code"], "not_implemented");
         assert!(projected.health_action.is_none());
+    }
+
+    #[test]
+    fn sse_closeout_client_disconnect_is_raised_at_client_frame_boundary() {
+        let source = raise_v3_sse_client_disconnect();
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ClientDisconnect);
+        assert_eq!(source.code, "client_disconnect");
+        assert_eq!(source.source_stage, "V3ServerRespOutbound06ClientFrame");
+    }
+
+    #[test]
+    fn sse_closeout_provider_failure_is_raised_by_error_owner() {
+        let source =
+            raise_v3_sse_provider_failure("provider_response_sse_stream", "provider broke");
+
+        assert_eq!(source.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(source.source_stage, "V3ProviderRespInbound01Raw");
+        assert_eq!(source.code, "provider_response_sse_stream");
+        assert_eq!(source.message, "provider broke");
+    }
+
+    #[test]
+    fn server_side_failures_are_raised_by_error_owner() {
+        let debug = raise_v3_debug_artifact_failure("disk full");
+        assert_eq!(debug.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(debug.source_stage, "V3DebugArtifact");
+        assert_eq!(debug.code, "codex_sample_persistence_failed");
+        assert_eq!(
+            debug
+                .internal_error
+                .as_ref()
+                .map(|internal| internal.internal_code),
+            Some("500-300")
+        );
+
+        let observability = raise_v3_runtime_observability_contract_failure("missing terminal");
+        assert_eq!(observability.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert_eq!(observability.source_stage, "V3RuntimeObservability");
+        assert_eq!(observability.code, "runtime_observability_contract");
     }
 }

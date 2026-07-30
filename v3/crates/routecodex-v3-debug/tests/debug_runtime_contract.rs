@@ -1,5 +1,6 @@
 use routecodex_v3_debug::{
-    V3DebugRuntime, V3DebugRuntimeConfig, V3DryRunFixture, V3RedactionPolicy,
+    v3_debug_payload_byte_limit, V3DebugBoundedTextCapture, V3DebugRuntime, V3DebugRuntimeConfig,
+    V3DryRunFixture, V3RedactionPolicy,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -87,6 +88,180 @@ fn snapshot_sessions_are_request_scoped_and_released() {
         .contains("sk-nope"));
     runtime.release_snapshot_session(&scope, &session).unwrap();
     assert!(runtime.snapshots().unwrap().is_empty());
+}
+
+#[test]
+fn debug_side_channel_bounds_large_history_arrays() {
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: None,
+        snapshots_enabled: false,
+        snapshot_stages: None,
+        dry_run_enabled: true,
+        raw_request_retention: 1,
+        raw_response_retention: 1,
+        event_retention: 8,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    let input = (0..240)
+        .map(|index| {
+            json!({
+                "type": "message",
+                "role": "user",
+                "content": format!("history item {index} {}", "x".repeat(1_600))
+            })
+        })
+        .collect::<Vec<_>>();
+    let redacted = runtime.redact_payload_for_side_channel(json!({
+        "input": input,
+        "model": "gpt-5.5"
+    }));
+    let serialized = serde_json::to_string(&redacted).unwrap();
+    assert!(serialized.contains("ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS"));
+    assert!(!serialized.contains("history item 239"));
+    assert!(
+        serialized.len() < 80_000,
+        "debug side-channel history snapshot must stay bounded, got {} bytes",
+        serialized.len()
+    );
+}
+
+#[test]
+fn debug_side_channel_enforces_total_payload_budget_for_nested_artifacts() {
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: None,
+        snapshots_enabled: false,
+        snapshot_stages: None,
+        dry_run_enabled: true,
+        raw_request_retention: 1,
+        raw_response_retention: 1,
+        event_retention: 8,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    let nested = (0..48)
+        .map(|outer| {
+            json!({
+                format!("wide_key_{outer}_{}", "k".repeat(512)): (0..48)
+                    .map(|inner| json!({"content": format!("nested {outer}-{inner} {}", "z".repeat(1_900))}))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect::<Vec<_>>();
+    let redacted = runtime.redact_payload_for_side_channel(json!({
+        "input": nested,
+        "model": "gpt-5.5"
+    }));
+    let serialized = serde_json::to_string(&redacted).unwrap();
+    assert!(
+        serialized.contains("ROUTECODEX_DEBUG_PAYLOAD_BUDGET_EXHAUSTED")
+            || serialized.contains("ROUTECODEX_DEBUG_SERIALIZED_PAYLOAD_BUDGET_EXCEEDED")
+    );
+    assert!(!serialized.contains("nested 47-47"));
+    assert!(
+        serialized.len() <= v3_debug_payload_byte_limit(),
+        "debug side-channel payload must enforce one total budget, got {} bytes",
+        serialized.len()
+    );
+}
+
+#[test]
+fn debug_side_channel_caps_final_serialized_artifact_with_sensitive_wide_objects() {
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: None,
+        snapshots_enabled: false,
+        snapshot_stages: None,
+        dry_run_enabled: true,
+        raw_request_retention: 1,
+        raw_response_retention: 1,
+        event_retention: 8,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    let input = (0..32)
+        .map(|outer| {
+            (0..64)
+                .map(|inner| {
+                    (
+                        format!(
+                            "authorization_{outer}_{inner}_{}",
+                            "sensitive_key_padding_".repeat(5)
+                        ),
+                        json!("Bearer must-not-survive"),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>()
+        })
+        .map(serde_json::Value::Object)
+        .collect::<Vec<_>>();
+
+    let redacted = runtime.redact_payload_for_side_channel(json!({"input": input}));
+    let serialized = serde_json::to_vec(&redacted).unwrap();
+
+    assert!(
+        serialized.len() <= v3_debug_payload_byte_limit(),
+        "final serialized debug artifact exceeded the hard byte budget: {}",
+        serialized.len()
+    );
+    assert!(!String::from_utf8_lossy(&serialized).contains("must-not-survive"));
+}
+
+#[test]
+fn debug_stream_capture_retains_a_bounded_prefix_and_explicit_truncation_truth() {
+    let mut capture = V3DebugBoundedTextCapture::new();
+    let first = b"event: response.output_text.delta\ndata: {\"delta\":\"first\"}\n\n";
+    capture.append(first);
+    capture.append(&vec![b'x'; 96 * 1024]);
+
+    let rendered = capture.rendered_text();
+    assert!(rendered.starts_with(std::str::from_utf8(first).unwrap()));
+    assert!(rendered.contains("ROUTECODEX_DEBUG_STREAM_TRUNCATED"));
+    assert_eq!(capture.total_bytes(), first.len() + 96 * 1024);
+    assert!(capture.truncated());
+    assert!(
+        rendered.len() < v3_debug_payload_byte_limit(),
+        "bounded stream capture must leave room for artifact metadata"
+    );
+}
+
+#[test]
+fn debug_side_channel_replaces_media_and_oversized_strings_with_placeholders() {
+    let runtime = V3DebugRuntime::new(V3DebugRuntimeConfig {
+        log_console: false,
+        log_file: None,
+        snapshots_enabled: false,
+        snapshot_stages: None,
+        dry_run_enabled: true,
+        raw_request_retention: 1,
+        raw_response_retention: 1,
+        event_retention: 8,
+        redaction: V3RedactionPolicy::default(),
+    })
+    .unwrap();
+    let image_payload = format!("data:image/png;base64,{}", "A".repeat(16_000));
+    let long_text = "debug long text ".repeat(1_200);
+    let redacted = runtime.redact_payload_for_side_channel(json!({
+        "input": [
+            {"type": "input_text", "text": long_text},
+            {"type": "input_image", "image_url": image_payload},
+            {"type": "message", "content": [{"type": "image_url", "image_url": {"url": "https://example.test/image.png"}}]}
+        ],
+        "metadata": {"authorization": "Bearer side-channel-secret"}
+    }));
+    let serialized = serde_json::to_string(&redacted).unwrap();
+    assert!(serialized.contains("ROUTECODEX_DEBUG_TRUNCATED_STRING"));
+    assert!(serialized.contains("ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER"));
+    assert!(serialized.contains("[REDACTED]"));
+    assert!(!serialized.contains("side-channel-secret"));
+    assert!(!serialized.contains("data:image/png;base64"));
+    assert!(
+        serialized.len() < 2000,
+        "debug side-channel payload must stay bounded, got {} bytes",
+        serialized.len()
+    );
 }
 
 #[test]
