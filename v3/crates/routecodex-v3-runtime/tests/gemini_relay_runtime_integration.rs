@@ -1289,3 +1289,158 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
+
+// E3: Gemini thinkingLevel -> reasoning.effort runtime integration (red tests).
+// The Gemini relay runtime preserves thinkingConfig.thinkingLevel natively in the
+// provider wire. The codec layer extracts ChatReasoningLevel semantics from the
+// thinkingLevel field. These tests verify the runtime integration path.
+
+#[tokio::test]
+async fn gemini_thinking_level_high_reaches_provider_wire() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-thinking-high".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents": [{"role": "user", "parts": [{"text": "think carefully"}]}],
+                "generationConfig": {
+                    "thinkingConfig": {
+                        "thinkingLevel": "HIGH"
+                    }
+                },
+                "stream": false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let level = captured
+        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+        .and_then(Value::as_str);
+    assert_eq!(level, Some("HIGH"), "provider wire must preserve thinkingLevel=HIGH");
+}
+
+#[tokio::test]
+async fn gemini_thinking_level_medium_reaches_provider_wire() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-thinking-medium".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+                "generationConfig": {
+                    "thinkingConfig": {
+                        "thinkingLevel": "MEDIUM"
+                    }
+                },
+                "stream": false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let level = captured
+        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+        .and_then(Value::as_str);
+    assert_eq!(level, Some("MEDIUM"), "provider wire must preserve thinkingLevel=MEDIUM");
+}
+
+#[tokio::test]
+async fn gemini_thinking_level_low_reaches_provider_wire() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-thinking-low".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents": [{"role": "user", "parts": [{"text": "quick answer"}]}],
+                "generationConfig": {
+                    "thinkingConfig": {
+                        "thinkingLevel": "LOW"
+                    }
+                },
+                "stream": false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let level = captured
+        .pointer("/generationConfig/thinkingConfig/thinkingLevel")
+        .and_then(Value::as_str);
+    assert_eq!(level, Some("LOW"), "provider wire must preserve thinkingLevel=LOW");
+}
+
+#[tokio::test]
+async fn gemini_thinking_budget_and_include_thoughts_produce_no_reasoning_effort() {
+    // includeThoughts and thinkingBudget are separate from thinkingLevel.
+    // They must NOT produce a reasoning.effort field in the provider wire.
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            request_id: "req-thinking-budget".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+                "generationConfig": {
+                    "thinkingConfig": {
+                        "includeThoughts": true,
+                        "thinkingBudget": 4096
+                    }
+                },
+                "stream": false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    // The provider wire must NOT contain reasoning.effort when only includeThoughts/thinkingBudget are set
+    let reasoning = captured.get("reasoning");
+    assert!(reasoning.is_none() || reasoning.and_then(|r| r.get("effort")).is_none(),
+        "provider wire must not contain reasoning.effort when only includeThoughts/thinkingBudget are set");
+    // But thinkingConfig must be preserved in the provider wire
+    let budget = captured
+        .pointer("/generationConfig/thinkingConfig/thinkingBudget")
+        .and_then(Value::as_u64);
+    assert_eq!(budget, Some(4096), "thinkingBudget must be preserved in provider wire");
+    let include = captured
+        .pointer("/generationConfig/thinkingConfig/includeThoughts")
+        .and_then(Value::as_bool);
+    assert_eq!(include, Some(true), "includeThoughts must be preserved in provider wire");
+}
+
+// E3: Gemini thinkingLevel -> reasoning.effort runtime integration.
