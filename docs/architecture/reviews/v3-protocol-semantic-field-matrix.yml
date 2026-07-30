@@ -1551,7 +1551,7 @@ chat_semantic_translation_groups:
       - request.reasoning_effort
     current_impl: partial
     gap: Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. Anthropic
-      thinking.budget_tokens outbound projection requires Jason auth. reasoning content and usage stay separate.
+      thinking.budget_tokens outbound projection requires Jason auth. reasoning content and usage stay separate. Grok explicitly rejects reasoning_effort/reasoning object on wire.
   - group_id: reasoning.request_summary_policy
     standard_chat_field: request.reasoning_summary_policy
     chat_fields:
