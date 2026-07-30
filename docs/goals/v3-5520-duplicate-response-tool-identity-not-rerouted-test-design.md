@@ -9,6 +9,7 @@
 - Lock Responses SSE terminal merge identity: every output item carrying a non-empty `call_id` uses it as semantic identity and `id` only as fallback; items without `call_id` use `id`. This covers function/custom/tool calls plus provider-native call families such as `tool_search_call` without a brittle type allowlist.
 - Positive control: stream item and terminal item with the same `call_id` but different item `id` merge into one tool call.
 - Positive control: a `tool_search_call` with a stream-only item `id` and a stable terminal `call_id` also merges into one item.
+- Terminal precedence: `response.completed` fields are authoritative. Merge may backfill a stream-only `id`, but must not replace terminal `status=completed`, arguments, content, or other present fields with stale stream values.
 - Negative control: two provider-origin tool calls with distinct `call_id` values remain distinct even if their item `id` values collide; Resp03 still rejects actual duplicate `call_id` values.
 - Keep `duplicate_response_tool_identity_fails_inside_response_chat_process` proving Resp03 rejects duplicate `call_id`.
 - Lock `is_v3_responses_provider_response_failure` to classify provider-origin `V3HubRelayResponseError` variants, excluding local execution-mode and stopless projection defects.

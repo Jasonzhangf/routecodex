@@ -4945,3 +4945,7 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Supersedes the preceding provider-error display sentence. When Error05 selects another provider, both realtime `[provider-error]` and `[provider-switch]` lines must print `[switch to:<next>] [switch from:<failed>]` before cause/reason fields. The console prefix remains the failed provider so the error owner is still truthful.
 - Terminal provider errors with no next target remain `target=<failed> result=<terminal action> next=-`; they must not be labeled as a switch.
 - Installed build `0.90.4004` live evidence after aggregate restart includes RID `...T173611531-688473-9538`: `[switch to:cc-sol[key1].gpt-5.6-sol] [switch from:glmrelay_openai[key1].glm-5.2] ... causeStatus=502`; all three listener health endpoints were OK.
+
+## 2026-07-30 - Responses terminal merge authority correction
+- `response.completed.output` is terminal truth. When stream and terminal output match by `call_id` or item `id`, stream fields may only backfill fields absent from the terminal item; they must not regress terminal `status=completed` to `in_progress` or replace present terminal arguments/content.
+- The codec owner is now bound in `v3.hub_relay_runtime_closeout` function/verification maps and the dedicated `v3.responses_provider_event.terminal_merge` call-map/manifest edge. Route/provider snapshots must not be hard-coded in the main dev skill; current compiled manifest remains the route truth.

@@ -34009,3 +34009,8 @@ Hard guards observed:
 - Red test: updated `provider_failure_console_content_exposes_red_error_and_switch` failed against the old provider-error formatter.
 - Fix is Server console projection only: switching failures now print `[switch to:<next>] [switch from:<failed>] result=...` before `causeStatus/type/message`; terminal no-next failures keep `target/result/next=-` and are covered by the negative test.
 - Verification after global install and aggregate restart: server provider tests 9/9, terminal merge 2/2, Resp03 true-duplicate rejection 1/1, Error05 duplicate identity tests 2/2, CLI build, `npm run install:v3`, and 10000/5520/5555 health all passed. Live RID `...T173611531-688473-9538` printed `switch to cc-sol` then `switch from glmrelay_openai` before `causeStatus=502`; latest 5000 log lines contained no `duplicate call_id/id` while multiple cc-sol SSE requests completed HTTP 201.
+
+## 2026-07-30T18:20+0800 V3 tool identity review corrections
+- Codex architecture review returned explicit P0 map drift and P1 findings even though it omitted the required verdict line: terminal merge owner/call edge absent from maps; stream-wins merge regressed terminal fields; main skill contained a contradictory hard-coded routing snapshot.
+- Red proof: terminal merge tests failed with function arguments replaced by stream data and `tool_search_call status=completed` replaced by `in_progress`.
+- Fix: terminal fields now win and stream only backfills absent keys; function/verification maps plus a dedicated call-map/manifest edge bind the codec owner and focused tests; the false provider/routing snapshot was physically removed from the main skill and replaced with current compiled-manifest truth.

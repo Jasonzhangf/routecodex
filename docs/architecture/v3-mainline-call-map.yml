@@ -3581,6 +3581,27 @@ chains:
       side_channel_reads:
       - v3.error.chain
       side_channel_writes: []
+- chain_id: v3.responses_provider_event.terminal_merge
+  owner_feature_id: v3.hub_relay_runtime_closeout
+  summary: Responses provider-event terminal merge matches call-bearing output by call_id, preserves terminal truth, and backfills only stream fields absent from response.completed.
+  manifest: docs/architecture/manifests/v3.responses_provider_event_terminal_merge.mainline.yml
+  edges:
+  - step_id: v3-responses-provider-event-terminal-merge-01
+    from_node: V3ProviderResponsesEventCodec
+    to_node: V3ProviderResponsesTerminalOrFailureObserved
+    caller_symbol: apply_v3_runtime_responses_semantic_event
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    callee_symbol: merge_v3_runtime_responses_stream_output_items_into_terminal_response
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+    status: anchored
+    owner_feature_id: v3.hub_relay_runtime_closeout
+    resource_flow:
+      consumes:
+      - v3.response.provider_raw
+      produces:
+      - v3.hub.response_semantic
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.sse.transport_boundary
   owner_feature_id: v3.sse_transport_core_independent
   summary: 'V3 SSE is a transport-only edge: provider bytes become opaque validated SSE frames in routecodex-v3-sse, protocol semantics are handled by provider/protocol codecs, and server output only hands finalized client stream bytes to Body::from_stream.'
