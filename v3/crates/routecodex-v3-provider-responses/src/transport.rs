@@ -670,9 +670,27 @@ impl ProviderResponsesTransport {
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());
         if status >= 400 {
-            let body =
-                read_response_body_bytes(response, &request_id, &provider_id, cancellation.clone())
-                    .await?;
+            let body = match read_response_body_bytes(
+                response,
+                &request_id,
+                &provider_id,
+                cancellation.clone(),
+            )
+            .await
+            {
+                Ok(body) => body,
+                Err(V3ProviderError::ClientDisconnect {
+                    request_id: client_request_id,
+                    provider_id: client_provider_id,
+                }) => {
+                    return Err(V3ProviderError::ClientDisconnect {
+                        request_id: client_request_id,
+                        provider_id: client_provider_id,
+                    });
+                }
+                Err(V3ProviderError::ResponseBody { .. }) => Vec::new(),
+                Err(other) => return Err(other),
+            };
             return Err(V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {
                     request_id,
@@ -1730,6 +1748,164 @@ mod tests {
         match error {
             V3ProviderError::Transport { .. } => {}
             other => panic!("expected transport timeout, got {other:?}"),
+        }
+    }
+
+    async fn spawn_http_error_response(
+        status: u16,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let response_headers = headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}\r\n"))
+            .collect::<String>();
+        let body = body.to_vec();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            let response = format!(
+                "HTTP/1.1 {status} Error\r\n{response_headers}connection: close\r\n\r\n"
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+        });
+        addr
+    }
+
+    fn http_transport_request(
+        request_id: &str,
+        url: String,
+        cancellation: Option<V3ProviderCancellation>,
+    ) -> V3Transport13ResponsesRequest {
+        let auth_env = "RCCV3_TEST_HTTP_STATUS_KEY";
+        std::env::set_var(auth_env, "sk-test-http-status");
+        let request = build_v3_transport_13_responses_http_request_from_parts(
+            request_id,
+            "http-status-provider",
+            url,
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::Environment(auth_env.into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"status-model","input":"hello","stream":false}),
+        )
+        .unwrap();
+        match cancellation {
+            Some(cancellation) => request.with_cancellation(cancellation),
+            None => request,
+        }
+    }
+
+    #[tokio::test]
+    async fn transport_http_status_preserves_body_when_read_succeeds() {
+        let body = br#"{"error":{"message":"upstream rejected request"}}"#;
+        let content_length = body.len().to_string();
+        let addr = spawn_http_error_response(
+            429,
+            &[
+                ("content-type", "application/json"),
+                ("content-length", &content_length),
+            ],
+            body,
+        )
+        .await;
+        let request = http_transport_request(
+            "req-http-status-readable-body",
+            format!("http://{addr}/v1/responses"),
+            None,
+        );
+        let error = ProviderResponsesTransport::default()
+            .send(request)
+            .await
+            .expect_err("HTTP error response must fail");
+        std::env::remove_var("RCCV3_TEST_HTTP_STATUS_KEY");
+
+        match error {
+            V3ProviderError::HttpStatus { response } => {
+                assert_eq!(response.status, 429);
+                assert_eq!(response.body, body);
+            }
+            other => panic!("expected HTTP status error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn transport_http_status_preserves_real_code_on_body_decode_failure() {
+        let addr = spawn_http_error_response(
+            502,
+            &[
+                ("content-type", "application/json"),
+                ("content-length", "64"),
+            ],
+            b"short",
+        )
+        .await;
+        let request = http_transport_request(
+            "req-http-status-corrupt-body",
+            format!("http://{addr}/v1/responses"),
+            None,
+        );
+        let error = ProviderResponsesTransport::default()
+            .send(request)
+            .await
+            .expect_err("HTTP error response must fail");
+        std::env::remove_var("RCCV3_TEST_HTTP_STATUS_KEY");
+
+        match error {
+            V3ProviderError::HttpStatus { response } => {
+                assert_eq!(response.status, 502);
+                assert!(response.body.is_empty());
+            }
+            other => panic!("expected HTTP status error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn transport_http_status_body_read_cancellation_remains_client_disconnect() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 502 Error\r\ncontent-type: application/json\r\ncontent-length: 64\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        let cancellation = V3ProviderCancellation::new();
+        let request = http_transport_request(
+            "req-http-status-client-disconnect",
+            format!("http://{addr}/v1/responses"),
+            Some(cancellation.clone()),
+        );
+        let send = tokio::spawn(async move {
+            ProviderResponsesTransport::default().send(request).await
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancellation.cancel();
+        let error = send
+            .await
+            .unwrap()
+            .expect_err("cancelled HTTP error body read must fail");
+        std::env::remove_var("RCCV3_TEST_HTTP_STATUS_KEY");
+        server.abort();
+
+        match error {
+            V3ProviderError::ClientDisconnect { .. } => {}
+            other => panic!("expected client disconnect, got {other:?}"),
         }
     }
 
