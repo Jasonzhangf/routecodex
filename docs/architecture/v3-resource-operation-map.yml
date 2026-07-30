@@ -1053,3 +1053,152 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+
+  - resource_id: v3.servertool.state_machine_control
+    resource_kind: internal_control_state
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ServerToolState01ControlScope
+    identity: [entryProtocol, endpoint, serverId, port, routingGroup, sessionId, conversationId, requestId, toolRunId]
+    allowed_writers:
+      - V3ServerToolStateManager
+      - HubReqChatProcess03Governed
+      - HubRespChatProcess03Governed
+    allowed_readers:
+      - V3ServerToolStateManager
+      - HubReqChatProcess03Governed
+      - HubRespChatProcess03Governed
+    forbidden_writers:
+      - routecodex-v3-server
+      - routecodex-v3-sse
+      - routecodex-v3-virtual-router
+      - routecodex-v3-target
+      - routecodex-v3-provider-responses
+      - v3.hub.provider_wire_payload
+      - v3.response.client_payload
+      - v3.debug.payload_budget
+      - v3.continuation.local_context_truth
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    may_enter_continuation_state: false
+    binding_status: design
+    required_gates:
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-architecture-docs
+
+  - resource_id: v3.web_search.execution_mode
+    resource_kind: compiled_capability_truth
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-config
+    owner_node: V3WebSearchExecutionModeCompiled
+    identity: [providerId, modelId, executionMode]
+    allowed_writers:
+      - V3ConfigStore
+      - V3Config05ManifestPublished
+    allowed_readers:
+      - V3RouteClassifier
+      - V3ServerToolStateManager
+      - HubReqChatProcess03Governed
+    forbidden_writers:
+      - routecodex-v3-server
+      - routecodex-v3-sse
+      - routecodex-v3-provider-responses
+      - v3.hub.provider_wire_payload
+      - v3.response.client_payload
+      - v3.debug.payload_budget
+      - v3.continuation.local_context_truth
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    may_enter_continuation_state: false
+    binding_status: design
+    required_gates:
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-architecture-docs
+
+
+  - resource_id: v3.server.request_identity
+    resource_kind: runtime_identity_counter
+    lifecycle: v3.console_request_count_visibility.mainline
+    identity: [serverId, localDay, sequence, requestId]
+    owner_feature_id: v3.console_request_count_visibility
+    owner_node: V3RequestCounter01AggregateOwned
+    allowed_readers: [next_v3_console_request_identity, render_v3_request_console_block, render_v3_response_console_block, format_v3_console_request_count]
+    allowed_writers: [spawn_v3_server_aggregate, V3RequestIdCounter::next_request_identity]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-target, routecodex-v3-virtual-router, routecodex-v3-provider-responses, provider_runtime.observation, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-console-request-count-visibility, npm run verify:v3-resource-map, npm run verify:v3-resource-relation-edge-lock]
+
+  - resource_id: v3.console.terminal_output
+    resource_kind: diagnostic
+    lifecycle: v3.responses.console_projection
+    owner_feature_id: v3.console_human_readable_layering
+    owner_node: V3ConsoleTerminalOutput
+    identity: [serverId, requestId, entryProtocol, severity]
+    allowed_readers: [developer_terminal]
+    allowed_writers: [emit_v3_colorized_request_console_line, emit_v3_error_console_line_for_context, emit_v3_error_console_line_for_state, emit_v3_error_console_line_with_port, emit_v3_startup_console_line, emit_v3_debug_sink_console_failure, emit_v3_provider_failure_console_event]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload, route.selection]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-console-request-count-visibility, npm run verify:v3-resource-map, npm run verify:v3-resource-relation-edge-lock]
+
+  - resource_id: v3.runtime.responses_observability
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.responses.console_projection
+    owner_feature_id: v3.console_human_readable_layering
+    owner_node: V3RuntimeObservability
+    identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
+    allowed_readers: [emit_v3_request_complete_console_line, emit_direct_sse_complete_console_lines, build_v3_route_selection_event_sink, build_v3_provider_failure_event_sink, emit_v3_request_route_hit_console_line_for_observability, emit_v3_provider_failure_console_event, emit_v3_provider_observability_console_lines]
+    allowed_writers: [build_v3_relay_observability_from_selected, build_v3_direct_runtime_observability, record_timing, handle_v3_responses_relay_provider_failure, handle_v3_responses_direct_provider_failure]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload, provider.wire_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:v3-resource-map]
+
+
+  - resource_id: v3.runtime.responses_timing_observability
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.runtime_timing_observability.mainline
+    identity: [requestId, attempt, timingPhase]
+    owner_feature_id: v3.runtime_timing_observability
+    owner_node: V3RuntimeTimingSummary
+    allowed_readers: [record_timing, emit_v3_request_complete_console_line]
+    allowed_writers: [V3RuntimeTimingState::start, start_external, finish_external, finish_runtime]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:v3-resource-map]
+
+  - resource_id: v3.config.http_sse_keepalive_interval
+    resource_kind: config_transport_interval
+    lifecycle: v3.config.compile
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config05ManifestPublished
+    identity: [serverId, httpSseKeepaliveMs]
+    allowed_writers: [compile_v3_http_sse_keepalive_ms_from_environment, compile_servers]
+    allowed_readers: [V3ServerManifest, responses_relay_output_response, responses_direct_output_response_with_console, v3_io_sse_body]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+
+  - resource_id: v3.server.responses_session_admission
+    resource_kind: listener_scoped_concurrency_gate
+    lifecycle: v3.responses_session_admission
+    owner_crate: routecodex-v3-server
+    owner_node: V3Server03ResponsesSessionAdmissionBlock
+    identity: [serverId, endpoint, explicitSessionId, explicitConversationId, permitToken]
+    allowed_writers: [V3ResponsesSessionAdmissionGate::try_admit, <V3ResponsesSessionAdmissionPermit as Drop>::drop]
+    allowed_readers: [admit_v3_responses_session_after_json_parse, pending_endpoint, hold_response_body_admission_permit]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, provider_action_gate]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: V3ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
+    binding_status: anchored

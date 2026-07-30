@@ -1892,6 +1892,8 @@ features:
       - v3.protocol_conversion.field_parity_contract
     mainline_bindings:
       - v3-protocol-field-parity-responses-chat-req-01
+      - v3-protocol-field-parity-responses-chat-req-negative-01
+      - v3-protocol-field-parity-responses-chat-req-negative-02
       - v3-protocol-field-parity-responses-chat-resp-01
       - v3-protocol-field-parity-responses-anthropic-req-01
       - v3-protocol-field-parity-anthropic-responses-req-01
@@ -1901,6 +1903,7 @@ features:
       - build_v3_chat_canonical_request_from_responses_payload
       - build_v3_openai_chat_standard_request_from_chat_canonical
       - build_provider_req_compat_06_from_v3_hub_req_outbound_07
+      - execute_v3_responses_relay_runtime_inner
       - build_v3_responses_provider_response_from_openai_chat_payload
       - encode_v3_anthropic_request_as_responses_semantic
       - encode_v3_responses_semantic_as_anthropic_request
@@ -3165,4 +3168,310 @@ features:
       - npm run verify:v3-architecture-docs
       - npm run build:v3-cli
       - git diff --check
+    runtime_status: source_active_live_verification_required
+
+  - feature_id: v3.responses_session_inflight_admission
+    owner_crate: routecodex-v3-server
+    owner_files:
+      - v3/crates/routecodex-v3-server/src/session_admission.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+    resource_bindings:
+      - v3.server.validated_http_input
+      - v3.server.responses_session_admission
+      - v3.error.chain
+    mainline_bindings:
+      - v3-responses-admission-01
+      - v3-responses-admission-error-02
+      - v3-responses-admission-release-03
+    entry_symbols:
+      - read_json_payload
+      - admit_v3_responses_session_after_json_parse
+      - pending_endpoint_after_responses_admission
+      - extract_responses_client_scope
+      - V3ResponsesSessionAdmissionGate::try_admit
+      - hold_response_body_admission_permit
+      - <V3ResponsesSessionAdmissionPermit as Drop>::drop
+      - project_v3_http_boundary_error
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/session_admission.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+      - v3/crates/routecodex-v3-error/tests/error_chain_contract.rs
+      - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
+      - docs/architecture/wiki/v3-responses-session-admission.md
+      - scripts/architecture/verify-v3-responses-session-admission.mjs
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-provider-responses
+      - sharedmodule
+      - src
+    required_gates:
+      - npm run verify:v3-responses-session-admission
+      - npm run test:v3-responses-session-admission
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --test error_chain_contract request_in_flight_projects_standard_error_chain_with_http_conflict -- --exact
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_overlap_is_rejected_before_provider_send -- --exact
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact
+      - git diff --check
+    runtime_status: source_pending_live_replay
+
+  - feature_id: v3.sse_http_keepalive_boundary
+    owner_crate: routecodex-v3-server
+    owner_file: v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      - v3.sse.transport_encoded_chunk
+      - v3.response.client_payload
+      - v3.config.http_sse_keepalive_interval
+    mainline_bindings:
+      - v3-sse-http-keepalive-01
+    entry_symbols:
+      - v3_io_sse_body
+      - build_v3_sse_transport_out_04_keepalive_comment
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - v3/crates/routecodex-v3-config/src/types.rs
+      - v3/crates/routecodex-v3-config/src/validate.rs
+      - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml
+      - docs/architecture/wiki/v3-sse-http-keepalive.md
+      - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
+      - scripts/architecture/verify-v3-responses-session-admission.mjs
+      - scripts/tests/v3-responses-session-admission-red-fixtures.mjs
+    forbidden_paths:
+      - src/server/handlers
+      - src/modules/llmswitch
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-virtual-router
+    required_gates:
+      - npm run verify:v3-responses-session-admission
+      - npm run test:v3-responses-session-admission
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_sse -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::successful_direct_responses_sse_starts_with_keepalive_before_provider_event -- --exact --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:architecture-wiki-html-sync
+      - git diff --check
+    runtime_status: source_pending_live_replay
+
+  - feature_id: v3.web_search_servertool_state_machine
+    status: design
+    owner_crates:
+      - routecodex-v3-config
+      - routecodex-v3-runtime
+      - routecodex-v3-virtual-router
+      - routecodex-v3-target
+    owner_scope: "V3 web_search two-axis route activation and ServerTool internal state-machine lifecycle; Route/VR selects only from current-turn evidence, ChatProcess owns tool/result pairing, provider compat owns wire shape only."
+    design:
+      - docs/goals/v3-web-search-servertool-state-machine-proposal.md
+    resource_bindings:
+      - v3.servertool.state_machine_control
+      - v3.web_search.execution_mode
+      - v3.request.normal_payload
+      - v3.response.client_payload
+    mainline_bindings:
+      - v3-web-search-sm-01
+      - v3-web-search-sm-02
+      - v3-web-search-sm-03
+      - v3-web-search-sm-04
+      - v3-web-search-sm-05
+      - v3-web-search-sm-06
+      - v3-web-search-sm-07
+      - v3-web-search-sm-08
+    allowed_paths:
+      - docs/goals/v3-web-search-servertool-state-machine-proposal.md
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - sharedmodule/llmswitch-core/rust-core/crates/servertool-core
+      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
+      - sharedmodule/llmswitch-core/rust-core/crates/provider-compat-core/src
+      - v3/crates/routecodex-v3-config
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-virtual-router
+      - v3/crates/routecodex-v3-target
+    forbidden_paths:
+      - v3/crates/routecodex-v3-server
+      - v3/crates/routecodex-v3-sse
+      - src/server/runtime/http-server
+      - src/providers
+    required_gates:
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-architecture-docs
+      - npm run verify:servertool-rust-only
+      - npm run build:v3-cli
+    runtime_status: design_only_not_implemented
+
+
+  - feature_id: v3.console_request_count_visibility
+    status: active
+    owner_crate: routecodex-v3-server
+    owner_files:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    owner_scope: "V3 Server owns one aggregate-shared request counter handle, one typed request identity allocation, and the request/response console count projection."
+    resource_bindings:
+      - v3.server.request_identity
+    entry_symbols:
+      - V3AllocatedRequestIdentity
+      - V3RequestIdCounter::next_request_identity
+      - spawn_v3_server_aggregate
+      - next_v3_console_request_identity
+      - render_v3_request_console_block
+      - render_v3_response_console_block
+      - format_v3_console_request_count
+    mainline_bindings:
+      - v3-console-count-01
+      - v3-console-count-02
+      - v3-console-count-03
+      - v3-console-count-04
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/goals/v3-console-request-count-visibility-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.console_request_count_visibility.mainline.yml
+      - scripts/architecture/verify-v3-console-request-count-visibility.mjs
+      - scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs
+      - package.json
+      - .github/workflows/test.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - sharedmodule
+      - src
+    required_gates:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity --lib -- --nocapture
+      - npm run verify:v3-console-request-count-visibility
+      - npm run test:v3-console-request-count-visibility-red-fixtures
+      - npm run verify:v3-architecture-docs
+    runtime_status: source_active_live_verification_required
+
+  - feature_id: v3.console_human_readable_layering
+    status: active
+    owner_crates: [routecodex-v3-runtime, routecodex-v3-server]
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    owner_scope: "Runtime owns route/provider-failure observability event truth; Server owns human console projection, terminal output, and request-scoped realtime dedupe."
+    resource_bindings:
+      - v3.runtime.responses_observability
+      - v3.console.terminal_output
+    entry_symbols:
+      - V3RuntimeProviderFailureEventSink
+      - V3RuntimeRouteSelectionEventSink
+      - build_v3_route_selection_event_sink
+      - build_v3_provider_failure_event_sink
+      - emit_v3_request_route_hit_console_line_for_observability
+      - emit_v3_provider_failure_console_event
+      - emit_v3_provider_observability_console_lines
+      - mark_v3_route_selection_console_event_once
+      - mark_v3_provider_failure_console_event_once
+    mainline_bindings:
+      - v3-console-realtime-01
+      - v3-console-realtime-02
+      - v3-console-realtime-03
+      - v3-console-realtime-04
+      - v3-console-realtime-05
+      - v3-console-realtime-06
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml
+      - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md
+    forbidden_paths:
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - sharedmodule
+      - src
+    required_gates:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server realtime_provider_failure_sink_prints_before_final_and_final_dedupes --lib -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_reselects_without_router_reentry --lib -- --nocapture
+      - CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli
+    runtime_status: source_active_live_verified_5520_realtime_provider_failure
+
+  - feature_id: v3.runtime_timing_observability
+    status: active
+    owner_crate: routecodex-v3-runtime
+    owner_files:
+      - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    owner_scope: "Runtime owns one timing state per Direct/Relay request; Direct SSE starts external timing in the kernel, closes it only after provider decoder clean EOF, and publishes Runtime timing from the outcome closeout."
+    resource_bindings:
+      - v3.runtime.responses_observability
+      - v3.runtime.responses_timing_observability
+    entry_symbols:
+      - V3RuntimeTimingState::start
+      - start_external
+      - finish_external
+      - finish_runtime
+      - wrap_direct_sse_provider_event_json_observation_stream
+      - wrap_direct_sse_provider_outcome_stream
+      - V3RuntimeStreamObservation::record_timing
+    mainline_bindings:
+      - v3-runtime-timing-01
+      - v3-runtime-timing-02
+      - v3-runtime-timing-03
+      - v3-runtime-timing-04
+      - v3-runtime-timing-05
+      - v3-runtime-timing-06
+      - v3-runtime-timing-07
+      - v3-runtime-timing-08
+      - v3-runtime-timing-09
+      - v3-runtime-timing-10
+      - v3-runtime-timing-11
+      - v3-runtime-timing-12
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+      - v3/crates/routecodex-v3-runtime/src/lib.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml
+      - scripts/architecture/verify-v3-runtime-timing-observability.mjs
+      - scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs
+      - package.json
+      - .github/workflows/test.yml
+    forbidden_paths:
+      - v3/crates/routecodex-v3-sse
+      - v3/crates/routecodex-v3-provider-responses
+      - v3/crates/routecodex-v3-target
+      - v3/crates/routecodex-v3-virtual-router
+      - sharedmodule
+      - src
+    required_gates:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime runtime_timing --lib -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_ --lib -- --nocapture
+      - npm run verify:v3-runtime-timing-observability
+      - npm run test:v3-runtime-timing-observability-red-fixtures
+      - npm run verify:v3-architecture-docs
     runtime_status: source_active_live_verification_required

@@ -1377,9 +1377,13 @@ features:
       - Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker for both `input[]` and string `input`, and never leaks as Responses reasoning or synthetic Anthropic thinking.
       - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
+      - Responses history with paired malformed function arguments projects OpenAI Chat function.arguments as {} while preserving parse-failure tool feedback.
+      - Responses history with unpaired malformed function arguments fails explicitly at ProviderReqCompat06 before the incompatible OpenAI Chat target can send.
       - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
     required_blackbox:
       - Source-level controlled runtime tests capture provider wire and client projection for the three supported paths.
+      - responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args
+      - responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send
       - No live 5555/provider replay is claimed by this feature until global install and managed restart gates run separately.
     required_gates:
       - npm run render:v3-protocol-semantic-field-matrix
@@ -2120,3 +2124,239 @@ features:
       source: "Positive/negative Rust tests, unique-writer red fixtures, architecture maps, and build gate pass."
       runtime: "Installed V3 10000 dry-run and 5555 old-sample replay prove provider-request body.model equals the selected candidate wire_model for every attempt."
       forbidden_claim: "Correct local provider-request model does not prove an upstream provider did not remap that model internally."
+
+  - feature_id: v3.web_search_servertool_state_machine
+    status: design
+    change_risk: high
+    owner_kind: rust_v3_chatprocess_servertool_state_machine
+    owner_scope: "web_search route activation, provider search execution mode, ServerTool state manager, search-only dispatch, result capture, follow-up marker, and paired tool-result injection."
+    design:
+      - docs/goals/v3-web-search-servertool-state-machine-proposal.md
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+    mainline_bindings:
+      - v3-web-search-sm-01
+      - v3-web-search-sm-02
+      - v3-web-search-sm-03
+      - v3-web-search-sm-04
+      - v3-web-search-sm-05
+      - v3-web-search-sm-06
+      - v3-web-search-sm-07
+      - v3-web-search-sm-08
+    required_positive:
+      - Explicit latest-turn search intent activates web_search route.
+      - Current assistant canonical web_search tool call starts ServerTool web_search state.
+      - GPT-family/native tool-mix mode routes without ServerTool state or ordinary tool stripping.
+      - MiniMax/search-only mode starts ServerTool state and strips ordinary tools only inside search dispatch.
+      - Captured search result is paired to the original tool_call_id and injected on the next governed request.
+    required_negative:
+      - Declared web_search tool alone does not activate web_search route.
+      - Wrong session, port, protocol, or toolRunId cannot consume ServerTool state.
+      - ServerTool state cannot enter provider wire payload, client response body, debug normal payload, or continuation state.
+      - Provider/search dispatch failure enters Error01-Error06 and cannot be projected as success.
+      - Virtual Router cannot inspect tool schema text or repair mixed-tool payloads.
+    required_gates:
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
+      - npm run verify:v3-architecture-docs
+      - npm run verify:servertool-rust-only
+      - npm run build:v3-cli
+    completion_rule:
+      source: "Red fixtures first, then Rust ChatProcess/ServerTool/provider-wire tests plus architecture gates and build pass."
+      runtime: "After global install and managed restart, live 5520 MiniMax explicit search proves search-only dispatch; declared-tool-only request stays normal route; GPT native search path has no ServerTool state."
+      forbidden_claim: "A /v1/models capability, declared tool list, provider name, provider compat workaround, SSE behavior, or debug sample is not proof of web_search routing correctness."
+
+
+  - feature_id: v3.console_request_count_visibility
+    status: active
+    change_risk: low
+    owner_kind: rust_v3_server_console_projection
+    owner_scope: "Server owns the typed request identity allocation and console projection; request/response payloads never carry request-count state."
+    owner_modules:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/goals/v3-console-request-count-visibility-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.console_request_count_visibility.mainline.yml
+    required_positive:
+      - One aggregate-shared request counter handle is cloned into every V3 listener.
+      - One atomic V3AllocatedRequestIdentity carries request_id, total_count, and daily_count.
+      - Request and response console headlines render the same typed total/daily request count.
+    required_negative:
+      - Listeners must not create per-port request counter handles for the shared persisted file.
+      - Console must not parse total or daily counts from the long request id string.
+      - Console must not emit a duplicate pre-route placeholder request block.
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity --lib -- --nocapture
+    smoke:
+      - npm run verify:v3-console-request-count-visibility
+      - npm run test:v3-console-request-count-visibility-red-fixtures
+    mainline_bindings:
+      - v3-console-count-01
+      - v3-console-count-02
+      - v3-console-count-03
+      - v3-console-count-04
+    completion_rule:
+      source: "Positive/negative Rust tests plus the request-count verifier and red fixtures pass."
+      runtime: "After global install and managed restart, live V3 listeners allocate without request-counter publish failures and print stable typed request counts."
+
+  - feature_id: v3.console_human_readable_layering
+    status: source_active_live_verified_5520_realtime_provider_failure
+    change_risk: medium
+    owner_kind: rust_v3_runtime_diagnostic_side_channel_and_server_console_projection
+    owner_scope: "Runtime publishes route/provider-failure observations at creation time; Server projects realtime human console lines and final deduped closeout."
+    unit:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/manifests/v3.console_human_readable_layering.mainline.yml
+    required_positive:
+      - Route selection prints as soon as Runtime selects a concrete target.
+      - Provider failure and provider-switch print when Error05/provider policy creates the observation.
+      - Final closeout prints terminal status/usage without delaying realtime provider events.
+    required_negative:
+      - Final observability does not reprint route/provider events already emitted by realtime sinks.
+      - Console sinks do not mutate request/response payload, provider wire, Virtual Router selection, or provider error policy.
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_failure_reselects_without_router_reentry --lib -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server realtime_provider_failure_sink_prints_before_final_and_final_dedupes --lib -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server direct_frame_console_emits_provider_switch_complete_and_usage --lib -- --nocapture
+    smoke:
+      - CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli
+      - node scripts/install-v3-cli.mjs
+      - rccv3 restart -c /Users/fanzhang/.rcc/config.v3.toml --timeout-ms 30000
+      - live 5520 MiniMax invalid-image replay with route/provider-error/provider-switch before terminal and no post-terminal route duplicate
+    mainline_bindings:
+      - v3-console-realtime-01
+      - v3-console-realtime-02
+      - v3-console-realtime-03
+      - v3-console-realtime-04
+      - v3-console-realtime-05
+      - v3-console-realtime-06
+    completion_rule:
+      source: "Focused Runtime and Server tests prove realtime sink emission and final dedupe."
+      runtime: "Installed V3 aggregate live replay proves realtime route/provider-error/provider-switch order before terminal."
+
+  - feature_id: v3.runtime_timing_observability
+    status: active
+    change_risk: medium
+    owner_kind: rust_v3_runtime_observability
+    owner_scope: "Runtime owns responses timing observability; Server may only project it into console/debug output."
+    unit:
+      - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+    contract:
+      - docs/goals/v3-runtime-timing-observability-test-design.md
+      - docs/goals/v3-runtime-timing-observability-debug-contract.json
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_positive:
+      - Direct SSE clean EOF publishes typed runtime_total, external, and internal timing after response.completed.
+      - Direct SSE terminal event before EOF does not fabricate terminal timing.
+      - Relay/Direct JSON timing remains Runtime-owned and Server read-only.
+    required_negative:
+      - Duplicate or premature external timing closeout fails instead of silently succeeding.
+      - Direct SSE malformed tail or [DONE] without response.completed does not publish successful Runtime timing.
+      - Server must not synthesize Runtime internal/external timing or emit unreported placeholders on success.
+    integration:
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime runtime_timing --lib -- --nocapture
+      - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_ --lib -- --nocapture
+    smoke:
+      - npm run verify:v3-runtime-timing-observability
+      - npm run test:v3-runtime-timing-observability-red-fixtures
+    mainline_bindings:
+      - v3-runtime-timing-01
+      - v3-runtime-timing-02
+      - v3-runtime-timing-03
+      - v3-runtime-timing-04
+      - v3-runtime-timing-05
+      - v3-runtime-timing-06
+      - v3-runtime-timing-07
+      - v3-runtime-timing-08
+      - v3-runtime-timing-09
+      - v3-runtime-timing-10
+      - v3-runtime-timing-11
+      - v3-runtime-timing-12
+    completion_rule:
+      source: "Positive/negative Rust tests plus runtime timing verifier and red fixtures pass."
+      runtime: "After global install and managed restart, same-entry live Direct SSE sample completes without duplicate external attempt panic and prints numeric timing."
+
+  - feature_id: v3.responses_session_inflight_admission
+    status: source_pending_live_replay
+    change_risk: high
+    owner_kind: rust_v3_server_http_boundary
+    owner_scope: "Listener-local Responses request admission and exact HTTP response-body lifetime release; no Runtime, Virtual Router, provider, codec, or continuation ownership."
+    owner_modules:
+      - v3/crates/routecodex-v3-server/src/session_admission.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+    design:
+      - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
+      - docs/architecture/wiki/v3-responses-session-admission.md
+      - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
+    required_unit:
+      - Same listener plus same explicit session or conversation rejects the second request with Error01-06 HTTP 409 request_in_flight.
+      - Different session on one listener and the same session on different listeners remain concurrently admissible.
+      - Missing explicit scope does not invent a cross-request key.
+      - Response EOF, stream error, and client body drop release only the exact permit.
+      - Conflict SSE starts with event error and never reaches provider transport.
+    required_integration:
+      - Controlled held-open provider proves the conflict is rejected before a second provider capture.
+      - Installed aggregate restart proves 5520 and 5555 stay port-isolated and a same-session 5555 overlap is explicit.
+    required_gates:
+      - npm run verify:v3-responses-session-admission
+      - npm run test:v3-responses-session-admission
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --test error_chain_contract request_in_flight_projects_standard_error_chain_with_http_conflict -- --exact
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_overlap_is_rejected_before_provider_send -- --exact
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact
+      - git diff --check
+    completion_boundary:
+      source_controlled: true
+      live_cutover: false
+      global_install_restart: false
+      forbidden_claim: "Do not claim completion from codec repair, provider-action gating, queued admission, or unit-only evidence."
+
+  - feature_id: v3.sse_http_keepalive_boundary
+    status: source_pending_live_replay
+    change_risk: high
+    owner_kind: rust_v3_server_http_transport_boundary
+    owner_scope: "V3 Server scheduling of transport-only SSE keepalive comments from one Config05 interval; comment encoding remains routecodex-v3-sse-owned."
+    owner_modules:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - v3/crates/routecodex-v3-sse/src/lib.rs
+    design:
+      - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
+      - docs/architecture/wiki/v3-sse-http-keepalive.md
+      - docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml
+    required_unit:
+      - Successful Direct and Relay Responses SSE starts with an immediate keepalive comment and emits idle periodic comments without changing event bytes.
+      - Error06 SSE keeps event error as its first frame, and EOF/error/drop stops keepalive scheduling.
+      - Config05 publishes one positive interval from ROUTECODEX_HTTP_SSE_KEEPALIVE_MS; malformed, empty, zero, or non-UTF8 values fail before listener bind.
+      - RCC_HTTP_SSE_KEEPALIVE_MS is rejected instead of acting as a second configuration truth.
+    required_gates:
+      - npm run verify:v3-responses-session-admission
+      - npm run test:v3-responses-session-admission
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_sse -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib tests::successful_direct_responses_sse_starts_with_keepalive_before_provider_event -- --exact --nocapture
+      - npm run verify:v3-architecture-docs
+      - npm run verify:architecture-wiki-html-sync
+      - git diff --check
+    completion_boundary:
+      source_controlled: true
+      live_cutover: false
+      global_install_restart: false
+      forbidden_claim: "Do not claim provider semantic correctness from HTTP keepalive scheduling evidence."

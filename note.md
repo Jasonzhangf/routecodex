@@ -33599,3 +33599,379 @@ Tags: #v3 #5555 #responses #custom-tool-output #async-cell #loop-diagnosis
 - Failure: `npm run install:release` installed/restarted 0.90.3987 but failed verification because `/health` returned V3 schema `{status:"ok", version:3, manifest_version:3}` while installer expected V2 readiness fields and semver in `version`.
 - Fix owner: V3 server health now publishes `build_version=env!("CARGO_PKG_VERSION")`; install verifier accepts either V2 `version===expected` with ready flags or V3 `manifest_version===3 && build_version===expected`.
 - Evidence: focused Jest install verifier test and V3 multi-listener health test passed.
+
+## 2026-07-29 V3 console human prefix: color + alignment
+
+User feedback (latest two turns):
+- 「端口，路由等人看的不要灰色啊，现在是灰色的」
+- 「你不觉得你的显示很诡异吗？人看的也没对齐，机器看的部分也没对齐，并且是灰色的」
+
+Re-read source evidence (v3/crates/routecodex-v3-server/src/lib.rs):
+- `format_v3_console_human_prefix` (L4298) concatenates `[port:protocol][project][route:model]` with zero column padding. No fixed-width anywhere on the human prefix.
+- `colorize_v3_layered_console_line` (L5344) wraps `human_prefix` in `ANSI_DEBUG_DIM` = `\x1b[2;90m` (bright-black = grey), even though this segment carries the most important entry info readers care about: port, protocol, project, route, model. Three callers (request, error, stopless) all force it grey.
+- `format_v3_console_layered_block_plain` (L5398) reuses the same zero-width prefix; same alignment defect, no color.
+
+Root cause:
+1. Human prefix base color was hardcoded `ANSI_DEBUG_DIM`; never exposed/overridable, so even headline-colored paths leaked grey prefix.
+2. `format_v3_console_human_prefix` did no column padding; alignment was purely natural drift.
+
+Plan (minimal, single file lib.rs, no payload mutation):
+
+Phase 1: define `V3_CONSOLE_PREFIX_*_COLUMN_WIDTH` constants (port_protocol=24, project=20, route_model=36) and apply left-pad via existing `align_v3_console_display_width` + `v3_console_display_width` (CJK-aware, no new util).
+- The `human_prefix` produced stays ASCII wrapped in `[...]`. Width is computed on the inner content of each bracket (no `[`/`]` padding).
+
+Phase 2: add `human_prefix_color: &str` parameter to `colorize_v3_layered_console_line` so prefix is not stuck on `ANSI_DEBUG_DIM`. Default the three callers to `ANSI_WHITE` (bright white). Keep `headline_color` unchanged: cyan / red / orange. Keep `debug_color` = `ANSI_DEBUG_DIM` (still dim, still called DEBUG_DIM on purpose for the machine-only segment).
+
+Phase 3: tests — add `console_human_prefix_uses_fixed_columns` (verify three widths) and update layering tests to assert that human prefix now starts with `ANSI_WHITE` (not `ANSI_DEBUG_DIM`) and that `format_v3_console_layered_block_plain` pads to the same widths.
+
+Phase 4 (after Jason ok): live closeout — install + restart, real 5520 `/v1/responses` replay, grep stdout for `5520:responses` and check both blocks at same column position, both prefix segments bright, debug segment dim. Update L93-XXX lessons.
+
+Hard guards observed:
+- No payload mutation, no SSE/handler/provider-error/Http03 chain change.
+- Do not touch `routecodex-v3-virtual-router` dirty worktree (worker else's).
+- Global install claim `resource_id:v3.global_install.current` still owned by 20260728T073640Z — live closeout needs Jason's authorization for a transfer / fresh install.
+
+## 2026-07-29 V3 console human layering source closeout
+
+- Verified root cause: the former renderer hardcoded the human scope to `ANSI_DEBUG_DIM` and concatenated variable-width port/protocol/project/route/model cells. The same rendered string was then reparsed for coloring, so human and machine layers had neither a stable typed boundary nor stable columns.
+- Unique owner fixed: `v3/crates/routecodex-v3-server/src/lib.rs`. `V3ConsoleRequestHeadline`, `V3ConsoleResponseHeadline`, and `V3ConsoleLayeredBlock` now carry typed human/debug fields. The human prefix uses terminal-width columns 24/20/36; the diagnostic session scope uses width 52.
+- Color/shape: request human line uses the session/request color, errors use red, stopless uses orange; no human segment receives `ANSI_DEBUG_DIM`. Exactly one blank line separates the human line from one complete dim diagnostic line. Plain and color renderers share the same three-line structure.
+- Dead semantics removed: rendered-text scope/KV/value color reparsers and the unused intermediate layered formatter were physically deleted. Missing headline/debug fails fast; no one-line fallback path remains.
+- Red/green evidence: fixed-column test first failed at display width `14 != 24`; focused console tests then passed `23/23`; full server lib passed `40/40`; server+runtime cargo check passed; scoped server rustfmt and `git diff --check` passed.
+- Architecture evidence: mainline review surface rendered; `verify:function-map-compile-gate`, `verify:architecture-mainline-call-map`, `verify:architecture-mainline-manifest-sync`, `verify:v3-architecture-docs`, `verify:v3-rust-only`, and `verify:v3-module-boundaries` passed. Function map stale reference to removed `format_v3_console_layered_block` was corrected to real owner `format_v3_console_layered_block_plain`.
+- External blocker: full V3 `cargo fmt --all -- --check` remains red only in other workers' `routecodex-v3-error` and `routecodex-v3-runtime` dirty files; this task's server file is rustfmt-clean.
+- Live gap remains explicit: no global install/restart/real 5520 replay in this source-closeout round because the live install resource claim is owned elsewhere. Do not report the visual change as installed/live until that separate closeout runs.
+
+## 2026-07-29 01:45:10 +0800 - V3 MiniMax OpenAI Chat image_url wire closeout
+- Source sample: ~/.rcc/codex-samples/openai-responses/ports/5520/openai-responses-router-gpt-5.5-20260729T002914418-662825-462/provider-request.json had OpenAI Chat content part image_url as bare string and upstream MiniMax returned invalid image_url content format (2013).
+- Root owner: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, Responses -> OpenAI Chat provider-wire codec.
+- Fix: normalize Responses input_image/image_url string into OpenAI Chat {image_url:{url,...}} and preserve detail; add unit test responses_input_image_url_maps_to_openai_chat_image_url_url.
+- Evidence: focused Rust tests, cargo check, clean HEAD+codec-only patch test, codex scoped review PASS, live 5520 explicit minimax_openai.MiniMax-M3 image request HTTP 200; provider-request sample openai-responses-router-minimax_openai.MiniMax-M3-20260729T013748758-663884-1521 has image_url dict ['detail','url'] and no invalid 2013.
+
+## 2026-07-29 06:40 +0800 - V2/V3 current-turn route classifier parity closeout
+- Root cause: V3 classified declared `tools`/`tool_choice`/descriptions and historical items as route signals, while V2 routes from the current active turn. The always-declared Responses `web_search` tool therefore stole coding continuations.
+- Unique owner: new shared Rust `route-classifier-core`, consumed by V2 `router-hotpath-napi` and V3 Req04/Router05. Tool declarations contribute zero route signal; actual current-turn calls/outputs select thinking/coding/search/tools; multimodal reads only `metadata.hasImageAttachment`; web_search reads only an actual current-turn web-search call or strict newest-user keywords.
+- Routing contract: shared classifier emits ordered primary route, optional configured longcontext tier, then mandatory default. V3 Virtual Router consumes that contract once; Target keeps candidate order and availability only.
+- Source evidence: shared classifier 7/7, V2 features 31/31, V2 classifier 24/24, V3 Runtime nodes 13/13, Config threshold 1/1, Virtual Router 17/17, Target 21/21, architecture/resource/module/Rust-only/wiki/file-size gates, focused Clippy, and `build:v3-cli` passed in the task-only snapshot.
+- Live evidence: the current-HEAD integration build installed V3 CLI sha256 `bafa73dbdfe99222d595537265f39f9bc1ef59c31c488b7f82a18c1e4a3d6c5c`; one aggregate `routecodex restart --port 5520` restarted 10000/5520/5555; all health probes passed. Exact old sample `662023-8758`, which declares `web_search` but ends with `apply_patch` call/output, dry-ran to Fable and real replay `664127-1764` returned HTTP 200 with `route=coding target=modrouter_anthropic[key1].claude-fable-5`, `response.completed`, and `response.done`.
+
+## 2026-07-29 provider action gate continuation audit
+- Verified a hidden cross-request ownership gap: standalone runtime constructors created a fresh action gate even though the managed Server passes one shared provider-health handle. `V3ProviderActionGate::process_shared` is now the default for all constructors, and a red fixture rejects request-local gate recreation.
+- Added paired gate coverage for second failure promotion, sustained deadline extension, exact key isolation, process-shared handles, and terminal exhaustion.
+- Verified terminal exhaustion previously left an admitted generation unchanged. Existing waiters then waited forever, and the expired deadline path repeatedly slept for zero duration. The gate now has a typed terminal transition: it advances to a sustained generation, wakes old waiters with `reevaluate_after_terminal`, requires Direct/Relay to rerun selection before transport, and admits the next provider action no earlier than five seconds. Terminal is not represented as success.
+- Source evidence green: provider action gate contract 8/8 in 23.38s; OpenAI Chat Relay reselect test 1/1 in 1.20s; Responses Relay default-floor retry-success 1/1 in 6.21s; typed Error05 terminal contract 3/3; Runtime+Server cargo check; provider-action verifier; 8 red fixtures; V3 architecture docs and rendered mainline sync.
+- Follow-up gate correction: a failure under a different provider runtime identity or
+  normalized error family now detects the already-active server/routing-group lane and
+  starts in sustained mode. The paired test proves it cannot restart at one second;
+  provider success clears the whole action lane.
+- Remaining P0/P1 audit findings are not yet fixed: OpenAI Chat/Gemini lazy SSE failures bypass Error05/gate; Direct SSE resets success before terminal closeout; client disconnect can mutate health; exact-pin continuation availability can fail before the gate. V2 still has fixed 3s TS queues, duplicate waits, immediate saturation 429, Traffic Governor immediate errors, provider-direct fake `defaultTierAvailable=false`, and a second TS policy center.
+
+## 2026-07-29T08:29+0800 V3 console Error truth source closeout review PASS
+- Closed the prior review findings without changing payload, routing, provider health policy, install, or live runtime: Direct SSE preserves the original typed `V3Error01SourceRaised`; Relay transport observations call error-owner raise APIs; client disconnect is raised at `V3ServerRespOutbound06ClientFrame`.
+- Console maps/manifests now bind `v3-console-17..25`, including the canonical adjacent `V3Error01SourceRaised -> ... -> V3Error06ClientProjected` chain. `v3.console.terminal_output` registers all direct stdout/stderr writers; normal console edges do not read debug artifacts.
+- Positive/negative evidence: error crate 5/5, console tests 26/26, full server lib 43/43, Server+Runtime checks, rustfmt, focused diff check, function/mainline/manifest/resource/V3 architecture gates all PASS. Codex architecture review returned explicit `VERDICT: PASS`.
+- Remaining boundary: no install, restart, live 5520 replay, or visual online capture was run. This proves source closeout only.
+## 2026-07-29 Anthropic thinking normalization audit
+
+- Confirmed request loss at `anthropic_codec.rs`: Anthropic assistant `thinking/signature` and `redacted_thinking/data` were omitted from Responses semantic input; Responses reasoning history was skipped on Anthropic provider wire.
+- Confirmed response loss at `anthropic_relay_runtime_codec.rs`: JSON projection ignored `encrypted_content`; Responses SSE preprojected client events before Resp04, split repeated reasoning deltas into distinct unclosed blocks, and could diverge from finalized response truth.
+- Confirmed provider SSE malformed `signature_delta` was silently ignored in `responses_relay_runtime.rs`.
+- Root fix keeps protocol conversion in the Anthropic codec owners, materializes Responses SSE to canonical response before Resp03/Resp04, and projects Anthropic events only from finalized Resp04 truth. Anthropic entry remains Relay-only by H1 contract.
+- Focused green evidence: Anthropic codec 45/45, Anthropic relay runtime 10/10, Anthropic-provider relay 6/6, H1 4/4, malformed signature unit 1/1. Architecture maps and exact touched-file format/diff gates pass.
+- Shared-tree blocker is unrelated concurrent `v3-error` E0382 partial move; do not misclassify canonical build/install as complete until its owner repairs and the full gates rerun.
+
+## 2026-07-29 V3 provider Error06 storm gate live correction
+- Installed-live replay exposed a missed terminal branch: explicit Direct `asxs.gpt-5.5` returned provider HTTP 401 in 0.46s because `ProjectTerminal` called `release_terminal` without first recording/waiting on the provider action gate. This disproved the prior source-only completion claim.
+- Red/green fix: `record_failure_and_wait_for_terminal_projection` now makes terminal Error06 consume the same admission as retry/reselect. A routing-group success received while waiting re-records the still-failed request instead of releasing a stale provider error with `waitMs=0`.
+- Positive locks: isolated terminal projection waits >=1s; unrelated success cannot release stale Error06; full provider-action contract 11/11 before the stale-success test and focused stale-success test pass; Direct pinned continuation still consumes 1s+5s gates. Negative lock: verifier/red fixture rejects removal of the terminal wait API.
+- Canonical install `0b5e7b0266b2ddcbefff183961799dd3f7c8e78fe7b9d8b3015b8399f48a3ddf`, config check PASS, aggregate restart instance `v3-44d74d11b52a8ff7372d`, health pending final closeout. Final live isolated 10000 explicit provider 401 took 2.181s. Concurrent terminal burst completed at 10.792s and 15.779s, a 4.987s separation, with one terminal projection per generation.
+- Exact old malformed-SSE request `658158-4893` was replayed without payload trimming. It no longer reproduced malformed SSE, but current routing reached an Anthropic provider-compat contract error (`Responses entry to Anthropic provider wire requires original Responses input surface`) and returned 500 after 6.621s. This is an explicit remaining replay gap and must not be reported as successful old-sample closeout.
+
+## 2026-07-29 Responses Relay provider-request compat Error05 bypass diagnosis
+- Symptom: installed `responses_v3_5520` projected 30 `responses_relay_runtime_error` HTTP 500 responses between 10:16:54 and 10:17:23, including subsecond intervals. The failure was `ProviderReqCompat06ProviderCompat` rejecting a Responses-to-Anthropic request without the original Responses input surface.
+- Known flow: `v3.provider_action_gate.mainline`; first divergence was `ProviderReqCompat06ProviderCompat -> project_v3_responses_relay_runtime_failure`, which skipped the registered `V3Error01SourceRaised -> V3Error05ExecutionDecision -> V3ProviderActionGateAdmission` edge.
+- Confirmed owner and scope: provider-bound request construction failures in `responses_relay_runtime.rs` must enter `run_v3_relay_provider_failure_policy`; Error06/server projection and provider compat codec are downstream/non-owner surfaces.
+- Red evidence: `responses_relay_provider_request_compat_failure_reselects_through_action_gate` returned `ProviderCompat(...)` before transport on the first candidate instead of waiting/reselecting. Live request IDs `669756-7393` through `669785-7422` prove the concurrent storm bypass.
+- Green source behavior: `ProviderCompat`, provider wire encoding, and provider transport-request construction failures now become typed provider failures at their adjacent request node, consume the shared Error05/action gate, and reselect. Non-provider errors remain fail-fast.
+- Latest 429 audit remains open: recent response files containing the text `429` had actual HTTP 200/201 status and embedded conversation history. No 2026-07-29 structured `V3Error06ClientProjected status=429` has yet been found; only structured status/requestId evidence may close that symptom.
+
+## 2026-07-29 V3 stopless default-enabled repair
+- Root cause: `routecodex-v3-config` compiled omitted `[features].stopless_center` as an absent manifest key, while runtime interpreted absence as disabled. That let 5520 pass an activated natural stop through as terminal instead of projecting stopless no-op guidance.
+- Fix owner: `v3/crates/routecodex-v3-config/src/validate.rs` now materializes deterministic `stopless_center = true` during Config04 resource-registry compilation. Runtime continues to consume only the compiled manifest and explicit server override.
+- Positive evidence: config default/override tests, omitted-feature runtime injection/projection, server override precedence, and missing-session-scope negative all passed.
+- Gate evidence: isolated snapshot passed stopless resource/state-machine gates, red fixtures, architecture/resource/module/Rust-only gates, and Rust format. Current shared tree still has unrelated verification-map YAML and file-size ratchet blockers, so no install/restart/live closure is claimed.
+
+## 2026-07-29 12:23:35 +0800 - 5520 fable Responses Anthropic compat
+- Symptom: 5520 default pool first candidate is modrouter_anthropic/claude-fable-5, but Responses requests with tool-history surfaces failed at provider_request_compat_error: "Responses entry to Anthropic provider wire requires original Responses input surface", then logs showed later GLM target after switch.
+- Root cause: ReqInbound intentionally keeps tool/search/image Responses history as the current data payload and does not create original_responses_payload; ReqOutbound Anthropic source selection incorrectly treated original_responses_payload as mandatory for every Responses entry.
+- Fix: ProviderReqCompat06/ReqOutbound Anthropic now prefers original surface when present, otherwise uses the current governed Responses input/messages payload; old unmappable metadata remains fail-fast through Error chain and no provider send.
+- Evidence: runtime unit test responses_entry_current_tool_history_surface_encodes_anthropic_without_original_snapshot PASS; responses_relay_anthropic_provider_wire_integration 8/8 PASS; npm run build:min PASS; install:v3 + rccv3 restart -> 5520/5555/10000 health 0.90.3989; 5520 provider-request dry-run generated providerId=modrouter_anthropic body.model=claude-fable-5 messages=47 tools=15 without provider network send; live 5520 small request returned model=claude-fable-5 text=RCC_FABLE_OK.
+## 2026-07-29 13:10 +0800 Stopless default review round 1 scope fix
+- Independent review found a P1: `execute_v3_responses_relay_runtime_inner` used `unwrap_or(true)` for an omitted StoplessControl handle, so no-scope wrappers activated Relay stopless despite the SOP requiring missing session scope to stay inactive.
+- Red evidence: `omitted_stopless_center_without_control_scope_stays_inactive` failed with client `status=requires_action` and `call_stopless_reasoning`; log `/tmp/v3-stopless-scope-red.log`.
+- Unique owner fix: changed only the runtime scope predicate default to `false`; valid scoped calls still use `V3ResponsesRelayStoplessControlScope::has_client_session_scope`.
+- Green evidence: omitted-feature scoped positive and no-scope negative both pass; full `hub_relay_stopless_center_semantics` is 15/15; config precedence and existing missing-session integration pass.
+
+## 2026-07-29 13:52 +0800 V3 responses 499 / Anthropic reasoning codec closeout
+- Symptoms checked: 5555 direct SSE client_disconnect logs on removead session; 5520 Fable first-hop provider_request_compat_error `Anthropic codec malformed reasoning item`; delayed human `started` line.
+- Source anchors verified: `v3/crates/routecodex-v3-server/src/lib.rs` emits request-received console line before VR/provider truth; route hit line is `event=route_selected`; `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs` treats Responses reasoning `encrypted_content:null` as absent, while malformed non-string/empty stays fail-fast.
+- Gates: `cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check`; server `console_` lib tests; runtime `responses_reasoning` characterization; `responses_relay_anthropic_provider_wire_integration`; `npm run build:min`; `npm run install:v3`; managed `rccv3 restart`; `/health` on 5520/5555/10000 all 0.90.3991.
+- Live evidence: 5520 old dry-run request `672349-9986` builds providerRequest `modrouter_anthropic` / `claude-fable-5`, `messages_len=63`, no `input`; live Fable smoke returned exact `RCC_FABLE_1785303129`; post-restart logs show no new `malformed reasoning item` in checked window.
+- 499 analysis: old 12:26 client_disconnect lines were from pre-0.90.3991 delayed-start build. Post-restart 5555 logs show immediate `route=- target=- reason=received`; sampled live windows show completed direct SSE requests without client_disconnect. A manual curl replay under live load was not a reliable client proof because multiple active same-session requests overlapped and the curl did not expose request id; do not use that as closure evidence.
+- Follow-up risk: direct streaming client byte-level proof still needs a controlled isolated request id / low-load window; current closure evidence proves server-side completion/no new 499 in observed logs, not a deterministic client-frame receipt test for 5555 direct SSE.
+
+## 2026-07-29 19:10 +0800 - System slowness / leak read-only audit
+- Current live state after restart is healthy at RouteCodex level: single rccv3 PID 38038 owns listeners 10000/5520/5555; all /health endpoints return build_version 0.90.3991; rccv3 fd count is 38 with no fd leak signature.
+- Memory pressure is not the cause in the sampled state: vm_stat shows compressor=0, pageouts=0, swapins=0, swapouts=0, and large free memory.
+- Current high system load is CPU/concurrency driven: iTerm2 around 100% CPU, freehand-daemon around 60-100%, WindowServer around 30%, tmux around 5-18%; rccv3 is variable and request-load dependent, sampled 8-104%.
+- Current RouteCodex log is large (server-v3-5555.log 182M) but not a write storm in the sampled window: growth about 2.4KB/s, last 2500 lines had started=194 completed=174 failed=0 provider_errors=24 client_disconnect=0.
+- Pre-restart slow symptom is visible in old completion lines: requests at 13:36-13:40 completed after 257s/370s/466s with time_i 252s/357s/452s and only 5-14s external time. This points to internal wait/queue/governance/action-gate/continuation path latency before provider external execution, not upstream latency and not memory pressure.
+- There are separate local stuck/background jobs that can make the host feel slow or block commits: a post-commit project-backup-sync/rsync into /Users/fanzhang/Mounts/t2s-nvme11 was stuck in U/S state, codex review processes were still present, and old cargo test processes existed for minutes/hours. No broad kill was performed.
+
+## 2026-07-29 19:20 +0800 - SSE stuck / request fighting root-cause diagnosis
+- Symptom quantified from server-v3-5555.log: 114 completed `/v1/responses` requests on 2026-07-29 had `time_i >= 60s`; worst examples were `time_i=1844s/969s/827s` while `time_e` stayed only `5-32s`. This proves clients were stuck after server accept/SSE open but before or inside RouteCodex internal provider-action governance, not blocked on upstream provider time.
+- Representative failing window: request `openai-responses-router-gpt-5.5-20260729T133226668-672950-10587` started at 13:32:26, did not route until 13:40:09, completed 13:40:13 with `elapsedMs=466314.1`, `time_i=452053.6ms`, `time_e=13839.9ms`.
+- Node trace for the same request shows the repeated pattern `V3Target10ConcreteProviderSelected -> V3ProviderActionGateTerminalReevaluation` dozens of times before `V3ProviderActionGateAdmission -> V3Execution11ProtocolDecision -> V3Transport13ResponsesHttpRequest`. This is the first divergent node.
+- Source owner verified: `v3/crates/routecodex-v3-runtime/src/kernel.rs` unconditionally calls `provider_health.wait_for_selected_provider_action(...)` on normal request selected-provider path; `provider_failure_runtime_policy.rs` maps it to `V3ProviderActionGate::wait_for_provider_action`; `provider_action_gate.rs` chooses any active key by `server_id + routing_group` (`max_by_key(next_admission_at)`) and commits terminal transitions by iterating every key in the same server/routing_group.
+- Root cause: the provider action gate is process-shared and routing-group scoped, so one active terminal/failure lane makes unrelated direct/SSE client requests in the same routing group wait/re-evaluate, even when they are normal fresh requests. Under concurrency, terminal commits wake waiters with `reevaluate_after_terminal`; waiters loop back to target selection and re-enter the same group-wide gate. This creates a convoy/livelock-like SSE stall, not a mutex deadlock and not provider latency.
+- Architectural issue: provider action gate is an Error05/retry/reselect recovery resource, but current kernel attaches it to every normal selected-provider request before provider send. That lets error recovery control state leak into the normal request admission path and causes clients to fight over the same routing-group lane.
+
+## 2026-07-29 18:04 +0800 - V3 Stopless default 5520 live closeout and task-only commit
+- Installed task-only V3 binary sha256 `e33958d8e51936e32ed27d5cf1b0d49403f5971ad78162962c2eca15db992aa2`; `rccv3 config check` passed; exactly one aggregate restart produced instance `v3-44d74d11b52a8ff7372d`; 10000/5520/5555 health passed.
+- Positive 5520 sample `672970-10607`: valid Relay session scope, exactly one provider `reasoningStop`, provider text-only `end_turn` without completion evidence, client standard `requires_action` with `routecodex hook run reasoningStop`, and console `event=activated`.
+- Negative 5520 sample `672921-10558`: no session/control scope, zero stopless guidance/tools, provider `end_turn` passed through as client `completed`, no no-op.
+- Review round 3 returned `VERDICT: PASS`; commit `654a9d858f4c5161d766fd17502b4d31e8822669` was created in the isolated task worktree and attached to `main` through a three-way index merge, preserving all unrelated shared staged/unstaged changes.
+
+## 2026-07-29 19:40 +0800 - Provider action timed lease design disproved
+- Exact red evidence: OpenAI Chat Relay and Gemini Relay `terminal_sse_success_with_active_waiter_preserves_sustained_action_spacing` both fail because a second provider action is admitted before the first lazy SSE stream reaches terminal success.
+- First divergence: `V3ProviderActionGateAdmission`. Current V3 and V2 Rust gates infer cancellation from `now >= next_admission_at` after five seconds. A legitimate provider action or lazy SSE can remain active longer than five seconds, so elapsed time is not cancellation evidence.
+- Root fix scope: remove timed admission expiry; make the Rust admission an explicitly owned permit. Success, failure, terminal commit, or permit drop/explicit abandon are the only transitions that release it. Lazy SSE must retain the permit to terminal/clean EOF; cancellation/drop abandons health-neutrally and starts a full sustained 5s floor.
+- Fairness gap confirmed separately: V3 tracks only `active_waiters` and V2 uses `HashSet`, so waiter order is not deterministic. Add FIFO tickets/queue after explicit permit ownership; cancellation removes only its own ticket.
+- Diagnosis contract: `docs/goals/provider-action-gate-explicit-abandon-debug-contract.json`.
+
+## 2026-07-29 20:18 +0800 - V3 live session stalls after provider-action-gate fix
+- Symptom: after 0.90.3995 restart, 5555 still showed apparent raw-only / delayed sessions under live load.
+- Evidence: `~/.rcc/logs/server-v3-5555.log` post-restart scan initially showed received-only requests; sample inspection showed `snapshots = true`, `~/.rcc/codex-samples` at 14G, and recent request snapshots writing 280K-1.7M `request.json` files on the live request path before runtime nodes.
+- Root cause: V3 debug side-channel redaction preserved full long text/image strings. `capture_v3_live_raw_request` synchronously persisted client-request snapshots before runtime execution, so large live payloads made sessions look stuck at `V3Server03HttpRequestRaw` and images/large payload content entered debug history.
+- Fix: `routecodex-v3-debug` redaction now replaces media strings and oversized strings with explicit placeholders. This keeps real request semantics untouched and bounds only debug/snapshot artifacts.
+- Verification: `cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --test debug_runtime_contract` passed 9/9; `cargo +stable check --manifest-path v3/Cargo.toml -p routecodex-v3-debug -p routecodex-v3-server` passed; `npm run build:min`, `npm run install:v3`, `routecodex restart --port 5555` installed 0.90.3996 and health passed on 5520/5555/10000.
+- Live verification: large dry-run with 160K+ debug payload returned in 0.095s and wrote 402B `request.json` containing `ROUTECODEX_DEBUG_MEDIA_PLACEHOLDER` and `ROUTECODEX_DEBUG_TRUNCATED_STRING`, with no `data:image/png;base64` or full long text. Real 5555 SSE smoke returned OK in 7.177s. Post-restart scan: 103 requests, `in_runtime_not_terminal_count=0`, `slow_time_i_ge_60s=0`, `V3ProviderActionGateTerminalReevaluation=0`; only raw-only sample was the intentional dry-run response path.
+
+## 2026-07-29 20:29 +0800 - V3 live session raw-only snapshot cap follow-up
+- Symptom after 0.90.3996: live 5555 still showed many apparent raw-only sample dirs and large request.json files under concurrent sessions; live logs showed most requests completing with low internal time, but the debug side-channel still persisted large request-history arrays (hundreds of input/tool entries) before runtime execution.
+- Red evidence: added focused routecodex-v3-debug test debug_side_channel_bounds_large_history_arrays; it failed before implementation because large history arrays were not bounded and no ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS placeholder existed.
+- Fix: routecodex-v3-debug now caps debug side-channel arrays and lowers long-string placeholder threshold; real request/provider/client payloads are untouched.
+- Verification: debug_runtime_contract 10/10 PASS; cargo check for routecodex-v3-debug + routecodex-v3-server PASS; npm run build:min PASS; npm run install:v3 PASS; routecodex restart --port 5555 installed 0.90.3997 and health passed on 5520/5555/10000. Large dry-run sample request.json is 61,910 bytes and contains array omission/truncation placeholders with no raw data:image payload, tail history, or secret; controlled 5555 SSE smoke returned RCC_BOUND_OK in 4.464s.
+- Remaining observation: post-restart long elapsed samples have low time_i and high time_e or provider switch storms, so current visible waiting is upstream/provider recovery latency, not the prior raw-snapshot synchronous write or provider action gate convoy.
+
+## 2026-07-29 21:15 +0800 - V3 remaining stuck session audit after 0.90.4000
+- Verified a second stall owner after debug snapshot bounding: `routecodex-v3-provider-responses` used `reqwest::Client::new()` with no local read timeout. The upstream `x-stainless-timeout: 300` header is only a provider hint; it does not abort the local HTTP send/read, so a hung upstream transport could hold the provider action permit and make later recovery waiters look stuck.
+- Fix owner: `ProviderResponsesTransport::default()` now builds the reqwest client with a 300s timeout, aligned to the provider timeout header. A test-only constructor verifies a hanging local TCP server times out instead of waiting forever.
+- Source gates: provider responses timeout unit PASS; routecodex-v3-provider-responses lib 21/21 PASS; runtime/server/provider-responses cargo check PASS; router-hotpath-napi cargo check PASS after existing provider-action-gate clone compile fix; function-map compile gate PASS; V3 architecture docs PASS; build:min PASS; install:v3 PASS; managed `routecodex restart --port 5555` PASS.
+- Live evidence: installed/current `rccv3 --version` is 0.90.4000 with sha256 `3c15e17a7de9e7dab35d9cc5f7bf4986351ba57b319e6e16c689e81aa392128a`; 5520/5555/10000 health all report build_version 0.90.4000. Controlled 5555 SSE smoke `675127-12764` completed HTTP 201 in 3.588s with `time_i=0.1ms`, `time_e=3586.4ms`. Post-smoke log scan from 21:10Z showed 35 received, 34 projected, 32 terminal console lines, 1 open request younger than 60s, 0 open requests older than 60s, and 0 `time_i>1000ms`.
+- Current interpretation: the visible old "request.json only" sample dirs are debug side-channel request captures, not terminal truth. Server trace/log truth shows recent live requests reaching `V3Server16HttpFrame` and completing with low internal time. Remaining long elapsed completions are provider external time or provider switch/recovery, not the previous internal deadlock/convoy.
+## 2026-07-29T20:31+0800 V2 provider-action gate explicit ownership diagnosis
+- Flow remains `error.provider_action_gate.mainline`; first divergence is V2 Rust `ProviderActionGateAdmission`.
+- Confirmed defects: admitted generation expires from wall clock after 5s; `record_failure` clears a group-active admission; waiters use unordered `HashSet`; the NAPI/TS path can cancel only a pre-admission waiter and has no admitted-action abandon transition.
+- Locked owner/edit scope in `docs/goals/v2-provider-action-gate-explicit-abandon-debug-contract.json`. V3 source is owned by the active closeout worker and is not in this run's edit scope.
+## 2026-07-29T20:30+0800 5520 MiniMax OpenAI malformed historical arguments
+- Failing sample: `~/.rcc/codex-samples/openai-responses/ports/5520/openai-responses-router-gpt-5.5-20260729T201108232-673745-11382/`. Call `call_e7896581c85649b58531dfc2` had two concatenated JSON objects in `function_call.arguments`; its paired output recorded `failed to parse function arguments: trailing characters...`. Anthropic wire emitted `tool_use.input={}`, but OpenAI Chat wire forwarded the invalid string and MiniMax returned HTTP 400 code 2013.
+- Review invalidated the first `"{}"` replacement because it was a payload-changing fallback. The prior 0.90.3997 HTTP 200 replay proves only that the fallback masked the upstream 400; it is not valid completion evidence.
+- Locked root owner: `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs` at `ProviderReqCompat06ProviderCompat`. Correct behavior is explicit lossless-projection failure before transport, preserving the original arguments and reporting call id plus matching parse-feedback presence.
+- Red/green: the controlled Relay test first reached provider transport and completed; after the owner fix, matching-feedback and no-feedback malformed cases both expose the local codec error and capture zero provider sends. Valid Responses/OpenAI Chat field-parity cases remain green.
+- Remaining closeout: full parity/map gates, Codex review, global install, aggregate restart via `routecodex restart --port 5520`, and exact old-sample online replay proving MiniMax no longer receives the invalid string.
+## 2026-07-29T21:49+0800 V2 provider-action RequestExecutor fixture diagnosis
+- Focused real-clock reroute run failed because several provider-action tests entered `/v1/responses` with `body: {}` and no Responses conversation context. The first selected target therefore failed at `provider.runtime_resolve` with `RESPONSES_STORE_MISSING_REQUEST_CONTEXT` before the intended provider-send 429/403/5xx; the second target became a matching sustained failure and hit the 5s Jest timeout.
+- Fixture correction uses valid `/v1/chat/completions` input for tests whose contract is Error05 provider action rather than Responses conversation semantics. The dedicated Responses standard-pipeline test keeps `/v1/responses` and now supplies explicit routing-group truth. Multi-failure tests receive 15s Jest budgets so the production 1s + 5s floors remain intact.
+- The longcontext test separately lacked authoritative route-pool truth, so Error05 correctly rejected the provider 400 instead of rerouting. Its fixture now declares the two-provider pool and keeps the prompt-too-long route-hint assertion.
+
+## 2026-07-29T21:55+0800 V2 RequestExecutor full regression first pass
+- Full file improved to 37/45 PASS. The remaining reds split into stale protocol fixtures (`/v1/responses` with no context), old same-provider retry expectations that violate the current all-provider-error-reroutable contract, fake-timer pool-exhaustion drift, and terminal tests that projected after one singleton failure without proving route/default exhaustion.
+- Corrected the tests at their contract layer: provider-action tests use valid chat input; retryable SSE now excludes/reselects the alternative provider; 401 terminal coverage now fails two providers, waits 1s then 5s, and only projects after the third route-selection call proves the pool empty; singleton exhaustion now preserves the original 429 without reviving route-cooldown replay.
+## 2026-07-29 22:12 +0800 - 5520 duplicate response tool identity bypasses Error05
+
+- Live request `openai-responses-router-gpt-5.5-20260729T220124715-675908-13545` contains no duplicate request tool identity; provider response reaches Resp03 and is correctly rejected as `malformed tool call at output index 5: duplicate call_id/id`.
+- First divergence is `is_v3_responses_provider_response_failure` in `responses_relay_runtime.rs`: both JSON and SSE branches call `run_json_response_hooks`, which wraps Resp03 failures as `V3ResponsesRelayRuntimeError::Response`, but that variant is absent from the provider-response failure classifier. The error therefore bypasses `provider_response_hook_failure -> handle_v3_responses_relay_provider_failure -> Error05` and is projected as generic runtime 500.
+- Unique fix stays in the shared Responses Relay provider-response classifier. Resp03 validation remains unchanged; no deduplication, ID rewrite, output deletion, SSE repair, handler repair, or success wrapping is allowed.
+## 2026-07-29 22:42 +0800 - V3 codex sample retention and snap scope contract
+- Jason required at most 100 persisted Codex sample request directories, `--snap` to persist Relay only, and `--snapall` to include Direct.
+- Follow-up correction: no `--snap`/`--snapall` must disable live Codex sample persistence even when config authoring has `debug.snapshots=true`; CLI invocation is the live capture authorization.
+- Owner split: Config publishes Direct snapshot permission; CLI/lifecycle only override it; Server owns canonical sample filesystem retention; Debug owns redaction/payload budgets.
+- Delivery order corrected globally and in `rcc-dev-skills`: focused gates -> build -> global install -> aggregate restart -> all-port health -> live replay -> Codex review -> precise commit/push. Any post-review code/config change invalidates PASS.
+- Test design: `docs/goals/v3-codex-sample-retention-snap-scope-test-design.md`.
+
+## 2026-07-29 23:29 +0800 - V2 provider-action gate action-scope closeout
+- Root defects were all at the V2 Error05 admission owner: wall-clock expiry could release a legitimate long-running action, `record_failure` could clear another in-flight admission, waiter order was not FIFO, and cancellation had no admitted-action abandon transition.
+- Rust now owns FIFO tickets and `lane_group + generation + action_scope_key` admission. There is no wall-clock lease; only matching failure, success, terminal commit, or health-neutral abandon releases the generation. The host queue is a thin NAPI consumer.
+- RequestExecutor now consistently uses initialized `routingPolicyGroupForAttempt` for runtime-resolve/send failures and preserves initialized `sessionId/conversationId` through the single pipeline-attempt metadata finalizer edge. Terminal VR exhaustion rethrows the original provider Error05.
+- Required evidence after native rebuild: provider-action Rust 17/17, queue/native/failure-plan 22/22, RequestExecutor 45/45, single-attempt 30/30, help contract 12/12, live NAPI help 4/4, Rust help 2/2, TypeScript no-emit PASS, `build:base` PASS, generated wiki sync PASS, browser smoke 27/27.
+- Current external gate gap: `verify:v3-provider-action-gate` rejects three new V3 manifest return-path nodes (`SuccessRecorded`, `FailureRecorded`, `PermitAbandoned`). That manifest belongs to the separate V3 provider-action owner and was not modified here. Until its verifier/manifest are synchronized, no global install/restart/live 429 closeout is claimed.
+
+## 2026-07-29 23:45 +0800 - V3 provider Responses terminal-missing closeout audit
+- Root source: `cc-sol` can close a Responses SSE stream without provider semantic `response.completed`. `response.done`, `response.requires_action`, and `[DONE]` are not substitutes for provider terminal truth.
+- Direct boundary: after same-protocol Direct has committed SSE bytes to the client, retry/reselect would mix or duplicate model output. The only correct current-request behavior is explicit stream failure plus provider health/action-gate recording; Relay can reselect because it materializes provider SSE before client commit.
+- Recovery owner: the process-shared Rust provider action gate is recovery-only, FIFO, and explicitly permit-owned. Fresh requests bypass unrelated lanes; retry/reselect consumes one permit; permit drop is health-neutral abandon; success/failure/terminal commit are the only owned transitions. The permit is released before entering Error05 after a failed attempt, preventing self-wait.
+- Current source evidence: provider-action contract 18/18, Error crate 17/17, terminal-focused provider SSE 26/26, machine lifecycle 47 edges, red fixtures 66/66, resource/mainline/Rust-only/architecture/fmt gates, Runtime cargo check, compile-fail gate, and V3 CLI build pass.
+- Installed evidence: ports 10000/5520/5555 report build `0.90.4001`; installed-current binary sha256 is `36d28873fd8d490cca55217865f46cb78e657dda9fb8c709712b84a17b05f082`. Exact old 5555 request replay returned HTTP 200 with one `response.completed`, one `response.done`, and no error event after Error05 reselection to a healthy provider.
+- Residual truth: the stochastic `cc-sol` EOF did not recur during that replay, so the replay proves installed Error05/reselection success but cannot prove the upstream will stop producing incomplete streams. No new `provider_response_sse_terminal_missing` appears after the 23:29 install in the checked log window; the last occurrence was 23:12:40.
+- Shared-tree blockers outside this feature remain explicit: module-boundary rejects Server-owned Error01 construction, Clippy rejects current Debug/Config edits, and file-size ratchets fail across ten concurrently modified V3 files.
+
+## 2026-07-30 00:20 +0800 - V3 provider-action review FAIL intake
+- Mandatory V3 review returned `VERDICT: FAIL`; no completion claim survives.
+- Confirmed source defects: Relay policy silently discards non-exhaustion target-resolution errors; Error05 retry/reselect is reduced to a boolean and can consume another request's newer lane; Direct provider-semantic Stopless handling accepts client-only `response.done`; machine maps omit provider raw -> event-codec terminal parsing edges; `kernel.rs` and `responses_relay_runtime.rs` exceed their shrink-only ratchets.
+- Corrected implementation order: lock red tests for non-exhaustion resolution, exact recovery witness, `response.done` non-consumption, and codec-edge map removal; then fix typed Error04/Error05/gate ownership, extract provider SSE outcome/codec logic into adjacent Rust modules, synchronize maps/gates, install/restart/replay, and rerun mandatory review.
+
+## 2026-07-30 00:43 +0800 - V3 provider-action review repair resumed
+- Refreshed `feature_id:v3.provider_action_gate` claim, MemoryPalace, V3 function/mainline/resource/verification maps, generated caller-flow review, current source, and prior review evidence. No kill switch or live red-fixture process remains.
+- Current repaired source already has typed exact Error05 recovery witness, independent target-resolution `Failed(Error01)`, Direct `response.completed` terminal truth, and Direct outcome extraction. Remaining source-structure gap is `responses_relay_runtime.rs` at 8231 lines versus its 7265 shrink-only ratchet.
+- Next owner-preserving slice: mechanically extract provider stream materialization and Responses provider event codec to adjacent child modules, then register raw provider -> codec -> semantic terminal/failure edges and replace the stale compact-exhaustion-only test with paired target-resolution source-error/exhaustion tests.
+## 2026-07-30T00:16+0800 V3 Responses same-session overlap diagnosis lock
+- Live request `16063` overlapped request `16048` on listener `5555` and session `019fad8b-d278-7613-a152-cda6ef5131ca`; Codex retry construction cloned partial streamed reasoning before the first request completed. Full rollout history had balanced call/output IDs and valid message roles before overlap, so provider codec repair is not the root owner.
+- First divergence is V3 Server HTTP ingress: there is no listener-local same-session admission resource. The second request reaches Runtime/provider wire with partial retry history. Unique fix is an explicit listener/session admission permit held through response-body EOF/error/drop; conflict must enter Error01-06 and standard Responses JSON/SSE projection.
+- Independent transport gap: V2 sends an immediate and 3000ms SSE keepalive comment, while V3 Direct/Relay HTTP SSE body wrappers do not consume the existing V3 SSE keepalive builder. Keepalive remains transport-only and cannot replace admission.
+- Forbidden fixes: Provider Action Gate as global concurrency owner, VR/provider/codec special cases, queueing polluted retry payloads, swallowing malformed tool outputs, or synthesizing roles.
+
+## 2026-07-30T06:52+0800 V3 SSE false client_disconnect regression diagnosis
+- Screenshot requests `681574-2639`, `681572-2637`, and `681566-2631` all reached the Direct response/client frame path before the Server logged `status=499 client_disconnect`.
+- First divergence is the dirty Server closeout change: both Direct and Relay wrapper `Drop` unconditionally create `ClientDisconnected`, while `client_disconnected_source` emits 499 without first merging `V3RuntimeStreamObservation`. The same diff reversed the established Direct test to require 499 after observed `response.completed`.
+- Prior verified truth in `MEMORY.md` and the 2026-07-25 live replay requires terminal observation first: success terminal -> completed; failure terminal -> explicit 502; no terminal -> health-neutral 499. The low-level SSE wrapper remains opaque and must not parse event names.
+- Locked edit scope and positive/negative matrix in `docs/goals/v3-sse-closeout-terminal-observation-before-disconnect-debug-contract.json`.
+## 2026-07-30 07:24 CST - V3 5555 latest error: Direct SSE timing closeout race
+
+- Live truth: `/Volumes/extension/.rcc/logs/server-v3-5555.log` contains repeated `status=500 subcode=runtime_observability_contract message=successful V3 Runtime observability is missing timing` after the same requests already projected `V3Server16HttpFrame status=201`.
+- Representative requests: `...T072216771-682144-3209`, `...T072242627-682153-3218`, `...T072305247-682160-3225`.
+- Three-layer root: Runtime correctly publishes Direct SSE timing only after decoder-validated clean EOF; Server may observe and deliver `response.completed` before polling the Runtime stream once more for EOF; body drop then classifies observed terminal as success and asks the console projection to consume timing that cannot yet exist.
+- Boundary: do not publish timing at `response.completed`/`[DONE]`, synthesize it from Server elapsed, mutate Direct bytes, or change provider-action policy. Fix the Runtime-observation -> Server-closeout adjacent contract so pre-EOF post-terminal drop does not fabricate Error01/500, while full drain still emits typed completion and pre-terminal drop remains 499.
+- Provider action evidence remains positive: latest samples show upstream 502/401 retained in `provider_failure_events`, with `wait_ms=1000/5000`, followed by HTTP 200 Relay completion/requires_action; this is separate from the observability 500.
+
+## 2026-07-30 07:31 CST - V3 Direct SSE timing closeout fix verified
+- Fix: `V3DirectSseConsoleFinalizer::emit_direct_sse_complete_console_lines` now returns without emitting a terminal success/error line when Direct SSE has observed terminal success but Runtime timing is absent before clean EOF. It does not synthesize timing, print `unreported`, emit 500, or classify as client disconnect.
+- Red/green: pre-fix focused test reproduced `runtime_observability_contract` 500; post-fix `direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof` passes and the full `direct_sse_console_closeout` slice keeps clean-EOF success, pre-terminal 499, and failed-terminal 502 intact.
+- Installed evidence: `npm run build:v3-cli`, `npm run install:v3`, managed `routecodex restart --port 5555`, and health on 10000/5520/5555 passed with build `0.90.4001`.
+- Live proof: 5555 request `codex-live-drop-terminal-test-2` read through `response.completed` then closed the client body; `/Users/fanzhang/.rcc/logs/server-v3-5555.log` kept `runtime_observability_contract` count at `284 -> 284`.
+- Review: first Codex review failed because the debug contract referenced a stale test symbol; contract was corrected and exact test ran one test. Second scoped review returned PASS.
+
+## 2026-07-30 07:35 CST - V3 5555 current-tree install and loaded-runtime proof
+- Current install: `install:v3` produced sha256 `6a83b81b96831f7dca24c657a5afb476dc4ba1a73355875e94fcc79206e6aca8` in repo, `~/.rcc/install/current`, and `/Volumes/extension/.rcc/install/current`; one `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` restored aggregate instance `v3-f178cf8bd542fc419708`.
+- Health: 10000/5520/5555 all report `status=ok`, manifest `version=3`, and `build_version=0.90.4001`.
+- Real 5555 replay: `model=gpt-5.5`, streaming marker `V3_RUNTIME_CLOSEOUT_OK`, HTTP 201, provider `response.completed`, no error event. Request `...T073509025-682371-3436` logged `time_i=0.1ms time_e=2454.6ms`.
+- Post-startup window: 46 unique 5555 requests, 44 Server16 frames, zero `runtime_observability_contract`, zero provider 429, and zero Error06 429. The sole Error06 was the intentionally invalid validation model `openai-responses-router-gpt-5.5`; the corrected `gpt-5.5` replay succeeded.
+- Provider-action contract remains green: isolated >=1s, sustained >=5s, provider-action 21/21; aggregate logs contain real `waitMs=1000` and `waitMs=5000` provider switches followed by typed completion.
+
+## 2026-07-30 07:45 CST - V3 Direct SSE timing closeout review correction
+- Mandatory Codex review rejected the unconditional missing-timing return in the shared Direct completion helper: both clean EOF and pre-EOF Drop called that helper, so the first fix also hid a real Runtime timing contract failure after clean EOF.
+- Red evidence: the new clean-EOF/missing-timing test failed because the log contained neither completion nor `runtime_observability_contract`.
+- Correct boundary: only `client_disconnected` suppresses terminal projection when terminal success is observed but timing is absent; the clean-EOF `complete` path always enters the completion projector, where missing timing remains an explicit 500 contract failure.
+
+## 2026-07-30 07:52 CST - V3 aggregate request counter cross-listener race
+- Post-restart live log reproduced `v3_debug_failure`: a 5555 request failed to rename `/Users/fanzhang/.rcc/state/request-id-counter.json.tmp.<pid>` because the temp file no longer existed.
+- Root source: each aggregate listener owns an independent `Arc<Mutex<V3RequestIdCounter>>`, but all three counters write the same state file and same PID-scoped temp path. Simultaneous 10000/5520/5555 allocation is therefore not mutually exclusive; one listener renames the shared temp file out from under another.
+- Unique fix boundary: construct one counter handle per aggregate before the listener loop and clone it into every listener. Preserve the single persisted counter, typed identity, fail-fast IO, and payload isolation.
+
+## 2026-07-30 08:00 CST - V3 5555 final timing and request-counter live closeout
+- Corrected the review finding: only Direct `client_disconnected` suppresses a terminal-success pre-EOF Drop with missing timing; the clean-EOF completion helper still projects missing timing as `runtime_observability_contract`.
+- Request-counter fix: aggregate constructs one counter handle before the listener loop and every 10000/5520/5555 listener receives `Arc::clone`.
+- Source evidence: Direct closeout 6/6, Runtime Direct SSE 8/8, timing verifier plus 12/12 red mutations, request-count verifier plus 8/8 red mutations, focused atomic count test, provider-action 21/21, architecture/fmt/diff gates.
+- Concurrent live/dry-run evidence: 60 cross-listener 5520/5555 requests produced zero request-counter publish errors and zero `v3_debug_failure`.
+- Installed truth: repo and both current install roots sha256 `a932272c29f739578c127d6919d6897d36ed36ebb306cc1ee7c40b24b8bb5b23`; aggregate `v3-f178cf8bd542fc419708`; 10000/5520/5555 health build `0.90.4001`.
+- Full-drain 5555 replay `...T075538868-682840-3905` returned HTTP 201 with `V3_RUNTIME_CLOSEOUT_FINAL_OK`; console recorded completed/stop, `time_i=0.1ms`, `time_e=3048.2ms`.
+- Post-startup log lines 212397-215490: zero `runtime_observability_contract`, zero counter publish failure, zero `v3_debug_failure`, zero status 429; real recovery waits still include 1s and 5s.
+- Residual: the live pre-EOF drop attempt reached Runtime EOF before the client body teardown, so exact pending-before-EOF proof remains the paired Rust pending-stream test rather than a deterministic live reproduction.
+
+## 2026-07-30 08:20 CST - V3 web_search state-machine proposal corrected
+- Jason corrected MiniMax classification: MiniMax supports remote search but cannot mix ordinary tools, so it is a search-only remote provider, not no-search/non-native.
+- Web search route is not triggered by declared tools; only current web_search call or explicit latest/search intent may activate it.
+- Proposal written: docs/goals/v3-web-search-servertool-state-machine-proposal.md. It separates native tool-mix direct providers from search-only remote providers and routes MiniMax through a Stopless-like ServerTool state machine.
+
+## 2026-07-30T08:29+0800 V3 web_search two-axis state-machine correction
+- Jason corrected the design: MiniMax supports remote search but cannot mix ordinary tools, so it is `native_remote_search_search_only`, not no-search.
+- Locked proposal at `docs/goals/v3-web-search-servertool-state-machine-proposal.md`: `web_search` route activates only from current assistant `web_search` call or explicit latest search intent, never from declared tool/capability alone.
+- New target: generic ServerTool state manager owns tool classification/state/follow-up pairing; `web_search` first tool-specific machine. GPT native tool-mix search is pass-through route; MiniMax search-only uses state-machine dispatch stripping non-search tools only inside search dispatch.
+- Added SOP lock to `.agents/skills/rcc-dev-skills/references/23-servertool-hook-dev-debug-flow.md` so future implementation does not revive V2 reenter or tool-declaration routing.
+
+## 2026-07-30 5555 asxs paid routing stop-bleed
+- Claim: resource_id:v3.live_5555_asxs_paid_routing, run: 20260730T004954Z-Macstudio.local-11576-asxs5555.
+- Symptom: 5555 route pools put duplicate cc-sol free lanes (`fwd.free.gpt-5.6`, `fwd.free.gpt-5.5`) before paid `fwd.paid.gpt-5.5`; when free lane failed/saturated, asxs paid could be delayed behind a duplicate same-provider lane or process health noise.
+- Root owner: live V3 config route group `responses_v3_5555` target order, not provider runtime or VR selection code.
+- Stop-bleed: edited live `config.v3.toml` (same inode at `/Users/fanzhang/.rcc/config.v3.toml` and `/Volumes/extension/.rcc/config.v3.toml`) so 5555 main pools order is `fwd.free.gpt-5.6 -> fwd.paid.gpt-5.5 -> fwd.v3.glm-5.2 -> fwd.v3.minimax-M3`; removed duplicate `fwd.free.gpt-5.5` from those pools only.
+- Evidence: `rccv3 config check -c` both paths PASS; `rccv3 restart -c /Users/fanzhang/.rcc/config.v3.toml --timeout-ms 30000` completed; health OK on 10000/5520/5555; 5555 VR status shows default/thinking/coding/longcontext/multimodal/web_search/search/tools all ordered free 5.6 then paid asxs and all available; live 5555 `/v1/responses` smoke returned 200 on first free lane.
+- Caveat: live smoke did not intentionally break cc-sol; paid asxs next-hop is proven by VR runtime target order/availability, not by forced provider failure.
+
+## 2026-07-30 V3 priority switch default-floor request-local exclusion
+- Claim: bug_id:v3_priority_switch_progression_after_provider_failure.
+- Symptom: priority switching looked wrong because a provider that was selected as default floor could fail inside the same request and then be selected again as `default_floor_retry_wait`, producing repeated same-provider errors instead of exhausting/switching according to the route plan.
+- Root owner: `v3/crates/routecodex-v3-target/src/lib.rs` Target10 provider selection. Runtime failure policy already re-enters target resolution with `request_local_provider_failure`; Target10 incorrectly allowed default floor protection to override that request-local exclusion.
+- Fix: default floor still bypasses process health/cooldown to keep the last configured provider available, but it no longer bypasses `request_local_provider_failure` from the current request.
+- Evidence: red test `default_floor_does_not_reselect_request_local_failed_candidate` failed before the code change; after fix, full `routecodex-v3-target --lib` passed, runtime focused switch/default-floor tests passed, `npm run install:v3` installed sha `14a494b7de32e4d6626048f690455044010b85a8a8fc01114a39ab8bae444ac5`, managed `rccv3 restart` completed, health OK on 10000/5520/5555, live 5520 smoke showed `modrouter_anthropic` provider compat error -> `provider-switch` to `glmrelay_openai` -> 200.
+- Boundary: this is not a provider-specific branch and not an error projection patch; it is the Target10 availability owner respecting the difference between process health cooldown and current-request failure exclusion.
+
+## 2026-07-30 V3 route config fable/asxs-crsa patch
+- User-authorized config-only patch: removed `claude-fable-5` route targets from V3 route config and changed ASXS paid forwarder/auth alias from `crsb` to `crsa` in both `~/.rcc` and `/Volumes/extension/.rcc`. `anthropic_v3_10000` default would have become empty, so its sole Fable target was replaced with `glmrelay_anthropic:key1:glm-5.2` instead of leaving an invalid default pool.
+- Verification: `/Users/fanzhang/.local/bin/rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` PASS and same check for `~/.rcc/config.v3.toml` PASS. No restart/live replay performed in this step.
+
+## 2026-07-30 ASXS env-key mismatch root cause
+- Root cause: Codex `~/.codex/config.toml` uses `env_key = "CRS_OAI_KEY1"` for `model_providers.asxs`, and current shell has that env var. RouteCodex ASXS provider config instead had a stale literal `apiKey` under alias `crsa`/old `crsb` path; its fingerprint differed from `CRS_OAI_KEY1` and therefore upstream auth failed even though direct Codex worked.
+- Fix: changed both ASXS provider config paths to `alias = "crsa"` plus `env = "CRS_OAI_KEY1"`; config checks pass. Runtime requires managed restart before live 5555/5520 status reflects the new auth handle.
+
+## 2026-07-30 ASXS auth shape correction
+- Correction: do not force ASXS or other providers onto V3 `env = "VAR"` handles. Required compatibility contract is V2-style provider config accepting either literal `apiKey = "..."` or env reference `apiKey = "${VAR}"`; `env` may remain supported, but must not be required or treated as the preferred migration for user configs.
+- Applied config: ASXS auth now uses `alias = "crsa"` plus `apiKey = "${CRS_OAI_KEY1}"`, keeping the credential source aligned with Codex while preserving V2-compatible config shape. Config checks pass; restart/live replay still pending.
+
+## 2026-07-30 request-local provider compat 不应进 health/action gate
+- 现场：5520/5555 Responses 历史 tool_call.arguments 为拼接 JSON 时，OpenAI Chat provider encoding 在 ProviderReqCompat06ProviderCompat 明确拒绝；旧实现把 provider_request_compat_error 作为 provider failure 记录 health/action gate，日志出现 failures/cooldown/waitMs=5000，造成请求被无谓串行/卡慢。
+- 真源：V3 provider failure runtime policy。request-local compat 是“当前请求与当前 target wire 不兼容”，只应本请求排除该 candidate 并重选；不能写 provider health，也不能占用 ProviderActionGate。
+- 验证：安装后 5520 live 样本 compat-no-wait-20260730T025051Z-53096 返回 200；日志显示 health=request_local_provider_compat failures=0 action=switch_provider next=glmrelay_anthropic，无 waitMs/cooldown。
+
+## 2026-07-30 Fable key/route restore
+- User supplied refreshed Fable API key and requested Fable restored to 5520 and 5555 before GLM-5.2. Updated `modrouter_anthropic` provider config key without printing secret. Restored `modrouter_anthropic:key1:claude-fable-5` into `responses_v3_5520` and `responses_v3_5555` route pools ahead of GLM-5.2.
+- Verification: `rccv3 config check` passed for both config roots; managed `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` completed; health OK on 10000/5520/5555; port status shows Fable available before GLM-5.2 on 5520 and 5555; explicit `claude-fable-5` provider-request dry-run on both ports selects `modrouter_anthropic` and stops before network send.
+
+## 2026-07-30 Direct SSE runtime timing duplicate owner panic
+- Symptom: V3 Direct SSE panic `V3 Runtime external timing attempt is already active` on `/v1/responses` streaming path.
+- Root cause: Direct SSE timing ownership was split incorrectly after kernel already started the external provider attempt. Correct lifecycle is kernel `start_external` once, decoder wrapper `finish_external` only after clean EOF, outcome wrapper `finish_runtime` after terminal provider outcome.
+- Fix: Removed duplicate external ownership from outcome closeout, restored decoder clean-EOF external closeout, added V3 function/mainline/resource/verification registrations, installed V3 and restarted aggregate instance.
+- Evidence: `.agent-collab/runs/20260730T030111Z-Macstudio.local-63406-dssefix/evidence.jsonl`; focused Rust Direct SSE/runtime timing tests PASS; `verify:v3-runtime-timing-observability` PASS; red fixtures PASS; `install:v3` PASS; `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` PASS; 10000/5520/5555 health PASS; live 5555 streaming `/v1/responses` completed with numeric `time_i/time_e` and no panic.
+- Remaining gap: `verify:v3-mainline-caller-flow` is blocked by pre-existing/manual-lock `v3.debug_error_foundation.mainline` fingerprint drift; refreshing that audit lock requires Jason authorization. Workspace-wide cargo fmt check also reports unrelated dirty Rust files outside this fix.
+
+## 2026-07-30 request-local provider compat default-floor no-wait closeout
+- Live replay after first fix exposed a second branch: when malformed Responses tool_call.arguments explicitly selected `glm-5.2`, the same request-local `ProviderReqCompat06ProviderCompat` failure reached default-floor retry/terminal branches and still emitted `waitMs=5000`; health stayed synthetic but action gate was still incorrectly entered.
+- Root owner remains `v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs`: request-local provider compat must terminal/reselect before any default-floor or same-provider retry branch, because retrying the same candidate cannot repair deterministic invalid provider-bound JSON projection.
+- Fix: move request-local compat handling ahead of default-floor/retry branches. If no compatible alternative exists, project `terminal_request_local_provider_compat_exhausted` with `failures=0`, `health=request_local_provider_compat`, no cooldown, no wait.
+- Evidence: unit `request_local_provider_compat_default_floor_exhausts_without_wait_or_health_mutation` passes; installed sha `89e188d1792efa75e42edb70cac9d3459c183b60141e52fa34c7a9c7e7f70f17`; live RID `compat-no-wait-glm2-20260730T031430Z-85382` shows `action=terminal_request_local_provider_compat_exhausted` without `waitMs` or cooldown.
+
+## 2026-07-30 OpenAI Chat paired parse-failure arguments closeout
+- Live source: 5520 GLM sample had a malformed historical `function_call.arguments` string and a paired `function_call_output` parse-failure message. Anthropic first hop returned upstream 502, then OpenAI Chat reselect failed locally at `ProviderReqCompat06ProviderCompat` with `arguments must be valid JSON; matching parse-failure tool result=true`.
+- Root owner: `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs`, the adjacent Responses -> OpenAI Chat provider-wire codec. This is not a Server/SSE/Error06 projection issue.
+- Fix: paired parse-failure histories now keep the tool result and encode the malformed call as OpenAI Chat `"arguments":"{}"`, matching the existing Anthropic self-correction behavior. Unpaired malformed arguments still fail before provider send.
+- Evidence: focused paired/unpaired Rust field-parity tests pass; OpenAI Chat codec characterization passes; `npm run install:v3` and managed `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` pass; health is OK on 10000/5520/5555; live 5520 GLM parse-feedback replay completed with response text `ok` and no local `ProviderReqCompat06ProviderCompat` error.
+
+## 2026-07-30 V3 provider event console buffering diagnosis
+- Symptom: live V3 console/provider error and provider-switch lines are only visible after the runtime response returns; during wait/reselect/provider retry the terminal has no progress line.
+- Expected: request start is printed at ingress; provider-error/provider-switch are printed when Error05/provider failure policy creates the event; final completed/usage remains printed at terminal closeout.
+- SOP/model flow: `v3.responses.console_projection`; Runtime owns `V3RuntimeObservability`/`provider_failure_events`, Server owns human console projection. Resource map: `v3.runtime.responses_observability` is diagnostic side-channel, never provider/client payload.
+- First divergence: `responses_relay_runtime.rs::handle_v3_responses_relay_provider_failure` and direct `kernel.rs` push `V3RuntimeProviderFailureObservation` into a Vec, but server emits `emit_v3_provider_observability_console_lines` only after `execute_*runtime*.await` returns.
+- Root cause: there is no request-scoped event sink between Runtime event creation and Server human formatter; final observability is correct but too late for long wait/reselect cycles.
+- Owner/edit scope: Runtime may publish the already-created diagnostic event through an injected side-channel sink; Server human formatter consumes it and dedupes final projection. No request/response payload, VR, provider wire, or error policy semantics may change.
+
+## 2026-07-30 V3 realtime route/provider console closeout
+- Verified root cause: Runtime produced route and provider failure observations in real time, but Server only projected most human console lines from final `V3RuntimeObservability` after runtime returned. The route sink also printed without marking the request-scoped dedupe set, so final closeout could print a duplicate route block after terminal failure.
+- Fix owner: Runtime exposes diagnostic side-channel sinks for route selection and provider failure events; Server injects request-scoped closures, formats human output, and dedupes final observability. Route emission now marks the realtime route-selection key at print time; final observability only backfills missing provider events and terminal usage/errors.
+- Architecture boundary: no request/response payload, provider wire, Virtual Router selection, provider health policy, Error05 action, or Error06 projection semantics changed. Runtime remains event truth owner; Server remains console projection owner.
+- Compile blocker repaired: untracked `kernel/direct_sse_provider_outcome.rs` used `Value::pointer` on `serde_json::Map`; changed to object `get()` chain so the required V3 runtime crate builds.
+- Evidence: targeted runtime/server tests passed; `cargo +stable fmt --all --manifest-path v3/Cargo.toml` passed; `CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli` passed; installed sha `45901679fdbf21084ec349133316615239b5df7b07e5b9843a240f5e32ea0b2a`; managed restart passed for 10000/5520/5555. Live 5520 replay RID `realtime-print-final-20260730T043421Z-83991` returned HTTP 400 as expected and log order showed route first, provider-error/provider-switch during waits, terminal last, and no post-terminal route duplicate.
+
+## 2026-07-30 V3 realtime console review status
+- `codex -p cc review` on the scoped embedded diff returned `VERDICT: FAIL`.
+- Findings fixed immediately: health build_version no longer falls back to crate version and now requires installed package truth; realtime route/provider dedupe mutex poisoning is fail-fast; Direct SSE provider outcome rejects typeless provider events instead of silently defaulting.
+- Remaining review blockers are broader existing dirty-scope issues in the same modified files: session admission behavior, Direct SSE keepalive injection/passthrough, Direct Error05/provider-health changes, post-commit SSE error chain projection, and missing function/mainline map entries for the new diagnostic sink edges.
+- Post-fix evidence remains green for realtime console behavior: final live replay RID `realtime-print-final-20260730T045148Z-98529` showed route before provider-error/provider-switch, terminal last, and no post-terminal route duplicate.
+
+## 2026-07-30T13:36+0800 V3 realtime console follow-up
+- Fixed Direct SSE passthrough keepalive injection in `responses_direct_output_response_with_console`: successful Direct SSE now passes `None` to `v3_client_sse_body`, preserving provider bytes.
+- Fixed post-commit SSE console error projection to use Error01→Error06 instead of a fabricated one-node `V3Error01SourceRaised` chain.
+- Fixed Direct SSE event codec to reject SSE `event` / JSON `type` mismatch and typeless provider events.
+- Fixed route selection dedupe key: removed `attempts` from the route key so same request/same target is not reprinted when runtime observability attempts changes.
+- Verification passed: server realtime provider-failure test, server Direct SSE tests, runtime Direct SSE tests, provider reselect test, architecture mainline map, architecture manifest sync, `cargo build -p routecodex-v3-cli`, global `install-v3-cli`.
+- Online state: V3 0.90.4003 running under tmux session `rccv3-4003-main`, listener PID observed as 27812, health OK on 10000/5520/5555 after start. Final marker `realtime-final-20260730T052749Z-27967` showed route before terminal with no post-terminal route duplicate.
+- Follow-up defect found: marker `realtime-final2-20260730T053138Z-9304` showed provider-error/provider-switch emitted immediately, but provider switch then returned `v3_route_target_runtime_failure: provider failure produced invalid Error05 action RejectNonProviderError`; terminal console line exists but lost session identity (`sessionID:-`). This is Error05/session projection scope, not console latency.
+- Review status: broad codex review over dirty worktree hung >3 minutes; explicit review PIDs 28217/28221/28222 were terminated. Need smaller isolated review diff or clean worktree before commit/push.

@@ -4814,3 +4814,120 @@ Tags: #routecodex #5520 #10000 #gpt56-routing-removed #encrypted-reasoning
 ## 2026-07-28 — V3 release health version truth
 - V3 `/health` keeps protocol/schema `version=3`; release/runtime semver must be exposed as `build_version` and release install verification must read `build_version` for V3, not reinterpret `version` as package semver.
 - `install:release` may successfully install/restart yet fail if its verifier is V2-only; fix verifier/schema truth, not the running server.
+
+## 2026-07-29 - V3 console human/debug projection truth
+- `routecodex-v3-server` is the sole V3 console presentation owner. Human port/protocol/project/route/model plus the request/response headline are one typed, bright-colored line; the complete machine diagnostic is a separate dim line after exactly one blank separator.
+- Human scope columns and diagnostic session scope use terminal display width, not bytes. Plain and ANSI renderers must preserve the same three-line shape, and rendered console strings must never be reparsed to recover scope or value semantics.
+- Rust tests that validate ANSI must call the typed colorizer directly. Do not mutate process-global color environment variables in parallel tests.
+- Source closeout passed focused `23/23`, full server lib `40/40`, server+runtime check, scoped rustfmt, architecture/function/mainline/manifest gates, and Codex review is required before delivery. Installed/live visual truth still requires a separate global install, managed restart, and real 5520 replay.
+
+## 2026-07-29 - V3 Responses -> OpenAI Chat image_url wire shape
+- MiniMax/OpenAI Chat providers reject Responses-derived image parts when provider wire emits `{"type":"image_url","image_url":"data:image/..."}`; correct OpenAI Chat wire shape is `{"type":"image_url","image_url":{"url":"data:image/...","detail":"..."}}`.
+- Unique owner is `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs`, the Responses -> OpenAI Chat provider-wire codec. Do not fix this in Virtual Router, Target, provider error projection, SSE, server handler, or provider switching.
+- Verification must inspect `~/.rcc/codex-samples/openai-responses/ports/<port>/<requestId>/provider-request.json` for `image_url` object shape and run a live same-entry image request; health alone is not evidence.
+
+## 2026-07-29 - V2/V3 current-turn route classification truth
+- V2 and V3 share one Rust classifier in `sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core`. Route signals come from the current active turn only; declared `tools`, `additional_tools`, `tool_choice`, descriptions, schemas, and historical calls contribute zero signal.
+- Actual current-turn tool calls/outputs classify thinking/coding/search/tools. Multimodal routing reads only request-scoped `metadata.hasImageAttachment`. Web-search routing reads only an actual current-turn web-search call or strict newest-user web-search keywords.
+- The classifier owns ordered route candidates: primary, optional configured `longcontext`, mandatory `default`. Virtual Router consumes that order; Target owns only expansion, health/capability availability, and request-local exclusions.
+- Installed/live proof: current-HEAD integration V3 CLI sha256 `bafa73dbdfe99222d595537265f39f9bc1ef59c31c488b7f82a18c1e4a3d6c5c`; aggregate restart instance `v3-44d74d11b52a8ff7372d`; ports 10000/5520/5555 healthy. Exact old 5520 sample `662023-8758` declares `web_search` but ends in `apply_patch`; replay request `664127-1764` selected `route=coding -> modrouter_anthropic.claude-fable-5` and completed HTTP 200 SSE.
+
+## 2026-07-29 - V3 console SSE error truth source contract
+- Supersedes the earlier same-day console source-closeout counts and pending-review state: focused console tests are 26/26, full server lib is 43/43, error lib is 5/5, and the scoped Codex architecture review returned `VERDICT: PASS`.
+- Direct SSE console closeout must preserve the original typed `V3Error01SourceRaised`; converting it to text and rebuilding Error01 loses kind/stage/code/message/link truth. Relay may report a transport observation only through an error-owner raise API.
+- Client disconnect originates at `V3ServerRespOutbound06ClientFrame`, projects HTTP 499 with `project_client_disconnect`, and remains health-neutral. SSE error projection rejects 2xx and traverses the canonical adjacent `V3Error01SourceRaised -> ... -> V3Error06ClientProjected` chain.
+- Console mainline review truth must include that adjacent error chain and the real terminal-output resource flow. stdout/stderr writes belong to `v3.console.terminal_output`; normal console projection does not read an existing debug artifact.
+- Source gates and review do not prove installed/live behavior. A managed V3 install/restart and real 5520 replay remain required before claiming the console presentation is live.
+
+## 2026-07-29 - V3 terminal provider errors consume the action gate
+- `ProjectTerminal` is a provider action, not an exemption from backoff. Before Error06, Direct/Relay/exact-pin provider exhaustion records the failure and consumes the same process-shared admission used by retry/reselect: isolated >=1s, sustained >=5s, one admission per generation.
+- A routing-group success can remove an active gate while a terminal request waits. The still-failed request must re-record its failure and wait again; treating `released_by_success` as permission to project the old error creates immediate stale Error06 responses.
+- Installed proof on aggregate 10000/5520/5555 used exact provider `asxs.gpt-5.5`: isolated terminal 401 took 2.181s; two concurrent sustained terminal requests completed at 10.792s and 15.779s. Installed binary sha256 was `0b5e7b0266b2ddcbefff183961799dd3f7c8e78fe7b9d8b3015b8399f48a3ddf`.
+
+## 2026-07-29 - V3 stopless default truth is compiled in Config04
+- `stopless_center` must be materialized as `true` during `routecodex-v3-config` Config04 resource-registry compilation when omitted from authoring. Runtime reads the compiled manifest and server override only; absence is not a valid live default.
+- Verified precedence: omitted global compiles true, explicit global false remains false, server false overrides compiled global true, and server true overrides global false.
+- Runtime evidence: omitted-feature Responses relay injects stopless guidance and exactly one `reasoningStop` tool; missing client session scope remains inactive and writes no StoplessCenter state.
+- Activation additionally requires an explicit Relay StoplessControl handle with a valid client session/conversation scope. A no-scope runtime wrapper must interpret missing control as inactive (`false`), not as implicit valid scope; this keeps public test/helper wrappers from bypassing the request-truth isolation boundary.
+- Installed/live proof: task-only V3 binary sha256 `e33958d8e51936e32ed27d5cf1b0d49403f5971ad78162962c2eca15db992aa2`; one aggregate restart instance `v3-44d74d11b52a8ff7372d`; ports 10000/5520/5555 healthy. Valid-scope 5520 sample `672970-10607` converted text-only provider `end_turn` without completion evidence into standard client `requires_action`/`reasoningStop`; no-scope sample `672921-10558` injected no guidance/tool and passed through as `completed`.
+- Review/commit truth: Codex review round 3 returned `VERDICT: PASS`; task-only commit is `654a9d858f4c5161d766fd17502b4d31e8822669`.
+- Later runtime replacement proof: another worker installed V3 build `0.90.3994` (current install sha256 `86d1afd789d6743a7acc18854c39bf2983d41d544b3fbcf664d3a4c226966eb9`) without this task restarting it. Current 5520 provider-request dry-runs still preserve the contract: valid scope emits exactly one `reasoningStop`, `tool_choice={"type":"any"}`, client `requires_action`, and no network send; missing scope emits zero stopless tools/no-op, client `completed`, and no network send.
+
+## 2026-07-29 - V3 5520 fable Responses Anthropic compat truth
+- 5520 default pool first candidate is fable; when logs show `provider=modrouter_anthropic... action=switch_provider next=glmrelay...` plus later started/route target as GLM, fable was attempted first and failed before provider send.
+- For Responses entry, `original_responses_payload` is optional: ReqInbound keeps tool/search/image history surfaces as the current payload and may not create an original snapshot. ReqOutbound/provider compat must consume the current governed payload when no original snapshot exists; do not use MetadataCenter or require raw original replay for provider wire construction.
+- Provider compat metadata/unmappable-field errors should enter the unified provider error chain and keep provider body unsent; tests should assert error_chain/observability rather than expecting runtime `Err` if the runtime contract projects client-visible 502.
+
+## 2026-07-29 V3 Responses console start + Anthropic reasoning null identity
+- V3 console `started` must be emitted at request receipt with `route=- target=- reason=received`; VR/provider truth must use a separate `event=route_selected`. Delaying `started` until observability makes live requests look like they never entered the server.
+- Anthropic relay codec rule: Responses reasoning `encrypted_content:null` means absent identity and must not fail Anthropic wire projection; non-string or empty `encrypted_content` remains malformed and fail-fast. Owner is `v3-runtime/src/hub_v1/anthropic_codec.rs`, not provider error projection or SSE transport.
+- 499 diagnosis rule: if a `client_disconnect` line predates the current globally installed build or follows a manually aborted validation curl, do not treat it as live root-cause evidence. Verify with build version, immediate receipt log, request id, and post-restart same-entry replay/log window.
+
+## 2026-07-29 - V3 provider action gate is recovery-only
+- Provider action gate belongs to Error05 provider-failure recovery, not the normal fresh request admission path. A fresh Direct/Relay request must not call `wait_for_selected_provider_action` just because another provider in the same server/routing-group has an active terminal/failure lane.
+- Verified root symptom: pre-fix 5555 had 100+ completed Responses requests with `time_i >= 60s` while `time_e` stayed provider-sized; representative request spent ~452s internally and repeatedly traced `V3Target10ConcreteProviderSelected -> V3ProviderActionGateTerminalReevaluation` before provider send.
+- Correct lifecycle: only after the current request receives `WaitThenReselect` or `WaitThenRetrySame` from provider failure policy does it set a local pending action-gate flag; the next loop consumes the shared gate once, then clears the flag before provider send.
+- Architecture boundary: provider action gate is a process-shared Error05/retry/reselect resource. Normal request selection remains VR/Target/Execution owner; leaking group-wide recovery state into normal admission causes SSE convoy/livelock-like stalls across unrelated sessions.
+- Live closeout: installed V3 0.90.3993 and aggregate restart of 10000/5520/5555. Post-restart 5555 requests show `time_i` in single-digit milliseconds on normal completions, no `V3ProviderActionGateTerminalReevaluation`, and a controlled SSE smoke completed in 3.75s.
+
+## 2026-07-29 - V3 debug snapshots must not persist full live payloads
+Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live client-request capture runs before runtime execution. Full long text/image payload persistence made sessions appear stuck at `V3Server03HttpRequestRaw` and grew `~/.rcc/codex-samples` to 14G. The owner is `routecodex-v3-debug` redaction: real request semantics stay untouched, but debug/snapshot side-channel payloads must replace media and oversized strings with placeholders. Live proof: large dry-run returned in 0.095s and wrote 402B `request.json`; post-restart scan showed no in-runtime stuck requests, no `time_i>=60s`, and no provider-action-gate terminal reevaluation.
+
+## 2026-07-29 - V3 debug snapshots must bound aggregate history arrays
+- Verified source: 5555 live sessions after debug media redaction still wrote 100KB+ request.json files when request history had many input/tool entries. Per-string redaction was insufficient because aggregate arrays remained unbounded.
+- Root owner: routecodex-v3-debug redaction, not server/SSE/provider payload. Debug snapshots are side-channel artifacts; bounding arrays/strings there does not mutate real business payload semantics.
+- Locked behavior: debug side-channel arrays beyond the configured cap must emit ROUTECODEX_DEBUG_OMITTED_ARRAY_ITEMS, media/large strings must be placeholders, and live request snapshots must stay bounded even when real requests remain full fidelity.
+- Verification: routecodex-v3-debug debug_runtime_contract includes debug_side_channel_bounds_large_history_arrays; live 0.90.3997 dry-run sample proved request.json 61,910 bytes with placeholders and no raw image/history tail/secret.
+
+## 2026-07-29 - V3 Responses malformed historical function arguments
+- A Responses history can contain malformed `function_call.arguments` plus a matching parse-failure output, but OpenAI Chat provider wire has no lossless representation for that invalid arguments string. Replacing it with `"{}"` changes payload semantics and is forbidden even when the tool output records the parse failure.
+- The unique owner is Rust `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs` at `ProviderReqCompat06ProviderCompat`. The codec must preserve the original request and fail explicitly before provider transport, naming the call id and whether matching parse feedback exists.
+- Required regression: the valid Responses -> OpenAI Chat parity case sends once; malformed cases with and without matching parse feedback both produce zero provider transport captures. Runtime retry/reselection remains exclusively owned by the typed provider failure policy.
+
+## 2026-07-29 - V3 provider HTTP transport must enforce local read timeout
+- `x-stainless-timeout: 300` is only an upstream/provider header and does not bound RouteCodex's local reqwest send/read. `routecodex-v3-provider-responses` must configure a real reqwest client read timeout, or a hung upstream can hold provider transport and provider-action recovery state indefinitely.
+- Unique owner: `ProviderResponsesTransport::default()` in `v3/crates/routecodex-v3-provider-responses/src/transport.rs`. Do not fix this in SSE handler, server frame projection, Virtual Router, client timeout parsing, debug snapshots, or provider-action gate policy.
+- Verification truth: a hanging local TCP server test must time out locally; installed 0.90.4000 on 5520/5555/10000 showed controlled 5555 SSE smoke `675127-12764` completed in 3.588s with `time_i=0.1ms`, and post-smoke log scan had zero open requests older than 60s and zero `time_i>1000ms` since 21:10Z.
+
+## 2026-07-29 - V2 provider action gate explicit ownership truth
+- V2 provider recovery actions are process-shared Rust state, not TS timers. The admission identity is `lane_group_key + generation + action_scope_key`; waiters are FIFO and each generation admits at most one action.
+- An admitted action has no wall-clock lease. Only the matching action scope may release it through provider failure, provider success, terminal commit, or health-neutral explicit abandon. Five seconds is the sustained spacing floor after an outcome, never cancellation evidence.
+- RequestExecutor must pass initialized `routingPolicyGroupForAttempt` to every provider failure consumer and preserve initialized `sessionId/conversationId` through `resolveRequestExecutorPipelineAttempt -> finalizeRequestExecutorAttemptMetadata`. Raw-entry metadata is not a fallback truth.
+- Active timing is isolated first action `>=1s`; overlapping waiter or continuous failure promotes the lane group to sustained mode, where subsequent provider actions are `>=5s` apart. The old `1s -> 2s -> 3s` cycle and fixed-every-5s statements are retired.
+
+## 2026-07-29 - V3 provider Responses terminal truth and post-commit boundary
+- Provider-side Responses SSE success requires `response.completed`. `response.done` is a client projection event, `[DONE]` is transport framing, and `response.requires_action` is non-terminal provider state; none may repair or replace a missing provider `response.completed`.
+- Relay materializes provider SSE before client commit, so missing terminal is a provider failure that may enter the canonical Error01-Error05 policy and reselect. Same-protocol Direct cannot safely reselect after client bytes are committed because that would duplicate or mix output; it must fail the stream explicitly and record provider health/action-gate state for later requests.
+- V3 provider action admission is a process-shared, recovery-only Rust resource with FIFO waiters and an explicitly owned permit. Fresh requests bypass unrelated recovery lanes. The permit has no time lease and is released only by matching success, failure, terminal commit, or health-neutral drop/abandon; failed actions drop the permit before re-entering Error05 to avoid self-wait.
+- Installed `0.90.4001` evidence on 10000/5520/5555: exact old 5555 request replay completed through Error05 reselection with `response.completed` and `response.done`. The replay did not reproduce the stochastic upstream EOF, so it proves installed recovery behavior, not that `cc-sol` will never emit another incomplete stream.
+
+## 2026-07-30 - V3 Direct SSE terminal-before-EOF must not fabricate observability errors
+- Direct SSE Runtime timing is published only after decoder-validated clean EOF. If a client closes immediately after receiving provider `response.completed`, Server may have terminal response status but no Runtime timing yet.
+- This state is not provider failure, not client_disconnect, and not a valid success headline with timing. Server console projection must emit no fabricated terminal success/error line rather than synthesize timing, print `unreported`, or raise `runtime_observability_contract` 500.
+- Verified fix in `routecodex-v3-server`: terminal-success drop before Runtime EOF emits neither false 500 nor 499; clean EOF still emits typed completion with numeric timing; pre-terminal drop remains health-neutral 499; failed terminal remains 502.
+- Installed/live proof on build `0.90.4001`: 5555 streamed request closed after `response.completed`; `runtime_observability_contract` count stayed `284 -> 284`.
+
+## 2026-07-30 - V3 5555 timing closeout loaded-runtime baseline
+- Current installed `rccv3` sha256 is `6a83b81b96831f7dca24c657a5afb476dc4ba1a73355875e94fcc79206e6aca8` across repo and both current install roots. Aggregate instance `v3-f178cf8bd542fc419708` serves 10000/5520/5555 at build `0.90.4001`.
+- The post-startup 5555 window contained 46 unique requests and 44 projected Server16 frames with zero `runtime_observability_contract`, zero provider 429, and zero Error06 429. A real `gpt-5.5` SSE replay returned HTTP 201 and `V3_RUNTIME_CLOSEOUT_OK`; request `...T073509025-682371-3436` completed with typed `time_i=0.1ms` and `time_e=2454.6ms`.
+- Provider failure pacing remains a separate Error05 recovery contract: the focused V3 provider-action suite passed 21/21, and live aggregate logs showed `waitMs=1000` then `waitMs=5000` before provider switch/completion. Do not change this policy to repair Server observability closeout.
+
+## 2026-07-30 - V3 Direct SSE timing closeout corrected boundary
+- The no-projection rule applies only to `V3DirectSseConsoleFinalizer::client_disconnected` when terminal success is observed before Runtime clean EOF and timing is still absent. The shared clean-EOF completion projector must not suppress missing timing.
+- Clean EOF with missing Runtime timing is a real `runtime_observability_contract` failure and must remain explicit. Pre-EOF terminal-success Drop emits no completion, 500, or 499; pre-terminal Drop remains 499; observed failure remains 502.
+- The correction is locked by paired Rust tests and the timing verifier/red fixtures: clean EOF missing timing fails explicitly, while pre-EOF terminal-success Drop stays silent.
+
+## 2026-07-30 - V3 aggregate request counter is process-shared
+- `spawn_v3_server_aggregate` must construct one `Arc<Mutex<V3RequestIdCounter>>` before the listener loop and clone that handle into every listener. Per-listener locks are invalid because all listeners publish the same `~/.rcc/state/request-id-counter.json` through the same PID-scoped temp path.
+- The reproduced race was one listener renaming `request-id-counter.json.tmp.<pid>` before another listener's rename, producing `No such file or directory` and `v3_debug_failure`. Sharing the aggregate lock fixes the first divergence without a second counter, payload change, or IO fallback.
+- The source gate and 8/8 red fixtures reject listener-local counter resurrection. Sixty concurrent 5520/5555 dry-run requests produced zero counter publish failures and zero `v3_debug_failure`.
+
+## 2026-07-30 - V3 5555 corrected loaded-runtime baseline
+- The previous `6a83b81...` hash remains historical. Current repo, `~/.rcc/install/current`, and `/Volumes/extension/.rcc/install/current` `rccv3` sha256 is `a932272c29f739578c127d6919d6897d36ed36ebb306cc1ee7c40b24b8bb5b23`; aggregate instance remains `v3-f178cf8bd542fc419708` on build `0.90.4001`.
+- In log lines 212397-215490, 5555 recorded 139 requests and 98 projected frames with zero `runtime_observability_contract`, zero request-counter publish failure, zero `v3_debug_failure`, and zero client/provider status 429. Provider recovery still showed `waitMs=1000` and `waitMs=5000`.
+- Real full-drain request `...T075538868-682840-3905` returned HTTP 201 and `V3_RUNTIME_CLOSEOUT_FINAL_OK`, then logged `responseStatus=completed`, `finish_reason=stop`, `time_i=0.1ms`, and `time_e=3048.2ms`. The exact pending-before-EOF state was not reproduced live because Runtime reached EOF before client teardown; paired pending-stream Rust tests are the precise negative proof.
+
+## 2026-07-30 V3 realtime console event projection
+- V3 route/provider human console events must be emitted through Runtime diagnostic side-channel sinks at event creation time, not only from final `V3RuntimeObservability`. Runtime remains the route/provider-failure event truth owner; Server remains the only human console projection/dedupe owner.
+- Route-selected console emission must mark request-scoped route dedupe immediately. Final observability is allowed to backfill missing provider events and terminal usage/error lines, but must not reprint route blocks after terminal failure/completion.
+- Console latency fixes must not change request/response payloads, provider wire, Virtual Router selection, provider health/Error05 policy, or Error06 projection.

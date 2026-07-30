@@ -1,0 +1,207 @@
+lifecycle_id: v3.runtime_timing_observability.mainline
+summary: Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.
+owner_feature_id: v3.runtime_timing_observability
+entrypoint:
+  node_id: V3RuntimeTimingStart
+  wiki_page: null
+  call_map_chain_id: v3.runtime_timing_observability.mainline
+node_ids:
+- V3RuntimeTimingExternalAttempt
+- V3RuntimeTimingExternalComplete
+- V3RuntimeTimingObservability
+- V3RuntimeTimingServerProjection
+- V3RuntimeTimingStart
+- V3RuntimeTimingStreamObservation
+- V3RuntimeTimingTerminal
+edges:
+- step_id: v3-runtime-timing-01
+  from_node: V3RuntimeTimingStart
+  to_node: V3RuntimeTimingExternalAttempt
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads: []
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-02
+  from_node: V3RuntimeTimingExternalAttempt
+  to_node: V3RuntimeTimingExternalComplete
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-03
+  from_node: V3RuntimeTimingExternalComplete
+  to_node: V3RuntimeTimingExternalAttempt
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-04
+  from_node: V3RuntimeTimingExternalComplete
+  to_node: V3RuntimeTimingTerminal
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-05
+  from_node: V3RuntimeTimingTerminal
+  to_node: V3RuntimeTimingStreamObservation
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_observability
+- step_id: v3-runtime-timing-06
+  from_node: V3RuntimeTimingStreamObservation
+  to_node: V3RuntimeTimingServerProjection
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces: []
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes: []
+- step_id: v3-runtime-timing-07
+  from_node: V3RuntimeTimingTerminal
+  to_node: V3RuntimeTimingObservability
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_observability
+- step_id: v3-runtime-timing-08
+  from_node: V3RuntimeTimingObservability
+  to_node: V3RuntimeTimingServerProjection
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces: []
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes: []
+- step_id: v3-runtime-timing-09
+  from_node: V3RuntimeTimingStart
+  to_node: V3RuntimeTimingExternalAttempt
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-10
+  from_node: V3RuntimeTimingExternalAttempt
+  to_node: V3RuntimeTimingExternalComplete
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-11
+  from_node: V3RuntimeTimingExternalComplete
+  to_node: V3RuntimeTimingTerminal
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_timing_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_timing_observability
+- step_id: v3-runtime-timing-12
+  from_node: V3RuntimeTimingTerminal
+  to_node: V3RuntimeTimingStreamObservation
+  status: anchored
+  owner_feature_id: v3.runtime_timing_observability
+  binding_pending: null
+  split_binding_id: null
+  resource_flow:
+    consumes:
+    - v3.runtime.responses_timing_observability
+    produces:
+    - v3.runtime.responses_observability
+    side_channel_reads:
+    - v3.runtime.responses_timing_observability
+    side_channel_writes:
+    - v3.runtime.responses_observability
+verification:
+  required_gates:
+  - npm run verify:architecture-mainline-call-map
+  - npm run verify:architecture-mainline-manifest-sync

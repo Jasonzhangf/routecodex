@@ -1,0 +1,193 @@
+lifecycle_id: v3.console_human_readable_layering.mainline
+summary: Runtime-owned Responses Direct/Relay observability, post-commit typed
+  Error01, pre-commit Error06, listener startup, and debug-sink failures enter
+  Server-owned typed layered console projections without rendered-text
+  reparsing.
+owner_feature_id: v3.console_human_readable_layering
+entrypoint:
+  node_id: V3ConsoleObs01RuntimeObservability
+  wiki_page: null
+  call_map_chain_id: v3.console_human_readable_layering.mainline
+node_ids:
+  - V3ConsoleDebugFailure08HumanBlock
+  - V3ConsoleError01HumanBlock
+  - V3ConsoleError06HumanBlock
+  - V3ConsoleObs01RuntimeObservability
+  - V3ConsoleProvider04ExceptionalBlock
+  - V3ConsoleReq02HumanBlock
+  - V3ConsoleResp03HumanBlock
+  - V3ConsoleStartup07HumanBlock
+  - V3ConsoleStopless05ExceptionalBlock
+  - V3DebugSink01WriteFailed
+  - V3Error01SourceRaised
+  - V3Error06ClientProjected
+  - V3RuntimeStreamObservation
+  - V3ServerRespOutbound06ClientFrame
+  - V3ServerStartup01ListenerSetPreflight
+  - V3SseTerminalFailureObservation
+edges:
+  - step_id: v3-console-01
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleReq02HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-02
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleResp03HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-03
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleProvider04ExceptionalBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-04
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleStopless05ExceptionalBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-05
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleResp03HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-06
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleStopless05ExceptionalBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-07
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleResp03HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-08
+    from_node: V3ConsoleObs01RuntimeObservability
+    to_node: V3ConsoleStopless05ExceptionalBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-09
+    from_node: V3Error01SourceRaised
+    to_node: V3ConsoleError01HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-10
+    from_node: V3Error01SourceRaised
+    to_node: V3ConsoleError01HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-11
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-12
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-13
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-14
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-15
+    from_node: V3ServerStartup01ListenerSetPreflight
+    to_node: V3ConsoleStartup07HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-16
+    from_node: V3DebugSink01WriteFailed
+    to_node: V3ConsoleDebugFailure08HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-17
+    from_node: V3SseTerminalFailureObservation
+    to_node: V3Error01SourceRaised
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-18
+    from_node: V3RuntimeStreamObservation
+    to_node: V3Error01SourceRaised
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-19
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-20
+    from_node: V3Error06ClientProjected
+    to_node: V3ConsoleError06HumanBlock
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-21
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3RuntimeStreamObservation
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-22
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3RuntimeStreamObservation
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+  - step_id: v3-console-23
+    from_node: V3RuntimeStreamObservation
+    to_node: V3Error01SourceRaised
+    status: anchored
+    owner_feature_id: v3.console_human_readable_layering
+    binding_pending: null
+    split_binding_id: null
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync
