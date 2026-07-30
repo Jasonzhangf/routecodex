@@ -10,6 +10,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;
+pub const V3_PROVIDER_ACTION_MEDIUM_DELAY_MS: u64 = 3_000;
 pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;
 const V3_PROVIDER_ACTION_IDLE_TTL_MS: u64 = 10 * 60_000;
 
@@ -103,6 +104,7 @@ impl Hash for V3ProviderActionGateKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3ProviderActionGateMode {
     Isolated,
+    Medium,
     Sustained,
 }
 
@@ -884,6 +886,7 @@ fn unregister_waiter(state: &mut V3ProviderActionGateState, ticket: u64) {
 fn mode_delay_ms(mode: V3ProviderActionGateMode) -> u64 {
     match mode {
         V3ProviderActionGateMode::Isolated => V3_PROVIDER_ACTION_ISOLATED_DELAY_MS,
+        V3ProviderActionGateMode::Medium => V3_PROVIDER_ACTION_MEDIUM_DELAY_MS,
         V3ProviderActionGateMode::Sustained => V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS,
     }
 }
