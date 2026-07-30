@@ -4237,7 +4237,8 @@ fn format_v3_provider_switch_console_content(
     request_id: &str,
     event: &V3RuntimeProviderFailureObservation,
 ) -> String {
-    let next = event
+    let from = format_v3_console_provider_key_label(&event.provider_key);
+    let target = event
         .next_provider_key
         .as_deref()
         .map(format_v3_console_provider_key_label)
@@ -4245,11 +4246,8 @@ fn format_v3_provider_switch_console_content(
     format_v3_console_timed_content(
         "[provider-switch]",
         &format!(
-            "req={} target={} result={} next={} reason=provider_failure",
-            request_id,
-            format_v3_console_provider_key_label(&event.provider_key),
-            event.action,
-            next
+            "req={} target={} from={} result={} reason=provider_failure",
+            request_id, target, from, event.action
         ),
     )
 }
@@ -9112,8 +9110,14 @@ mod tests {
             format_v3_provider_switch_console_content("req-provider-switch", &event);
         assert!(switch_content.contains("[provider-switch]"));
         assert!(switch_content.contains(
-            "target=limited[key1].gpt-5.5 result=switch_provider next=minimax[key1].MiniMax-M3"
+            "target=minimax[key1].MiniMax-M3 from=limited[key1].gpt-5.5 result=switch_provider"
         ));
+        assert!(
+            switch_content
+                .find("target=minimax[key1].MiniMax-M3")
+                .unwrap()
+                < switch_content.find("reason=provider_failure").unwrap()
+        );
 
         let colored = colorize_v3_layered_console_line(
             V3ConsoleLayeredBlock::new("", &error_content, &error_content, ""),
