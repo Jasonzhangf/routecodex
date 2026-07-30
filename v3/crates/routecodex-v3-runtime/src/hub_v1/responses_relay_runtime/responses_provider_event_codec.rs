@@ -823,11 +823,11 @@ fn merge_v3_runtime_responses_terminal_and_stream_output_item(
 ) -> Value {
     let (Some(terminal), Some(stream)) = (terminal_item.as_object(), stream_item.as_object())
     else {
-        return stream_item.clone();
+        return terminal_item.clone();
     };
     let mut merged = terminal.clone();
     for (key, value) in stream {
-        merged.insert(key.clone(), value.clone());
+        merged.entry(key.clone()).or_insert_with(|| value.clone());
     }
     Value::Object(merged)
 }
@@ -903,6 +903,10 @@ mod tests {
         assert_eq!(output.len(), 1, "same tool call must not be duplicated");
         assert_eq!(output[0]["call_id"], "call_shared");
         assert_eq!(output[0]["id"], "fc_stream");
+        assert_eq!(
+            output[0]["arguments"], "{}",
+            "response.completed arguments must remain authoritative"
+        );
     }
 
     #[test]
@@ -962,6 +966,10 @@ mod tests {
         );
         assert_eq!(output[0]["call_id"], "call_search");
         assert_eq!(output[0]["id"], "ts_stream");
+        assert_eq!(
+            output[0]["status"], "completed",
+            "response.completed status must not regress to stream state"
+        );
     }
 
     #[test]
@@ -989,5 +997,10 @@ mod tests {
         let output = terminal["output"].as_array().expect("terminal output");
         assert_eq!(output.len(), 1, "same message item must not be duplicated");
         assert_eq!(output[0]["id"], "msg_shared");
+        assert_eq!(
+            output[0]["content"],
+            json!([]),
+            "response.completed content must remain authoritative"
+        );
     }
 }
