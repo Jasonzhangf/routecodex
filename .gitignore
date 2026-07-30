@@ -123,6 +123,12 @@ sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outboun
 target/
 sharedmodule/llmswitch-core/rust-core/target/
 sharedmodule/llmswitch-core-migrated/
+# Custom cargo target dirs and side-band rustc artifacts (e.g. .target-rcc-*, .target-*)
+.shared-*/.target-*/
+**/.target-*/
+# E2E / stress test scratch artifacts (random-size files, never source-of-truth)
+*.bin
+zterm-e2e-download-*.bin
 # llmswitch-core src/tools generated files
 sharedmodule/llmswitch-core/src/tools/*.js
 sharedmodule/llmswitch-core/src/tools/*.d.ts
