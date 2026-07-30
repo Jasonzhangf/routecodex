@@ -807,8 +807,16 @@ fn find_v3_runtime_responses_terminal_output_item_index(
 }
 
 fn read_v3_runtime_responses_output_item_identity(item: &Value) -> Option<&str> {
-    item.get("id")
-        .or_else(|| item.get("call_id"))
+    let is_tool_call = matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call" | "custom_tool_call" | "tool_call")
+    );
+    let identity = if is_tool_call {
+        item.get("call_id").or_else(|| item.get("id"))
+    } else {
+        item.get("id").or_else(|| item.get("call_id"))
+    };
+    identity
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
 }
@@ -866,4 +874,66 @@ fn v3_runtime_responses_output_item_has_visible_text(item: &Value) -> bool {
                     .is_some_and(|text| !text.trim().is_empty())
             })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_merge_matches_tool_calls_by_call_id_before_item_id() {
+        let mut terminal = json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_shared",
+                "name": "exec_command",
+                "arguments": "{}"
+            }]
+        });
+        let stream_items = vec![json!({
+            "type": "function_call",
+            "id": "fc_stream",
+            "call_id": "call_shared",
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"pwd\"}"
+        })];
+
+        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
+            terminal.as_object_mut().expect("terminal response object"),
+            &stream_items,
+        );
+
+        let output = terminal["output"].as_array().expect("terminal output");
+        assert_eq!(output.len(), 1, "same tool call must not be duplicated");
+        assert_eq!(output[0]["call_id"], "call_shared");
+        assert_eq!(output[0]["id"], "fc_stream");
+    }
+
+    #[test]
+    fn terminal_merge_keeps_distinct_tool_call_ids_separate() {
+        let mut terminal = json!({
+            "output": [{
+                "type": "function_call",
+                "id": "fc_shared",
+                "call_id": "call_first",
+                "name": "exec_command",
+                "arguments": "{}"
+            }]
+        });
+        let stream_items = vec![json!({
+            "type": "function_call",
+            "id": "fc_shared",
+            "call_id": "call_second",
+            "name": "exec_command",
+            "arguments": "{}"
+        })];
+
+        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
+            terminal.as_object_mut().expect("terminal response object"),
+            &stream_items,
+        );
+
+        let output = terminal["output"].as_array().expect("terminal output");
+        assert_eq!(output.len(), 2, "distinct tool calls must remain separate");
+    }
 }

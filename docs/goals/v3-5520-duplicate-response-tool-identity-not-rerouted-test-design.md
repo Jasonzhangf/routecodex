@@ -6,6 +6,9 @@
 
 ## White-Box
 
+- Lock Responses SSE terminal merge identity: function/custom/tool calls use `call_id` as semantic identity and `id` only as fallback; message/reasoning items continue using `id`.
+- Positive control: stream item and terminal item with the same `call_id` but different item `id` merge into one tool call.
+- Negative control: two provider-origin tool calls with distinct `call_id` values remain distinct even if their item `id` values collide; Resp03 still rejects actual duplicate `call_id` values.
 - Keep `duplicate_response_tool_identity_fails_inside_response_chat_process` proving Resp03 rejects duplicate `call_id`.
 - Lock `is_v3_responses_provider_response_failure` to classify provider-origin `V3HubRelayResponseError` variants, excluding local execution-mode and stopless projection defects.
 - Lock `provider_response_hook_failure` to preserve `V3HubRespChatProcess03Governed` as the first-failure stage for Resp03 malformed provider output.
@@ -27,3 +30,5 @@
 ## Known Gap Before Fix
 
 JSON and SSE both call `run_json_response_hooks`, but `V3ResponsesRelayRuntimeError::Response` currently falls through the non-provider branch. The existing Resp03 unit test proves detection only; it does not prove Error05 routing.
+
+The SSE terminal merge currently reads `id` before `call_id` for every output type. Providers may emit a different item `id` in `response.completed.output` while preserving the same tool `call_id`; the merge misses the semantic match, inserts a second tool item, and Resp03 then reports a false duplicate `call_id/id` provider failure.

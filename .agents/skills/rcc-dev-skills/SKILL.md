@@ -268,3 +268,227 @@ description: RouteCodex 调试与架构路由入口
 - 关键判断：route/started 行使用 selected target observability；`[provider-error]` / `[provider-switch]` 是 Error05 event 投影，必须使用 `V3RuntimeProviderFailureObservation` 的 failed provider 生成 prefix；字段顺序固定为本轮 `target`、`result`、`next` 在前，`causeStatus/type/message` 等原因在后。
 - 可复用动作：先用 live log 按 request id 对比 route -> provider-error -> switch -> completion；再用 focused server console test 锁 provider-error prefix；最后安装重启后扫描 human provider-error 行 prefix/target 是否一致，并确认 `target -> result -> next -> causeStatus` 顺序。
 - 反模式/边界：不要改 VR、provider wire、Error05 policy 或 provider health 来修显示；这是 server console projection side-channel，不得影响 request/response payload 或 reroute 语义。
+
+## V3 config SSOT 真源（2026-07-30 实测）
+
+### 配置位置
+- **生产配置**：`~/.rcc/config.v3.toml`（V3 唯一真源）
+- **V2 存根**：`~/.rcc/config.toml`（仅作 bootstrap locator，不要在 V3 上去改它）
+- **启动方式**：`routecodex restart --port 5555`（聚合重启 5555/5520/10000）
+- **Binary**：`~/.rcc/install/current/dist/bin/rccv3`（Rust V3）
+
+### 配置结构
+```toml
+version = 3
+
+[servers.responses_v3_5555]
+bind = "0.0.0.0"
+port = 5555
+routing_group = "responses_v3_5555"
+endpoints = ["responses"]
+
+[servers.responses_v3_5520]
+bind = "0.0.0.0"
+port = 5520
+routing_group = "responses_v3_5520"
+endpoints = ["responses"]
+
+# forwarder 跨 route_group 复用
+[forwarders."fwd.free.gpt-5.6"]
+model = "gpt-5.6"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "cc-sol", model = "gpt-5.6-sol", key = "key1", priority = 1 },
+]
+
+# route_group = routing_policy_group，含多个 pool
+[route_groups.responses_v3_5555.pools.default]
+selection = { strategy = "weighted" }
+targets = [
+  { kind = "forwarder", id = "fwd.free.gpt-5.6", priority = 1, weight = 1 },
+  { kind = "forwarder", id = "fwd.paid.gpt-5.5", priority = 2, weight = 1 },
+]
+```
+
+### 路由策略
+- `strategy = "weighted"`：负载均衡，按 weight 比例分配
+- `strategy = "priority"`：优先级，先用 priority=1，失败才用 2...
+- `selection` 在 pool 级别定义，targets 里的 weight/priority 配合使用
+
+### pool match 规则
+- `precedence`：越小越优先匹配
+- `min_input_tokens`：输入超过阈值触发的池（如 longcontext）
+- `required_capabilities`：需要特定能力时触发的池
+- `entry_protocol`：入口协议匹配
+
+### 常用调试命令
+```bash
+routecodex restart --port 5555
+curl http://127.0.0.1:5555/health
+curl http://127.0.0.1:5555/v1/models
+tail -f ~/.rcc/logs/server-v3-5555.log
+cp ~/.rcc/config.v3.toml ~/.rcc/config.v3.toml.bak-$(date +%Y%m%dT%H%M%S)
+```
+
+### Provider ID 速查
+| Provider ID | 模型 | 用途 |
+|---|---|---|
+| `cc-sol` | gpt-5.6-sol | GPT 免费 |
+| `asxs` | gpt-5.5 | GPT 付费 |
+| ~~`modrouter_anthropic`~~ | ~~claude-fable-5~~ | 已从路由池移除（2026-07-30） |
+| `glmrelay_openai` / `glmrelay_anthropic` | glm-5.2 | Claude 双通道 |
+| `minimax_openai` / `minimax_anthropic` | MiniMax-M3 | Claude 双通道 |
+
+### 当前路由顺序（2026-07-30 改后）
+- **5555（GPT优先）**：`gpt-free > gpt-paid > glm-5.2 > minimax-M3`
+- **5520（glm-5.2 优先）**：`glm-5.2 > minimax-M3 > gpt-free > gpt-paid`
+- **multimodal/search/web_search（5520）**：`minimax-M3 > glm-5.2 > gpt-free > gpt-paid`
+- **触发信号**：Jason 说"改路由"、问 V3 配置、改 5555/5520 forwarder/pool/routing_order 时使用。
+
+## V3 VR 分流 V2 vs V3 对比（2026-07-30 审计）
+
+### 架构
+- `v3-route-classifier/src/route.rs`：`classify_route()` 决定 `route_name` + `candidates[]`
+- `v3-virtual-router/src/lib.rs`：`resolve_route_pool_plan()` 转 `tiers[]`
+- 池匹配：`pool_matches()` (rule.facts) + `pool_route_signal_matches()` (route_name)
+
+### 9 个 ROUTE_PRIORITY 顺序
+```
+multimodal → coding → longcontext → web_search → thinking → search → tools → background → default
+```
+
+### 触发条件
+| Route | 触发 |
+|---|---|
+| `multimodal` | `has_image_attachment=true` (metadata `/metadata/hasImageAttachment`) |
+| `coding` | `last_assistant_tool_category=="coding" && continuation` |
+| `longcontext` | `input_tokens >= threshold` (180k for 5555/5520) |
+| `web_search` | `websearch tool continuation` OR `user msg with web_search intent` |
+| `thinking` | `user_msg` OR `stopless_followup` OR `thinking_continuation` |
+| `search` | `last_assistant_tool_category=="search" && continuation` |
+| `tools` | `other_tool_continuation` OR `unknown_tool_continuation` |
+| `background` | `has_background_keyword` |
+| `default` | none (兜底) |
+
+### V2 → V3 关键差异
+- 池结构：`routing.default/coding/...` 数组 → `route_groups.{group}.pools.{name}` BTreeMap
+- 分类：inline provider switch → 独立 `classify_route()` crate
+- 多 tier fallback：`single-tier` → `tiers[]` fallback 链
+- weighted 负载均衡：V3 新增
+- `provider.model` 直连：V3 新增（`asxs.gpt-5.5`）
+- multimodal：capability match (V2) → precedence=0 显式池 (V3)
+- longcontext 自动追加 candidates：V3 防漏
+- thinking 排除 longcontext：`thinking && !reached_long_context`
+
+### Invariant（红测已锁）
+- multimodal 优先级 > 所有非 context route signal
+- longcontext > multimodal（context 优先）
+- 同一 precedence 多池 → `AmbiguousPoolMatches` error
+- candidate signal 名称 == pool_id（`pool_route_signal_matches`）
+- `required_capabilities` 包含 signal 名也算匹配
+- `default` 池必须存在且非空
+- web_search 池是 NOT generic fallback：必须有专门 web_search 池才能 route
+
+### 风险点
+1. **multimodal 必须显式定义**：不定义则 image 落到 default
+2. **tools precedence=30**：被 web_search(20)、multimodal(0)、longcontext(1) 压制
+3. **thinking 排除 longcontext**：longcontext 触发时不会走 thinking
+4. **web_search capability pool 需显式存在**：V3 不通用 fallback
+
+## V3 VR 缺失/弱化功能 vs V2 router-hotpath-napi（2026-07-30 审计）
+
+### 1. Forced target / retry pin 缺失
+V2 有 `routing_state.forced_target`；V3 只有 `resolve_v3_direct_model_plan`（`provider.model` 直连），retry 失败后无 pin 强绑定。
+
+### 2. Prefer target 缺失
+V2 读 `metadata.preferTarget` 排序 candidates；V3 无。
+
+### 3. Excluded provider keys 缺失
+V2 读 `metadata.excludedProviderKeys`；V3 用 runtime 内部 `request_local_excluded_candidates`，不消费 metadata。
+
+### 4. Forwarder sticky session 缺失
+V2 用 `metadata.sessionId` 绑 forwarder；V3 无 sticky。
+
+### 5. Provider wire media detection 缺失
+V2 区分 `has_image_attachment` / `has_provider_wire_media_attachment` / `has_remote_video_attachment`；V3 只读 `metadata.hasImageAttachment`。
+
+### 6. Custom tool detection 缺失
+V2 `features.has_custom_tool_declared` + `filter_pools_by_custom_tool_payload_support`；V3 无。
+
+### 7. Video route 缺失
+V2 独立 `video` route + `requires_remote_video`；V3 video 走 multimodal 池。
+
+### 1. Forced target / retry pin 缺失（V3 真缺）
+V2 `routing_state.forced_target`；V3 只有 `resolve_v3_direct_model_plan`（`provider.model` 直连），retry 失败后无 pin 强绑定。后果：同 request 失败重试，VR 会重新选，可能再次打到同 provider 失败键。
+
+### 2. Prefer target 缺失（V3 真缺）
+V2 读 `metadata.preferTarget` 排序 candidates；V3 无。后果：客户端 prefer hint 不生效。
+
+### 3. Excluded provider keys（V3 路径不同，非缺失）
+V2 读 `metadata.excludedProviderKeys`；V3 用 runtime 内部 `request_local_excluded_candidates`（V3ProviderFailureRuntimeHealth 记录）。两者等价，仅 metadata 接口不同。
+
+### 4. Forwarder sticky session 缺失（V3 真缺）
+V2 `metadata.sessionId` 绑 forwarder；V3 无。后果：forwarder 每次新选，没有会话亲和性。
+
+### 5. Provider wire media detection 缺失（V3 真缺）
+V2 区分 `has_image_attachment` / `has_provider_wire_media_attachment` / `has_remote_video_attachment`；V3 只读 `metadata.hasImageAttachment`。后果：图片需要走 provider wire 重编码时，V3 不会切到 visual 池。
+
+### 6. Custom tool detection 缺失（V3 真缺）
+V2 `features.has_custom_tool_declared` + `filter_pools_by_custom_tool_payload_support`；V3 无。后果：客户端自定义 tool 不触发 pool 过滤。
+
+### 7. Video route 缺失（V3 真缺）
+V2 独立 `video` route + `requires_remote_video`；V3 video 走 multimodal 池。后果：video 走 multimodal 路径。
+
+### 8. Cooldown/health integration（V3 owner 错位但功能在）
+V2 `apply_standard_filters` 链 `health_manager.is_available` + `cooldown_remaining_ms` + `concurrency_busy`；V3 VR 选择阶段不消费 health，但 `V3ProviderFailureRuntimeHealth` + `direct_sse_provider_outcome` 在 runtime 失败后 exclusion 链里做。架构正确分层：VR 只路由，runtime 管 health。审计时不要把这点当缺失。
+
+### 9. Default floor candidates（V3 不应补，违反 hard 约束）
+V2 `build_default_floor_candidates_ignoring_exclusions`；V3 `tiers.push(default_pool)` 兜底。V3 设计硬约束：default 池必须显式最后 tier，不允许 ignore-exclusion floor。V2 floor 是 v2 兼容需要，V3 不应迁移。
+
+### 10. Context spillover 缺失（V3 真缺）
+V2 `context_spillover_active`：context 不足时切 longcontext；V3 candidates 自动追加 longcontext，但无 spillover 跳过非 longcontext 路由。后果：context 超限的池被优先选，浪费一次后切。
+
+### 11. Bound alias prefix 缺失（V3 真缺）
+V2 `bound_alias_prefix` 按 alias 前缀过滤 available；V3 无。后果：alias 路由精度低。
+
+### 12. Load balancer SWRR（V3 已有）
+V3 `ordered_target_indices` + `swrr_order` 实现 nginx SWRR（`swrr_current: BTreeMap<String, Vec<i64>>` 持久化跨请求）。V2 router-hotpath-napi 同样 SWRR。
+
+### 13. Longcontext threshold 配置源（V3 已修复）
+V3 从 `routing_group.pools.longcontext.match.min_input_tokens` 读（V3-virtual-router/src/lib.rs::configured_v3_longcontext_threshold_tokens），per-group 走 manifest。V2 全局 `longContextThresholdTokens` 走 v2_compat 编译到 per-group。V3 无全局 fallback 是设计选择（每个 listener 独立配置）。
+
+### 14. Background keyword 配置化（V3 真缺，dead code）
+V3 `classify_route` 接收 `has_background_keyword` 字段，但 `build_v3_router_request_facts_for_entry_with_metadata` 写死 `false`，`background` route 永远不触发。V2 从 `config.backgroundKeywords` 读。
+
+### 15. Pool match entry_protocol 多值（V3 真缺）
+V3 单值；V2 支持多值数组。
+
+### 16. Reachable longcontext 上限（V3 已有）
+V3 `pool_matches` 已实现 `max_input_tokens` 字段（`v3-virtual-router/src/lib.rs:524`），用于 longcontext 池上限。
+
+### 19. Provider registry server_tools_disabled（V3 待确认）
+V3 manifest 提供 provider；VR 不消费 `server_tools_disabled` 字段。V2 在 `apply_standard_filters` 链入 `server_tool_required` 过滤。V3 行为差异需在 runtime owner 验证。
+
+### 20. Chat Web search intent 简化（V3 简化但等价）
+V2 `chat_web_search_intent.rs` 独立分析；V3 复用 `classify_route` + `has_web_search_intent(text)`，无 chat 专用分析。V3 已通过 `active_turn.rs::extract_message_signals` 处理 chat 结构。
+
+### V3 实际行为风险（5555/5520 当前配置）
+- retry pin 缺失（#1）：同 request 失败重试可能再选同 provider
+- prefer hint 缺失（#2）：客户端 hint 不生效
+- forwarder sticky 缺失（#4）：forwarder 无会话亲和
+- video 走 multimodal（#7）：video 不走独立池
+- background route 永远不触发（#14）：dead code 路径
+- provider wire media 不区分（#5）：图片 wire 重编场景不切换
+
+### 真正需要补的（按优先级）
+P0：#1 retry pin（影响重试风暴）
+P1：#4 forwarder sticky（影响 forwarder 会话）
+P2：#10 context spillover（context 超限浪费一次）
+P3：#14 background 修复（dead code，要么补配置，要么物理删除）
+P3：#2 prefer hint（客户端语义）
+P3：#5/#6 provider wire media + custom tool（边缘场景）
+P3：#7 video 独立（边缘场景）
+P3：#15 entry_protocol 多值（配置灵活性）
+
+### 触发信号
+当 Jason 问"VR 缺什么"、"V2 V3 差异"、"路由补齐"时使用。

@@ -4246,7 +4246,7 @@ fn format_v3_provider_switch_console_content(
     format_v3_console_timed_content(
         "[provider-switch]",
         &format!(
-            "req={} target={} from={} result={} reason=provider_failure",
+            "req={} [switch to:{}] [switch from:{}] result={} reason=provider_failure",
             request_id, target, from, event.action
         ),
     )
@@ -9110,11 +9110,11 @@ mod tests {
             format_v3_provider_switch_console_content("req-provider-switch", &event);
         assert!(switch_content.contains("[provider-switch]"));
         assert!(switch_content.contains(
-            "target=minimax[key1].MiniMax-M3 from=limited[key1].gpt-5.5 result=switch_provider"
+            "[switch to:minimax[key1].MiniMax-M3] [switch from:limited[key1].gpt-5.5] result=switch_provider"
         ));
         assert!(
             switch_content
-                .find("target=minimax[key1].MiniMax-M3")
+                .find("[switch to:minimax[key1].MiniMax-M3]")
                 .unwrap()
                 < switch_content.find("reason=provider_failure").unwrap()
         );
