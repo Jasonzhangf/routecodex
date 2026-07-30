@@ -33996,3 +33996,16 @@ Hard guards observed:
 - Root owner remains server human console projection, not VR/provider wire/Error05. The event truth already had failed target, action, next provider, and cause separately.
 - Fix: `format_v3_provider_failure_console_content` now prints `target=<failed> result=<action> next=<next> causeStatus=<status> ... type/message...`; `[provider-switch]` now mirrors `target/result/next` instead of `from/to/action`.
 - Verification: focused server tests pass and show the new order; `cargo build -p routecodex-v3-cli`, `npm run install:v3`, managed restart, and 10000/5520/5555 health passed. Post-restart traffic currently routes directly to Fable key2, so no fresh live provider-error was generated to scan; older pre-restart lines remain in log with the old shape.
+
+## 2026-07-30 V3 false duplicate tool-call 502 + switch labels
+- Live failures repeatedly reported `provider response event codec failed: malformed tool call ... duplicate call_id/id`; Error05 switched providers, but the duplicate was locally created by terminal merge.
+- Verified cc-sol sample: `response.output_item.added/done` carried `id=fc_*` plus `call_id=call_*`; `response.completed.output` carried the same `call_id` and no `id`. Old merge compared stream `id` to terminal `call_id`, inserted a second item, then Resp03 rejected it.
+- Fix: Responses provider event codec uses a non-empty `call_id` first for every call-bearing output item, including `tool_search_call`; output without `call_id` uses `id`. Paired tests prove same-call merge, native call-family coverage, non-call `id` merge, and distinct-call preservation; existing Resp03/Error05 tests still reject true duplicates.
+- Console: provider-switch prints `[switch to:...] [switch from:...] result=... reason=...`.
+- Verification: focused runtime/server tests and install:v3 passed; aggregate restart completed; 10000/5520/5555 health passed; live cc-sol SSE tool call completed HTTP 201; post-restart logs showed the new switch labels.
+
+## 2026-07-30T17:40+0800 V3 switching provider-error label follow-up
+- User evidence showed the first patch changed only `[provider-switch]`; realtime `[provider-error]` still printed ambiguous `target/result/next` fields.
+- Red test: updated `provider_failure_console_content_exposes_red_error_and_switch` failed against the old provider-error formatter.
+- Fix is Server console projection only: switching failures now print `[switch to:<next>] [switch from:<failed>] result=...` before `causeStatus/type/message`; terminal no-next failures keep `target/result/next=-` and are covered by the negative test.
+- Verification after global install and aggregate restart: server provider tests 9/9, terminal merge 2/2, Resp03 true-duplicate rejection 1/1, Error05 duplicate identity tests 2/2, CLI build, `npm run install:v3`, and 10000/5520/5555 health all passed. Live RID `...T173611531-688473-9538` printed `switch to cc-sol` then `switch from glmrelay_openai` before `causeStatus=502`; latest 5000 log lines contained no `duplicate call_id/id` while multiple cc-sol SSE requests completed HTTP 201.

@@ -4195,16 +4195,29 @@ fn format_v3_provider_failure_console_content(
         .as_deref()
         .map(format_v3_console_provider_key_label)
         .unwrap_or_else(|| "-".to_string());
-    let mut fields = format!(
-        "req={} target={} result={} next={} causeStatus={} failures={} health={}",
-        request_id,
-        provider,
-        event.action,
-        next,
-        event.status,
-        event.failure_count,
-        event.health_state
-    );
+    let mut fields = if event.action == "switch_provider" && event.next_provider_key.is_some() {
+        format!(
+            "req={} [switch to:{}] [switch from:{}] result={} causeStatus={} failures={} health={}",
+            request_id,
+            next,
+            provider,
+            event.action,
+            event.status,
+            event.failure_count,
+            event.health_state
+        )
+    } else {
+        format!(
+            "req={} target={} result={} next={} causeStatus={} failures={} health={}",
+            request_id,
+            provider,
+            event.action,
+            next,
+            event.status,
+            event.failure_count,
+            event.health_state
+        )
+    };
     if let Some(cooldown_until_ms) = event.cooldown_until_ms {
         fields.push_str(&format!(" cooldownUntilMs={cooldown_until_ms}"));
     }
@@ -9091,15 +9104,19 @@ mod tests {
         let error_content =
             format_v3_provider_failure_console_content("req-provider-switch", &event);
         assert!(error_content.contains("❌ [provider-error]"));
-        assert!(error_content.contains("target=limited[key1].gpt-5.5"));
+        assert!(error_content.contains("[switch to:minimax[key1].MiniMax-M3]"));
+        assert!(error_content.contains("[switch from:limited[key1].gpt-5.5]"));
         assert!(error_content.contains("result=switch_provider"));
-        assert!(error_content.contains("next=minimax[key1].MiniMax-M3"));
         assert!(
-            error_content.find("target=limited[key1].gpt-5.5").unwrap()
+            error_content
+                .find("[switch to:minimax[key1].MiniMax-M3]")
+                .unwrap()
                 < error_content.find("causeStatus=502").unwrap()
         );
         assert!(
-            error_content.find("next=minimax[key1].MiniMax-M3").unwrap()
+            error_content
+                .find("[switch from:limited[key1].gpt-5.5]")
+                .unwrap()
                 < error_content.find("causeStatus=502").unwrap()
         );
         assert!(error_content.contains("failures=3"));
@@ -9132,6 +9149,19 @@ mod tests {
             colored.contains(&format!("\n\n{ANSI_DEBUG_DIM}")),
             "provider error diagnostic line must be dim gray: {colored:?}"
         );
+
+        let terminal_event = V3RuntimeProviderFailureObservation {
+            action: "terminal_default_floor_exhausted".to_string(),
+            next_provider_key: None,
+            ..event
+        };
+        let terminal_content =
+            format_v3_provider_failure_console_content("req-provider-terminal", &terminal_event);
+        assert!(terminal_content.contains("target=limited[key1].gpt-5.5"));
+        assert!(terminal_content.contains("result=terminal_default_floor_exhausted"));
+        assert!(terminal_content.contains("next=-"));
+        assert!(!terminal_content.contains("[switch to:"));
+        assert!(!terminal_content.contains("[switch from:"));
     }
 
     #[test]
@@ -9219,7 +9249,8 @@ mod tests {
         let provider_error_line = after_realtime
             .lines()
             .find(|line| {
-                line.contains("❌ [provider-error]") && line.contains("target=first[key].gpt-5.5")
+                line.contains("❌ [provider-error]")
+                    && line.contains("[switch from:first[key].gpt-5.5]")
             })
             .unwrap_or_else(|| {
                 panic!("missing provider-error line for failed provider: {after_realtime}")
@@ -9231,6 +9262,10 @@ mod tests {
         assert!(
             !provider_error_line.contains("[direct:second.gpt-5.5"),
             "provider failure line must not be displayed under the next provider target: {provider_error_line}"
+        );
+        assert!(
+            provider_error_line.contains("[switch to:second[key].gpt-5.5]"),
+            "provider failure line must label the selected next provider: {provider_error_line}"
         );
         assert!(
             after_realtime.contains("[provider-switch]"),

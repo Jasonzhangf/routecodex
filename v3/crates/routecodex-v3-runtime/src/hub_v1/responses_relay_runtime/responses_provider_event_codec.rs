@@ -807,18 +807,14 @@ fn find_v3_runtime_responses_terminal_output_item_index(
 }
 
 fn read_v3_runtime_responses_output_item_identity(item: &Value) -> Option<&str> {
-    let is_tool_call = matches!(
-        item.get("type").and_then(Value::as_str),
-        Some("function_call" | "custom_tool_call" | "tool_call")
-    );
-    let identity = if is_tool_call {
-        item.get("call_id").or_else(|| item.get("id"))
-    } else {
-        item.get("id").or_else(|| item.get("call_id"))
-    };
-    identity
+    item.get("call_id")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            item.get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+        })
 }
 
 fn merge_v3_runtime_responses_terminal_and_stream_output_item(
@@ -935,5 +931,63 @@ mod tests {
 
         let output = terminal["output"].as_array().expect("terminal output");
         assert_eq!(output.len(), 2, "distinct tool calls must remain separate");
+    }
+
+    #[test]
+    fn terminal_merge_matches_tool_search_calls_by_call_id() {
+        let mut terminal = json!({
+            "output": [{
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "status": "completed"
+            }]
+        });
+        let stream_items = vec![json!({
+            "type": "tool_search_call",
+            "id": "ts_stream",
+            "call_id": "call_search",
+            "status": "in_progress"
+        })];
+
+        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
+            terminal.as_object_mut().expect("terminal response object"),
+            &stream_items,
+        );
+
+        let output = terminal["output"].as_array().expect("terminal output");
+        assert_eq!(
+            output.len(),
+            1,
+            "same tool-search call must not be duplicated"
+        );
+        assert_eq!(output[0]["call_id"], "call_search");
+        assert_eq!(output[0]["id"], "ts_stream");
+    }
+
+    #[test]
+    fn terminal_merge_matches_non_call_output_by_item_id() {
+        let mut terminal = json!({
+            "output": [{
+                "type": "message",
+                "id": "msg_shared",
+                "role": "assistant",
+                "content": []
+            }]
+        });
+        let stream_items = vec![json!({
+            "type": "message",
+            "id": "msg_shared",
+            "role": "assistant",
+            "content": [{"type":"output_text","text":"ok"}]
+        })];
+
+        merge_v3_runtime_responses_stream_output_items_into_terminal_response(
+            terminal.as_object_mut().expect("terminal response object"),
+            &stream_items,
+        );
+
+        let output = terminal["output"].as_array().expect("terminal output");
+        assert_eq!(output.len(), 1, "same message item must not be duplicated");
+        assert_eq!(output[0]["id"], "msg_shared");
     }
 }

@@ -265,8 +265,8 @@ description: RouteCodex 调试与架构路由入口
 
 ## V3 provider-error console prefix invariant
 - 触发信号：human console line prefix `route:provider.model` 和同一行 `provider=...` 不一致，尤其是 switch 后显示 next provider 但错误来自 previous provider。
-- 关键判断：route/started 行使用 selected target observability；`[provider-error]` / `[provider-switch]` 是 Error05 event 投影，必须使用 `V3RuntimeProviderFailureObservation` 的 failed provider 生成 prefix；字段顺序固定为本轮 `target`、`result`、`next` 在前，`causeStatus/type/message` 等原因在后。
-- 可复用动作：先用 live log 按 request id 对比 route -> provider-error -> switch -> completion；再用 focused server console test 锁 provider-error prefix；最后安装重启后扫描 human provider-error 行 prefix/target 是否一致，并确认 `target -> result -> next -> causeStatus` 顺序。
+- 关键判断：route/started 行使用 selected target observability；`[provider-error]` / `[provider-switch]` 是 Error05 event 投影，必须使用 `V3RuntimeProviderFailureObservation` 的 failed provider 生成 prefix。切换事件字段顺序固定为 `[switch to:<next>] [switch from:<failed>] result` 在前，`causeStatus/type/message` 等原因在后；没有 next target 的 terminal error 保留 `target/result/next=-`，禁止伪装成 switch。
+- 可复用动作：先用 live log 按 request id 对比 route -> provider-error -> switch -> completion；再用 focused server console 正反测试锁 switching 与 terminal 两种投影；最后安装重启后扫描 switching provider-error 是否满足 `switch to -> switch from -> causeStatus`，且 terminal error 不含 switch 标签。
 - 反模式/边界：不要改 VR、provider wire、Error05 policy 或 provider health 来修显示；这是 server console projection side-channel，不得影响 request/response payload 或 reroute 语义。
 
 ## V3 config SSOT 真源（2026-07-30 实测）

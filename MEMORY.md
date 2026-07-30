@@ -4935,3 +4935,13 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 ## 2026-07-30 - V3 5555 route priority after Fable restore
 - If 5555 shows `cc-sol[key1].gpt-5.6-sol` or `asxs[crsa].gpt-5.5` before Fable on default/search/tool routes, first audit `/Volumes/extension/.rcc/config.v3.toml` route pool ordering. The verified fix is config-level: keep `responses_v3_5555` aligned with the working 5520 policy so default/longcontext/thinking/coding route Fable before GLM/MiniMax/cc/asxs, and search/web_search/tools/multimodal route MiniMax + Fable before GLM/cc/asxs. This prevents upstream cc 502 and ASXS 400 from being first-hop noise without changing provider runtime, payload, Error05, or SSE semantics.
 - `request_in_flight` 409 on `/v1/responses` means the same listener session/conversation already has an active request; validate by comparing request timestamps and the earlier request completion line before treating it as provider/routing failure.
+
+## 2026-07-30 - Responses SSE tool identity truth
+- Provider Responses SSE may expose a tool item `id` on `response.output_item.*` but omit that item `id` from `response.completed.output`, while preserving the same `call_id`. Tool-call semantic identity is therefore `call_id`; item `id` is not the cross-event merge key.
+- V3 relay terminal merge uses a non-empty `call_id` first for every call-bearing output item, including provider-native families such as `tool_search_call`; output without `call_id` uses `id`. This prevents false duplicate tool items without accepting actual repeated provider `call_id` values.
+- Human provider-switch lines use explicit `[switch to:...] [switch from:...]` labels; provider-error remains the failed target and cause projection.
+
+## 2026-07-30 - V3 switching provider-error label correction
+- Supersedes the preceding provider-error display sentence. When Error05 selects another provider, both realtime `[provider-error]` and `[provider-switch]` lines must print `[switch to:<next>] [switch from:<failed>]` before cause/reason fields. The console prefix remains the failed provider so the error owner is still truthful.
+- Terminal provider errors with no next target remain `target=<failed> result=<terminal action> next=-`; they must not be labeled as a switch.
+- Installed build `0.90.4004` live evidence after aggregate restart includes RID `...T173611531-688473-9538`: `[switch to:cc-sol[key1].gpt-5.6-sol] [switch from:glmrelay_openai[key1].glm-5.2] ... causeStatus=502`; all three listener health endpoints were OK.
