@@ -602,6 +602,11 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubRespInbound02Normalized
     identity: [requestId, providerProtocol, entryProtocol]
+    semantic_contract:
+      openai_chat_stream_tool_call_identity: wire index locates the active call stream; a non-empty provider tool_call id identifies a materialized call within that wire-index stream
+      reused_wire_index_rule: a previously unseen non-empty id on an occupied wire index starts a new materialized call and must not concatenate arguments with the prior call
+      continuation_rule: same-id and id-less deltas append to the active call for that wire index; a previously seen id on the same reused index reattaches to its original call
+      cross_index_duplicate_rule: duplicate ids on different wire indices remain distinct inbound calls for Resp03 identity validation
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespContinuation04Committed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]

@@ -1505,6 +1505,7 @@ features:
     design:
       - docs/goals/v3-hub-relay-runtime-closeout-plan.md
       - docs/design/v3-hub-relay-fixed-pipeline-contract.md
+      - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
     contract:
       - docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
       - docs/architecture/v3-resource-operation-map.yml
@@ -1525,10 +1526,14 @@ features:
       - provider raw response decode/protocol errors enter the same provider failure policy and reselect before Error06 while alternatives remain
       - Anthropic provider SSE terminal `message_stop` closes open text/thinking/reasoning blocks without synthetic 502, while still-open `tool_use` remains malformed and fails fast
       - Responses Relay provider SSE accepts known OpenAI Responses reasoning summary/content events without provider-failure switch, while unknown `response.*` events still fail-fast
+      - OpenAI Chat provider SSE treats a different non-empty tool_call id on an occupied wire index as a new materialized call, preserving first-seen order and independent JSON argument streams
+      - OpenAI Chat provider SSE keeps same-id and id-less deltas attached to the active call for their wire index, while ordinary parallel indices remain distinct
+      - OpenAI Chat provider SSE reattaches a previously seen tool_call id to its original materialized call after the same wire index is reused, while preserving cross-index duplicate ids for Resp03 rejection
       - provider-request dry-run uses the shared no-network transport terminal effect for Responses Relay and Anthropic Messages Relay
       - Responses Relay last default retries exactly twice with fixed 5s delay and projects on the third failure
       - provider/client payloads do not leak session continuation metadata_center resource or routecodex control fields
     required_gates:
+      - npm run test:v3-openai-chat-stream-tool-call-identity
       - npm run test:v3-hub-relay-runtime-closeout
       - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
       - npm run verify:v3-hub-relay-runtime-closeout

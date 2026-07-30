@@ -178,6 +178,13 @@ Relay is borrow-first and move-at-boundary:
   consumed by Runtime response governance, Resp04 saves one local context, next Req04 restores that
   context before the current tool output, and terminal success releases it.
 - The provider-error case proves Error01-06 projection without Resp01 success projection.
+- OpenAI Chat SSE provider-event decoding is an internal block on
+  `V3ProviderRespInbound01Raw -> ProviderRespCompat02ProviderCompat`. A wire index identifies only
+  the active delta stream; a different non-empty `tool_call.id` starts a new materialized call, while
+  a previously seen id on that same reused index rejoins its original call and id-less deltas
+  continue the active call. Duplicate ids on different wire indices remain distinct for Resp03
+  identity validation. This preserves provider call order and keeps independent argument JSON from
+  being concatenated.
 - Isolation assertions forbid session/conversation, `metadata_center`, `continuation_store`, and
   RouteCodex control fields in provider/client normal payload.
 - Completion boundary: this is controlled Runtime evidence only. It does not authorize P6 deletion,
