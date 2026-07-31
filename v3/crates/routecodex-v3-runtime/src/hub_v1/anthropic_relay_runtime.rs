@@ -16,7 +16,7 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3_ERROR_CHAIN_NODE_IDS,
+    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     build_v3_anthropic_provider_request_header, build_v3_provider_12_responses_wire_payload,
@@ -34,6 +34,7 @@ const V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3AnthropicRelayRuntimeInput {
     pub server_id: String,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub payload: Value,
 }
@@ -528,10 +529,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        server_id: &input.server_id,
-        entry_kind: "anthropic",
-        endpoint_path: "/v1/messages",
-        route_facts_body: &route_facts_body,
+        failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
         deterministic_sample,
@@ -543,6 +541,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
+                failure_session_scope: &input.failure_session_scope,
                 entry_kind: "anthropic",
                 endpoint_path: "/v1/messages",
                 body: &route_facts_body,
@@ -820,8 +819,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     };
                 record_provider_success_after_resp04(
                     &provider_health,
-                    &input.server_id,
-                    server_routing_group(manifest, &input.server_id)?,
+                    &input.failure_session_scope,
                     &selected_target_provider_id,
                     &selected_target_auth_alias,
                     &selected_target_model_id,
@@ -971,8 +969,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     };
                 record_provider_success_after_resp04(
                     &provider_health,
-                    &input.server_id,
-                    server_routing_group(manifest, &input.server_id)?,
+                    &input.failure_session_scope,
                     &selected_target_provider_id,
                     &selected_target_auth_alias,
                     &selected_target_model_id,
@@ -1421,16 +1418,14 @@ fn provider_failure_output(
 
 fn record_provider_success_after_resp04(
     provider_health: &V3ProviderFailureRuntimeHealth,
-    server_id: &str,
-    routing_group: &str,
+    failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
     auth_alias: &str,
     model_id: &str,
 ) -> Result<(), V3AnthropicRelayRuntimeError> {
     provider_health
-        .record_provider_success_in_scope(
-            server_id,
-            routing_group,
+        .record_provider_success_in_failure_scope(
+            failure_session_scope,
             provider_id,
             Some(auth_alias),
             Some(model_id),

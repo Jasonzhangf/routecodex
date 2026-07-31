@@ -81,6 +81,12 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         &manifest(scope),
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-json".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -133,6 +139,12 @@ async fn anthropic_responses_field_parity_request_matrix() {
         &manifest(scope),
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-anthropic-field-matrix".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -383,6 +395,12 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
             &manifest_with_two_providers(scope),
             V3AnthropicRelayRuntimeInput {
                 server_id: scope.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-provider-reselect".into(),
                 payload: json!({
                     "model":"claude-client-alias",
@@ -429,6 +447,12 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         &manifest(scope),
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-error".into(),
             payload: json!({"model":"claude-client-alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
         },
@@ -641,6 +665,12 @@ async fn responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth()
         &manifest(scope),
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-thinking-sse".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -677,6 +707,12 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
         &manifest(scope),
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-thinking-no-terminal".into(),
             payload: json!({
                 "model":"claude-client-alias",

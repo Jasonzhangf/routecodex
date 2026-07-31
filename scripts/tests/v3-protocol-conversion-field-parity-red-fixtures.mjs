@@ -589,13 +589,13 @@ const cases = [
   {
     name: 'Provider compat failure no longer enters typed Error05',
     file: 'docs/architecture/v3-mainline-call-map.yml',
-    from: `step_id: v3-protocol-field-parity-responses-chat-req-negative-02
-    from_node: ProviderReqCompat06ProviderCompat
-    to_node: V3Error05ExecutionDecision`,
-    to: `step_id: v3-protocol-field-parity-responses-chat-req-negative-02-removed
-    from_node: ProviderReqCompat06ProviderCompat
-    to_node: V3Error05ExecutionDecision`,
-    diagnostic: /ProviderReqCompat06 typed failure edge|v3-protocol-field-parity-responses-chat-req-negative-02/u,
+    from: `step_id: v3-provider-action-gate-01
+      from_node: ProviderReqCompat06ProviderCompat
+      to_node: V3Error05ExecutionDecision`,
+    to: `step_id: v3-provider-action-gate-01
+      from_node: ProviderReqCompat06ProviderCompat
+      to_node: V3ProviderReqOutbound09TransportRequest`,
+    diagnostic: /ProviderReqCompat06 typed failure edge|V3Error05ExecutionDecision/u,
   },
   {
     name: 'Protocol parity aggregate gate is disconnected from CI and build',

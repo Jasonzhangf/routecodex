@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "npm run verify:architecture-review-surface-light && npm run verify:function-map-compile-gate && npm run build:base && npm run verify:servertool-rust-only && npm run verify:architecture-ci",
-    "build:min": "npm run verify:architecture-review-surface-light && npm run verify:function-map-compile-gate && npm run build:base && npm run verify:servertool-rust-only",
+    "build:min": "npm run verify:v3-architecture-ci && npm run verify:architecture-review-surface-light && npm run verify:function-map-compile-gate && npm run build:base && npm run verify:servertool-rust-only",
     "build:dev": "bash -lc 'export BUILD_MODE=dev ROUTECODEX_BUILD_RESTART_ONLY=1 ROUTECODEX_INSTALL_VERIFY_PORT=5555; npm run build:base && npm run fix:cli-permission'",
     "build:dev:full": "bash -lc 'export BUILD_MODE=dev ROUTECODEX_BUILD_RESTART_ONLY=1; npm run cleanup:stale-server-pids || true; trap \"npm run cleanup:stale-server-pids >/dev/null 2>&1 || true\" EXIT; npm run build:base && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run mock:regressions && npm run verify:errorsamples'",
     "build:native-hotpath": "node sharedmodule/llmswitch-core/scripts/build-native-hotpath.mjs && npm run verify:legacy-text-tool-harvest-napi-binding",
@@ -236,6 +236,9 @@
     "test:v3-provider-action-gate": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-error && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture",
     "verify:v3-provider-action-gate": "node scripts/architecture/verify-v3-provider-action-gate.mjs",
     "test:v3-provider-action-gate-red-fixtures": "node scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "test:v3-provider-session-cooldown": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses health::tests -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_initial_exhaustion_revives_one_in_plan_provider_from_sibling_success -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_cross_session_revive_failure_sends_once_and_preserves_cooldown_block -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib relay_failed_revive_preserves_deadline_and_returns_no_second_retry -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib missing_failure_session_fails_before_any_provider_send -- --nocapture",
+    "verify:v3-provider-session-cooldown": "node scripts/architecture/verify-v3-provider-session-cooldown.mjs",
+    "test:v3-provider-session-cooldown-red-fixtures": "node scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs",
     "verify:v3-runtime-timing-observability": "node scripts/architecture/verify-v3-runtime-timing-observability.mjs",
     "test:v3-runtime-timing-observability-red-fixtures": "node scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs",
     "verify:v3-console-request-count-visibility": "node scripts/architecture/verify-v3-console-request-count-visibility.mjs",
@@ -294,7 +297,7 @@
     "test:v3-compile-fail": "node scripts/tests/v3-compile-fail-boundaries.mjs",
     "verify:v3-cargo-fmt": "cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check",
     "verify:v3-clippy": "CARGO_NET_OFFLINE=true cargo +stable clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings",
-    "build:v3-cli": "npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && npm run verify:v3-route-classifier-local-owner && npm run verify:route-classifier-core-file-size && npm run test:route-classifier-semantics && CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli",
+    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && npm run verify:v3-route-classifier-local-owner && npm run verify:route-classifier-core-file-size && npm run test:route-classifier-semantics && CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli",
     "test:v3-responses-direct-unit": "cargo test --manifest-path v3/Cargo.toml --workspace --lib -- --nocapture",
     "test:v3-responses-direct-blackbox": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server -- --nocapture",
     "test:v3-direct-response-observability": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test general_provider sse_request_accepts_json_provider_response_as_json_raw_body -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test general_provider json_request_rejects_sse_provider_response_without_switching_response_kind -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_frame_console_infers_stop_finish_reason_from_completed_json_status -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_stream_request_error06_projects_sse_error_not_json -- --nocapture",
@@ -484,7 +487,8 @@
     "test:v3-mainline-caller-flow-red-fixtures": "node scripts/tests/v3-mainline-caller-flow-red-fixtures.mjs",
     "verify:legacy-text-tool-harvest-napi-orphans": "node scripts/architecture/verify-legacy-text-tool-harvest-napi-orphans.mjs",
     "verify:legacy-text-tool-harvest-napi-binding": "node scripts/architecture/verify-legacy-text-tool-harvest-napi-binding.mjs",
-    "test:legacy-text-tool-harvest-napi-orphans-red-fixtures": "node scripts/tests/legacy-text-tool-harvest-napi-orphans-red-fixtures.mjs"
+    "test:legacy-text-tool-harvest-napi-orphans-red-fixtures": "node scripts/tests/legacy-text-tool-harvest-napi-orphans-red-fixtures.mjs",
+    "verify:v3-architecture-ci": "node scripts/architecture/verify-v3-architecture-ci.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

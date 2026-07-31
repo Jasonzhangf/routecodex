@@ -22,7 +22,7 @@ use routecodex_v3_config::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3_ERROR_CHAIN_NODE_IDS,
+    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -70,6 +70,7 @@ impl From<String> for V3ResponsesRelayRuntimeError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3ResponsesRelayRuntimeInput {
     pub server_id: String,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub payload: Value,
 }
@@ -246,7 +247,8 @@ pub struct V3RuntimeStreamObservationSnapshot {
 
 struct V3ResponsesRelayProviderFailure {
     status: u16,
-    client_response: Value,
+    policy_error_type: String,
+    policy_error_message: String,
     provider_id: String,
     source_stage: &'static str,
     observability: Option<V3RuntimeObservability>,
@@ -1484,9 +1486,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         client_response_transport_intent,
     );
     trace.push("V3HubReqInbound01ClientRaw");
-    let req02 =
-        build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01(req01)
-            .map_err(V3ResponsesRelayRuntimeError::InboundCanonical)?;
+    let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
+        .map_err(V3ResponsesRelayRuntimeError::InboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
     let base_hub_scope = V3HubContinuationScope::new(
         V3HubEntryProtocol::Responses,
@@ -1571,8 +1572,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             }
         };
     }
-    let selected_server_routing_group =
-        try_before_resp03!(server_routing_group(manifest, &input.server_id));
     let provider_semantic_body = request_outcome.payload().clone();
     let route_facts_body = request_outcome
         .responses_original_input_surface_payload()
@@ -1596,10 +1595,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        server_id: &input.server_id,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        route_facts_body: &route_facts_body,
+        failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_failure_health,
         retry_policy: shared_retry_policy,
         deterministic_sample,
@@ -1613,6 +1609,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
+                failure_session_scope: &input.failure_session_scope,
                 entry_kind: "responses",
                 endpoint_path: "/v1/responses",
                 body: &route_facts_body,
@@ -2079,9 +2076,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     action,
                 )?;
                 try_before_resp03!(provider_health
-                    .record_provider_success_in_scope(
-                        &input.server_id,
-                        &selected_server_routing_group,
+                    .record_provider_success_in_failure_scope(
+                        &failure_context.failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
@@ -2303,9 +2299,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     action,
                 )?;
                 try_before_resp03!(provider_health
-                    .record_provider_success_in_scope(
-                        &input.server_id,
-                        &selected_server_routing_group,
+                    .record_provider_success_in_failure_scope(
+                        &failure_context.failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
@@ -2516,11 +2511,7 @@ async fn handle_v3_responses_relay_provider_failure(
         selected,
         failure.source_stage,
         failure.status,
-        failure
-            .client_response
-            .pointer("/error/type")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        Some(failure.policy_error_type.clone()),
         v3_responses_relay_provider_failure_reason(&failure)
             .unwrap_or("provider failure")
             .to_string(),
@@ -2571,16 +2562,25 @@ async fn handle_v3_responses_relay_provider_failure(
 fn v3_responses_relay_provider_failure_reason(
     failure: &V3ResponsesRelayProviderFailure,
 ) -> Option<&str> {
-    failure
-        .client_response
-        .pointer("/error/message")
+    Some(failure.policy_error_message.as_str()).filter(|message| !message.is_empty())
+}
+
+fn v3_provider_failure_error_type_from_body(body: &Value) -> String {
+    body.pointer("/error/type")
+        .or_else(|| body.pointer("/error/code"))
         .and_then(Value::as_str)
-        .or_else(|| {
-            failure
-                .client_response
-                .pointer("/error/type")
-                .and_then(Value::as_str)
-        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("provider_error")
+        .to_string()
+}
+
+fn v3_provider_failure_message_from_body(body: &Value) -> String {
+    body.pointer("/error/message")
+        .or_else(|| body.pointer("/error/type"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("provider failure")
+        .to_string()
 }
 
 fn build_v3_runtime_provider_failure_observation_from_policy_event(
@@ -2887,15 +2887,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 candidates_remaining: 0,
                 source_status: None,
             });
-            error_output(
-                source,
-                projected.status,
-                projected.body,
-                "none",
-                Vec::new(),
-                None,
-                0,
-            )
+            error_output(source, projected.status, "none", Vec::new(), None, 0)
         }
         error => {
             let message = error.to_string();
@@ -2905,15 +2897,7 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "responses_relay_runtime_error",
                 message.clone(),
             );
-            error_output(
-                source,
-                500,
-                json!({"error":{"type":"runtime_error","message":message}}),
-                "none",
-                Vec::new(),
-                None,
-                0,
-            )
+            error_output(source, 500, "none", Vec::new(), None, 0)
         }
     }
 }
@@ -4488,9 +4472,12 @@ fn provider_http_failure(
 ) -> V3ResponsesRelayProviderFailure {
     let body = serde_json::from_slice::<Value>(body)
         .unwrap_or_else(|_| json!({"error":{"type":"provider_error","message":"provider error"}}));
+    let policy_error_type = v3_provider_failure_error_type_from_body(&body);
+    let policy_error_message = v3_provider_failure_message_from_body(&body);
     V3ResponsesRelayProviderFailure {
         status,
-        client_response: body,
+        policy_error_type,
+        policy_error_message,
         provider_id: provider_id.to_string(),
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         observability,
@@ -4511,13 +4498,15 @@ fn provider_runtime_failure(
                 error.to_string(),
             )
         });
+    let policy_error_message = error.to_string();
     V3ResponsesRelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
         } else {
             502
         },
-        client_response: json!({"error":{"type":"provider_error","message":error.to_string()}}),
+        policy_error_type: "provider_runtime_error".to_string(),
+        policy_error_message: policy_error_message.clone(),
         provider_id: provider_id.to_string(),
         source_stage: provider_runtime_failure_stage(&error),
         observability,
@@ -4531,15 +4520,12 @@ fn provider_semantic_failure(
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
+    let policy_error_type = error.code.clone();
+    let policy_error_message = error.message.clone();
     V3ResponsesRelayProviderFailure {
         status,
-        client_response: json!({
-            "error": {
-                "type": "provider_semantic_error",
-                "code": error.code,
-                "message": error.message,
-            }
-        }),
+        policy_error_type,
+        policy_error_message,
         provider_id: provider_id.to_string(),
         source_stage: "V3ProviderRespInbound01Raw",
         observability,
@@ -4560,14 +4546,8 @@ fn provider_response_stream_relay_failure(
             message,
         } => V3ResponsesRelayProviderFailure {
             status,
-            client_response: json!({
-                "error": {
-                    "type": "rate_limit_error",
-                    "code": code,
-                    "message": message,
-                    "status": status
-                }
-            }),
+            policy_error_type: code.clone(),
+            policy_error_message: message.clone(),
             provider_id: provider_id.to_string(),
             source_stage: "V3ProviderRespInbound01Raw",
             observability,
@@ -4606,12 +4586,8 @@ fn provider_request_relay_failure(
     };
     Ok(V3ResponsesRelayProviderFailure {
         status: 502,
-        client_response: json!({
-            "error": {
-                "type": error_type,
-                "message": message,
-            }
-        }),
+        policy_error_type: error_type.to_string(),
+        policy_error_message: message.clone(),
         provider_id: provider_id.to_string(),
         source_stage,
         observability,
@@ -4675,12 +4651,8 @@ fn provider_response_hook_failure(
             let message = format!("provider response event codec failed: {other}");
             V3ResponsesRelayProviderFailure {
                 status: 502,
-                client_response: json!({
-                    "error": {
-                        "type": "provider_error",
-                        "message": message,
-                    }
-                }),
+                policy_error_type: "provider_response_event_codec_failure".to_string(),
+                policy_error_message: message.clone(),
                 provider_id: provider_id.to_string(),
                 source_stage: "V3HubRespChatProcess03Governed",
                 observability,
@@ -4724,13 +4696,11 @@ fn provider_failure_output(
 fn error_output(
     source: routecodex_v3_error::V3Error01SourceRaised,
     status: u16,
-    client_response: Value,
     provider_id: &str,
     mut trace: Vec<&'static str>,
     mut observability: Option<V3RuntimeObservability>,
     candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
-    let _ = client_response;
     let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
         source,
         action_scope: V3ErrorActionScope::ProviderInstance {
@@ -4781,11 +4751,17 @@ mod tests {
             resp03_failure.source_stage,
             "V3HubRespChatProcess03Governed"
         );
-        assert!(resp03_failure
-            .client_response
-            .pointer("/error/message")
-            .and_then(Value::as_str)
-            .is_some_and(|message| message.contains("duplicate call_id/id")));
+        assert_eq!(
+            resp03_failure.policy_error_type,
+            "provider_response_event_codec_failure"
+        );
+        assert!(
+            resp03_failure
+                .policy_error_message
+                .contains("duplicate call_id/id"),
+            "{}",
+            resp03_failure.policy_error_message
+        );
 
         let provider_raw_failure = provider_response_hook_failure(
             V3ResponsesRelayRuntimeError::Provider(V3ProviderError::ResponseBody {
@@ -4974,6 +4950,12 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "s".to_string(),
+                failure_session_scope: V3ProviderFailureSessionScope::new(
+                    "s",
+                    "g",
+                    "session-responses-relay-test",
+                )
+                .expect("test failure session scope"),
                 request_id: "req_reasoning_original_surface_route".to_string(),
                 payload: json!({
                     "model": "gpt-5.5",
@@ -5523,12 +5505,8 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         let output = provider_failure_output(
             V3ResponsesRelayProviderFailure {
                 status: 429,
-                client_response: json!({
-                    "error": {
-                        "type": "rate_limit_error",
-                        "message": "controlled rate limit"
-                    }
-                }),
+                policy_error_type: "rate_limit_error".to_string(),
+                policy_error_message: "controlled rate limit".to_string(),
                 provider_id: "controlled".to_string(),
                 source_stage: "V3ProviderReqOutbound09TransportRequest",
                 terminal_projection: Some(terminal_projection),

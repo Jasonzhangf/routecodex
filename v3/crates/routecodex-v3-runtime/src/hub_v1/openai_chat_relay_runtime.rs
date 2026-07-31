@@ -11,7 +11,7 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3_ERROR_CHAIN_NODE_IDS,
+    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload,
@@ -46,6 +46,7 @@ impl From<String> for V3OpenAiChatRelayRuntimeError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3OpenAiChatRelayRuntimeInput {
     pub server_id: String,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub payload: Value,
 }
@@ -204,10 +205,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
-        server_id: &input.server_id,
-        entry_kind: "openai_chat",
-        endpoint_path: "/v1/chat/completions",
-        route_facts_body: &route_facts_body,
+        failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
         deterministic_sample,
@@ -219,6 +217,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
+                failure_session_scope: &input.failure_session_scope,
                 entry_kind: "openai_chat",
                 endpoint_path: "/v1/chat/completions",
                 body: &route_facts_body,
@@ -456,9 +455,8 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                     }
                 };
                 provider_health
-                    .record_provider_success_in_scope(
-                        &input.server_id,
-                        server_routing_group(manifest, &input.server_id)?,
+                    .record_provider_success_in_failure_scope(
+                        &failure_context.failure_session_scope,
                         &selected_target_provider_id,
                         Some(&selected_target_auth_alias),
                         Some(&selected_target_model_id),
@@ -475,7 +473,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             }
             V3ProviderResponseBody::Sse(stream) => {
                 push_sse_response_chain_trace(&mut trace);
-                let routing_group = server_routing_group(manifest, &input.server_id)?.to_string();
                 return Ok(V3OpenAiChatRelayRuntimeOutput {
                     status: 200,
                     client_body: V3OpenAiChatRelayClientBody::Sse(project_sse_stream(
@@ -483,8 +480,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                         selected_target_compatibility_profile,
                         V3OpenAiChatSseProviderOutcome {
                             provider_health: provider_health.clone(),
-                            server_id: input.server_id.clone(),
-                            routing_group,
+                            failure_session_scope: failure_context.failure_session_scope.clone(),
                             provider_id: selected_target_provider_id,
                             auth_alias: selected_target_auth_alias,
                             model_id: selected_target_model_id,
@@ -590,8 +586,7 @@ struct V3OpenAiChatSseState {
 
 struct V3OpenAiChatSseProviderOutcome {
     provider_health: V3ProviderFailureRuntimeHealth,
-    server_id: String,
-    routing_group: String,
+    failure_session_scope: V3ProviderFailureSessionScope,
     provider_id: String,
     auth_alias: String,
     model_id: String,
@@ -607,8 +602,7 @@ impl V3OpenAiChatSseProviderOutcome {
         drop(self._provider_action_permit.take());
         self.provider_health
             .record_post_commit_provider_stream_failure(
-                &self.server_id,
-                &self.routing_group,
+                &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
@@ -623,14 +617,14 @@ impl V3OpenAiChatSseProviderOutcome {
         if self.recorded {
             return Ok(());
         }
-        self.provider_health.record_provider_success_in_scope(
-            &self.server_id,
-            &self.routing_group,
-            &self.provider_id,
-            Some(&self.auth_alias),
-            Some(&self.model_id),
-            v3_relay_provider_policy_now_epoch_ms()?,
-        )?;
+        self.provider_health
+            .record_provider_success_in_failure_scope(
+                &self.failure_session_scope,
+                &self.provider_id,
+                Some(&self.auth_alias),
+                Some(&self.model_id),
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )?;
         self.recorded = true;
         Ok(())
     }

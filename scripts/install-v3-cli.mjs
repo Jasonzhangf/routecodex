@@ -16,6 +16,12 @@ const routeClassifierFileSizeGate = path.join(
   'architecture',
   'verify-route-classifier-core-file-size.mjs',
 );
+const v3ArchitectureCiGate = path.join(
+  repoRoot,
+  'scripts',
+  'architecture',
+  'verify-v3-architecture-ci.mjs',
+);
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
 const repoBin = path.join(repoRoot, 'dist', 'bin', binaryName);
 const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
@@ -62,6 +68,12 @@ function buildV3Cli() {
   if (!fs.existsSync(manifestPath)) {
     fail(`missing V3 manifest: ${manifestPath}`);
   }
+  const v3ArchitectureGateResult = spawnSync(process.execPath, [v3ArchitectureCiGate], {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: 'inherit',
+  });
+  requireSpawnSuccess(v3ArchitectureGateResult, 'V3 architecture CI gate');
   const gateResult = spawnSync(process.execPath, [routeClassifierFileSizeGate], {
     cwd: repoRoot,
     env: process.env,

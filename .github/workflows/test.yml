@@ -29,6 +29,8 @@ jobs:
         run: npm run verify:repo-sanity
       - name: Architecture gates
         run: npm run verify:architecture-ci
+      - name: V3 architecture CI umbrella
+        run: npm run verify:v3-architecture-ci
       - name: V3 OpenAI Chat stream tool-call identity tests
         run: npm run test:v3-openai-chat-stream-tool-call-identity
       - name: File line-limit gate (<500)
@@ -105,6 +107,8 @@ jobs:
         run: npm run verify:repo-sanity
       - name: Architecture gates
         run: npm run verify:architecture-ci
+      - name: V3 architecture CI umbrella
+        run: npm run verify:v3-architecture-ci
       - name: File line-limit gate (<500)
         run: npm run verify:file-line-limit
       - name: V3 file-size ratchet gate (<=1500)

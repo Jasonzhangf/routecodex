@@ -1082,6 +1082,12 @@ async fn feature_toggle_false_disables_relay_stopless_injection_and_projection()
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".to_string(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-disabled".to_string(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1136,6 +1142,12 @@ async fn omitted_stopless_center_compiles_true_and_injects_guidance_and_projects
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".to_string(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-omitted-stopless".to_string(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1204,6 +1216,12 @@ async fn omitted_stopless_center_without_control_scope_stays_inactive() {
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".to_string(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-omitted-stopless-without-scope".to_string(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1272,6 +1290,12 @@ async fn server_override_precedence_applies_after_compiled_global_default() {
             &server_disabled_manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".to_string(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-server-stopless-disabled".to_string(),
                 payload: json!({
                     "model":"gpt-5.5",
@@ -1327,6 +1351,12 @@ async fn server_override_precedence_applies_after_compiled_global_default() {
             &server_enabled_manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".to_string(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-server-stopless-enabled".to_string(),
                 payload: json!({
                     "model":"gpt-5.5",

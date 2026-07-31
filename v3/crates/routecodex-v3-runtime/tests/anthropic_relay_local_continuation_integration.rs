@@ -78,6 +78,12 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
         &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-local-1".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -100,6 +106,12 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
         &manifest(server_id),
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-local-2".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -490,6 +502,12 @@ fn request(
 ) -> V3AnthropicRelayRuntimeInput {
     V3AnthropicRelayRuntimeInput {
         server_id: server_id.into(),
+        failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+            "test-server",
+            "test-group",
+            concat!(module_path!(), ":", line!()),
+        )
+        .expect("test provider failure session scope"),
         request_id: request_id.into(),
         payload: json!({
             "model":"claude-client-alias",

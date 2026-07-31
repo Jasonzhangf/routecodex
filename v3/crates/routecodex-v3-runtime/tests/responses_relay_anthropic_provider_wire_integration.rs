@@ -147,6 +147,12 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-anthropic-provider-wire".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -206,6 +212,12 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
         &claude_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "anthropic_v3_10000".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-claude-code-compat".into(),
             payload: json!({
                 "model":"claude-fable-5",
@@ -284,6 +296,12 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
         &claude_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "anthropic_v3_10000".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-anthropic-cyber-refusal-retry".into(),
             payload: json!({
                 "model":"claude-fable-5",
@@ -306,7 +324,10 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     assert_eq!(observability.provider_failure_events.len(), 1);
     let failure = &observability.provider_failure_events[0];
     assert_eq!(failure.status, 429);
-    assert_eq!(failure.error_type.as_deref(), Some("rate_limit_error"));
+    assert_eq!(
+        failure.error_type.as_deref(),
+        Some("ANTHROPIC_CYBER_REFUSAL")
+    );
     assert!(failure
         .message
         .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
@@ -335,6 +356,12 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-anthropic-provider-unmappable-metadata".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -371,6 +398,12 @@ async fn responses_relay_reasoning_request_config_projects_anthropic_system_mark
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-reasoning-to-anthropic-marker".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -410,6 +443,12 @@ async fn responses_relay_string_input_reasoning_request_config_projects_anthropi
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-string-reasoning-to-anthropic-marker".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -482,6 +521,12 @@ async fn responses_relay_anthropic_provider_json_preserves_thinking_to_responses
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-anthropic-json-reasoning".into(),
             payload: json!({
                 "model":"MiniMax-M3",
@@ -589,6 +634,12 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-anthropic-sse-reasoning".into(),
             payload: json!({
                 "model":"MiniMax-M3",

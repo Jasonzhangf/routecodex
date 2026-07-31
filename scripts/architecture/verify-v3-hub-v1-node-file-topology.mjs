@@ -109,7 +109,12 @@ function rustFiles(dir) {
   if (!fs.existsSync(abs(dir))) return out;
   for (const entry of fs.readdirSync(abs(dir))) {
     const file = path.join(dir, entry);
-    if (fs.statSync(abs(file)).isFile() && file.endsWith('.rs')) out.push(rel(file));
+    const stat = fs.statSync(abs(file));
+    if (stat.isDirectory()) {
+      out.push(...rustFiles(file));
+    } else if (stat.isFile() && file.endsWith('.rs')) {
+      out.push(rel(file));
+    }
   }
   return out.sort();
 }

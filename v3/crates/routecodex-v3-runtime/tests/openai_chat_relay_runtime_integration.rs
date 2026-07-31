@@ -110,6 +110,12 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-json".into(),
             payload: payload.clone(),
         },
@@ -228,6 +234,12 @@ async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_actio
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-client-disconnect-{index}"),
                 payload: json!({
                     "model":"chat-client-alias",
@@ -316,6 +328,12 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
         &manifest_with_two_providers_for_scope(server_id),
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-provider-reselect".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -360,6 +378,12 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         &manifest_with_identity(server_id),
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-error".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -429,6 +453,12 @@ async fn sse_runtime_preserves_split_frames_tool_delta_terminal_and_done_order()
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-sse".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -487,6 +517,12 @@ data: [DONE]
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-sse-reasoning-chain".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -638,6 +674,12 @@ async fn sse_first_client_frame_is_observable_before_provider_terminal() {
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-sse-timing".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -694,6 +736,12 @@ async fn sse_done_before_terminal_and_terminal_without_done_fail_explicitly() {
             &manifest(),
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-sse-negative".into(),
                 payload: json!({
                     "model":"chat-client-alias",
@@ -734,6 +782,12 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-post-commit-failure".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -761,6 +815,12 @@ async fn post_commit_sse_failure_records_failure_but_does_not_block_a_fresh_requ
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-after-post-commit-failure".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -788,6 +848,12 @@ async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "clean_eof".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-seed-active-gate".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -829,6 +895,12 @@ data: [DONE]
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "clean_eof".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-terminal-reset".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -858,6 +930,12 @@ data: [DONE]
             &waiting_manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "clean_eof".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-released-by-terminal-success".into(),
                 payload: json!({
                     "model":"chat-client-alias",
@@ -895,6 +973,7 @@ data: [DONE]
 async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_active_recovery";
+    const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
     let manifest = manifest_with_two_providers_for_scope(server_id);
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
@@ -913,6 +992,12 @@ data: [DONE]
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                FAILURE_SESSION_ID,
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-active-recovery-stream".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -945,6 +1030,12 @@ data: [DONE]
             &waiting_manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    FAILURE_SESSION_ID,
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-second-recovery-action".into(),
                 payload: json!({
                     "model":"chat-client-alias",
@@ -1021,6 +1112,12 @@ data: [DONE]
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "post_done_transport".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-post-done-transport".into(),
             payload: json!({
                 "model":"chat-client-alias",
@@ -1067,6 +1164,12 @@ data: [DONE]
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: identity,
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-post-done-{}", expected.replace(' ', "-")),
                 payload: json!({
                     "model":"chat-client-alias",
@@ -1098,6 +1201,12 @@ async fn request_side_channel_is_rejected_before_provider_transport() {
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-isolation".into(),
             payload: json!({
                 "model":"chat-client-alias",

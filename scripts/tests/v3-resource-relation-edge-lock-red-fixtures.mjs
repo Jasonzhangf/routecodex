@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 
 const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs');
@@ -15,6 +16,16 @@ const copied = [
   'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs',
   'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs',
 ];
+
+function mutateYaml(source, mutate) {
+  const document = YAML.parse(source);
+  mutate(document);
+  return YAML.stringify(document);
+}
+
+function edge(document, stepId) {
+  return document.chains.flatMap((chain) => chain.edges ?? []).find((item) => item.step_id === stepId);
+}
 
 const cases = [
   {
@@ -40,7 +51,9 @@ const cases = [
     name: 'edge references undeclared resource',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace('consumes: [v3.config.file_source]', 'consumes: [v3.unknown.resource]');
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-01').resource_flow.consumes = ['v3.unknown.resource'];
+      });
     },
     diagnostic: /undeclared resource v3\.unknown\.resource/u,
   },
@@ -48,10 +61,9 @@ const cases = [
     name: 'resource relation moved to edge top level',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace(
-        '        resource_flow:\n          consumes: [v3.config.file_source]',
-        '        consumes: [v3.config.file_source]\n        resource_flow:\n          consumes: [v3.config.file_source]',
-      );
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-01').consumes = ['v3.config.file_source'];
+      });
     },
     diagnostic: /resource relationship field consumes must be nested under resource_flow/u,
   },
@@ -75,10 +87,9 @@ const cases = [
     name: 'plural target shortcut field',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace(
-        '        to_node: V3Config02AuthoringParsed\n',
-        '        to_node: V3Config02AuthoringParsed\n        to_nodes: [V3Config02AuthoringParsed, V3Config02OtherParsed]\n',
-      );
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-01').to_nodes = ['V3Config02AuthoringParsed', 'V3Config02OtherParsed'];
+      });
     },
     diagnostic: /path shortcut field to_nodes is forbidden; multiple callable paths require multiple edges/u,
   },
@@ -86,7 +97,9 @@ const cases = [
     name: 'duplicate edge step id',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace('      - step_id: v3-cfg-02', '      - step_id: v3-cfg-01');
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-02').step_id = 'v3-cfg-01';
+      });
     },
     diagnostic: /duplicate step_id v3-cfg-01/u,
   },
@@ -102,7 +115,9 @@ const cases = [
     name: 'edge owner missing from function map',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace('owner_feature_id: v3.config_interpreter_contract\n        resource_flow:', 'owner_feature_id: v3.test_missing_edge_owner\n        resource_flow:');
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-01').owner_feature_id = 'v3.test_missing_edge_owner';
+      });
     },
     diagnostic: /v3-cfg-01: owner_feature_id v3\.test_missing_edge_owner is not declared in docs\/architecture\/v3-function-map\.yml/u,
   },
@@ -126,10 +141,9 @@ const cases = [
     name: 'unknown resource_flow field',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace(
-        '          side_channel_writes: []\n        status: anchored',
-        '          side_channel_writes: []\n          relates_to: [v3.config.file_source]\n        status: anchored',
-      );
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-01').resource_flow.relates_to = ['v3.config.file_source'];
+      });
     },
     diagnostic: /unknown resource_flow field relates_to/u,
   },
@@ -137,7 +151,9 @@ const cases = [
     name: 'missing resource_flow required field',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace('          side_channel_reads: []\n          side_channel_writes: []\n        status: anchored', '          side_channel_reads: []\n        status: anchored');
+      return mutateYaml(source, (document) => {
+        delete edge(document, 'v3-cfg-01').resource_flow.side_channel_writes;
+      });
     },
     diagnostic: /resource_flow\.side_channel_writes must be an array/u,
   },

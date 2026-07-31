@@ -203,6 +203,12 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-relay-json".into(),
             payload: json!({
                 "model":"client-responses",
@@ -303,6 +309,12 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-relay-sse".into(),
             payload: json!({
                 "model":"client-responses",
@@ -456,6 +468,12 @@ async fn responses_relay_client_sse_request_projects_sse_even_when_provider_retu
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-relay-client-sse-provider-json".into(),
             payload: json!({
                 "model":"client-responses",
@@ -521,6 +539,12 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-standard-payload".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -597,6 +621,12 @@ async fn responses_relay_openai_chat_target_projects_responses_builtin_tools_to_
         &openai_chat_target_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-tool-search".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -698,6 +728,12 @@ async fn responses_relay_openai_chat_target_normalizes_redacted_tool_schema_plac
         &openai_chat_target_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-redacted-tool-schema".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -777,6 +813,12 @@ async fn responses_relay_openai_chat_target_keeps_tool_result_immediately_after_
         &openai_chat_target_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-tool-pair-order".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -902,6 +944,12 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-relay-sse-stop-observability".into(),
             payload: json!({
                 "model":"client-responses",
@@ -964,6 +1012,12 @@ async fn responses_relay_client_json_request_projects_json_even_when_provider_re
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-relay-client-json-provider-sse".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1516,6 +1570,12 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-context-reselect".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1594,6 +1654,12 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-malformed-provider-json-reselect".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1652,6 +1718,12 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id,
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-responses-duplicate-tool-identity-{suffix}"),
                 payload: json!({
                     "model":"client-responses",
@@ -1702,6 +1774,12 @@ async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_a
         &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-duplicate-tool-identity-terminal".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1751,6 +1829,12 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-responses-context-reselect-{turn}"),
                 payload: json!({
                     "model":"client-responses",
@@ -1804,6 +1888,12 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-context-reselect-cooled".into(),
             payload: json!({
                 "model":"client-responses",
@@ -1860,6 +1950,12 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
         &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-context-exhausted".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1906,6 +2002,12 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
             &responses_single_limited_manifest_for_scope(server_id),
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-responses-default-floor-cap".into(),
                 payload: json!({
                     "model":"gpt-5.5",
@@ -1965,6 +2067,12 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
         &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-default-floor-waits".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1998,6 +2106,12 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_actio
         &responses_request_compat_reselect_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "compat_reselect".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-provider-compat-reselect".into(),
             payload: json!({
                 "model":"client-responses",
@@ -2044,6 +2158,12 @@ async fn concurrent_provider_request_compat_failures_do_not_serialize_request_lo
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "compat_storm".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: request_id.into(),
                 payload: json!({
                     "model":"client-responses",
@@ -2083,6 +2203,12 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-sse-body-read-error".into(),
             payload: json!({
                 "model":"client-responses",
@@ -2125,6 +2251,12 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-terminal-missing".into(),
             payload: json!({
                 "model":"client-responses",
@@ -2163,6 +2295,12 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-responses-after-terminal-missing".into(),
                 payload: json!({
                     "model":"client-responses",
@@ -2189,6 +2327,12 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-sse-invalid-utf8".into(),
             payload: json!({
                 "model":"client-responses",
@@ -2228,6 +2372,12 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-sse-malformed-event-json".into(),
             payload: json!({
                 "model":"client-responses",
@@ -2264,9 +2414,16 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
 #[test]
 fn provider_key_consecutive_failures_cool_for_fifteen_minutes_without_cross_model_pollution() {
     let store = V3ProviderHealthStore::from_manifest(&responses_single_limited_manifest());
+    let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
+        "test-server",
+        "test-group",
+        "provider-key-cooldown",
+    )
+    .expect("test provider failure session scope");
     for (index, now_ms) in [1_000, 2_000, 3_000].into_iter().enumerate() {
         let record = store
-            .record_provider_failure(
+            .record_provider_failure_in_session(
+                &failure_session_scope,
                 "limited",
                 Some("key1"),
                 Some("gpt-5.5"),
@@ -2312,6 +2469,12 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
         &manifest_for_scope(server_id),
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-closeout-error".into(),
             payload: json!({
                 "model":"claude-client-alias",
@@ -2549,6 +2712,12 @@ targets = [
 fn request(request_id: &str, messages: Value, stream: bool) -> V3AnthropicRelayRuntimeInput {
     V3AnthropicRelayRuntimeInput {
         server_id: "controlled".into(),
+        failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+            "test-server",
+            "test-group",
+            concat!(module_path!(), ":", line!()),
+        )
+        .expect("test provider failure session scope"),
         request_id: request_id.into(),
         payload: json!({
             "model":"claude-client-alias",

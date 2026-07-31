@@ -27,6 +27,8 @@ function fail(message) {
 
 const all = files('v3');
 const read = (path) => readFileSync(path, 'utf8');
+const isRustTestSource = (path) =>
+  path.includes('/tests/') || path.endsWith('/tests.rs') || path.includes('/src/tests/') || path.includes('/src/') && path.endsWith('/tests.rs');
 
 for (const path of all) {
   const text = read(path);
@@ -36,7 +38,7 @@ for (const path of all) {
     .replace(/\.fallback\(path_not_found\)/g, '')
     .replace(/fallback-credit-2026-06-01/g, 'provider-credit-beta-2026-06-01')
     .replace(/\bcomplete_or_repair_v3_resp03_tool_frames\b/g, 'complete_v3_resp03_tool_frames');
-  const isTest = path.includes('/tests/');
+  const isTest = isRustTestSource(path);
   const isErrorOwner = path.includes('routecodex-v3-error/src/');
   const isProviderOwner = path.includes('routecodex-v3-provider-responses/src/');
   const isProviderHealthRuntimeBoundary =
@@ -114,6 +116,7 @@ if (/serde_json::from_slice|default_tier|providers\.get/.test(hookSource)) {
 }
 
 const serverSource = files('v3/crates/routecodex-v3-server/src')
+  .filter((path) => !isRustTestSource(path))
   .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
   .join('\n');
 if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {
@@ -202,8 +205,12 @@ if (/execute_v3_foundation_dry_run_runtime/.test(foundationSource)) {
   fail('dead foundation Dry Run lifecycle must not coexist with the Runtime-owned P6 Dry Run');
 }
 
-const runtimeKernelSource = read('v3/crates/routecodex-v3-runtime/src/kernel.rs');
-const dryRunSource = runtimeKernelSource.match(/pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*?\n}\n\npub async fn execute_v3_responses_direct_runtime_kernel/)?.[0] ?? '';
+const runtimeDirectProtocolPlanSource = read(
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs',
+);
+const dryRunSource = runtimeDirectProtocolPlanSource.match(
+  /pub async fn execute_v3_responses_direct_dry_run_runtime[\s\S]*$/,
+)?.[0] ?? '';
 const dryRunUsesResponsesRuntimeKernel =
   /execute_v3_responses_direct_runtime_kernel_with_transport_debug_core/.test(dryRunSource);
 if (!/V3DryRunNoNetworkTransport/.test(dryRunSource)

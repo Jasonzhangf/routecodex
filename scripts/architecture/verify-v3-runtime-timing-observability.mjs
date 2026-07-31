@@ -26,9 +26,21 @@ const directSseOutcomePath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
 );
+const directRuntimeHelpersPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
+);
+const kernelTestsPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs",
+);
 const serverPath = path.join(
   root,
   "v3/crates/routecodex-v3-server/src/lib.rs",
+);
+const serverTestsPath = path.join(
+  root,
+  "v3/crates/routecodex-v3-server/src/tests/mod.rs",
 );
 const v3FunctionMapPath = path.join(root, "docs/architecture/v3-function-map.yml");
 const functionMapPath = path.join(root, "docs/architecture/function-map.yml");
@@ -106,10 +118,15 @@ const runtimeObservability = relayRuntime.slice(
 );
 const kernel = readRequired(kernelPath);
 const directSseOutcome = readRequired(directSseOutcomePath);
+const directRuntimeHelpers = readRequired(directRuntimeHelpersPath);
+const kernelTests = readRequired(kernelTestsPath);
 const directSseOutcomeWrapper = directSseOutcome.slice(
   directSseOutcome.indexOf("pub(super) fn wrap_direct_sse_provider_outcome_stream("),
 );
 const server = readRequired(serverPath);
+const serverTests = readRequired(serverTestsPath);
+const serverAndTests = `${server}
+${serverTests}`;
 const serverProduction = server.split("#[cfg(test)]")[0];
 const responseProjection = serverProduction.slice(
   serverProduction.indexOf("fn emit_v3_request_complete_console_line("),
@@ -133,8 +150,14 @@ function sliceTokioTest(source, testName) {
   if (start === -1) {
     return "";
   }
-  const next = source.indexOf("\n    #[tokio::test]", start + signature.length);
-  return source.slice(start, next === -1 ? source.length : next);
+  const nextCandidates = [
+    source.indexOf("\n#[tokio::test]", start + signature.length),
+    source.indexOf("\n    #[tokio::test]", start + signature.length),
+  ].filter((candidate) => candidate !== -1);
+  if (nextCandidates.length === 0) {
+    return "";
+  }
+  return source.slice(start, Math.min(...nextCandidates));
 }
 
 const directFinalizer = serverProduction.slice(
@@ -153,11 +176,11 @@ const directClientDisconnected = sliceRustFunction(
   "fn client_disconnected(mut self)",
 );
 const directPreEofCloseoutTest = sliceTokioTest(
-  server,
+  serverAndTests,
   "direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof",
 );
 const directCleanEofMissingTimingTest = sliceTokioTest(
-  server,
+  serverAndTests,
   "direct_sse_console_clean_eof_exposes_missing_runtime_timing_contract",
 );
 const v3FunctionMap = readRequired(v3FunctionMapPath);
@@ -213,7 +236,7 @@ requireMatch(
   "Direct SSE provider decoder must receive the Runtime timing state",
 );
 requireMatch(
-  kernel,
+  directRuntimeHelpers,
   /decoder[\s\S]*\.finish\(\)[\s\S]*finish_external\(\)/,
   "Direct SSE external timing must close only after decoder clean EOF",
 );
@@ -281,7 +304,7 @@ requireMatch(
   "Direct SSE provider outcome must reject mismatched SSE event and JSON types",
 );
 requireMatch(
-  kernel,
+  kernelTests,
   /async fn direct_sse_event_name_json_type_mismatch_is_protocol_invalid\(\)[\s\S]*provider_response_sse_event_invalid[\s\S]*does not match JSON type[\s\S]*timing\.is_none\(\)/,
   "Direct SSE mismatch regression must prove explicit failure without successful timing",
 );

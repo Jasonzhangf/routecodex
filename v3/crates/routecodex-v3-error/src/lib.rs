@@ -335,9 +335,51 @@ pub struct V3Error04TargetExhaustionDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct V3Error05RecoveryAdmissionWitness {
+pub struct V3ProviderFailureSessionScope {
     server_id: String,
     routing_group: String,
+    session_id: String,
+}
+
+impl V3ProviderFailureSessionScope {
+    pub fn new(
+        server_id: impl Into<String>,
+        routing_group: impl Into<String>,
+        session_id: impl Into<String>,
+    ) -> Result<Self, String> {
+        fn required(value: String, field: &str) -> Result<String, String> {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(format!(
+                    "provider failure session scope {field} cannot be empty"
+                ));
+            }
+            Ok(value.to_string())
+        }
+
+        Ok(Self {
+            server_id: required(server_id.into(), "server_id")?,
+            routing_group: required(routing_group.into(), "routing_group")?,
+            session_id: required(session_id.into(), "session_id")?,
+        })
+    }
+
+    pub fn server_id(&self) -> &str {
+        &self.server_id
+    }
+
+    pub fn routing_group(&self) -> &str {
+        &self.routing_group
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V3Error05RecoveryAdmissionWitness {
+    failure_session_scope: V3ProviderFailureSessionScope,
     provider_runtime_identity: String,
     normalized_error_family: String,
     generation: u64,
@@ -345,8 +387,7 @@ pub struct V3Error05RecoveryAdmissionWitness {
 
 impl V3Error05RecoveryAdmissionWitness {
     pub fn new(
-        server_id: impl Into<String>,
-        routing_group: impl Into<String>,
+        failure_session_scope: V3ProviderFailureSessionScope,
         provider_runtime_identity: impl Into<String>,
         normalized_error_family: impl Into<String>,
         generation: u64,
@@ -363,8 +404,7 @@ impl V3Error05RecoveryAdmissionWitness {
             return Err("Error05 recovery witness generation must be positive".to_string());
         }
         Ok(Self {
-            server_id: required(server_id.into(), "server_id")?,
-            routing_group: required(routing_group.into(), "routing_group")?,
+            failure_session_scope,
             provider_runtime_identity: required(
                 provider_runtime_identity.into(),
                 "provider_runtime_identity",
@@ -378,11 +418,19 @@ impl V3Error05RecoveryAdmissionWitness {
     }
 
     pub fn server_id(&self) -> &str {
-        &self.server_id
+        self.failure_session_scope.server_id()
     }
 
     pub fn routing_group(&self) -> &str {
-        &self.routing_group
+        self.failure_session_scope.routing_group()
+    }
+
+    pub fn session_id(&self) -> &str {
+        self.failure_session_scope.session_id()
+    }
+
+    pub fn failure_session_scope(&self) -> &V3ProviderFailureSessionScope {
+        &self.failure_session_scope
     }
 
     pub fn provider_runtime_identity(&self) -> &str {
@@ -953,6 +1001,39 @@ pub fn raise_v3_runtime_observability_contract_failure(
         "runtime_observability_contract",
         message,
     )
+}
+
+pub fn project_v3_post_commit_sse_source(
+    source: V3Error01SourceRaised,
+    status: u16,
+) -> V3Error06ClientProjected {
+    if matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
+        let classified = build_v3_error_02_classified_from_v3_error_01(source);
+        let action = build_v3_error_03_target_local_action_from_v3_error_02(
+            classified,
+            V3ErrorActionScope::None,
+            0,
+        );
+        let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+            action, 0, false, false,
+        );
+        let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
+        let terminal = decision
+            .try_into_terminal()
+            .expect("post-commit provider SSE source must project terminal Error05");
+        let mut projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
+        projected.status = status;
+        projected
+    } else {
+        let mut projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: Some(status),
+        });
+        projected.status = status;
+        projected
+    }
 }
 
 pub fn project_v3_pending_endpoint_error(

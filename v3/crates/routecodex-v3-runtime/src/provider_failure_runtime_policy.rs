@@ -4,11 +4,11 @@ use routecodex_v3_error::{
     build_v3_error_06_client_projected_from_v3_error_05, V3Error05ExecutionDecision,
     V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
     V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink,
+    V3ExternalErrorLink, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
-    V3ProviderFailureRecord, V3ProviderHealthStore,
+    V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 use routecodex_v3_target::{
     V3Target10ConcreteProviderSelected, V3TargetCandidate, V3TargetInterpreter,
@@ -103,10 +103,7 @@ pub(crate) struct V3RelayProviderFailurePolicyResult {
 
 pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
     pub(crate) manifest: &'ctx V3Config05ManifestPublished,
-    pub(crate) server_id: &'ctx str,
-    pub(crate) entry_kind: &'ctx str,
-    pub(crate) endpoint_path: &'ctx str,
-    pub(crate) route_facts_body: &'ctx Value,
+    pub(crate) failure_session_scope: V3ProviderFailureSessionScope,
     pub(crate) provider_health: &'ctx V3ProviderFailureRuntimeHealth,
     pub(crate) retry_policy: V3RelayProviderFailureRetryPolicy,
     pub(crate) deterministic_sample: u64,
@@ -118,17 +115,15 @@ pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) trace: &'state mut Vec<&'static str>,
 }
 
-pub(crate) struct V3RelayProviderTargetResolutionInput<
-    'input,
-    R: V3ProviderAvailabilityReader + ?Sized,
-> {
+pub(crate) struct V3RelayProviderTargetResolutionInput<'input> {
     pub(crate) manifest: &'input V3Config05ManifestPublished,
     pub(crate) server_id: &'input str,
     pub(crate) entry_kind: &'input str,
     pub(crate) endpoint_path: &'input str,
     pub(crate) body: &'input Value,
     pub(crate) request_local_excluded_candidates: &'input BTreeSet<String>,
-    pub(crate) provider_health: &'input R,
+    pub(crate) failure_session_scope: &'input V3ProviderFailureSessionScope,
+    pub(crate) provider_health: &'input V3ProviderFailureRuntimeHealth,
     pub(crate) now_ms: u64,
     pub(crate) deterministic_sample: u64,
 }
@@ -146,6 +141,86 @@ struct V3RelayExcludedAvailability<
 > {
     base: &'availability R,
     excluded: &'excluded BTreeSet<String>,
+}
+
+struct V3RevivedCandidateAvailability<'availability> {
+    session: &'availability V3ProviderSessionAvailabilityReader,
+    global: &'availability V3ProviderFailureRuntimeHealth,
+    revived_candidate_key: &'availability str,
+}
+
+impl V3ProviderAvailabilityReader for V3RevivedCandidateAvailability<'_> {
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        if v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id)
+            == self.revived_candidate_key
+        {
+            return self
+                .global
+                .availability(provider_id, auth_alias, model_id, now_ms);
+        }
+        self.session
+            .availability(provider_id, auth_alias, model_id, now_ms)
+    }
+}
+
+pub(crate) fn try_reselect_cross_session_revive_from_captured_candidates(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    expanded: &routecodex_v3_target::V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    now_ms: u64,
+) -> Result<Option<V3Target10ConcreteProviderSelected>, String> {
+    let session_availability = provider_health.session_bound_availability(failure_session_scope);
+    for candidate in &expanded.candidates {
+        let candidate_key = v3_relay_provider_candidate_key(&candidate);
+        if request_local_excluded_candidates.contains(&candidate_key)
+            || !provider_health
+                .availability(
+                    &candidate.provider_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                    now_ms,
+                )
+                .available
+        {
+            continue;
+        }
+        let admitted = provider_health
+            .store()
+            .try_acquire_cross_session_revive(
+                failure_session_scope,
+                &candidate.provider_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                now_ms,
+            )
+            .map_err(|error| error.to_string())?
+            .is_some();
+        if !admitted {
+            continue;
+        }
+        let revived_availability = V3RevivedCandidateAvailability {
+            session: &session_availability,
+            global: provider_health,
+            revived_candidate_key: &candidate_key,
+        };
+        return V3TargetInterpreter::default()
+            .select_available(expanded.clone(), &revived_availability, now_ms)
+            .map(Some)
+            .map_err(|error| {
+                format!(
+                    "atomic revive candidate {candidate_key} could not be selected from captured plan: {:?}",
+                    error.attempted_candidates
+                )
+            });
+    }
+    Ok(None)
 }
 
 impl<R: V3ProviderAvailabilityReader + ?Sized> V3ProviderAvailabilityReader
@@ -188,6 +263,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) fn record_provider_failure_record(
         &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
@@ -195,34 +271,44 @@ impl V3ProviderFailureRuntimeHealth {
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
         self.store
-            .record_provider_failure(provider_id, auth_alias, model_id, reason, now_ms)
+            .record_provider_failure_in_session(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                reason,
+                now_ms,
+            )
             .map_err(|error| error.to_string())
     }
 
-    pub(crate) fn record_provider_success_in_scope(
+    pub(crate) fn record_provider_success_in_failure_scope(
         &self,
-        server_id: &str,
-        routing_group: &str,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), String> {
         self.store
-            .record_provider_success(provider_id, auth_alias, model_id, now_ms)
+            .record_provider_success_in_session(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                now_ms,
+            )
             .map_err(|error| error.to_string())?;
         self.action_gate
             .record_provider_success(&V3ProviderActionProviderScope::new(
-                server_id,
-                routing_group,
+                failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
             )?)
     }
 
-    pub(crate) fn record_provider_action_failure(
+    pub(crate) fn record_provider_action_failure_in_scope(
         &self,
-        server_id: &str,
-        routing_group: &str,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
@@ -230,17 +316,15 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<V3ProviderActionFailureRecorded, String> {
         self.action_gate
             .record_failure(&V3ProviderActionGateKey::new(
-                server_id,
-                routing_group,
+                failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
                 error_family,
             )?)
     }
 
-    pub(crate) async fn wait_for_terminal_provider_projection(
+    pub(crate) async fn wait_for_terminal_provider_projection_in_scope(
         &self,
-        server_id: &str,
-        routing_group: &str,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
@@ -248,8 +332,24 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<V3ProviderActionAdmission, String> {
         self.action_gate
             .record_failure_and_wait_for_terminal_projection(V3ProviderActionGateKey::new(
-                server_id,
-                routing_group,
+                failure_session_scope,
+                v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
+                error_family,
+            )?)
+            .await
+    }
+
+    pub(crate) async fn wait_for_provider_action_failure_in_scope(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        error_family: &str,
+    ) -> Result<V3ProviderActionAdmission, String> {
+        self.action_gate
+            .record_failure_and_wait(V3ProviderActionGateKey::new(
+                failure_session_scope,
                 v3_relay_provider_candidate_key_parts(provider_id, auth_alias, model_id),
                 error_family,
             )?)
@@ -258,8 +358,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) fn record_post_commit_provider_stream_failure(
         &self,
-        server_id: &str,
-        routing_group: &str,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
@@ -267,15 +366,15 @@ impl V3ProviderFailureRuntimeHealth {
         reason: &str,
     ) -> Result<(), String> {
         self.record_provider_failure_record(
+            failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
             Some(reason),
             v3_relay_provider_policy_now_epoch_ms()?,
         )?;
-        self.record_provider_action_failure(
-            server_id,
-            routing_group,
+        self.record_provider_action_failure_in_scope(
+            failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
@@ -293,8 +392,7 @@ impl V3ProviderFailureRuntimeHealth {
             .wait_for_recovery_witness(
                 witness,
                 V3ProviderActionProviderScope::new(
-                    witness.server_id(),
-                    witness.routing_group(),
+                    witness.failure_session_scope(),
                     v3_relay_provider_candidate_key_parts(
                         &selected.candidate.provider_id,
                         Some(&selected.candidate.auth_alias),
@@ -307,19 +405,12 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) async fn wait_for_exact_selected_provider_action(
         &self,
-        manifest: &V3Config05ManifestPublished,
-        server_id: &str,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         selected: &V3Target10ConcreteProviderSelected,
     ) -> Result<Option<V3ProviderActionAdmission>, String> {
-        let routing_group = manifest
-            .servers
-            .get(server_id)
-            .map(|server| server.routing_group.as_str())
-            .ok_or_else(|| format!("server {server_id} is missing"))?;
         self.action_gate
             .wait_for_exact_provider_action(&V3ProviderActionProviderScope::new(
-                server_id,
-                routing_group,
+                failure_session_scope,
                 v3_relay_provider_candidate_key_parts(
                     &selected.candidate.provider_id,
                     Some(&selected.candidate.auth_alias),
@@ -331,6 +422,13 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) fn store(&self) -> V3ProviderHealthStore {
         self.store.clone()
+    }
+
+    pub(crate) fn session_bound_availability(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+    ) -> V3ProviderSessionAvailabilityReader {
+        V3ProviderSessionAvailabilityReader::new(self.store.clone(), failure_session_scope.clone())
     }
 }
 
@@ -353,6 +451,46 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
     ) -> V3ProviderAvailabilityProjection {
         self.store
             .availability(provider_id, auth_alias, model_id, now_ms)
+    }
+}
+
+fn reselect_from_captured_target_plan(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: &V3Target10ConcreteProviderSelected,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    now_ms: u64,
+) -> V3RelayProviderTargetResolution {
+    let target = V3TargetInterpreter::default();
+    let classified = target.classify_kind(selected.route.clone());
+    let expanded = match target.expand_candidates(
+        context.manifest,
+        classified,
+        context.deterministic_sample,
+    ) {
+        Ok(expanded) => expanded,
+        Err(error) => {
+            return V3RelayProviderTargetResolution::Failed(target_resolution_source(
+                "V3Target09CandidateSetExpanded",
+                "captured_target_plan_expansion_failed",
+                error,
+            ))
+        }
+    };
+    let session_bound_availability = context
+        .provider_health
+        .session_bound_availability(&context.failure_session_scope);
+    match target.select_available(
+        expanded,
+        &V3RelayExcludedAvailability {
+            base: &session_bound_availability,
+            excluded: request_local_excluded_candidates,
+        },
+        now_ms,
+    ) {
+        Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
+        Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
+            attempted_candidates: exhausted.attempted_candidates,
+        },
     }
 }
 
@@ -382,6 +520,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         context
             .provider_health
             .record_provider_failure_record(
+                &context.failure_session_scope,
                 &selected.candidate.provider_id,
                 Some(&selected.candidate.auth_alias),
                 Some(&selected.candidate.model_id),
@@ -390,33 +529,21 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             )
             .map_err(|error| error.to_string())?
     };
-    let routing_group = context
-        .manifest
-        .servers
-        .get(context.server_id)
-        .map(|server| server.routing_group.as_str())
-        .ok_or_else(|| format!("server {} is missing", context.server_id))?;
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    let resolution = resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
-        manifest: context.manifest,
-        server_id: context.server_id,
-        entry_kind: context.entry_kind,
-        endpoint_path: context.endpoint_path,
-        body: context.route_facts_body,
-        request_local_excluded_candidates: &excluded_with_failed,
-        provider_health: context.provider_health,
-        now_ms: v3_relay_provider_policy_now_epoch_ms()?,
-        deterministic_sample: context.deterministic_sample,
-    });
+    let resolution = reselect_from_captured_target_plan(
+        context,
+        &selected,
+        &excluded_with_failed,
+        v3_relay_provider_policy_now_epoch_ms()?,
+    );
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
             if alternative_key != candidate_key || !alternative.default_floor_protected {
                 let request_local_recovery = || {
                     V3Error05RecoveryAdmissionWitness::new(
-                        context.server_id,
-                        routing_group,
+                        context.failure_session_scope.clone(),
                         candidate_key.clone(),
                         error_type
                             .as_deref()
@@ -427,14 +554,17 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 let recovery = if is_request_local_compat_failure {
                     None
                 } else {
-                    Some(context.provider_health.record_provider_action_failure(
-                        context.server_id,
-                        routing_group,
-                        &selected.candidate.provider_id,
-                        Some(&selected.candidate.auth_alias),
-                        Some(&selected.candidate.model_id),
-                        error_type.as_deref().unwrap_or("provider_failure"),
-                    )?)
+                    Some(
+                        context
+                            .provider_health
+                            .record_provider_action_failure_in_scope(
+                                &context.failure_session_scope,
+                                &selected.candidate.provider_id,
+                                Some(&selected.candidate.auth_alias),
+                                Some(&selected.candidate.model_id),
+                                error_type.as_deref().unwrap_or("provider_failure"),
+                            )?,
+                    )
                 };
                 let decision = build_v3_relay_provider_error_05_decision(
                     &selected,
@@ -477,6 +607,59 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             attempted_candidates,
         } => {
             let _ = attempted_candidates;
+            if !is_request_local_compat_failure
+                && context
+                    .provider_health
+                    .store()
+                    .try_acquire_cross_session_revive(
+                        &context.failure_session_scope,
+                        &selected.candidate.provider_id,
+                        Some(&selected.candidate.auth_alias),
+                        Some(&selected.candidate.model_id),
+                        v3_relay_provider_policy_now_epoch_ms()?,
+                    )
+                    .map_err(|error| error.to_string())?
+                    .is_some()
+            {
+                let recovery = context
+                    .provider_health
+                    .record_provider_action_failure_in_scope(
+                        &context.failure_session_scope,
+                        &selected.candidate.provider_id,
+                        Some(&selected.candidate.auth_alias),
+                        Some(&selected.candidate.model_id),
+                        error_type.as_deref().unwrap_or("provider_failure"),
+                    )?;
+                let decision = build_v3_relay_provider_error_05_decision(
+                    &selected,
+                    source_stage,
+                    status,
+                    error_type.as_deref(),
+                    &message,
+                    0,
+                    selected.candidate.default_pool_member,
+                    true,
+                    Some(recovery.recovery_witness()?),
+                );
+                state.trace.push("V3CrossSessionReviveAdmitted");
+                return Ok(V3RelayProviderFailurePolicyResult {
+                    terminal_projection: terminal_projection_for(&decision),
+                    decision,
+                    retry_selected: Some(Box::new(selected.clone())),
+                    event: build_v3_relay_provider_failure_policy_event(
+                        V3RelayProviderFailurePolicyEventInput {
+                            candidate: selected.candidate,
+                            status,
+                            error_type,
+                            message,
+                            health_record,
+                            action: "cross_session_revive",
+                            next_provider_key: Some(candidate_key),
+                            wait_ms: Some(recovery.minimum_delay_ms),
+                        },
+                    ),
+                });
+            }
             true
         }
         V3RelayProviderTargetResolution::Failed(source) => {
@@ -542,7 +725,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             ),
         });
     }
-    if selected.default_floor_protected || selected.candidate.default_pool_member {
+    if health_record.state != "cooldown"
+        && (selected.default_floor_protected || selected.candidate.default_pool_member)
+    {
         let retries_done = state
             .same_candidate_retries
             .entry(candidate_key.clone())
@@ -561,9 +746,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             );
             let admission = context
                 .provider_health
-                .wait_for_terminal_provider_projection(
-                    context.server_id,
-                    routing_group,
+                .wait_for_terminal_provider_projection_in_scope(
+                    &context.failure_session_scope,
                     &selected.candidate.provider_id,
                     Some(&selected.candidate.auth_alias),
                     Some(&selected.candidate.model_id),
@@ -590,14 +774,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         }
         *retries_done = retries_done.saturating_add(1);
         state.trace.push("V3DefaultFloorBackoffWait");
-        let failure_record = context.provider_health.record_provider_action_failure(
-            context.server_id,
-            routing_group,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            error_type.as_deref().unwrap_or("provider_failure"),
-        )?;
+        let failure_record = context
+            .provider_health
+            .record_provider_action_failure_in_scope(
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                error_type.as_deref().unwrap_or("provider_failure"),
+            )?;
         let wait_ms = failure_record.minimum_delay_ms;
         let decision = build_v3_relay_provider_error_05_decision(
             &selected,
@@ -632,17 +817,20 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .same_candidate_retries
         .entry(candidate_key.clone())
         .or_insert(0);
-    if *retries_done < context.retry_policy.same_candidate_retries {
+    if health_record.state != "cooldown"
+        && *retries_done < context.retry_policy.same_candidate_retries
+    {
         *retries_done = retries_done.saturating_add(1);
         state.trace.push("V3TargetLocalRetried");
-        let failure_record = context.provider_health.record_provider_action_failure(
-            context.server_id,
-            routing_group,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            error_type.as_deref().unwrap_or("provider_failure"),
-        )?;
+        let failure_record = context
+            .provider_health
+            .record_provider_action_failure_in_scope(
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                error_type.as_deref().unwrap_or("provider_failure"),
+            )?;
         let wait_ms = Some(failure_record.minimum_delay_ms);
         let decision = build_v3_relay_provider_error_05_decision(
             &selected,
@@ -693,9 +881,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     );
     let admission = context
         .provider_health
-        .wait_for_terminal_provider_projection(
-            context.server_id,
-            routing_group,
+        .wait_for_terminal_provider_projection_in_scope(
+            &context.failure_session_scope,
             &selected.candidate.provider_id,
             Some(&selected.candidate.auth_alias),
             Some(&selected.candidate.model_id),
@@ -773,8 +960,8 @@ fn build_v3_relay_provider_error_05_decision(
     )
 }
 
-pub(crate) fn resolve_v3_relay_target<R: V3ProviderAvailabilityReader + ?Sized>(
-    input: V3RelayProviderTargetResolutionInput<'_, R>,
+pub(crate) fn resolve_v3_relay_target(
+    input: V3RelayProviderTargetResolutionInput<'_>,
 ) -> Result<V3Target10ConcreteProviderSelected, String> {
     match resolve_v3_relay_target_outcome(input) {
         V3RelayProviderTargetResolution::Selected(selected) => Ok(selected),
@@ -789,8 +976,8 @@ pub(crate) fn resolve_v3_relay_target<R: V3ProviderAvailabilityReader + ?Sized>(
     }
 }
 
-pub(crate) fn resolve_v3_relay_target_outcome<R: V3ProviderAvailabilityReader + ?Sized>(
-    input: V3RelayProviderTargetResolutionInput<'_, R>,
+pub(crate) fn resolve_v3_relay_target_outcome(
+    input: V3RelayProviderTargetResolutionInput<'_>,
 ) -> V3RelayProviderTargetResolution {
     let facts = crate::build_v3_router_request_facts_for_entry(
         input.body,
@@ -846,17 +1033,34 @@ pub(crate) fn resolve_v3_relay_target_outcome<R: V3ProviderAvailabilityReader + 
             ))
         }
     };
+    let session_availability = input
+        .provider_health
+        .session_bound_availability(input.failure_session_scope);
     match target.select_available(
-        expanded,
+        expanded.clone(),
         &V3RelayExcludedAvailability {
-            base: input.provider_health,
+            base: &session_availability,
             excluded: input.request_local_excluded_candidates,
         },
         input.now_ms,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
-        Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates: exhausted.attempted_candidates,
+        Err(exhausted) => match try_reselect_cross_session_revive_from_captured_candidates(
+            input.provider_health,
+            input.failure_session_scope,
+            &expanded,
+            input.request_local_excluded_candidates,
+            input.now_ms,
+        ) {
+            Ok(Some(selected)) => V3RelayProviderTargetResolution::Selected(selected),
+            Ok(None) => V3RelayProviderTargetResolution::Exhausted {
+                attempted_candidates: exhausted.attempted_candidates,
+            },
+            Err(error) => V3RelayProviderTargetResolution::Failed(target_resolution_source(
+                "V3ProviderHealthStateMutated",
+                "cross_session_revive_admission_failed",
+                error,
+            )),
         },
     }
 }
@@ -938,280 +1142,4 @@ pub(crate) fn v3_relay_provider_policy_now_epoch_ms() -> Result<u64, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-    use serde_json::json;
-
-    fn target_resolution_manifest(scope: &str) -> V3Config05ManifestPublished {
-        let source = r#"
-version = 3
-[servers.__SCOPE__]
-bind = "127.0.0.1"
-port = 5555
-routing_group = "__SCOPE__"
-endpoints = ["responses"]
-[providers.primary]
-type = "responses"
-base_url = "http://primary.invalid/v1"
-default_model = "gpt-test"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "PRIMARY_KEY" }] }
-[providers.primary.models.gpt-test]
-wire_name = "gpt-test"
-supports_streaming = true
-supports_thinking = true
-capabilities = ["text", "tools", "reasoning"]
-[route_groups.__SCOPE__.pools.client_responses]
-selection = { strategy = "priority" }
-match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
-targets = [
-  { kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }
-]
-[route_groups.__SCOPE__.pools.default]
-selection = { strategy = "priority" }
-targets = [
-  { kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }
-]
-"#
-        .replace("__SCOPE__", scope);
-        compile_v3_config_05_manifest(
-            parse_v3_config_02_authoring(&source).expect("target-resolution authoring"),
-        )
-        .expect("target-resolution manifest")
-    }
-
-    fn resolve_target(
-        manifest: &V3Config05ManifestPublished,
-        server_id: &str,
-        excluded: &BTreeSet<String>,
-        health: &V3ProviderFailureRuntimeHealth,
-    ) -> V3RelayProviderTargetResolution {
-        resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
-            manifest,
-            server_id,
-            entry_kind: "responses",
-            endpoint_path: "/v1/responses",
-            body: &json!({"model":"client-responses","input":"hello"}),
-            request_local_excluded_candidates: excluded,
-            provider_health: health,
-            now_ms: 1,
-            deterministic_sample: 0,
-        })
-    }
-
-    fn assert_resolution_failure(
-        resolution: V3RelayProviderTargetResolution,
-        expected_stage: &str,
-        expected_code: &str,
-    ) {
-        let V3RelayProviderTargetResolution::Failed(source) = resolution else {
-            panic!("expected independent target-resolution source failure");
-        };
-        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
-        assert_eq!(source.source_stage, expected_stage);
-        assert_eq!(source.code, expected_code);
-    }
-
-    #[test]
-    fn classifier_failure_preserves_its_own_error01_stage_and_code() {
-        let manifest = target_resolution_manifest("resolution_classifier");
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-
-        assert_resolution_failure(
-            resolve_target(&manifest, "missing-server", &BTreeSet::new(), &health),
-            "V3Router05RequestClassified",
-            "target_resolution_classification_failed",
-        );
-    }
-
-    #[test]
-    fn route_plan_failure_preserves_its_own_error01_stage_and_code() {
-        let mut manifest = target_resolution_manifest("resolution_plan");
-        manifest
-            .route_groups
-            .get_mut("resolution_plan")
-            .expect("route group")
-            .pools
-            .remove("default");
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-
-        assert_resolution_failure(
-            resolve_target(&manifest, "resolution_plan", &BTreeSet::new(), &health),
-            "V3Router06RoutePoolResolved",
-            "target_resolution_route_plan_failed",
-        );
-    }
-
-    #[test]
-    fn candidate_expansion_failure_preserves_its_own_error01_stage_and_code() {
-        let mut manifest = target_resolution_manifest("resolution_expand");
-        manifest.providers.remove("primary");
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-
-        assert_resolution_failure(
-            resolve_target(&manifest, "resolution_expand", &BTreeSet::new(), &health),
-            "V3Target09CandidateSetExpanded",
-            "target_resolution_candidate_expansion_failed",
-        );
-    }
-
-    #[test]
-    fn unavailable_candidate_is_exhaustion_not_runtime_failure() {
-        let manifest = target_resolution_manifest("resolution_exhausted");
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let mut excluded = BTreeSet::new();
-        excluded.insert(v3_relay_provider_candidate_key_parts(
-            "primary",
-            Some("key1"),
-            Some("gpt-test"),
-        ));
-
-        let V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates,
-        } = resolve_target(&manifest, "resolution_exhausted", &excluded, &health)
-        else {
-            panic!("unavailable selected candidates must produce typed exhaustion");
-        };
-        assert!(!attempted_candidates.is_empty());
-    }
-
-    #[tokio::test]
-    async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_health_mutation()
-    {
-        let manifest = target_resolution_manifest("compat_default_floor");
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let selected =
-            match resolve_target(&manifest, "compat_default_floor", &BTreeSet::new(), &health) {
-                V3RelayProviderTargetResolution::Selected(selected) => selected,
-                _ => panic!("valid fixture must select the default-floor provider"),
-            };
-        let mut failed_candidates = BTreeSet::new();
-        let mut same_candidate_retries = BTreeMap::new();
-        let mut trace = Vec::new();
-        let route_facts_body = json!({"model":"client-responses","input":"hello"});
-        let context = V3RelayProviderFailurePolicyContext {
-            manifest: &manifest,
-            server_id: "compat_default_floor",
-            entry_kind: "responses",
-            endpoint_path: "/v1/responses",
-            route_facts_body: &route_facts_body,
-            provider_health: &health,
-            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
-            deterministic_sample: 0,
-        };
-        let mut state = V3RelayProviderFailurePolicyState {
-            failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
-            trace: &mut trace,
-        };
-
-        let result = run_v3_relay_provider_failure_policy(
-            &context,
-            selected,
-            "ProviderReqCompat06ProviderCompat",
-            502,
-            Some("provider_request_compat_error".to_string()),
-            "arguments must be valid JSON".to_string(),
-            &mut state,
-        )
-        .await
-        .expect("request-local compat exhaustion must project without recovery wait");
-
-        assert_eq!(
-            result.event.health_record.state,
-            "request_local_provider_compat"
-        );
-        assert_eq!(result.event.health_record.failure_count, 0);
-        assert_eq!(result.event.health_record.cooldown_until_ms, None);
-        assert_eq!(result.event.wait_ms, None);
-        assert_eq!(
-            result.event.action,
-            "terminal_request_local_provider_compat_exhausted"
-        );
-        assert!(result.retry_selected.is_none());
-        assert!(result.terminal_projection.is_some());
-        assert!(state.same_candidate_retries.is_empty());
-    }
-
-    #[tokio::test]
-    async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429() {
-        let mut manifest = target_resolution_manifest("resolution_policy");
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let selected =
-            match resolve_target(&manifest, "resolution_policy", &BTreeSet::new(), &health) {
-                V3RelayProviderTargetResolution::Selected(selected) => selected,
-                _ => panic!("valid fixture must select a provider"),
-            };
-        manifest
-            .route_groups
-            .get_mut("resolution_policy")
-            .expect("route group")
-            .pools
-            .remove("default");
-        let mut failed_candidates = BTreeSet::new();
-        let mut same_candidate_retries = BTreeMap::new();
-        let mut trace = Vec::new();
-        let route_facts_body = json!({"model":"client-responses","input":"hello"});
-        let context = V3RelayProviderFailurePolicyContext {
-            manifest: &manifest,
-            server_id: "resolution_policy",
-            entry_kind: "responses",
-            endpoint_path: "/v1/responses",
-            route_facts_body: &route_facts_body,
-            provider_health: &health,
-            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
-            deterministic_sample: 0,
-        };
-        let mut state = V3RelayProviderFailurePolicyState {
-            failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
-            trace: &mut trace,
-        };
-
-        let result = run_v3_relay_provider_failure_policy(
-            &context,
-            selected,
-            "V3ProviderRespInbound01Raw",
-            429,
-            Some("rate_limit".to_string()),
-            "prior provider returned 429".to_string(),
-            &mut state,
-        )
-        .await
-        .expect("target-resolution source failure must remain projectable");
-
-        assert_eq!(
-            result
-                .decision
-                .exhaustion
-                .local_action
-                .classified
-                .source
-                .code,
-            "target_resolution_route_plan_failed"
-        );
-        assert_eq!(
-            result
-                .decision
-                .exhaustion
-                .local_action
-                .classified
-                .source
-                .source_stage,
-            "V3Router06RoutePoolResolved"
-        );
-        let projection = result
-            .terminal_projection
-            .expect("non-provider target-resolution failure is terminal");
-        assert_eq!(projection.status, 500);
-        assert_ne!(projection.status, 429);
-        assert_eq!(
-            projection.body["error"]["code"],
-            "target_resolution_route_plan_failed"
-        );
-        assert!(!projection
-            .body
-            .to_string()
-            .contains("prior provider returned 429"));
-    }
-}
+mod tests;

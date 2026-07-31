@@ -17,9 +17,9 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime_with_local_continuation,
-    V3ResponsesRelayClientBody, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime_with_local_continuation, V3ResponsesRelayClientBody,
+    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
+    V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -147,6 +147,12 @@ async fn v3_parity_responses_reasoning_effort_medium_reaches_openai_chat_wire() 
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-parity-effort-medium".into(),
             payload: json!({
                 "model": "gpt-5.5",
@@ -199,6 +205,12 @@ async fn v3_parity_responses_reasoning_effort_low_reaches_openai_chat_wire() {
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-parity-effort-low".into(),
             payload: json!({
                 "model": "gpt-5.5",
@@ -250,6 +262,12 @@ async fn v3_parity_no_reasoning_config_omits_reasoning_effort_from_wire() {
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-parity-no-reasoning".into(),
             payload: json!({
                 "model": "gpt-5.5",
@@ -299,6 +317,12 @@ async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-parity-summary-only".into(),
             payload: json!({
                 "model": "gpt-5.5",
@@ -350,6 +374,12 @@ async fn v3_parity_reasoning_effort_not_in_client_response_body() {
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-parity-no-client-effort".into(),
             payload: json!({
                 "model": "gpt-5.5",

@@ -1,3 +1,4 @@
+use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
     V3ProviderActionGate, V3ProviderActionGateKey, V3ProviderActionGateMode,
     V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
@@ -14,19 +15,40 @@ fn key(error_family: &str) -> V3ProviderActionGateKey {
     )
 }
 
+fn session_scope(server_id: &str, routing_group: &str) -> V3ProviderFailureSessionScope {
+    V3ProviderFailureSessionScope::new(
+        server_id,
+        routing_group,
+        format!("{server_id}:{routing_group}:session"),
+    )
+    .expect("valid provider failure session scope")
+}
+
 fn scoped_key(
     server_id: &str,
     routing_group: &str,
     provider: &str,
     error_family: &str,
 ) -> V3ProviderActionGateKey {
-    V3ProviderActionGateKey::new(server_id, routing_group, provider, error_family)
-        .expect("valid action gate key")
+    V3ProviderActionGateKey::new(
+        &session_scope(server_id, routing_group),
+        provider,
+        error_family,
+    )
+    .expect("valid action gate key")
+}
+
+fn scoped_provider_scope(
+    server_id: &str,
+    routing_group: &str,
+    provider: &str,
+) -> V3ProviderActionProviderScope {
+    V3ProviderActionProviderScope::new(&session_scope(server_id, routing_group), provider)
+        .expect("valid provider action scope")
 }
 
 fn provider_scope(provider: &str) -> V3ProviderActionProviderScope {
-    V3ProviderActionProviderScope::new("server-a", "group-a", provider)
-        .expect("valid provider action scope")
+    scoped_provider_scope("server-a", "group-a", provider)
 }
 
 #[tokio::test]
@@ -300,12 +322,8 @@ async fn exact_provider_lookup_ignores_another_provider_recovery_lane() {
     gate.record_failure(&provider_b_failure)
         .expect("record provider B failure");
 
-    let provider_a = V3ProviderActionProviderScope::new(
-        "server-exact",
-        "group-exact",
-        "provider-a:key-a:model-a",
-    )
-    .expect("provider A scope");
+    let provider_a =
+        scoped_provider_scope("server-exact", "group-exact", "provider-a:key-a:model-a");
     let exact = tokio::time::timeout(
         Duration::from_millis(100),
         gate.wait_for_exact_provider_action(&provider_a),
@@ -562,14 +580,11 @@ async fn changing_provider_and_error_family_cannot_restart_an_active_lane_at_one
         "changing provider or error family restarted an active storm lane at one second"
     );
 
-    gate.record_provider_success(
-        &V3ProviderActionProviderScope::new(
-            "storm-server",
-            "storm-group",
-            "provider-b:key:model-b",
-        )
-        .expect("success scope"),
-    )
+    gate.record_provider_success(&scoped_provider_scope(
+        "storm-server",
+        "storm-group",
+        "provider-b:key:model-b",
+    ))
     .expect("storm lane cleanup");
 }
 
@@ -624,12 +639,7 @@ async fn admitted_action_failure_advances_the_group_before_reselecting() {
         .await
         .expect("terminal projection admission");
 
-    let primary = V3ProviderActionProviderScope::new(
-        "server-outcome",
-        "group-outcome",
-        "provider-a:key:model",
-    )
-    .expect("primary scope");
+    let primary = scoped_provider_scope("server-outcome", "group-outcome", "provider-a:key:model");
     gate.wait_for_provider_action(&primary)
         .await
         .expect("next request admission")
@@ -777,8 +787,7 @@ async fn recovery_ticket_consumes_its_exact_failure_key_not_the_latest_group_lan
     gate.record_failure(&failed_b).expect("provider B failure");
 
     let action_scope =
-        V3ProviderActionProviderScope::new("ticket-server", "ticket-group", "provider-c:key:model")
-            .expect("reselected provider scope");
+        scoped_provider_scope("ticket-server", "ticket-group", "provider-c:key:model");
     let transition = gate
         .wait_for_recovery_ticket(&ticket_a, action_scope)
         .await
@@ -808,12 +817,11 @@ async fn superseded_same_key_generation_returns_typed_transition() {
         .record_failure(&failed)
         .expect("newer same-key failure");
 
-    let action_scope = V3ProviderActionProviderScope::new(
+    let action_scope = scoped_provider_scope(
         "superseded-server",
         "superseded-group",
         "provider-b:key:model",
-    )
-    .expect("reselected provider scope");
+    );
     let transition = gate
         .wait_for_recovery_ticket(&first_ticket, action_scope)
         .await
@@ -839,12 +847,11 @@ async fn success_released_recovery_reenters_the_retained_five_second_generation(
     );
     let first = gate.record_failure(&failed).expect("first failure");
     let first_ticket = first.recovery_ticket().clone();
-    let action_scope = V3ProviderActionProviderScope::new(
+    let action_scope = scoped_provider_scope(
         "success-release-server",
         "success-release-group",
         "provider-b:key:model",
-    )
-    .expect("reselected provider scope");
+    );
 
     let pending = {
         let gate = gate.clone();

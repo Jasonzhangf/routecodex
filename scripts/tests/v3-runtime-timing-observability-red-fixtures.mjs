@@ -22,9 +22,12 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/runtime_timing.rs",
   "v3/crates/routecodex-v3-runtime/src/lib.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
   "v3/crates/routecodex-v3-server/src/lib.rs",
+  "v3/crates/routecodex-v3-server/src/tests/mod.rs",
   "docs/architecture/function-map.yml",
   "docs/architecture/mainline-call-map.yml",
   "docs/architecture/resource-operation-map.yml",
@@ -109,7 +112,7 @@ const cases = [
   },
   {
     name: "Direct SSE decoder stops owning clean EOF timing",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
     mutate: (source) =>
       source.replace(
         "                        Ok(()) => match state.runtime_timing.finish_external() {",
@@ -184,7 +187,7 @@ const cases = [
   },
   {
     name: "Direct SSE mismatch regression is deleted",
-    path: "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs",
     mutate: (source) =>
       source.replace(
         "async fn direct_sse_event_name_json_type_mismatch_is_protocol_invalid()",
@@ -312,11 +315,11 @@ const cases = [
   },
   {
     name: "Direct SSE closeout fabricates completion before Runtime EOF",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    path: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
     mutate: (source) =>
       source.replace(
-        '        assert!(!log.contains("event=completed"), "{log}");\n        assert!(!log.contains("event=failed"), "{log}");\n',
-        '        assert!(!log.contains("event=failed"), "{log}");\n',
+        '    assert!(!log.contains("event=completed"), "{log}");\n    assert!(!log.contains("event=failed"), "{log}");\n',
+        '    assert!(!log.contains("event=failed"), "{log}");\n',
       ),
     diagnostic: /pre-EOF terminal-drop test must reject fabricated completion/u,
   },
@@ -342,10 +345,10 @@ const cases = [
   },
   {
     name: "Direct SSE clean EOF test stops requiring timing contract failure",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    path: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
     mutate: (source) =>
       source.replace(
-        '        assert!(\n            log.contains("subcode=runtime_observability_contract"),\n            "{log}"\n        );\n',
+        '    assert!(\n        log.contains("subcode=runtime_observability_contract"),\n        "{log}"\n    );\n',
         "",
       ),
     diagnostic: /clean-EOF missing-timing test must require the Runtime observability contract code/u,

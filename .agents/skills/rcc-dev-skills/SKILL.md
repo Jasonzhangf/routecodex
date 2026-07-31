@@ -179,6 +179,8 @@ description: RouteCodex 调试与架构路由入口
 - 对 `function_call.arguments`、tool output 顺序、schema、stream intent 等 provider-bound 字段，先用真实样本定位第一个制造坏字段的节点；协议转换规则错误回 provider-wire builder/codec，对话治理错误回 ReqChatProcess/RespChatProcess。
 - Provider codec 只做协议转换和契约校验；V2 已明确的转换规则必须在 codec 对齐。例如普通 `function_call.arguments` 无法解析为 JSON 时，Anthropic provider request 转成合法 `tool_use.input={}`，同时保留原 call/output 对，禁止删掉模型纠错反馈。
 - 修 `~/.rcc/config.toml` / `/Volumes/extension/.rcc/config.toml` 时禁止整文件恢复旧备份。先定位当前污染块，再用最新可信样本只补丁目标 port/group/forwarder；多端口 `[[httpserver.ports]]` 语义必须保留。5520 这类生产端口要验证 routing group、forwarder targets、provider registry 三层一致，禁止把旧 `fwd.temp` / GLM / MiniMax / stale provider 误恢复进目标组。
+- Server test fixture 里如果需要临时 HOME/STATE，必须让 helper 自己持有独占 state 路径；不要依赖进程全局 `HOME` 再靠别的测试锁来兜底。否则并行测试会把无关 tmpdir 误删成 EINVAL，表面看像业务失败，实际是 fixture 污染。
+- 结构化 test slicer 不要假设 `#[tokio::test]` 一定缩进四空格。抽离测试模块后，切片边界应同时兼容顶层 `\n#[tokio::test]` 和嵌套 `\n    #[tokio::test]`，否则 red-fixture 可能误判为 PASS。
 
 ## 硬护栏
 - 单一路径：`HTTP -> Hub Pipeline -> VR -> Provider Runtime -> Upstream`
@@ -268,3 +270,9 @@ description: RouteCodex 调试与架构路由入口
 - 关键判断：route/started 行使用 selected target observability；`[provider-error]` / `[provider-switch]` 是 Error05 event 投影，必须使用 `V3RuntimeProviderFailureObservation` 的 failed provider 生成 prefix。切换事件字段顺序固定为 `[switch to:<next>] [switch from:<failed>] result` 在前，`causeStatus/type/message` 等原因在后；没有 next target 的 terminal error 保留 `target/result/next=-`，禁止伪装成 switch。
 - 可复用动作：先用 live log 按 request id 对比 route -> provider-error -> switch -> completion；再用 focused server console 正反测试锁 switching 与 terminal 两种投影；最后安装重启后扫描 switching provider-error 是否满足 `switch to -> switch from -> causeStatus`，且 terminal error 不含 switch 标签。
 - 反模式/边界：不要改 VR、provider wire、Error05 policy 或 provider health 来修显示；这是 server console projection side-channel，不得影响 request/response payload 或 reroute 语义。
+
+## V3 provider action recovery lane scope invariant
+- Trigger: `ProviderHealth("provider action recovery ticket references a lane that is absent")` appears only in full/parallel relay suites while the focused provider failure retry test passes.
+- Diagnosis: check whether Error05 provider action failure record, recovery witness, recovery wait, and success release use the same `V3ProviderFailureSessionScope`. `routing_group` as session id is a contract bug; it lets same group/provider success from another request clear the lane.
+- Correct owner: `provider_action_gate.rs` and `provider_failure_runtime_policy.rs`. Fix the typed lane key/witness source; do not repair by serializing tests, adding fallback lanes, weakening session identity, or moving logic into SSE/Server/Error06 projection.
+- Required proof: run provider action contract tests, session isolation contract, protocol parity, `verify:architecture-review-surface-light`, and P0 architecture gates.

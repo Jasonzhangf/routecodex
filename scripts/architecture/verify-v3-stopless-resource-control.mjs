@@ -18,7 +18,12 @@ const paths = {
   hubCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   runtime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   directRuntime: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+  directState: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
+  directStopless: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs',
+  directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  hookStoplessInjection:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs',
   packageJson: 'package.json',
 };
 
@@ -40,8 +45,13 @@ const designContract = readText(paths.designContract);
 const stoplessSop = readText(paths.stoplessSop);
 const hubSource = [readText(paths.hub), readText(paths.hubCommon)].join('\n');
 const runtimeSource = readText(paths.runtime);
-const directRuntimeSource = readText(paths.directRuntime);
-const hookSource = readText(paths.hooks);
+const directRuntimeSource = [
+  readText(paths.directRuntime),
+  readText(paths.directState),
+  readText(paths.directStopless),
+  readText(paths.directHelpers),
+].join('\n');
+const hookSource = [readText(paths.hooks), readText(paths.hookStoplessInjection)].join('\n');
 const packageJson = readJson(paths.packageJson);
 
 verifyPackageScripts();

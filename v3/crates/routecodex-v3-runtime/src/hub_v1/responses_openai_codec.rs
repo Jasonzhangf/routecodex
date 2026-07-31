@@ -508,7 +508,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
     build_v3_chat_canonical_request_from_responses_payload(payload)
 }
 
-fn responses_payload_needs_req04_original_surface(payload: &Value) -> bool {
+pub(crate) fn responses_payload_needs_req04_original_surface(payload: &Value) -> bool {
     let Some(input) = payload.get("input").and_then(Value::as_array) else {
         return false;
     };

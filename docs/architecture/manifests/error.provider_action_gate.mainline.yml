@@ -1,4 +1,5 @@
 lifecycle_id: error.provider_action_gate.mainline
+status: active
 summary: Typed ErrorErr05 provider actions enter the Rust process-shared
   isolated-1s/sustained-5s gate; this lifecycle ends at the atomic terminal
   generation commit. ErrorErr05 -> ErrorErr06 remains the separate
@@ -22,6 +23,10 @@ edges:
   - step_id: error-provider-action-gate-01
     from_node: ErrorErr05ExecutionDecision
     to_node: ProviderActionGateFailureRecorded
+    caller_symbol: resolveRequestExecutorProviderFailurePlan
+    caller_file: src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
+    callee_symbol: recordErrorActionBackoff
+    callee_file: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -39,6 +44,10 @@ edges:
   - step_id: error-provider-action-gate-02
     from_node: ProviderActionGateFailureRecorded
     to_node: ProviderActionGateAdmission
+    caller_symbol: resolveRequestExecutorProviderFailurePlan
+    caller_file: src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts
+    callee_symbol: waitErrorActionBackoffWithGate
+    callee_file: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -53,6 +62,10 @@ edges:
   - step_id: error-provider-action-gate-03
     from_node: ProviderActionGateAdmission
     to_node: ProviderActionGateTerminalCommitRequested
+    caller_symbol: waitErrorActionBackoffWithGate
+    caller_file: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+    callee_symbol: commitProviderActionTerminalNative
+    callee_file: src/modules/llmswitch/bridge/provider-action-gate-host.ts
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -69,6 +82,10 @@ edges:
   - step_id: error-provider-action-gate-04
     from_node: ProviderActionGateTerminalCommitRequested
     to_node: ProviderActionGateTerminalCommitted
+    caller_symbol: commit_provider_action_terminal_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+    callee_symbol: commit_terminal
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -85,6 +102,10 @@ edges:
   - step_id: error-provider-action-gate-05
     from_node: ProviderActionGateAdmission
     to_node: ProviderActionGateSuccessRequested
+    caller_symbol: recordErrorActionSuccessByLaneGroup
+    caller_file: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+    callee_symbol: recordProviderActionSuccessNative
+    callee_file: src/modules/llmswitch/bridge/provider-action-gate-host.ts
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -101,6 +122,10 @@ edges:
   - step_id: error-provider-action-gate-06
     from_node: ProviderActionGateSuccessRequested
     to_node: ProviderActionGateSuccessCommitted
+    caller_symbol: record_provider_action_success_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+    callee_symbol: record_success
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -117,6 +142,10 @@ edges:
   - step_id: error-provider-action-gate-07
     from_node: ProviderActionGateAdmission
     to_node: ProviderActionGateAbandonRequested
+    caller_symbol: waitErrorActionBackoffWithGate
+    caller_file: src/server/runtime/http-server/executor/request-executor-error-action-queue.ts
+    callee_symbol: abandonProviderActionAdmissionNative
+    callee_file: src/modules/llmswitch/bridge/provider-action-gate-host.ts
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -133,6 +162,10 @@ edges:
   - step_id: error-provider-action-gate-08
     from_node: ProviderActionGateAbandonRequested
     to_node: ProviderActionGateAbandoned
+    caller_symbol: abandon_provider_action_admission_json
+    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs
+    callee_symbol: abandon_admission
+    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs
     status: anchored
     owner_feature_id: error.provider_action_gate
     binding_pending: null
@@ -150,3 +183,11 @@ verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-manifest-sync
+downstream_projection:
+  lifecycle_id: error.mainline
+  step_id: err-05
+  provider_action_gate_witness: none
+admission_ownership:
+  wall_clock_expiry_forbidden: true
+  abandon_increments_failure_count: false
+  max_admissions_per_generation: 1

@@ -73,7 +73,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: run_v3_relay_provider_failure_policy
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-04
     from: V3Error05RecoveryWitness
@@ -91,7 +91,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: run_v3_relay_provider_failure_policy
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection
+    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection_in_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-06
     from: V3ProviderActionGateTerminalAdmission
@@ -173,7 +173,7 @@ edges:
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: run_v3_direct_provider_failure_policy
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-15
     from: V3Error01SourceRaised
     to: V3Error05ExecutionDecision
@@ -352,7 +352,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3DirectSseProviderOutcome::record_success
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_scope
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-35
     from: V3ProviderActionPermitInFlight
@@ -388,7 +388,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3OpenAiChatSseProviderOutcome::record_success
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_scope
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-39
     from: V3ProviderActionPermitInFlight
@@ -424,7 +424,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3GeminiSseProviderOutcome::record_success
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_scope
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-43
     from: V3ProviderActionPermitInFlight
@@ -451,7 +451,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: execute_v3_responses_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_scope
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-46
     from: V3ProviderActionPermitInFlight
@@ -469,7 +469,7 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: record_provider_success_after_resp04
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_scope
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-48
     from: V3ProviderRespInbound01Raw

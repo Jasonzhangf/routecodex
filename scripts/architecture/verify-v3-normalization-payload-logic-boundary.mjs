@@ -74,8 +74,19 @@ function forbidAll(text, owner, patterns) {
 const boundaries = [
   {
     owner: 'ReqInbound02 entry normalization',
-    text: functionBody(hub, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01'),
+    text: functionBody(
+      hub,
+      'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
+    ),
     required: ['previous: input', 'V3HubRequestSemanticProtocol::Chat'],
+  },
+  {
+    owner: 'ReqInbound02 fail-fast public builder',
+    text: functionBody(hub, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01'),
+    required: [
+      'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
+      '.expect("V3 ReqInbound02 normalization failed")',
+    ],
   },
   {
     owner: 'RespInbound02 entry normalization',

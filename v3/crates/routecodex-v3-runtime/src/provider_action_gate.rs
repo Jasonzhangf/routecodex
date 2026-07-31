@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
-use routecodex_v3_error::V3Error05RecoveryAdmissionWitness;
+use routecodex_v3_error::{V3Error05RecoveryAdmissionWitness, V3ProviderFailureSessionScope};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
@@ -18,18 +18,26 @@ const V3_PROVIDER_ACTION_IDLE_TTL_MS: u64 = 10 * 60_000;
 pub struct V3ProviderActionProviderScope {
     pub server_id: String,
     pub routing_group: String,
+    pub session_id: String,
     pub provider_runtime_identity: String,
 }
 
 impl V3ProviderActionProviderScope {
     pub fn new(
-        server_id: impl Into<String>,
-        routing_group: impl Into<String>,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_runtime_identity: impl Into<String>,
+    ) -> Result<Self, String> {
+        Self::from_failure_session_scope(failure_session_scope, provider_runtime_identity)
+    }
+
+    fn from_failure_session_scope(
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_runtime_identity: impl Into<String>,
     ) -> Result<Self, String> {
         Ok(Self {
-            server_id: required_scope_part(server_id.into(), "server_id")?,
-            routing_group: required_scope_part(routing_group.into(), "routing_group")?,
+            server_id: failure_session_scope.server_id().to_string(),
+            routing_group: failure_session_scope.routing_group().to_string(),
+            session_id: failure_session_scope.session_id().to_string(),
             provider_runtime_identity: required_scope_part(
                 provider_runtime_identity.into(),
                 "provider_runtime_identity",
@@ -41,22 +49,21 @@ impl V3ProviderActionProviderScope {
 #[derive(Debug, Clone, Eq)]
 pub struct V3ProviderActionGateKey {
     pub provider_scope: V3ProviderActionProviderScope,
+    pub session_id: String,
     pub normalized_error_family: String,
 }
 
 impl V3ProviderActionGateKey {
     pub fn new(
-        server_id: impl Into<String>,
-        routing_group: impl Into<String>,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_runtime_identity: impl Into<String>,
         normalized_error_family: impl Into<String>,
     ) -> Result<Self, String> {
+        let provider_scope =
+            V3ProviderActionProviderScope::new(failure_session_scope, provider_runtime_identity)?;
         Ok(Self {
-            provider_scope: V3ProviderActionProviderScope::new(
-                server_id,
-                routing_group,
-                provider_runtime_identity,
-            )?,
+            session_id: provider_scope.session_id.clone(),
+            provider_scope,
             normalized_error_family: required_scope_part(
                 normalized_error_family.into(),
                 "normalized_error_family",
@@ -65,12 +72,17 @@ impl V3ProviderActionGateKey {
     }
 
     fn from_recovery_witness(witness: &V3Error05RecoveryAdmissionWitness) -> Result<Self, String> {
-        Self::new(
-            witness.server_id(),
-            witness.routing_group(),
-            witness.provider_runtime_identity(),
-            witness.normalized_error_family(),
-        )
+        Ok(Self {
+            provider_scope: V3ProviderActionProviderScope::from_failure_session_scope(
+                witness.failure_session_scope(),
+                witness.provider_runtime_identity(),
+            )?,
+            session_id: witness.failure_session_scope().session_id().to_string(),
+            normalized_error_family: required_scope_part(
+                witness.normalized_error_family().to_string(),
+                "normalized_error_family",
+            )?,
+        })
     }
 
     fn recovery_witness(
@@ -78,8 +90,11 @@ impl V3ProviderActionGateKey {
         generation: u64,
     ) -> Result<V3Error05RecoveryAdmissionWitness, String> {
         V3Error05RecoveryAdmissionWitness::new(
-            &self.provider_scope.server_id,
-            &self.provider_scope.routing_group,
+            V3ProviderFailureSessionScope::new(
+                &self.provider_scope.server_id,
+                &self.provider_scope.routing_group,
+                &self.provider_scope.session_id,
+            )?,
             &self.provider_scope.provider_runtime_identity,
             &self.normalized_error_family,
             generation,
@@ -341,6 +356,7 @@ impl V3ProviderActionGate {
                 .filter(|(key, _)| {
                     key.provider_scope.server_id == provider_scope.server_id
                         && key.provider_scope.routing_group == provider_scope.routing_group
+                        && key.provider_scope.session_id == provider_scope.session_id
                         && (!exact_provider
                             || key.provider_scope.provider_runtime_identity
                                 == provider_scope.provider_runtime_identity)
@@ -463,6 +479,7 @@ impl V3ProviderActionGate {
         for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
             active_key.provider_scope.server_id == server_id
                 && active_key.provider_scope.routing_group == routing_group
+                && active_key.provider_scope.session_id == key.provider_scope.session_id
         }) {
             state.generation = state.generation.saturating_add(1);
             state.mode = V3ProviderActionGateMode::Sustained;
@@ -495,9 +512,11 @@ impl V3ProviderActionGate {
         }
         let server_id = key.provider_scope.server_id.clone();
         let routing_group = key.provider_scope.routing_group.clone();
+        let session_id = key.provider_scope.session_id.clone();
         for (_key, state) in states.iter_mut().filter(|(key, _)| {
             key.provider_scope.server_id == server_id
                 && key.provider_scope.routing_group == routing_group
+                && key.provider_scope.session_id == session_id
         }) {
             state.generation = state.generation.saturating_add(1);
             state.mode = V3ProviderActionGateMode::Sustained;
@@ -533,18 +552,21 @@ impl V3ProviderActionGate {
             .filter(|(active_key, _)| {
                 active_key.provider_scope.server_id == key.provider_scope.server_id
                     && active_key.provider_scope.routing_group == key.provider_scope.routing_group
+                    && active_key.provider_scope.session_id == key.provider_scope.session_id
             })
             .map(|(_, state)| state.generation)
             .max();
         let active_admission_owned = states.iter().any(|(active_key, state)| {
             active_key.provider_scope.server_id == key.provider_scope.server_id
                 && active_key.provider_scope.routing_group == key.provider_scope.routing_group
+                && active_key.provider_scope.session_id == key.provider_scope.session_id
                 && state.admitted_generation == Some(state.generation)
         });
         if active_lane_generation.is_some() {
             for (_active_key, state) in states.iter_mut().filter(|(active_key, _)| {
                 active_key.provider_scope.server_id == key.provider_scope.server_id
                     && active_key.provider_scope.routing_group == key.provider_scope.routing_group
+                    && active_key.provider_scope.session_id == key.provider_scope.session_id
             }) {
                 state.mode = V3ProviderActionGateMode::Sustained;
                 state.next_admission_at =
@@ -701,6 +723,7 @@ impl V3ProviderActionWaiter {
                 let group_has_active_admission = states.iter().any(|(key, state)| {
                     key.provider_scope.server_id == self.key.provider_scope.server_id
                         && key.provider_scope.routing_group == self.key.provider_scope.routing_group
+                        && key.provider_scope.session_id == self.key.provider_scope.session_id
                         && state.admitted_generation == Some(state.generation)
                 });
                 let Some(state) = states.get_mut(&self.key) else {
@@ -813,6 +836,8 @@ impl V3ProviderActionWaiter {
                         **sibling_key != self.key
                             && sibling_key.provider_scope.server_id == server_id
                             && sibling_key.provider_scope.routing_group == routing_group
+                            && sibling_key.provider_scope.session_id
+                                == self.key.provider_scope.session_id
                     }) {
                         let _ = sibling_key;
                         sibling.mode = V3ProviderActionGateMode::Sustained;

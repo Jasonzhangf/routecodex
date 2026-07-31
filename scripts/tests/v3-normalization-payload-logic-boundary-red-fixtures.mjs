@@ -110,8 +110,8 @@ const fixtures = [
   {
     name: 'RespOutbound required_action inference',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
-    from: 'V3HubRespOutbound05ClientSemantic { previous: input }',
-    to: 'let _required_action = "required_action";\n    V3HubRespOutbound05ClientSemantic { previous: input }',
+    from: ') -> V3HubRespOutbound05ClientSemantic {\n    let client_payload = Arc::new(input.finalized_payload().clone());',
+    to: ') -> V3HubRespOutbound05ClientSemantic {\n    let _required_action = "required_action";\n    let client_payload = Arc::new(input.finalized_payload().clone());',
     diagnostic: /RespOutbound05 client semantic projection/,
   },
   {

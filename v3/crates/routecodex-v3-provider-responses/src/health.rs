@@ -1,16 +1,8 @@
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_error::{V3ErrorActionPlan, V3ErrorActionScope};
+use routecodex_v3_error::{V3ErrorActionScope, V3ProviderFailureSessionScope};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct V3ProviderHealthActionApplied {
-    pub scope_label: String,
-    pub reason: String,
-    pub until_ms: Option<u64>,
-    pub health_affecting: bool,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct V3ProviderAvailabilityProjection {
@@ -60,6 +52,13 @@ pub struct V3ProviderFailureRecord {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V3ProviderCrossSessionReviveAdmission {
+    pub provider_key: String,
+    pub original_cooldown_until_ms: u64,
+    pub evidence_session_id: String,
+}
+
 pub trait V3ProviderAvailabilityReader {
     fn availability(
         &self,
@@ -101,6 +100,42 @@ pub struct V3ProviderAvailabilityRegistry {
     store: V3ProviderHealthStore,
 }
 
+#[derive(Debug, Clone)]
+pub struct V3ProviderSessionAvailabilityReader {
+    store: V3ProviderHealthStore,
+    failure_session_scope: V3ProviderFailureSessionScope,
+}
+
+impl V3ProviderSessionAvailabilityReader {
+    pub fn new(
+        store: V3ProviderHealthStore,
+        failure_session_scope: V3ProviderFailureSessionScope,
+    ) -> Self {
+        Self {
+            store,
+            failure_session_scope,
+        }
+    }
+}
+
+impl V3ProviderAvailabilityReader for V3ProviderSessionAvailabilityReader {
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        self.store.availability_for_session(
+            &self.failure_session_scope,
+            provider_id,
+            auth_alias,
+            model_id,
+            now_ms,
+        )
+    }
+}
+
 impl V3ProviderAvailabilityRegistry {
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
@@ -131,16 +166,26 @@ struct V3ProviderHealthState {
     configured_disabled: BTreeSet<String>,
     health_disabled: BTreeSet<String>,
     failure_policies: BTreeMap<String, V3ProviderFailurePolicy>,
-    consecutive_failures: BTreeMap<String, V3ProviderConsecutiveFailure>,
-    cooldowns: BTreeMap<String, V3ProviderCooldown>,
+    consecutive_failures: BTreeMap<V3ProviderFailureSessionKey, V3ProviderConsecutiveFailure>,
+    cooldowns: BTreeMap<V3ProviderFailureSessionKey, V3ProviderCooldown>,
+    session_successes: BTreeMap<V3ProviderFailureSessionKey, u64>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
     concurrency: BTreeMap<String, V3ProviderConcurrencyState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct V3ProviderFailureSessionKey {
+    server_id: String,
+    routing_group: String,
+    session_id: String,
+    provider_runtime_identity: String,
 }
 
 #[derive(Debug, Clone)]
 struct V3ProviderCooldown {
     reason: String,
     until_ms: Option<u64>,
+    revive_consumed_for_until_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,16 +241,19 @@ impl V3ProviderHealthStore {
         }
     }
 
-    pub fn record_provider_failure(
+    pub fn record_provider_failure_in_session(
         &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         reason: Option<&str>,
         now_ms: u64,
     ) -> Result<V3ProviderFailureRecord, V3ProviderHealthError> {
-        let scope_label = provider_key_scope_label(provider_id, auth_alias, model_id);
         let provider_key = provider_key_label(provider_id, auth_alias, model_id);
+        let key =
+            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
+        let scope_label = provider_failure_session_scope_label(&key);
         let mut state = self
             .state
             .write()
@@ -222,16 +270,16 @@ impl V3ProviderHealthStore {
         }
         if state
             .cooldowns
-            .get(&scope_label)
+            .get(&key)
             .is_some_and(|cooldown| cooldown.until_ms.is_some_and(|until| until > now_ms))
         {
             let failure_count = state
                 .consecutive_failures
-                .get(&scope_label)
+                .get(&key)
                 .map_or(0, |failure| failure.failure_count);
             let cooldown_until_ms = state
                 .cooldowns
-                .get(&scope_label)
+                .get(&key)
                 .and_then(|cooldown| cooldown.until_ms);
             return Ok(V3ProviderFailureRecord {
                 scope_label,
@@ -244,25 +292,26 @@ impl V3ProviderHealthStore {
         }
         if state
             .cooldowns
-            .get(&scope_label)
+            .get(&key)
             .is_some_and(|cooldown| cooldown.until_ms.is_some_and(|until| until <= now_ms))
         {
-            state.cooldowns.remove(&scope_label);
-            state.consecutive_failures.remove(&scope_label);
+            state.cooldowns.remove(&key);
+            state.consecutive_failures.remove(&key);
         }
         let policy = state
             .failure_policies
             .get(provider_id)
             .copied()
             .unwrap_or_default();
-        let failure = state
-            .consecutive_failures
-            .entry(scope_label.clone())
-            .or_insert(V3ProviderConsecutiveFailure {
-                failure_count: 0,
-                last_failure_at_ms: now_ms,
-                reason: None,
-            });
+        let failure =
+            state
+                .consecutive_failures
+                .entry(key.clone())
+                .or_insert(V3ProviderConsecutiveFailure {
+                    failure_count: 0,
+                    last_failure_at_ms: now_ms,
+                    reason: None,
+                });
         failure.failure_count = failure.failure_count.saturating_add(1);
         failure.last_failure_at_ms = now_ms;
         if let Some(reason) = reason.filter(|value| !value.trim().is_empty()) {
@@ -276,12 +325,13 @@ impl V3ProviderHealthStore {
             cooldown_until_ms = Some(now_ms.saturating_add(policy.cooldown_ms));
             record_state = "cooldown".to_string();
             state.cooldowns.insert(
-                scope_label.clone(),
+                key,
                 V3ProviderCooldown {
                     reason: record_reason
                         .clone()
                         .unwrap_or_else(|| "provider_consecutive_failures".to_string()),
                     until_ms: cooldown_until_ms,
+                    revive_consumed_for_until_ms: None,
                 },
             );
         }
@@ -295,58 +345,101 @@ impl V3ProviderHealthStore {
         })
     }
 
-    pub fn record_provider_success(
+    pub fn record_provider_success_in_session(
         &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<(), V3ProviderHealthError> {
-        let scope_label = provider_key_scope_label(provider_id, auth_alias, model_id);
+        let key =
+            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
         let mut state = self
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        if state
-            .cooldowns
-            .get(&scope_label)
-            .is_some_and(|cooldown| cooldown.until_ms.is_some_and(|until| until > now_ms))
-        {
-            return Ok(());
-        }
-        state.cooldowns.remove(&scope_label);
-        state.consecutive_failures.remove(&scope_label);
+        state.cooldowns.remove(&key);
+        state.consecutive_failures.remove(&key);
+        state.session_successes.insert(key, now_ms);
         Ok(())
     }
 
-    pub(crate) fn apply_error_action(
+    pub fn record_provider_revive_success_in_session(
         &self,
-        action: &V3ErrorActionPlan,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
         now_ms: u64,
-    ) -> Result<V3ProviderHealthActionApplied, V3ProviderHealthError> {
-        let scope_label = scope_label(&action.scope);
-        let until_ms = action
-            .duration_ms
-            .map(|duration| now_ms.saturating_add(duration));
-        if action.health_affecting && !matches!(action.scope, V3ErrorActionScope::None) {
-            self.state
-                .write()
-                .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?
-                .cooldowns
-                .insert(
-                    scope_label.clone(),
-                    V3ProviderCooldown {
-                        reason: action.reason.clone(),
-                        until_ms,
-                    },
-                );
+    ) -> Result<(), V3ProviderHealthError> {
+        let key =
+            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        state.cooldowns.remove(&key);
+        state.consecutive_failures.remove(&key);
+        state.session_successes.insert(key, now_ms);
+        remove_expired_session_state(&mut state, now_ms);
+        Ok(())
+    }
+
+    pub fn try_acquire_cross_session_revive(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<Option<V3ProviderCrossSessionReviveAdmission>, V3ProviderHealthError> {
+        let key =
+            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        remove_expired_session_state(&mut state, now_ms);
+        let original_cooldown_until_ms = match state.cooldowns.get(&key) {
+            Some(cooldown) => match cooldown.until_ms {
+                Some(until_ms) if until_ms > now_ms => until_ms,
+                _ => return Ok(None),
+            },
+            None => return Ok(None),
+        };
+        if state.cooldowns.get(&key).is_some_and(|cooldown| {
+            cooldown.revive_consumed_for_until_ms == Some(original_cooldown_until_ms)
+        }) {
+            return Ok(None);
         }
-        Ok(V3ProviderHealthActionApplied {
-            scope_label,
-            reason: action.reason.clone(),
-            until_ms,
-            health_affecting: action.health_affecting,
-        })
+        let evidence_session_id = state
+            .session_successes
+            .iter()
+            .filter(|(candidate, _)| {
+                candidate.server_id == key.server_id
+                    && candidate.routing_group == key.routing_group
+                    && candidate.provider_runtime_identity == key.provider_runtime_identity
+                    && candidate.session_id != key.session_id
+                    && !state.cooldowns.get(*candidate).is_some_and(|cooldown| {
+                        cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms)
+                    })
+            })
+            .max_by_key(|(_, success_at_ms)| *success_at_ms)
+            .map(|(candidate, _)| candidate.session_id.clone());
+        let Some(evidence_session_id) = evidence_session_id else {
+            return Ok(None);
+        };
+        state
+            .cooldowns
+            .get_mut(&key)
+            .expect("active cooldown was validated under the same write lock")
+            .revive_consumed_for_until_ms = Some(original_cooldown_until_ms);
+        Ok(Some(V3ProviderCrossSessionReviveAdmission {
+            provider_key: provider_key_label(provider_id, auth_alias, model_id),
+            original_cooldown_until_ms,
+            evidence_session_id,
+        }))
     }
 
     pub(crate) fn update_quota_state(
@@ -387,6 +480,38 @@ impl V3ProviderHealthStore {
             .insert(provider_id, concurrency.clone());
         Ok(concurrency)
     }
+
+    pub fn availability_for_session(
+        &self,
+        failure_session_scope: &V3ProviderFailureSessionScope,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        let key =
+            provider_failure_session_key(failure_session_scope, provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .expect("provider health lock should not be poisoned in session projection");
+        remove_expired_session_state(&mut state, now_ms);
+        let mut projection =
+            global_availability_projection(&state, provider_id, auth_alias, model_id, now_ms);
+        if let Some(cooldown) = state
+            .cooldowns
+            .get(&key)
+            .filter(|cooldown| cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms))
+        {
+            projection.blocked_scopes.push(format!(
+                "{}:{}",
+                provider_failure_session_scope_label(&key),
+                cooldown.reason
+            ));
+            projection.available = false;
+        }
+        projection
+    }
 }
 
 impl V3ProviderAvailabilityReader for V3ProviderHealthStore {
@@ -397,53 +522,11 @@ impl V3ProviderAvailabilityReader for V3ProviderHealthStore {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> V3ProviderAvailabilityProjection {
-        let keys = availability_scope_keys(provider_id, auth_alias, model_id);
         let state = self
             .state
             .read()
             .expect("provider health lock should not be poisoned in projection");
-        let mut blocked_scopes =
-            keys.iter()
-                .filter(|key| {
-                    state.cooldowns.get(*key).is_some_and(|cooldown| {
-                        cooldown.until_ms.is_none_or(|until| until > now_ms)
-                    })
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-        if state.configured_disabled.contains(provider_id) {
-            blocked_scopes.push(format!(
-                "configured_disabled:provider_instance:{provider_id}"
-            ));
-        }
-        blocked_scopes.extend(
-            keys.iter()
-                .filter(|key| {
-                    state.quotas.get(*key).is_some_and(|quota| {
-                        quota.remaining == 0
-                            && quota
-                                .reset_at_ms
-                                .is_none_or(|reset_at_ms| reset_at_ms > now_ms)
-                    })
-                })
-                .map(|key| format!("quota:{key}")),
-        );
-        if state
-            .concurrency
-            .get(provider_id)
-            .is_some_and(|concurrency| {
-                concurrency.limit > 0 && concurrency.in_flight >= concurrency.limit
-            })
-        {
-            blocked_scopes.push(format!("concurrency:provider_instance:{provider_id}"));
-        }
-        V3ProviderAvailabilityProjection {
-            provider_id: provider_id.to_string(),
-            auth_alias: auth_alias.map(ToOwned::to_owned),
-            model_id: model_id.map(ToOwned::to_owned),
-            available: blocked_scopes.is_empty(),
-            blocked_scopes,
-        }
+        global_availability_projection(&state, provider_id, auth_alias, model_id, now_ms)
     }
 }
 
@@ -459,27 +542,17 @@ pub(crate) fn explain_provider_health_reasons(
         .state
         .read()
         .expect("provider health lock should not be poisoned in diagnostic projection");
-    keys.into_iter()
-        .filter_map(|key| {
-            state.cooldowns.get(&key).and_then(|cooldown| {
-                cooldown
-                    .until_ms
-                    .is_none_or(|until| until > now_ms)
-                    .then(|| format!("{key}:{}", cooldown.reason))
-            })
+    state
+        .quotas
+        .values()
+        .filter(|quota| {
+            keys.contains(&quota.scope_label)
+                && quota.remaining == 0
+                && quota
+                    .reset_at_ms
+                    .is_none_or(|reset_at_ms| reset_at_ms > now_ms)
         })
-        .chain(
-            state
-                .quotas
-                .values()
-                .filter(|quota| {
-                    quota.remaining == 0
-                        && quota
-                            .reset_at_ms
-                            .is_none_or(|reset_at_ms| reset_at_ms > now_ms)
-                })
-                .map(|quota| format!("quota:{}:exhausted", quota.scope_label)),
-        )
+        .map(|quota| format!("quota:{}:exhausted", quota.scope_label))
         .chain(
             state
                 .concurrency
@@ -495,6 +568,91 @@ pub(crate) fn explain_provider_health_reasons(
                 }),
         )
         .collect()
+}
+
+fn global_availability_projection(
+    state: &V3ProviderHealthState,
+    provider_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+    now_ms: u64,
+) -> V3ProviderAvailabilityProjection {
+    let keys = availability_scope_keys(provider_id, auth_alias, model_id);
+    let mut blocked_scopes = Vec::new();
+    if state.configured_disabled.contains(provider_id) {
+        blocked_scopes.push(format!(
+            "configured_disabled:provider_instance:{provider_id}"
+        ));
+    }
+    if state.health_disabled.contains(provider_id) {
+        blocked_scopes.push(format!("health_disabled:provider_instance:{provider_id}"));
+    }
+    blocked_scopes.extend(
+        keys.iter()
+            .filter(|key| {
+                state.quotas.get(*key).is_some_and(|quota| {
+                    quota.remaining == 0
+                        && quota
+                            .reset_at_ms
+                            .is_none_or(|reset_at_ms| reset_at_ms > now_ms)
+                })
+            })
+            .map(|key| format!("quota:{key}")),
+    );
+    if state
+        .concurrency
+        .get(provider_id)
+        .is_some_and(|concurrency| {
+            concurrency.limit > 0 && concurrency.in_flight >= concurrency.limit
+        })
+    {
+        blocked_scopes.push(format!("concurrency:provider_instance:{provider_id}"));
+    }
+    V3ProviderAvailabilityProjection {
+        provider_id: provider_id.to_string(),
+        auth_alias: auth_alias.map(ToOwned::to_owned),
+        model_id: model_id.map(ToOwned::to_owned),
+        available: blocked_scopes.is_empty(),
+        blocked_scopes,
+    }
+}
+
+fn provider_failure_session_key(
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    provider_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> V3ProviderFailureSessionKey {
+    V3ProviderFailureSessionKey {
+        server_id: failure_session_scope.server_id().to_string(),
+        routing_group: failure_session_scope.routing_group().to_string(),
+        session_id: failure_session_scope.session_id().to_string(),
+        provider_runtime_identity: provider_key_label(provider_id, auth_alias, model_id),
+    }
+}
+
+fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
+    format!(
+        "provider_failure_session:{}:{}:{}:{}",
+        key.server_id, key.routing_group, key.session_id, key.provider_runtime_identity
+    )
+}
+
+fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) {
+    const SESSION_STATE_IDLE_TTL_MS: u64 = 30 * 60_000;
+    state
+        .cooldowns
+        .retain(|_, cooldown| cooldown.until_ms.is_none_or(|until_ms| until_ms > now_ms));
+    state.consecutive_failures.retain(|key, failure| {
+        state.cooldowns.contains_key(key)
+            || failure
+                .last_failure_at_ms
+                .saturating_add(SESSION_STATE_IDLE_TTL_MS)
+                > now_ms
+    });
+    state.session_successes.retain(|_, success_at_ms| {
+        success_at_ms.saturating_add(SESSION_STATE_IDLE_TTL_MS) > now_ms
+    });
 }
 
 fn availability_scope_keys(
@@ -561,15 +719,8 @@ mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
-    fn action(scope: V3ErrorActionScope) -> V3ErrorActionPlan {
-        V3ErrorActionPlan {
-            scope,
-            reason: "provider_failure".to_string(),
-            duration_ms: Some(10_000),
-            retry_eligible: true,
-            health_affecting: true,
-            exhaustion_effect: "target_local_reselect".to_string(),
-        }
+    fn session(session_id: &str) -> V3ProviderFailureSessionScope {
+        V3ProviderFailureSessionScope::new("server-a", "group-a", session_id).unwrap()
     }
 
     #[test]
@@ -616,92 +767,135 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     }
 
     #[test]
-    fn health_actions_are_scoped_and_availability_projection_is_read_only() {
+    fn three_failures_cool_only_the_originating_session() {
         let store = V3ProviderHealthStore::default();
-        let applied = store
-            .apply_error_action(
-                &action(V3ErrorActionScope::AuthKey {
-                    provider_id: "provider-a".to_string(),
-                    auth_alias: "key-a".to_string(),
-                }),
-                100,
-            )
-            .unwrap();
-        assert_eq!(applied.scope_label, "auth_key:provider-a:key-a");
-        assert!(
-            !store
-                .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 101)
-                .available
-        );
-        assert!(
+        for now_ms in 100..103 {
             store
-                .availability("provider-a", Some("key-b"), Some("gpt-5.5"), 101)
-                .available
-        );
-        assert!(
-            store
-                .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
-                .available
-        );
-    }
-
-    #[test]
-    fn client_disconnect_or_none_scope_does_not_mutate_health() {
-        let store = V3ProviderHealthStore::default();
-        store
-            .apply_error_action(
-                &V3ErrorActionPlan {
-                    scope: V3ErrorActionScope::None,
-                    reason: "client_disconnect".to_string(),
-                    duration_ms: None,
-                    retry_eligible: false,
-                    health_affecting: false,
-                    exhaustion_effect: "health_neutral_client_disconnect".to_string(),
-                },
-                100,
-            )
-            .unwrap();
-        assert!(
-            store
-                .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 101)
-                .available
-        );
-    }
-
-    #[test]
-    fn provider_and_model_scopes_do_not_cross_contaminate() {
-        let store = V3ProviderHealthStore::default();
-        for scope in [
-            V3ErrorActionScope::ProviderInstance {
-                provider_id: "provider-a".to_string(),
-            },
-            V3ErrorActionScope::CanonicalModel {
-                provider_id: "provider-b".to_string(),
-                model_id: "gpt-5.5".to_string(),
-            },
-        ] {
-            store.apply_error_action(&action(scope), 100).unwrap();
+                .record_provider_failure_in_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    Some("controlled failure"),
+                    now_ms,
+                )
+                .unwrap();
         }
         assert!(
             !store
-                .availability("provider-a", Some("key-a"), Some("other-model"), 101)
-                .available
-        );
-        assert!(
-            !store
-                .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
-                .available
-        );
-        assert!(
-            store
-                .availability("provider-b", Some("key-a"), Some("other-model"), 101)
+                .availability_for_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    103,
+                )
                 .available
         );
         assert!(
             store
-                .availability("third", Some("key-a"), Some("gpt-5.5"), 101)
+                .availability_for_session(
+                    &session("session-b"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    103,
+                )
                 .available
         );
+    }
+
+    #[test]
+    fn failures_from_different_sessions_never_combine() {
+        let store = V3ProviderHealthStore::default();
+        for session_id in ["session-a", "session-b", "session-b"] {
+            store
+                .record_provider_failure_in_session(
+                    &session(session_id),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    None,
+                    100,
+                )
+                .unwrap();
+        }
+        for session_id in ["session-a", "session-b"] {
+            assert!(
+                store
+                    .availability_for_session(
+                        &session(session_id),
+                        "provider-a",
+                        Some("key-a"),
+                        Some("gpt-5.5"),
+                        101,
+                    )
+                    .available
+            );
+        }
+    }
+
+    #[test]
+    fn cross_session_revive_is_atomic_and_preserves_original_deadline_on_failure() {
+        let store = V3ProviderHealthStore::default();
+        store
+            .record_provider_success_in_session(
+                &session("session-b"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                90,
+            )
+            .unwrap();
+        let mut original_deadline = None;
+        for now_ms in 100..103 {
+            original_deadline = store
+                .record_provider_failure_in_session(
+                    &session("session-a"),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("gpt-5.5"),
+                    None,
+                    now_ms,
+                )
+                .unwrap()
+                .cooldown_until_ms;
+        }
+        let admission = store
+            .try_acquire_cross_session_revive(
+                &session("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                103,
+            )
+            .unwrap()
+            .expect("healthy sibling evidence grants one revive");
+        assert_eq!(
+            Some(admission.original_cooldown_until_ms),
+            original_deadline
+        );
+        assert!(store
+            .try_acquire_cross_session_revive(
+                &session("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                104,
+            )
+            .unwrap()
+            .is_none());
+        let failed_revive = store
+            .record_provider_failure_in_session(
+                &session("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                Some("revive failed"),
+                105,
+            )
+            .unwrap();
+        assert_eq!(failed_revive.cooldown_until_ms, original_deadline);
     }
 
     #[test]

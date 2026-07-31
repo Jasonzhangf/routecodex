@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 
 const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-provider-action-gate.mjs');
@@ -14,8 +15,12 @@ const copied = [
   'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
@@ -29,6 +34,7 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
+  'v3/crates/routecodex-v3-server/src/tests/mod.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs',
   'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
   'src/modules/llmswitch/bridge/provider-action-gate-host.ts',
@@ -51,6 +57,25 @@ const copied = [
   'docs/architecture/wiki/v3-provider-action-gate.md',
   'docs/goals/direct-relay-cross-request-error-storm-control-plan.md',
 ];
+
+function mutateYaml(source, mutate) {
+  const document = YAML.parse(source);
+  mutate(document);
+  return YAML.stringify(document);
+}
+
+function chain(document, chainId) {
+  return document.chains.find((item) => item.chain_id === chainId);
+}
+
+function edge(document, stepId) {
+  return document.chains.flatMap((item) => item.edges ?? []).find((item) => item.step_id === stepId);
+}
+
+function removeEdge(document, chainId, stepId) {
+  const owner = chain(document, chainId);
+  owner.edges = owner.edges.filter((item) => item.step_id !== stepId);
+}
 const cases = [
   {
     name: 'isolated floor shrinks',
@@ -282,7 +307,7 @@ const cases = [
   },
   {
     name: 'Direct mutates health before client disconnect classification',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
     mutate: (source) => source.replace(
       'if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)',
       'if false && matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)',
@@ -291,7 +316,7 @@ const cases = [
   },
   {
     name: 'Direct exact-pin lookup failure returns to generic RuntimeFailure',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
     mutate: (source) => source.replace(
       'missing_exact_pin_is_provider_availability_error05_without_router_reentry',
       'missing_exact_pin_returns_generic_runtime_failure',
@@ -322,47 +347,47 @@ const cases = [
   {
     name: 'V2 required terminal commit edge is deleted',
     path: 'docs/architecture/mainline-call-map.yml',
-    mutate: (source) => {
-      const start = source.indexOf('      - step_id: error-provider-action-gate-04\n');
-      const end = source.indexOf('\n  - chain_id: error.mainline\n', start);
-      return start >= 0 && end > start ? source.slice(0, start) + source.slice(end) : source;
-    },
+    mutate: (source) => mutateYaml(source, (document) => removeEdge(
+      document,
+      'error.provider_action_gate.mainline',
+      'error-provider-action-gate-04',
+    )),
     diagnostic: /missing required edge error-provider-action-gate-04/u,
   },
   {
     name: 'V3 required atomic terminal commit edge is deleted',
     path: 'docs/architecture/v3-mainline-call-map.yml',
-    mutate: (source) => source.replace(
-      /^      - \{ step_id: v3-provider-action-gate-06,[^\n]*\n/mu,
-      '',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => removeEdge(
+      document,
+      'v3.provider_action_gate.mainline',
+      'v3-provider-action-gate-06',
+    )),
     diagnostic: /missing required edge v3-provider-action-gate-06/u,
   },
   {
     name: 'V3 required provider success outcome edge is deleted',
     path: 'docs/architecture/v3-mainline-call-map.yml',
-    mutate: (source) => source.replace(
-      /^      - \{ step_id: v3-provider-action-gate-34,[^\n]*\n/mu,
-      '',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => removeEdge(
+      document,
+      'v3.provider_action_gate.mainline',
+      'v3-provider-action-gate-34',
+    )),
     diagnostic: /missing required edge v3-provider-action-gate-34/u,
   },
   {
     name: 'V3 map declares a fake caller symbol',
     path: 'docs/architecture/v3-mainline-call-map.yml',
-    mutate: (source) => source.replace(
-      'caller_symbol: execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs, callee_symbol: handle_v3_responses_relay_provider_failure',
-      'caller_symbol: fake_execute_v3_responses_relay_runtime_inner, caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs, callee_symbol: handle_v3_responses_relay_provider_failure',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => {
+      edge(document, 'v3-provider-action-gate-01').caller_symbol = 'fake_execute_v3_responses_relay_runtime_inner';
+    }),
     diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_inner/u,
   },
   {
     name: 'V2 map declares a fake callee symbol',
     path: 'docs/architecture/mainline-call-map.yml',
-    mutate: (source) => source.replace(
-      '        callee_symbol: commitProviderActionTerminalNative\n',
-      '        callee_symbol: fakeCommitProviderActionTerminalNative\n',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => {
+      edge(document, 'error-provider-action-gate-03').callee_symbol = 'fakeCommitProviderActionTerminalNative';
+    }),
     diagnostic: /callee_symbol must equal commitProviderActionTerminalNative/u,
   },
   {
@@ -472,10 +497,12 @@ const cases = [
   {
     name: 'V3 resource map drops atomic terminal writer',
     path: 'docs/architecture/v3-resource-operation-map.yml',
-    mutate: (source) => source.replace(
-      ', V3ProviderActionGate::commit_terminal_admission]',
-      ']',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => {
+      const resource = document.resources.find((item) => item.resource_id === 'v3.error.provider_action_gate');
+      resource.allowed_writers = resource.allowed_writers.filter(
+        (writer) => writer !== 'V3ProviderActionGate::commit_terminal_admission',
+      );
+    }),
     diagnostic: /allowed_writers: missing binding V3ProviderActionGate::commit_terminal_admission/u,
   },
   {
@@ -574,19 +601,19 @@ const cases = [
   {
     name: 'V2 map duplicates a required edge ID',
     path: 'docs/architecture/mainline-call-map.yml',
-    mutate: (source) => source.replace(
-      '      - step_id: error-provider-action-gate-04\n',
-      '      - step_id: error-provider-action-gate-04\n        from_node: Duplicate\n        to_node: Duplicate\n        status: anchored\n      - step_id: error-provider-action-gate-04\n',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => {
+      const owner = chain(document, 'error.provider_action_gate.mainline');
+      owner.edges.push({ ...edge(document, 'error-provider-action-gate-04') });
+    }),
     diagnostic: /duplicate edge IDs: error-provider-action-gate-04/u,
   },
   {
     name: 'V3 map duplicates a required edge ID',
     path: 'docs/architecture/v3-mainline-call-map.yml',
-    mutate: (source) => {
-      const edge = source.match(/^      - \{ step_id: v3-provider-action-gate-06,[^\n]*\n/mu)?.[0] || '';
-      return edge ? source.replace(edge, `${edge}${edge}`) : source;
-    },
+    mutate: (source) => mutateYaml(source, (document) => {
+      const owner = chain(document, 'v3.provider_action_gate.mainline');
+      owner.edges.push(structuredClone(edge(document, 'v3-provider-action-gate-06')));
+    }),
     diagnostic: /duplicate edge IDs: v3-provider-action-gate-06/u,
   },
   {
@@ -636,7 +663,7 @@ const cases = [
   },
   {
     name: 'Direct Stopless accepts response.done as provider semantic terminal',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
     mutate: (source) => source.replace(
       'if semantic_event != "response.completed" {',
       'if !matches!(semantic_event, "response.completed" | "response.done") {',
@@ -647,8 +674,8 @@ const cases = [
     name: 'Relay target-resolution source errors are swallowed as exhaustion',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     mutate: (source) => source.replace(
-      'let resolution = resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {',
-      'let resolution = if let Ok(alternative) = resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {',
+      'let resolution = reselect_from_captured_target_plan(',
+      'let resolution = if let Ok(alternative) = resolve_v3_relay_target(',
     ),
     diagnostic: /target-resolution source errors must not be swallowed as provider-pool exhaustion/u,
   },
@@ -670,10 +697,11 @@ const cases = [
   {
     name: 'Required Responses provider raw-to-codec edge is deleted',
     path: 'docs/architecture/v3-mainline-call-map.yml',
-    mutate: (source) => source.replace(
-      /^      - \{ step_id: v3-provider-action-gate-50,[^\n]*\n/mu,
-      '',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => removeEdge(
+      document,
+      'v3.provider_action_gate.mainline',
+      'v3-provider-action-gate-50',
+    )),
     diagnostic: /missing required edge v3-provider-action-gate-50/u,
   },
   {

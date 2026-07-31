@@ -15,8 +15,12 @@ const files = {
   v2Projection: 'src/server/utils/http-error-mapper.ts',
   gate: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
   policy: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+  policyTests: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
   error: 'v3/crates/routecodex-v3-error/src/lib.rs',
   direct: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+  directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+  directUnitTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
+  directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs',
   responses: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesMaterializer: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
@@ -25,6 +29,7 @@ const files = {
   anthropic: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
   gemini: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
+  serverTests: 'v3/crates/routecodex-v3-server/src/tests/mod.rs',
   gateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
   openaiChatTests: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   geminiTests: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
@@ -414,9 +419,9 @@ const requiredV3Edges = [
     to_node: 'V3Error05RecoveryWitness',
     caller_symbol: 'run_v3_relay_provider_failure_policy',
     caller_file: files.policy,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_action_failure',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope',
     callee_file: files.policy,
-    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*record_provider_action_failure\s*\(/u,
+    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*record_provider_action_failure_in_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -438,9 +443,9 @@ const requiredV3Edges = [
     to_node: 'V3ProviderActionGateTerminalAdmission',
     caller_symbol: 'run_v3_relay_provider_failure_policy',
     caller_file: files.policy,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::wait_for_terminal_provider_projection_in_scope',
     callee_file: files.policy,
-    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*wait_for_terminal_provider_projection\s*\(/u,
+    call_witness: /\bcontext\s*\.\s*provider_health\s*\.\s*wait_for_terminal_provider_projection_in_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -547,7 +552,7 @@ const requiredV3Edges = [
     caller_symbol: 'execute_v3_responses_direct_runtime_kernel_core',
     caller_file: files.direct,
     callee_symbol: 'run_v3_direct_provider_failure_policy',
-    callee_file: files.direct,
+    callee_file: files.directHelpers,
     call_witness: /\brun_v3_direct_provider_failure_policy\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
@@ -786,9 +791,9 @@ const requiredV3Edges = [
     to_node: 'V3ProviderActionSuccessRecorded',
     caller_symbol: 'V3DirectSseProviderOutcome::record_success',
     caller_file: files.directSse,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_scope',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_scope\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -834,9 +839,9 @@ const requiredV3Edges = [
     to_node: 'V3ProviderActionSuccessRecorded',
     caller_symbol: 'V3OpenAiChatSseProviderOutcome::record_success',
     caller_file: files.openaiChat,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_scope',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_scope\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -882,9 +887,9 @@ const requiredV3Edges = [
     to_node: 'V3ProviderActionSuccessRecorded',
     caller_symbol: 'V3GeminiSseProviderOutcome::record_success',
     caller_file: files.gemini,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_scope',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_scope\s*\(/u,
+    call_witness: /\bself\s*\.\s*provider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -918,9 +923,9 @@ const requiredV3Edges = [
     to_node: 'V3ProviderActionSuccessRecorded',
     caller_symbol: 'execute_v3_responses_relay_runtime_inner',
     caller_file: files.responses,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_scope',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_scope\s*\(/u,
+    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -942,9 +947,9 @@ const requiredV3Edges = [
     to_node: 'V3ProviderActionSuccessRecorded',
     caller_symbol: 'record_provider_success_after_resp04',
     caller_file: files.anthropic,
-    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_scope',
+    callee_symbol: 'V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope',
     callee_file: files.policy,
-    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_scope\s*\(/u,
+    call_witness: /\bprovider_health\s*\.\s*record_provider_success_in_failure_scope\s*\(/u,
     status: 'anchored',
     owner_feature_id: 'v3.provider_action_gate',
   },
@@ -1271,7 +1276,7 @@ for (const testName of [
   'unavailable_candidate_is_exhaustion_not_runtime_failure',
   'target_resolution_failure_projects_itself_instead_of_prior_provider_429',
 ]) {
-  assertRustTest(text.policy, files.policy, testName);
+  assertRustTest(text.policyTests, files.policyTests, testName);
 }
 if (/pub\s+struct\s+V3Error05TerminalDecision\s*\{\s*pub/gu.test(text.error)) {
   failures.push(`${files.error}: terminal Error05 wrapper must not expose constructible fields`);
@@ -1321,10 +1326,10 @@ if (/matches!\s*\(\s*[\w.]+\s*,\s*"response\.completed"\s*\|\s*"response\.done"/
     `${files.directSse}: provider response.done must not satisfy the response.completed terminal contract`,
   );
 }
-requireText(text.direct, files.direct, 'if semantic_event != "response.completed" {');
-if (/semantic_event[\s\S]{0,160}?"response\.completed"\s*\|\s*"response\.done"/u.test(text.direct)) {
+requireText(text.directHelpers, files.directHelpers, 'if semantic_event != "response.completed" {');
+if (/semantic_event[\s\S]{0,160}?"response\.completed"\s*\|\s*"response\.done"/u.test(text.directHelpers)) {
   failures.push(
-    `${files.direct}: Direct Stopless provider semantic hooks must not accept response.done before response.completed closeout`,
+    `${files.directHelpers}: Direct Stopless provider semantic hooks must not accept response.done before response.completed closeout`,
   );
 }
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
@@ -1437,6 +1442,7 @@ for (const forbidden of [
   const production = [
     text.policy,
     text.direct,
+    text.directHelpers,
     text.responses,
     text.openaiChat,
     text.anthropic,
@@ -1503,18 +1509,26 @@ assertRustTest(
   'direct_client_disconnect_is_health_neutral_and_never_enters_action_wait',
 );
 assertRustTest(
-  text.direct,
-  files.direct,
+  text.directUnitTests,
+  files.directUnitTests,
   'normal_direct_request_does_not_consume_unrelated_provider_failure_gate',
 );
-requireText(text.direct, files.direct, 'if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)');
+requireText(
+  text.directHelpers,
+  files.directHelpers,
+  'if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)',
+);
 for (const token of [
-  'missing_exact_pin_is_provider_availability_error05_without_router_reentry',
   'V3ExactPinAvailabilityExhaustion',
   'continuation_exact_pin_unavailable',
 ]) {
-  requireText(text.direct, files.direct, token);
+  requireText(text.directHelpers, files.directHelpers, token);
 }
+requireText(
+  text.directExactPinTests,
+  files.directExactPinTests,
+  'missing_exact_pin_is_provider_availability_error05_without_router_reentry',
+);
 for (const token of [
   'provider_failure_with_route_capacity_is_typed_nonterminal_error05',
   'provider_failure_with_same_provider_budget_is_typed_retry_same',
@@ -1530,6 +1544,10 @@ requireText(
 for (const token of [
   'direct_sse_console_closeout_abruptly_closes_without_fabricating_error06',
   'relay_sse_body_abruptly_closes_without_fabricating_error_event',
+]) {
+  requireText(text.serverTests, files.serverTests, token);
+}
+for (const token of [
   'emit_v3_post_commit_sse_source_console_line_for_context',
   'io::Error::other',
 ]) {

@@ -213,7 +213,7 @@ const cases = [
   {
     name: 'focused duplicate identity package gate removed',
     file: 'package.json',
-    marker: '    "test:v3-5520-duplicate-tool-identity": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_duplicate_tool_identity -- --nocapture && npm run verify:v3-hub-relay-runtime-closeout && npm run test:v3-hub-relay-runtime-closeout-red-fixtures",\n',
+    marker: '    "test:v3-5520-duplicate-tool-identity": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib terminal_merge -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_duplicate_tool_identity -- --nocapture && npm run verify:v3-hub-relay-runtime-closeout && npm run test:v3-hub-relay-runtime-closeout-red-fixtures",\n',
     mutation: '',
     diagnostic: /missing script test:v3-5520-duplicate-tool-identity/,
   },
@@ -255,8 +255,8 @@ const cases = [
   {
     name: 'Resp03 Error01 call-map callee drifts to local envelope helper',
     file: 'docs/architecture/v3-mainline-call-map.yml',
-    marker: 'callee_symbol: build_v3_error_01_source_raised_external, callee_file: v3/crates/routecodex-v3-error/src/lib.rs',
-    mutation: 'callee_symbol: provider_response_hook_failure, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    marker: '    caller_symbol: build_v3_relay_provider_error_05_decision\n    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs\n    callee_symbol: build_v3_error_01_source_raised_external\n    callee_file: v3/crates/routecodex-v3-error/src/lib.rs',
+    mutation: '    caller_symbol: build_v3_relay_provider_error_05_decision\n    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs\n    callee_symbol: provider_response_hook_failure\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     diagnostic: /callee_symbol must equal build_v3_error_01_source_raised_external/,
   },
   {

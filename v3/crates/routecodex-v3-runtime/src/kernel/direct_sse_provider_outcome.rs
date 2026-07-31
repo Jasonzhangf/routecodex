@@ -1,9 +1,7 @@
 use super::*;
-
 pub(super) struct V3DirectSseProviderOutcome {
     pub(super) provider_health: V3ProviderFailureRuntimeHealth,
-    pub(super) server_id: String,
-    pub(super) routing_group: String,
+    pub(super) failure_session_scope: V3ProviderFailureSessionScope,
     pub(super) provider_id: String,
     pub(super) auth_alias: String,
     pub(super) model_id: String,
@@ -169,8 +167,7 @@ impl V3DirectSseProviderOutcome {
         drop(self._provider_action_permit.take());
         self.provider_health
             .record_post_commit_provider_stream_failure(
-                &self.server_id,
-                &self.routing_group,
+                &self.failure_session_scope,
                 &self.provider_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
@@ -185,14 +182,14 @@ impl V3DirectSseProviderOutcome {
         if self.recorded {
             return Ok(());
         }
-        self.provider_health.record_provider_success_in_scope(
-            &self.server_id,
-            &self.routing_group,
-            &self.provider_id,
-            Some(&self.auth_alias),
-            Some(&self.model_id),
-            v3_relay_provider_policy_now_epoch_ms()?,
-        )?;
+        self.provider_health
+            .record_provider_success_in_failure_scope(
+                &self.failure_session_scope,
+                &self.provider_id,
+                Some(&self.auth_alias),
+                Some(&self.model_id),
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )?;
         self.recorded = true;
         Ok(())
     }

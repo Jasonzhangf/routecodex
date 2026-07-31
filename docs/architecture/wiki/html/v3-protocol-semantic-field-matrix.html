@@ -1534,7 +1534,7 @@
       <details><summary>Chat shape / value rule</summary><div>Chat reasoning_effort is a request option. Visible thinking/reasoning content is response/message content semantics.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. reasoning content and usage stay separate.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. Anthropic thinking.budget_tokens outbound projection requires Jason auth. reasoning content and usage stay separate. Grok explicitly rejects reasoning_effort/reasoning object on wire.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.effort</code></li></ul>

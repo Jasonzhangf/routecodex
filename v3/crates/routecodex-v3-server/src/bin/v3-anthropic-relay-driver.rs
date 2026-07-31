@@ -1,4 +1,5 @@
 use routecodex_v3_config::V3ConfigStore;
+use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::V3AnthropicRelayRuntimeInput;
 use routecodex_v3_server::execute_v3_anthropic_messages_request;
 use serde_json::{json, Value};
@@ -35,6 +36,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: "controlled".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "controlled",
+                manifest
+                    .servers
+                    .get("controlled")
+                    .map(|server| server.routing_group.as_str())
+                    .unwrap_or("controlled"),
+                "anthropic-relay-driver",
+            )?,
             request_id: format!(
                 "controlled-{}",
                 fixture

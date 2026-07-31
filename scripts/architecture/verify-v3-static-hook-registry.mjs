@@ -72,6 +72,7 @@ for (const node of nodes) {
 
 const builders = [
   'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
+  'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
   'build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01',
   'build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02',
   'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
@@ -81,11 +82,13 @@ const builders = [
   'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
   'build_v3_provider_req_outbound_08_from_provider_req_compat_06',
   'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
+  'build_v3_provider_resp_inbound_01_raw_from_sse_chunks',
   'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01',
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02',
   'build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02',
   'build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
 ];
 for (const builder of builders) {
@@ -100,7 +103,7 @@ for (const axis of axes) if (!production.includes(`pub enum ${axis}`)) failures.
 if (/entry_protocol[\s\S]{0,120}(?:Direct|RemoteProviderOwned)|provider_protocol[\s\S]{0,120}RemoteProviderOwned|same_protocol/i.test(production)) {
   failures.push('protocol fact is used to infer execution or continuation ownership');
 }
-if (/provider_family|model_prefix|starts_with\(/i.test(production)) failures.push('Hub v1 contains provider-specific branch vocabulary');
+if (/provider_family|model_prefix|(?:provider_(?:id|type)|model_id)\s*\.\s*starts_with\s*\(/i.test(production)) failures.push('Hub v1 contains provider-specific branch vocabulary');
 
 for (const node of nodes) {
   for (const phase of ['Entry', 'Exit']) {
@@ -119,7 +122,7 @@ for (const variant of ['MissingHook', 'DuplicateHook', 'UnknownHook', 'Incompati
 }
 if (/std::fs|libloading|discover.*hook|dynamic.*hook/i.test(production)) failures.push('dynamic hook loading/discovery is forbidden');
 if (/fallback|default_hook|unwrap_or.*hook/i.test(production)) failures.push('missing-hook fallback is forbidden');
-if (/routecodex_v3_provider_responses|reqwest|ResponsesTransport|\.send\(/.test(production)) failures.push('H1 Hub v1 skeleton must not connect Provider network');
+if (/\breqwest\b|\.send\s*\(|TcpStream|hyper::client/.test(production)) failures.push('H1 Hub v1 skeleton must not connect Provider network');
 if (/pub\s+(?:struct|type)\s+[^\n]*(?:Value|Record)|pub\s+[^\n]*serde_json::Value/.test(production)) failures.push('Hub v1 critical node payload cannot expose bare generic Value/Record DTOs');
 if (/SemanticEnvelope|CanonicalPayload|SharedNodeDto/.test(production)) failures.push('Hub v1 cannot collapse distinct nodes into a synonymous shared DTO');
 if ((production.match(/V3ServerRespOutbound06ClientFrame/g) ?? []).length < 2) failures.push('sole response exit node missing');

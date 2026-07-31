@@ -260,6 +260,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/foundation.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-server/src/lib.rs
     resource_bindings:
       - v3.request.protocol_context
       - v3.debug.trace_context
@@ -277,6 +278,7 @@ features:
       - v3.error.execution_decision
       - v3.error.client_projection
       - v3.provider_error.policy_manifest
+      - v3.provider.failure_session_scope
       - v3.provider.health_state
       - v3.provider.availability_projection
     mainline_bindings:
@@ -297,6 +299,7 @@ features:
       - v3-de-15
       - v3-de-16
       - v3-de-17
+      - v3-de-18
     entry_symbols:
       - execute_v3_foundation_pending_runtime
       - execute_v3_responses_direct_dry_run_runtime
@@ -313,13 +316,19 @@ features:
       - build_v3_error_01_source_raised_internal
       - build_v3_error_02_classified_from_v3_error_01
       - build_v3_error_03_target_local_action_from_v3_error_02
-      - build_v3_error_04_target_exhaustion_decision_from_v3_error_03
+      - build_v3_error_04_target_exhaustion_decision_with_provider_availability
       - build_v3_error_05_execution_decision_from_v3_error_04
       - build_v3_error_06_client_projected_from_v3_error_05
-      - V3ProviderHealthStore::apply_error_action
-      - V3ProviderHealthStore::record_provider_failure
-      - V3ProviderHealthStore::record_provider_success
+      - V3ProviderFailureRuntimeHealth::record_provider_failure_record
+      - V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
+      - V3ProviderFailureRuntimeHealth::session_bound_availability
+      - V3ProviderSessionAvailabilityReader::availability
+      - V3ProviderHealthStore::record_provider_failure_in_session
+      - V3ProviderHealthStore::record_provider_success_in_session
       - V3ProviderHealthStore::availability
+      - V3ProviderHealthStore::availability_for_session
+      - V3ProviderHealthStore::try_acquire_cross_session_revive
+      - build_v3_provider_failure_session_scope_for_request
       - V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET
       - V3_PROVIDER_FAILURE_BACKOFF_DELAY_MS
     allowed_paths:
@@ -354,6 +363,9 @@ features:
       - npm run verify:v3-module-boundaries
       - npm run verify:v3-static-hook-registry
       - npm run verify:v3-resource-map
+      - npm run verify:v3-provider-session-cooldown
+      - npm run test:v3-provider-session-cooldown-red-fixtures
+      - npm run test:v3-provider-session-cooldown
       - npm run test:v3-compile-fail
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
@@ -2193,6 +2205,7 @@ features:
       - v3-hub-relay-closeout-14
       - v3-hub-relay-closeout-15
       - v3-hub-relay-closeout-16
+      - v3-hub-relay-response-failure-01
       - v3-openai-chat-event-codec-01
       - v3-openai-chat-event-codec-02
       - v3-responses-relay-server-01
@@ -2211,6 +2224,11 @@ features:
       - V3ResponsesRelayLocalContinuationScope
       - execute_v3_responses_relay_request
       - responses_relay_output_response
+      - is_v3_responses_provider_response_failure
+      - provider_response_hook_failure
+      - build_v3_relay_provider_error_05_decision
+      - build_v3_error_01_source_raised_external
+      - responses_relay_runtime::provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate
       - build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events
       - collect_openai_chat_stream_event
       - collect_openai_chat_stream_tool_call_deltas
@@ -2243,6 +2261,8 @@ features:
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
@@ -3079,6 +3099,7 @@ features:
     owner_crates: [routecodex-v3-server, routecodex-v3-runtime]
     owner_files:
       - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
       - scripts/architecture/verify-v3-file-size.mjs
@@ -3440,6 +3461,7 @@ features:
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     owner_scope: "Runtime owns one timing state per Direct/Relay request; Direct SSE starts external timing in the kernel, closes it only after provider decoder clean EOF, and publishes Runtime timing from the outcome closeout."
@@ -3471,9 +3493,12 @@ features:
       - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
       - v3/crates/routecodex-v3-runtime/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-resource-operation-map.yml
@@ -3497,3 +3522,89 @@ features:
       - npm run test:v3-runtime-timing-observability-red-fixtures
       - npm run verify:v3-architecture-docs
     runtime_status: source_active_live_verification_required
+
+  - feature_id: v3.provider_action_gate
+    status: active
+    runtime_status: source_active_live_verification_required
+    owner_crate: routecodex-v3-runtime
+    owner_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+    resource_bindings:
+      - v3.error.execution_decision
+      - v3.error.provider_action_gate
+      - v3.provider.health_state
+    mainline_bindings:
+      - v3-provider-action-gate-01
+      - v3-provider-action-gate-02
+      - v3-provider-action-gate-03
+      - v3-provider-action-gate-04
+      - v3-provider-action-gate-05
+      - v3-provider-action-gate-06
+      - v3-provider-action-gate-07
+      - v3-provider-action-gate-08
+      - v3-provider-action-gate-09
+      - v3-provider-action-gate-10
+      - v3-provider-action-gate-11
+      - v3-provider-action-gate-12
+      - v3-provider-action-gate-13
+      - v3-provider-action-gate-14
+      - v3-provider-action-gate-15
+      - v3-provider-action-gate-16
+      - v3-provider-action-gate-17
+      - v3-provider-action-gate-18
+      - v3-provider-action-gate-19
+      - v3-provider-action-gate-20
+      - v3-provider-action-gate-21
+      - v3-provider-action-gate-22
+      - v3-provider-action-gate-23
+      - v3-provider-action-gate-24
+      - v3-provider-action-gate-25
+      - v3-provider-action-gate-26
+      - v3-provider-action-gate-27
+      - v3-provider-action-gate-28
+      - v3-provider-action-gate-29
+      - v3-provider-action-gate-30
+      - v3-provider-action-gate-31
+      - v3-provider-action-gate-32
+      - v3-provider-action-gate-33
+      - v3-provider-action-gate-34
+      - v3-provider-action-gate-35
+      - v3-provider-action-gate-36
+      - v3-provider-action-gate-37
+      - v3-provider-action-gate-38
+      - v3-provider-action-gate-39
+      - v3-provider-action-gate-40
+      - v3-provider-action-gate-41
+      - v3-provider-action-gate-42
+      - v3-provider-action-gate-43
+      - v3-provider-action-gate-44
+      - v3-provider-action-gate-45
+      - v3-provider-action-gate-46
+      - v3-provider-action-gate-47
+      - v3-provider-action-gate-48
+      - v3-provider-action-gate-49
+      - v3-provider-action-gate-50
+      - v3-provider-action-gate-51
+    entry_symbols:
+      - V3ProviderActionGate
+      - V3ProviderActionAdmission::take_permit
+      - V3ProviderActionPermit::drop
+      - V3ProviderActionGate::abandon_admission
+      - V3ProviderActionGate::commit_terminal_admission
+    allowed_paths:
+      - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+    required_gates:
+      - npm run test:v3-provider-action-gate
+      - npm run verify:v3-provider-action-gate
+      - npm run test:v3-provider-action-gate-red-fixtures
+      - npm run test:v3-provider-session-cooldown
+      - npm run verify:v3-provider-session-cooldown
+      - npm run test:v3-provider-session-cooldown-red-fixtures
+      - npm run verify:v3-resource-map

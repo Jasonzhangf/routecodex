@@ -876,7 +876,7 @@ features:
     status: p3_p4_source_and_live_verified
     change_risk: high
     owner_kind: rust_project_v3
-    owner_scope: "P3 global Debug plus P4 global Error and Provider-owned health/availability foundation"
+    owner_scope: "P3 global Debug plus P4 global Error and Provider-owned session-isolated health/availability foundation"
     owner_modules:
       - v3/crates/routecodex-v3-debug
       - v3/crates/routecodex-v3-error
@@ -897,7 +897,7 @@ features:
     required_unit:
       - routecodex-v3-debug ordered events, sinks, redaction, raw capture, snapshot sessions, dry-run fixture plans
       - routecodex-v3-error six adjacent builders, taxonomy, action scope, target exhaustion, client projection
-      - routecodex-v3-provider-responses provider/auth/model scoped health state and read-only availability
+      - routecodex-v3-provider-responses server/routing-group/session/provider-runtime scoped failure health state and read-only availability
       - routecodex-v3-runtime foundation pending and dry-run kernels
       - routecodex-v3-runtime provider failure policy constants keep V3 direct and relay retry budgets aligned
     required_contract:
@@ -930,6 +930,9 @@ features:
       - npm run verify:v3-module-boundaries
       - npm run verify:v3-static-hook-registry
       - npm run verify:v3-resource-map
+      - npm run verify:v3-provider-session-cooldown
+      - npm run test:v3-provider-session-cooldown-red-fixtures
+      - npm run test:v3-provider-session-cooldown
       - npm run test:v3-compile-fail
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
@@ -1540,6 +1543,7 @@ features:
     required_gates:
       - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime terminal_merge --lib -- --nocapture
       - npm run test:v3-openai-chat-stream-tool-call-identity
+      - npm run test:v3-5520-duplicate-tool-identity
       - npm run test:v3-hub-relay-runtime-closeout
       - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
       - npm run verify:v3-hub-relay-runtime-closeout
@@ -2068,6 +2072,7 @@ features:
       - scripts/architecture/verify-v3-file-size.mjs
       - scripts/tests/v3-file-size-red-fixtures.mjs
       - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
     design:
@@ -2265,7 +2270,10 @@ features:
     unit:
       - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+      - v3/crates/routecodex-v3-server/src/tests/mod.rs
     contract:
       - docs/goals/v3-runtime-timing-observability-test-design.md
       - docs/goals/v3-runtime-timing-observability-debug-contract.json
@@ -2371,3 +2379,85 @@ features:
       live_cutover: false
       global_install_restart: false
       forbidden_claim: "Do not claim provider semantic correctness from HTTP keepalive scheduling evidence."
+
+  - feature_id: v3.provider_action_gate
+    status: source_active_live_verification_required
+    change_risk: high
+    owner_kind: rust_v3_provider_action_gate
+    owner_scope: V3 provider action admission, recovery, terminal projection, permit ownership, post-commit SSE observation, and response event-codec evidence.
+    owner_modules:
+      - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+      - v3/crates/routecodex-v3-error/src/lib.rs
+    contract:
+      - docs/architecture/manifests/v3.provider_action_gate.mainline.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/wiki/v3-provider-action-gate.md
+    mainline_bindings:
+      - v3-provider-action-gate-01
+      - v3-provider-action-gate-02
+      - v3-provider-action-gate-03
+      - v3-provider-action-gate-04
+      - v3-provider-action-gate-05
+      - v3-provider-action-gate-06
+      - v3-provider-action-gate-07
+      - v3-provider-action-gate-08
+      - v3-provider-action-gate-09
+      - v3-provider-action-gate-10
+      - v3-provider-action-gate-11
+      - v3-provider-action-gate-12
+      - v3-provider-action-gate-13
+      - v3-provider-action-gate-14
+      - v3-provider-action-gate-15
+      - v3-provider-action-gate-16
+      - v3-provider-action-gate-17
+      - v3-provider-action-gate-18
+      - v3-provider-action-gate-19
+      - v3-provider-action-gate-20
+      - v3-provider-action-gate-21
+      - v3-provider-action-gate-22
+      - v3-provider-action-gate-23
+      - v3-provider-action-gate-24
+      - v3-provider-action-gate-25
+      - v3-provider-action-gate-26
+      - v3-provider-action-gate-27
+      - v3-provider-action-gate-28
+      - v3-provider-action-gate-29
+      - v3-provider-action-gate-30
+      - v3-provider-action-gate-31
+      - v3-provider-action-gate-32
+      - v3-provider-action-gate-33
+      - v3-provider-action-gate-34
+      - v3-provider-action-gate-35
+      - v3-provider-action-gate-36
+      - v3-provider-action-gate-37
+      - v3-provider-action-gate-38
+      - v3-provider-action-gate-39
+      - v3-provider-action-gate-40
+      - v3-provider-action-gate-41
+      - v3-provider-action-gate-42
+      - v3-provider-action-gate-43
+      - v3-provider-action-gate-44
+      - v3-provider-action-gate-45
+      - v3-provider-action-gate-46
+      - v3-provider-action-gate-47
+      - v3-provider-action-gate-48
+      - v3-provider-action-gate-49
+      - v3-provider-action-gate-50
+      - v3-provider-action-gate-51
+    required_positive:
+      - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.
+    required_gates:
+      - npm run test:v3-provider-action-gate
+      - npm run verify:v3-provider-action-gate
+      - npm run test:v3-provider-action-gate-red-fixtures
+      - npm run test:v3-provider-session-cooldown
+      - npm run verify:v3-provider-session-cooldown
+      - npm run test:v3-provider-session-cooldown-red-fixtures
+      - npm run verify:v3-resource-map
+    completion_rule:
+      source: Provider action gates, maps, manifests, red fixtures, and runtime source checks pass.
+      runtime: Live verification remains required before claiming production closeout.
+      forbidden_claim: Do not claim complete from source gates alone; live verification is explicit.

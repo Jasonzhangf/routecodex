@@ -29,7 +29,10 @@ pub(crate) use provider_compat_shared::{
     provider_protocol_compat_id, provider_wire_protocol_for_provider_type,
 };
 mod responses_openai_codec;
-pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
+pub(crate) use responses_openai_codec::{
+    build_v3_chat_canonical_request_from_responses_payload_for_req_inbound,
+    responses_payload_needs_req04_original_surface,
+};
 mod request_outbound_format;
 pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,

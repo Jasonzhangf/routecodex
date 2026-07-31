@@ -69,8 +69,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:c4640c59c879afb9d39249c9d4c0ea5c999022a701a9f65b79e061fbb4293018
-    last_manual_authorization_id: auth-20260726-vr-target-protocol-decision
+    fingerprint: sha256:9c8e7f1e93a0ba4b1ffffc68bad3af881fe5216b822ee45c9a260a5b461f1b56
+    last_manual_authorization_id: auth-20260731-v3-responses-direct-owner-split-lock-refresh
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -94,8 +94,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f
-    last_manual_authorization_id: auth-20260724-resp03-tool-governance-split
+    fingerprint: sha256:7e820a4b9abf338c874911d7b599c10c79803079b186ca4dfb3b437b30a100e4
+    last_manual_authorization_id: auth-20260731-v3-servertool-hook-skeleton-lock-refresh
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
     status: audited_locked
@@ -103,8 +103,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
-    last_manual_authorization_id: auth-20260729-v3-debug-payload-budget
+    fingerprint: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
+    last_manual_authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
   - item_id: chain:v3.sse.transport_boundary
     chain_id: v3.sse.transport_boundary
     status: audited_locked
@@ -114,6 +114,34 @@ locked_items:
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md#sse-edge-sop
     fingerprint: sha256:ee58da7eca3b82d7e16b0cff456968919d023c8c8bb5fcf8766b9465d2b275ed
 manual_authorizations:
+  - authorization_id: auth-20260731-v3-de18-failure-session-scope-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T17:05:00+08:00'
+    reason: "Jason instructed continuing the Codex-review closeout after P0-MAP-DRIFT showed v3-de-18 falsely claimed Server writes Provider Health. This refresh locks the corrected edge: build_v3_provider_failure_session_scope_for_request now maps V3Server03HttpRequestRaw -> V3ProviderFailureSessionScope, produces v3.provider.failure_session_scope, and the verifier/red fixtures reject Provider Health mutation or v3.provider.health_state on v3-de-18. Runtime Error01-06 and Provider Health mutation topology are unchanged."
+    fingerprint_before: sha256:2e262da748708b41269ed46bc9452d73367b142e452ae24b2b67db68f4bb8657
+    fingerprint_after: sha256:3a62cd4e24df96130d7a9892f027608a4c10bd32e404481e18aa5896330849f2
+  - authorization_id: auth-20260731-v3-debug-error-session-health-map-drift-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T16:45:00+08:00'
+    reason: "Jason instructed continuing execution after Codex review found P0-MAP-DRIFT in the session health identity/owner bindings; this refresh locks the corrected debug/error foundation map where Provider Health identity is session-scoped, direct health edges bind to V3ProviderFailureRuntimeHealth -> V3ProviderHealthStore session APIs, and the verifier now rejects stale provider-global map entries. Runtime Error01-06 topology is unchanged."
+    fingerprint_before: sha256:7c61139166bb06245658f7cc62cf366690ad8159adc6b1e900893a7ecdf90107
+    fingerprint_after: sha256:2e262da748708b41269ed46bc9452d73367b142e452ae24b2b67db68f4bb8657
+  - authorization_id: auth-20260731-v3-responses-direct-owner-split-lock-refresh
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T14:50:12+08:00'
+    reason: "Jason authorized refreshing the audited Direct mainline lock after the verified file-size decomposition moved the existing v3-rd-09 caller owner from kernel.rs to kernel/direct_protocol_plan.rs without changing the Direct lifecycle or runtime semantics."
+    fingerprint_before: sha256:c4640c59c879afb9d39249c9d4c0ea5c999022a701a9f65b79e061fbb4293018
+    fingerprint_after: sha256:9c8e7f1e93a0ba4b1ffffc68bad3af881fe5216b822ee45c9a260a5b461f1b56
+  - authorization_id: auth-20260731-v3-debug-error-current-owner-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T14:50:12+08:00'
+    reason: "Jason authorized refreshing the audited debug/error foundation lock after source verification consolidated the previously authorized caller-flow sync and bound Error03-05 to V3ErrorHandlingCenter, Error04 to the availability-aware builder, provider failure recording to V3ProviderFailureRuntimeHealth and the session-scoped health store, and Direct planning edges to the decomposed direct_protocol_plan owner; the Error01-06 topology remains unchanged."
+    fingerprint_before: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
+    fingerprint_after: sha256:7c61139166bb06245658f7cc62cf366690ad8159adc6b1e900893a7ecdf90107
   - authorization_id: auth-20260729-v3-debug-payload-budget
     item_id: chain:v3.debug_error_foundation.mainline
     approved_by: Jason
@@ -142,6 +170,20 @@ manual_authorizations:
     reason: "Jason approved fixing, reviewing, and committing the overlapping V3 error, console, and provider-action work. Error04 now requires caller-owned route-pool, default-pool, and same-provider availability proof; the builder that inferred exhaustion from candidate count alone was physically removed, and Error06 now consumes only typed terminal Error05. The Error01-06 topology and edge count remain unchanged; only the owning builder contract and symbol changed."
     fingerprint_before: sha256:4858bdc8079206ee2083299206845b43f4e4643055c2405df1f46b0d4ad7e1fe
     fingerprint_after: sha256:38b56257ab7b4ec2d6b79e3a46132f759434b438b9fedbff7953ec6d0a9af7ce
+  - authorization_id: auth-20260731-v3-servertool-hook-skeleton-lock-refresh
+    item_id: chain:v3.servertool_hook_skeleton_lifecycle
+    approved_by: Jason
+    approved_at: '2026-07-31T13:58:14+08:00'
+    reason: "Jason authorized refreshing the audited lock after the verified mainline caller flow and render sync changed the chain fingerprint without changing runtime semantics."
+    fingerprint_before: sha256:e47bae6a4f5f8530cc2005a6ccfed3d24f1d3719c11ad0061912e17b6bb4003f
+    fingerprint_after: sha256:7e820a4b9abf338c874911d7b599c10c79803079b186ca4dfb3b437b30a100e4
+  - authorization_id: auth-20260731-v3-debug-error-foundation-lock-refresh
+    item_id: chain:v3.debug_error_foundation.mainline
+    approved_by: Jason
+    approved_at: '2026-07-31T13:58:14+08:00'
+    reason: "Jason authorized refreshing the audited lock after the verified mainline caller flow and render sync changed the chain fingerprint without changing runtime semantics."
+    fingerprint_before: sha256:5e3f4fc296d20586517136147dce146569f94b34616ef5d49fff01c01b4bf011
+    fingerprint_after: sha256:c29480973dbd035b5799ff5098cae9e7853c5ccfb39eaad8ab5848de9e330896
   - authorization_id: auth-20260726-direct-history-tool-image-placeholder
     item_id: chain:v3.responses_direct.required_mainline
     approved_by: Jason

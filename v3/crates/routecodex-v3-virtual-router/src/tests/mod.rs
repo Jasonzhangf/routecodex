@@ -96,11 +96,19 @@ fn matching_facts() -> V3RouterRequestFacts {
         client_model: Some("client-model".into()),
         capabilities: BTreeSet::from(["tools".into()]),
         input_tokens: 10,
-        route_signals: V3RouteClassifierSignals {
-            has_current_turn_tool_output: true,
-            last_assistant_tool_category: Some("other".into()),
-            ..Default::default()
-        },
+        route_classification: test_route("tools", &["tools", "default"]),
+    }
+}
+
+fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
+    RouteClassification {
+        route_name: route.to_string(),
+        reasoning: format!("test:{route}"),
+        candidates: candidates
+            .iter()
+            .map(|candidate| (*candidate).to_string())
+            .collect(),
+        required_capabilities: Vec::new(),
     }
 }
 
@@ -120,6 +128,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     alias: "key1".into(),
                     env: Some("PROV_KEY".into()),
                     token_file: None,
+                    api_key: None,
                 }],
             },
             models: BTreeMap::from([(
@@ -154,7 +163,7 @@ fn direct_facts(model: &str, capabilities: BTreeSet<String>) -> V3RouterRequestF
         client_model: Some(model.into()),
         capabilities,
         input_tokens: 10,
-        route_signals: Default::default(),
+        route_classification: RouteClassification::default(),
     }
 }
 
@@ -190,7 +199,7 @@ fn direct_provider_model_short_circuits_pool_matching() {
 }
 
 #[test]
-fn direct_unknown_provider_continues_to_normal_classification() {
+fn direct_unknown_provider_falls_back_to_classification() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -212,7 +221,7 @@ fn direct_unknown_provider_continues_to_normal_classification() {
 }
 
 #[test]
-fn direct_unknown_model_fails_but_media_capability_does_not_block_direct_route() {
+fn direct_unknown_model_and_media_mismatch_fail_without_reroute() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -239,13 +248,13 @@ fn direct_unknown_model_fails_but_media_capability_does_not_block_direct_route()
             direct_facts("prov.model-x", BTreeSet::from(["vision".into()])),
         )
         .unwrap();
-    let plan = router
-        .resolve_route_pool_plan(&manifest, classified)
-        .expect("direct provider.model route must not be blocked by request route signals");
-    assert_eq!(plan.tiers[0].pool_id, "direct");
     assert_eq!(
-        plan.tiers[0].direct_provider_model.as_ref(),
-        Some(&("prov".to_string(), "model-x".to_string()))
+        router.resolve_route_pool_plan(&manifest, classified),
+        Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
+            provider: "prov".into(),
+            model: "model-x".into(),
+            capability: "vision".into(),
+        })
     );
 }
 
@@ -301,11 +310,7 @@ fn no_match_uses_default_and_only_equal_best_precedence_is_ambiguous() {
                 client_model: Some("different-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
-                route_signals: V3RouteClassifierSignals {
-                    has_current_turn_tool_output: true,
-                    last_assistant_tool_category: Some("other".into()),
-                    ..Default::default()
-                },
+                route_classification: test_route("tools", &["tools", "default"]),
             },
         )
         .unwrap();
@@ -414,7 +419,7 @@ fn add_model_match_pool(
 }
 
 #[test]
-fn route_contract_prefers_web_search_over_generic_tools_even_when_precedence_is_lower() {
+fn web_search_capability_does_not_override_route_pool_reason() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     manifest
@@ -440,12 +445,7 @@ fn route_contract_prefers_web_search_over_generic_tools_even_when_precedence_is_
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into(), "web_search".into()]),
                 input_tokens: 10,
-                route_signals: V3RouteClassifierSignals {
-                    latest_message_from_user: true,
-                    route_owned_websearch_tool_declared: true,
-                    current_user_web_search_intent: true,
-                    ..Default::default()
-                },
+                route_classification: test_route("tools", &["tools", "default"]),
             },
         )
         .unwrap();
@@ -454,7 +454,41 @@ fn route_contract_prefers_web_search_over_generic_tools_even_when_precedence_is_
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
 
-    assert_eq!(hit.pool_id, "web_search");
+    assert_eq!(hit.pool_id, "tools");
+}
+
+#[test]
+fn web_search_capability_pool_is_not_generic_route_fallback() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .remove("tools");
+    add_match_pool(&mut manifest, "web_search", 1, vec!["web_search"], None);
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["web_search".into()]),
+                input_tokens: 10,
+                route_classification: test_route("thinking", &["thinking", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+    assert_eq!(hit.pool_id, "default");
 }
 
 #[test]
@@ -484,11 +518,7 @@ fn route_contract_prefers_multimodal_over_all_non_context_route_signals() {
                     "multimodal".into(),
                 ]),
                 input_tokens: 10,
-                route_signals: V3RouteClassifierSignals {
-                    has_visual: true,
-                    latest_message_from_user: true,
-                    ..Default::default()
-                },
+                route_classification: test_route("multimodal", &["multimodal", "default"]),
             },
         )
         .unwrap();
@@ -501,7 +531,7 @@ fn route_contract_prefers_multimodal_over_all_non_context_route_signals() {
 }
 
 #[test]
-fn route_contract_treats_min_token_longcontext_as_context_safety_first() {
+fn route_contract_keeps_multimodal_ahead_of_longcontext() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     add_match_pool(&mut manifest, "multimodal", 1, vec!["multimodal"], None);
@@ -518,7 +548,10 @@ fn route_contract_treats_min_token_longcontext_as_context_safety_first() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["multimodal".into(), "web_search".into()]),
                 input_tokens: 1_000,
-                route_signals: Default::default(),
+                route_classification: test_route(
+                    "multimodal",
+                    &["multimodal", "longcontext", "default"],
+                ),
             },
         )
         .unwrap();
@@ -527,44 +560,7 @@ fn route_contract_treats_min_token_longcontext_as_context_safety_first() {
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
 
-    assert_eq!(hit.pool_id, "longcontext");
-}
-
-#[test]
-fn route_contract_captures_search_tools_default_in_one_plan() {
-    let router = V3VirtualRouter::default();
-    let mut manifest = manifest(V3SelectionStrategy::Priority);
-    add_match_pool(&mut manifest, "search", 1, vec!["search"], None);
-
-    let classified = router
-        .classify_request_with_facts(
-            &manifest,
-            "s",
-            "/v1/responses",
-            V3RouterRequestFacts {
-                entry_protocol: "responses".into(),
-                client_model: Some("client-model".into()),
-                capabilities: BTreeSet::from(["search".into(), "tools".into()]),
-                input_tokens: 10,
-                route_signals: V3RouteClassifierSignals {
-                    has_current_turn_tool_output: true,
-                    last_assistant_tool_category: Some("search".into()),
-                    ..Default::default()
-                },
-            },
-        )
-        .unwrap();
-    let plan = router
-        .resolve_route_pool_plan(&manifest, classified)
-        .unwrap();
-
-    assert_eq!(
-        plan.tiers
-            .iter()
-            .map(|tier| tier.pool_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["search", "tools", "default"]
-    );
+    assert_eq!(hit.pool_id, "multimodal");
 }
 
 #[test]
@@ -584,10 +580,7 @@ fn route_contract_prefers_explicit_model_pool_over_generic_thinking() {
                 client_model: Some("client-test".into()),
                 capabilities: BTreeSet::from(["thinking".into()]),
                 input_tokens: 10,
-                route_signals: V3RouteClassifierSignals {
-                    latest_message_from_user: true,
-                    ..Default::default()
-                },
+                route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
         .unwrap();
@@ -657,7 +650,7 @@ fn missing_non_default_match_and_invalid_protocol_facts_fail_explicitly() {
                 client_model: None,
                 capabilities: BTreeSet::new(),
                 input_tokens: 0,
-                route_signals: Default::default(),
+                route_classification: RouteClassification::default(),
             },
         ),
         Err(V3VirtualRouterError::InvalidRoutingFacts(

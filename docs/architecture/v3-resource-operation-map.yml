@@ -787,7 +787,7 @@ resources:
     owner_crate: routecodex-v3-error
     owner_node: V3Error04TargetExhaustionDecision
     identity: [candidatesRemaining, targetExhausted]
-    allowed_writers: [build_v3_error_04_target_exhaustion_decision_from_v3_error_03]
+    allowed_writers: [build_v3_error_04_target_exhaustion_decision_with_provider_availability]
     allowed_readers: [V3Error05ExecutionDecision]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
@@ -817,14 +817,26 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider.failure_session_scope
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3ProviderFailureSessionScope
+    identity: [serverId, routingGroup, sessionId]
+    allowed_writers: [V3ProviderFailureSessionScope::new]
+    allowed_readers: [V3Server03HttpRequestRaw, V3Error05RecoveryAdmissionWitness::new, V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope, V3ProviderFailureRuntimeHealth::session_bound_availability, V3ProviderActionProviderScope::new, V3ProviderSessionAvailabilityReader::availability]
+    forbidden_writers: [routecodex-v3-provider-responses, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive, routecodex-v3-virtual-router, routecodex-v3-target]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.provider.health_state
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderHealthStateMutated
-    identity: [providerId, authAlias, modelId, reason, untilMs]
-    allowed_writers: [V3ProviderHealthStore::apply_error_action, V3ProviderHealthStore::record_provider_failure, V3ProviderHealthStore::record_provider_success]
-    allowed_readers: [V3ProviderHealthStore::availability]
+    identity: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
+    allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::try_acquire_cross_session_revive]
+    allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability, V3ProviderHealthStore::try_acquire_cross_session_revive]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -834,8 +846,8 @@ resources:
     lifecycle: v3.debug_error_foundation.mainline
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3ProviderAvailabilityProjected
-    identity: [providerId, authAlias, modelId, available]
-    allowed_writers: [V3ProviderHealthStore::availability]
+    identity: [providerId, authAlias, modelId, available, blockedScopes]
+    allowed_writers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability]
     allowed_readers: [routecodex-v3-target]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router]
     may_enter_provider_body: false
@@ -1132,6 +1144,7 @@ resources:
     lifecycle: v3.console_request_count_visibility.mainline
     identity: [serverId, localDay, sequence, requestId]
     owner_feature_id: v3.console_request_count_visibility
+    owner_crate: routecodex-v3-server
     owner_node: V3RequestCounter01AggregateOwned
     allowed_readers: [next_v3_console_request_identity, render_v3_request_console_block, render_v3_response_console_block, format_v3_console_request_count]
     allowed_writers: [spawn_v3_server_aggregate, V3RequestIdCounter::next_request_identity]
@@ -1145,6 +1158,7 @@ resources:
     resource_kind: diagnostic
     lifecycle: v3.responses.console_projection
     owner_feature_id: v3.console_human_readable_layering
+    owner_crate: routecodex-v3-server
     owner_node: V3ConsoleTerminalOutput
     identity: [serverId, requestId, entryProtocol, severity]
     allowed_readers: [developer_terminal]
@@ -1152,12 +1166,14 @@ resources:
     forbidden_writers: [ProviderReqOutbound06WirePayload, response.client_payload, request.normal_payload, route.selection]
     may_enter_provider_body: false
     may_enter_client_body: false
+    binding_status: anchored
     required_gates: [npm run verify:v3-console-request-count-visibility, npm run verify:v3-resource-map, npm run verify:v3-resource-relation-edge-lock]
 
   - resource_id: v3.runtime.responses_observability
     resource_kind: diagnostic_side_channel
     lifecycle: v3.responses.console_projection
     owner_feature_id: v3.console_human_readable_layering
+    owner_crate: routecodex-v3-runtime
     owner_node: V3RuntimeObservability
     identity: [requestId, entryProtocol, executionMode, routingGroupId, providerId, modelId]
     allowed_readers: [emit_v3_request_complete_console_line, emit_direct_sse_complete_console_lines, build_v3_route_selection_event_sink, build_v3_provider_failure_event_sink, emit_v3_request_route_hit_console_line_for_observability, emit_v3_provider_failure_console_event, emit_v3_provider_observability_console_lines]
@@ -1165,6 +1181,7 @@ resources:
     forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
+    binding_status: anchored
     required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:v3-resource-map]
 
 
@@ -1173,12 +1190,14 @@ resources:
     lifecycle: v3.runtime_timing_observability.mainline
     identity: [requestId, attempt, timingPhase]
     owner_feature_id: v3.runtime_timing_observability
+    owner_crate: routecodex-v3-runtime
     owner_node: V3RuntimeTimingSummary
     allowed_readers: [record_timing, emit_v3_request_complete_console_line]
     allowed_writers: [V3RuntimeTimingState::start, start_external, finish_external, finish_runtime]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
+    binding_status: anchored
     required_gates: [npm run verify:v3-runtime-timing-observability, npm run verify:v3-resource-map]
 
   - resource_id: v3.config.http_sse_keepalive_interval
@@ -1207,3 +1226,30 @@ resources:
     may_enter_client_body: false
     release_point: V3ServerRespOutbound06ClientFrameBodyEofErrorOrDrop
     binding_status: anchored
+
+  - resource_id: v3.error.provider_action_gate
+    resource_kind: process_local_control_side_channel
+    lifecycle: v3.provider_action_gate.mainline
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3ProviderActionGateAdmission
+    identity:
+      - provider_action_scope
+      - generation
+      - waiter_ticket
+    allowed_writers:
+      - V3ProviderActionGate::abandon_admission
+      - V3ProviderActionGate::commit_terminal_admission
+    allowed_readers:
+      - V3ProviderFailureRuntimeHealth
+      - V3ProviderActionGate
+    forbidden_writers:
+      - routecodex-v3-server
+      - routecodex-v3-sse
+      - routecodex-v3-provider-responses
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+    required_gates:
+      - npm run verify:v3-provider-action-gate
+      - npm run test:v3-provider-action-gate-red-fixtures
+      - npm run verify:v3-resource-map

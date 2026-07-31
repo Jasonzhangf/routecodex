@@ -5,12 +5,37 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    build_v3_server_03_http_request_raw,
+    build_v3_server_03_http_request_raw as build_v3_server_03_http_request_raw_with_scope,
     execute_v3_responses_direct_runtime_kernel_with_continuation, register_responses_direct_hooks,
     V3ClientBody, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
+
+fn build_v3_server_03_http_request_raw(
+    server_id: String,
+    request_id: String,
+    execution_id: String,
+    method: String,
+    path: String,
+    body: Value,
+) -> routecodex_v3_runtime::V3Server03HttpRequestRaw {
+    let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
+        &server_id,
+        "test-group",
+        format!("test-session:{request_id}"),
+    )
+    .expect("test provider failure session scope");
+    build_v3_server_03_http_request_raw_with_scope(
+        server_id,
+        failure_session_scope,
+        request_id,
+        execution_id,
+        method,
+        path,
+        body,
+    )
+}
 
 #[derive(Default)]
 struct PassthroughTransport {

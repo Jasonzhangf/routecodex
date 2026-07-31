@@ -2,6 +2,7 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_06_client_projected_from_v3_error_05,
     V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3ErrorActionScope,
     V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ProviderFailureSessionScope,
 };
 
 fn provider_failure() -> routecodex_v3_error::V3Error01SourceRaised {
@@ -15,8 +16,8 @@ fn provider_failure() -> routecodex_v3_error::V3Error01SourceRaised {
 
 fn recovery_witness() -> V3Error05RecoveryAdmissionWitness {
     V3Error05RecoveryAdmissionWitness::new(
-        "server-a",
-        "group-a",
+        V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+            .expect("valid provider failure session scope"),
         "provider-a:key-a:model-a",
         "provider_malformed_sse",
         1,

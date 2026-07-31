@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import YAML from 'yaml';
 
 const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-stopless-resource-control.mjs');
@@ -22,12 +23,26 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-debug/src/lib.rs',
 ];
+
+function mutateYaml(source, mutate) {
+  const document = YAML.parse(source);
+  mutate(document);
+  return YAML.stringify(document);
+}
+
+function edge(document, stepId) {
+  return document.chains.flatMap((chain) => chain.edges ?? []).find((item) => item.step_id === stepId);
+}
 
 const cases = [
 
@@ -136,12 +151,9 @@ const cases = [
     marker: 'step_id: v3-hub-relay-closeout-03,',
     replacement: 'step_id: v3-hub-relay-closeout-03,',
     mutate(source) {
-      const marker = 'step_id: v3-hub-relay-closeout-03,';
-      const start = source.indexOf(marker);
-      const end = source.indexOf('\n', start);
-      return source.slice(0, start)
-        + source.slice(start, end).replace('side_channel_writes: []', `side_channel_writes: [${resourceId}]`)
-        + source.slice(end);
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-hub-relay-closeout-03').resource_flow.side_channel_writes = [resourceId];
+      });
     },
     diagnostic: /undeclared cross-SOP StoplessCenter access outside/u,
   },
@@ -149,12 +161,9 @@ const cases = [
     name: 'server aggregate edge claims control write',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate(source) {
-      const marker = 'step_id: v3-responses-relay-server-02,';
-      const start = source.indexOf(marker);
-      const end = source.indexOf('\n', start);
-      return source.slice(0, start)
-        + source.slice(start, end).replace('side_channel_writes: []', `side_channel_writes: [${resourceId}]`)
-        + source.slice(end);
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-responses-relay-server-02').resource_flow.side_channel_writes = [resourceId];
+      });
     },
     diagnostic: /undeclared cross-SOP StoplessCenter access outside|aggregate server edge must not claim control\/resource writes/u,
   },
@@ -175,7 +184,7 @@ const cases = [
 
   {
     name: 'Direct request fallback scope can write StoplessCenter',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
     marker: 'session_id.starts_with("request:")',
     replacement: 'session_id.starts_with("routecodex-disabled-request-fallback:")',
     diagnostic: /missing session_id\.starts_with\("request:"\)|request-fallback scope guard missing session_id\.starts_with\("request:"\)/u,
@@ -247,8 +256,13 @@ const cases = [
   {
     name: 'direct mainline chain loses StoplessCenter control chain id',
     path: 'docs/architecture/v3-mainline-call-map.yml',
-    marker: '  - chain_id: v3.direct_stopless_metadata_center\n',
-    replacement: '  - chain_id: v3.direct_stopless_metadata_center_removed\n',
+    mutate(source) {
+      return mutateYaml(source, (document) => {
+        document.chains.find(
+          (chain) => chain.chain_id === 'v3.direct_stopless_metadata_center',
+        ).chain_id = 'v3.direct_stopless_metadata_center_removed';
+      });
+    },
     diagnostic: /missing chain v3\.direct_stopless_metadata_center/u,
   },
   {
@@ -310,7 +324,7 @@ const cases = [
   },
   {
     name: 'provider-visible guideline leaks internal counter budget',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs',
     marker: '上一轮仍未给出明确完成或阻塞证据；更严格地推进，本轮必须先执行一个最小可验证工具动作，不要只写分析、计划或总结。',
     replacement: '这是连续第 2 次需要继续推进（最多 3 次）。上一轮仍未给出明确完成或阻塞证据；更严格地推进，本轮必须先执行一个最小可验证工具动作，不要只写分析、计划或总结。',
     diagnostic: /provider-visible stopless guideline must not contain 这是连续第|provider-visible stopless guideline must not contain 最多/u,

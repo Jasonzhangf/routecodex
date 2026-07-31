@@ -945,6 +945,12 @@ async fn json_stopless_center_persists_without_local_continuation_store() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-center-metadata-only".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1035,6 +1041,12 @@ async fn json_stopless_center_missing_client_session_scope_passes_stop_without_c
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-missing-session".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1135,6 +1147,12 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-center-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1186,6 +1204,12 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-center-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1280,6 +1304,12 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-additional-tools-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1316,6 +1346,12 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-additional-tools-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1392,6 +1428,12 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-error-cleanup-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1428,6 +1470,12 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
         &target_exhaustion_manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-error-cleanup-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1501,6 +1549,12 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             &manifest(),
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-stopless-guard-{round}"),
                 payload: body,
             },
@@ -1525,6 +1579,12 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-guard-5".into(),
             payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_4","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
         },
@@ -1586,6 +1646,12 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-control-dryrun-readonly-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1635,6 +1701,12 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
             &manifest(),
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-stopless-control-dryrun-readonly-2".into(),
                 payload: submit_payload.clone(),
             },
@@ -1659,6 +1731,12 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
             &manifest(),
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-stopless-control-dryrun-readonly-3".into(),
                 payload: submit_payload,
             },
@@ -1725,6 +1803,12 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
             &manifest(),
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-stopless-guard-pass-through-{round}"),
                 payload: body,
             },
@@ -1749,6 +1833,12 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-guard-pass-through-5".into(),
             payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_diag_4","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
         },
@@ -1814,6 +1904,12 @@ async fn sse_runtime_runs_stopless_center_through_json_hub_pipeline_before_clien
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-sse-center".into(),
             payload: json!({"model":"gpt-5.5","input":[{"role":"user","content":"stream stopless"}],"stream":true}),
         },
@@ -1900,6 +1996,12 @@ async fn json_runtime_preserves_responses_reasoning_and_visible_text_fields_to_c
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-reasoning-text-runtime".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -1994,6 +2096,12 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-dry-run-1".into(),
             payload: original_request.clone(),
         },
@@ -2027,6 +2135,12 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
             &manifest(),
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-stopless-dry-run-2".into(),
                 payload: submit_payload.clone(),
             },
@@ -2070,6 +2184,12 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
             &manifest(),
             V3ResponsesRelayRuntimeInput {
                 server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-stopless-dry-run-3".into(),
                 payload: submit_payload,
             },
@@ -2122,6 +2242,12 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-apply-patch-sse-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2261,6 +2387,12 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-local-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2286,6 +2418,12 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-local-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2408,6 +2546,12 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-additional-tools-normal-1".into(),
             payload: original_request.clone(),
         },
@@ -2428,6 +2572,12 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-additional-tools-normal-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2543,6 +2693,12 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-apply-patch-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2575,6 +2731,12 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-apply-patch-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2642,6 +2804,12 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-wrong-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2662,6 +2830,12 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-wrong-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2708,6 +2882,12 @@ async fn full_history_paired_tool_output_does_not_require_local_restore() {
         &manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-full-history".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2809,6 +2989,12 @@ async fn responses_relay_selected_openai_chat_provider_uses_chat_wire_tools_and_
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-wire".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2940,6 +3126,12 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-natural-stopless-submit-tools-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -2977,6 +3169,12 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-natural-stopless-submit-tools-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3104,6 +3302,12 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-stopless-submit-tools-1".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3132,6 +3336,12 @@ async fn responses_openai_chat_stopless_submit_restores_additional_tools_for_pro
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-stopless-submit-tools-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3231,6 +3441,12 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-custom".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3322,6 +3538,12 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-custom-unescaped".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3393,6 +3615,12 @@ async fn responses_openai_chat_field_parity_request_matrix() {
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-openai-chat-field-request".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3516,6 +3744,12 @@ async fn responses_openai_chat_field_parity_malformed_arguments_with_parse_failu
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-malformed-feedback".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3610,6 +3844,12 @@ async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_be
         &manifest_openai_chat_wire_with_responses_reselect(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-malformed-unpaired".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3698,6 +3938,12 @@ async fn responses_openai_chat_field_parity_web_search_call_history_projects_too
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-openai-chat-web-search-history".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3892,6 +4138,12 @@ async fn responses_openai_chat_field_parity_response_matrix() {
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-responses-openai-chat-field-response".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -3967,6 +4219,12 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-stopless-noop-provider-wire".into(),
             payload: json!({
                 "model":"gpt-5.5",
@@ -4108,6 +4366,12 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-openai-chat-wire-sse".into(),
             payload: json!({
                 "model":"gpt-5.5",

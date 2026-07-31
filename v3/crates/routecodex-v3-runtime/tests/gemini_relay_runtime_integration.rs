@@ -89,6 +89,12 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-json".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: payload.clone(),
@@ -145,6 +151,12 @@ async fn json_function_call_governance_preserves_gemini_name_mapping() {
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-function-call".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -242,6 +254,12 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
         &manifest_with_two_providers_for_scope(server_id),
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-provider-reselect".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -302,6 +320,12 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         &manifest_for_action_gate_scope(server_id),
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-error".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -345,6 +369,12 @@ async fn malformed_provider_error_body_projects_explicit_error_not_fallback() {
         &manifest_for_action_gate_scope(server_id),
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-malformed-error".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -474,6 +504,12 @@ async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signatur
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-sse-thought-chain".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -535,6 +571,12 @@ async fn sse_runtime_emits_first_gemini_event_before_provider_terminal_without_m
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-sse".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -668,6 +710,12 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             &manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-gemini-post-commit-{case}"),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
@@ -698,6 +746,12 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             &manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: format!("req-gemini-after-post-commit-{case}"),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
@@ -727,6 +781,12 @@ async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-gemini-seed-active-gate".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -761,6 +821,12 @@ async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-gemini-terminal-reset".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -790,6 +856,12 @@ async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
             &waiting_manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: waiting_server_id,
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-gemini-released-by-terminal-success".into(),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
@@ -821,6 +893,7 @@ async fn terminal_sse_recovery_does_not_block_a_fresh_request() {
 async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
     use futures_util::StreamExt;
     let server_id = "gemini_active_recovery";
+    const FAILURE_SESSION_ID: &str = "gemini-active-recovery-session";
     let manifest = manifest_with_two_providers_for_scope(server_id);
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
@@ -837,6 +910,12 @@ async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                FAILURE_SESSION_ID,
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-gemini-active-recovery-stream".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -868,6 +947,12 @@ async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
             &waiting_manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    FAILURE_SESSION_ID,
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-gemini-second-recovery-action".into(),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
@@ -934,6 +1019,12 @@ async fn lazy_sse_client_disconnect_is_health_neutral_and_never_enters_action_wa
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-gemini-client-disconnect".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -975,6 +1066,12 @@ async fn lazy_sse_client_disconnect_is_health_neutral_and_never_enters_action_wa
             &manifest,
             V3GeminiRelayRuntimeInput {
                 server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
                 request_id: "req-gemini-after-client-disconnect".into(),
                 endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                 payload: json!({
@@ -999,6 +1096,12 @@ async fn response_side_channel_is_rejected_for_json_and_sse_before_client_succes
         &manifest_for_action_gate_scope(server_id),
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-json-response-isolation".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1063,6 +1166,12 @@ async fn side_channel_request_fails_before_provider_send() {
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-isolation".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1088,6 +1197,12 @@ async fn non_gemini_route_target_fails_before_provider_send() {
         &manifest_with_provider_type("openai_chat"),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-non-gemini-target".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1120,6 +1235,12 @@ async fn collect_sse_items(chunks: Vec<Vec<u8>>, server_id: &str) -> Vec<Result<
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-sse-negative".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1305,6 +1426,12 @@ async fn gemini_thinking_level_high_reaches_provider_wire() {
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-thinking-high".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1326,7 +1453,11 @@ async fn gemini_thinking_level_high_reaches_provider_wire() {
     let level = captured
         .pointer("/generationConfig/thinkingConfig/thinkingLevel")
         .and_then(Value::as_str);
-    assert_eq!(level, Some("HIGH"), "provider wire must preserve thinkingLevel=HIGH");
+    assert_eq!(
+        level,
+        Some("HIGH"),
+        "provider wire must preserve thinkingLevel=HIGH"
+    );
 }
 
 #[tokio::test]
@@ -1339,6 +1470,12 @@ async fn gemini_thinking_level_medium_reaches_provider_wire() {
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-thinking-medium".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1360,7 +1497,11 @@ async fn gemini_thinking_level_medium_reaches_provider_wire() {
     let level = captured
         .pointer("/generationConfig/thinkingConfig/thinkingLevel")
         .and_then(Value::as_str);
-    assert_eq!(level, Some("MEDIUM"), "provider wire must preserve thinkingLevel=MEDIUM");
+    assert_eq!(
+        level,
+        Some("MEDIUM"),
+        "provider wire must preserve thinkingLevel=MEDIUM"
+    );
 }
 
 #[tokio::test]
@@ -1373,6 +1514,12 @@ async fn gemini_thinking_level_low_reaches_provider_wire() {
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-thinking-low".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1394,7 +1541,11 @@ async fn gemini_thinking_level_low_reaches_provider_wire() {
     let level = captured
         .pointer("/generationConfig/thinkingConfig/thinkingLevel")
         .and_then(Value::as_str);
-    assert_eq!(level, Some("LOW"), "provider wire must preserve thinkingLevel=LOW");
+    assert_eq!(
+        level,
+        Some("LOW"),
+        "provider wire must preserve thinkingLevel=LOW"
+    );
 }
 
 #[tokio::test]
@@ -1409,6 +1560,12 @@ async fn gemini_thinking_budget_and_include_thoughts_produce_no_reasoning_effort
         &manifest(),
         V3GeminiRelayRuntimeInput {
             server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
             request_id: "req-thinking-budget".into(),
             endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
             payload: json!({
@@ -1436,11 +1593,19 @@ async fn gemini_thinking_budget_and_include_thoughts_produce_no_reasoning_effort
     let budget = captured
         .pointer("/generationConfig/thinkingConfig/thinkingBudget")
         .and_then(Value::as_u64);
-    assert_eq!(budget, Some(4096), "thinkingBudget must be preserved in provider wire");
+    assert_eq!(
+        budget,
+        Some(4096),
+        "thinkingBudget must be preserved in provider wire"
+    );
     let include = captured
         .pointer("/generationConfig/thinkingConfig/includeThoughts")
         .and_then(Value::as_bool);
-    assert_eq!(include, Some(true), "includeThoughts must be preserved in provider wire");
+    assert_eq!(
+        include,
+        Some(true),
+        "includeThoughts must be preserved in provider wire"
+    );
 }
 
 // E3: Gemini thinkingLevel -> reasoning.effort runtime integration.

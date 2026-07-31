@@ -1,6 +1,7 @@
 use futures_util::Stream;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_route_classifier::{
     classify_route, extract_active_turn_signals, RouteClassifierInput,
@@ -13,6 +14,7 @@ use std::pin::Pin;
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Server03HttpRequestRaw {
     pub server_id: String,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub execution_id: String,
     pub method: String,
@@ -22,6 +24,7 @@ pub struct V3Server03HttpRequestRaw {
 
 pub fn build_v3_server_03_http_request_raw(
     server_id: String,
+    failure_session_scope: V3ProviderFailureSessionScope,
     request_id: String,
     execution_id: String,
     method: String,
@@ -30,6 +33,7 @@ pub fn build_v3_server_03_http_request_raw(
 ) -> V3Server03HttpRequestRaw {
     V3Server03HttpRequestRaw {
         server_id,
+        failure_session_scope,
         request_id,
         execution_id,
         method,
@@ -54,6 +58,7 @@ pub struct V3RouteClassifierMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProtocolContext {
     pub server_id: String,
+    pub failure_session_scope: V3ProviderFailureSessionScope,
     pub request_id: String,
     pub execution_id: String,
     pub endpoint: String,
@@ -117,6 +122,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     V3Req04StandardizedResponses {
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,
+            failure_session_scope: raw.failure_session_scope,
             request_id: raw.request_id,
             execution_id: raw.execution_id,
             endpoint: raw.path,

@@ -11,8 +11,8 @@ const fixtures = [
   {
     name: 'mainline builder mapped back to root',
     relative: 'docs/architecture/v3-mainline-call-map.yml',
-    from: 'callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
-    to: 'callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
+    from: '    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+    to: '    callee_symbol: build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01\n    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
     diagnostic: /callee_file|root aggregator|req_inbound_02_normalized/,
   },
   {
@@ -41,8 +41,8 @@ const fixtures = [
   {
     name: 'provider compat branch numbering made ambiguous',
     relative: 'docs/architecture/v3-mainline-call-map.yml',
-    from: 'from_node: V3HubReqOutbound07ProviderSemantic, to_node: ProviderReqCompat06ProviderCompat',
-    to: 'from_node: V3HubReqOutbound07ProviderSemantic, to_node: ProviderReqCompat07ProviderCompat',
+    from: '    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat06ProviderCompat',
+    to: '    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat07ProviderCompat',
     diagnostic: /v3-hub-req-07 must remain adjacent|ProviderReqCompat06ProviderCompat/,
   },
   {

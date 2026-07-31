@@ -93,7 +93,7 @@ const fixtures = [
   },
   {
     name: 'dry run sends provider network',
-    file: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs',
     transform: (source) => source.replace('"provider_network_send": false,', '"provider_network_send": true,'),
     diagnostic: /P6 Dry Run must execute the Provider pipeline and stop only the Provider network-send effect/,
   },

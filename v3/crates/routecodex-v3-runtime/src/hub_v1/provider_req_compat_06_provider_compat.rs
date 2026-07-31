@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_entry_current_tool_history_surface_encodes_anthropic_without_original_snapshot() {
+    fn responses_entry_tool_history_surface_encodes_anthropic_with_original_surface_snapshot() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -334,8 +334,8 @@ mod tests {
             V3HubProviderWireProtocol::Anthropic,
         );
         assert!(
-            req07.original_responses_payload().is_none(),
-            "ReqInbound leaves tool-history Responses surfaces as current payload instead of a separate original snapshot"
+            req07.original_responses_payload().is_some(),
+            "ReqInbound must retain original Responses input surface for target-compatible outbound projection"
         );
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
