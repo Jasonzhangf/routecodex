@@ -193,6 +193,12 @@ resources:
     owner_crate: routecodex-v3-virtual-router
     owner_node: V3Router06RoutePoolResolved
     identity: [serverId, routeGroupId, matchedPoolId, defaultPoolId, orderedOpaqueTargets]
+    semantic_contract:
+      priority_order: lower numeric priority tiers precede every higher numeric tier
+      weighted_scope: SWRR applies only within one equal-priority tier
+      state_scope: [serverId, routeGroupId, poolId, priority]
+      session_boundary: session-bound Provider availability is consumed later by Target and cannot be collapsed into process-global cooldown truth
+      continuation_boundary: previous_response_id owner constrains Direct versus Relay before ordinary route allocation
     allowed_writers: [V3VirtualRouter::resolve_route_pool_plan]
     allowed_readers: [V3VirtualRouter::hit_opaque_target_plan_once]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error]
@@ -229,6 +235,9 @@ resources:
     owner_crate: routecodex-v3-target
     owner_node: V3Target10ConcreteProviderSelected
     identity: [requestId, targetId, providerId, providerType, authAlias, modelId]
+    semantic_contract:
+      availability_scope: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
+      tier_progression: a higher numeric priority tier is selectable only when every lower-priority candidate is unavailable in the current session
     allowed_writers: [V3Target10ConcreteProviderSelected]
     allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]

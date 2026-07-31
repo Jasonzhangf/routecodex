@@ -22,6 +22,38 @@ Virtual Router.
 - The complete path must satisfy both contracts: Virtual Router hits once, and a matched optional
   pool cannot cause final exhaustion while the mandatory default floor still has selectable content.
 
+## Priority-weighted selection correction test design
+
+The 5555 `weighted` pools also declare per-target `priority`. Their contract is hierarchical, not
+two competing strategies:
+
+1. continuation ownership from `previous_response_id` constrains the request to its Direct or Relay
+   lane before ordinary route allocation; weighting cannot change that owner;
+2. Provider availability/cooldown is read through the request's session-bound availability reader,
+   so one session cannot make another session's tier unavailable;
+3. among candidates available to that session, only the lowest numeric priority tier is eligible;
+4. weight/SWRR chooses only among targets in that same priority tier;
+5. a higher numeric priority tier becomes eligible only after every candidate in all lower numeric
+   tiers is unavailable for the current session.
+
+Positive white-box cases:
+
+- equal-priority targets follow their configured SWRR weight sequence;
+- when every priority-1 candidate is unavailable, priority-2 becomes selectable;
+- the same provider cooled in session A remains selectable in session B;
+- a recorded Direct continuation stays Direct and a recorded Relay continuation stays Relay.
+
+Negative white-box cases:
+
+- a high-weight priority-2 target never wins while any priority-1 candidate is available;
+- one unavailable priority-1 candidate does not open priority-2 while another priority-1 candidate
+  remains available;
+- weighted ordering cannot override a continuation owner or collapse session scopes.
+
+Module/live blackbox: use the 5555 default pool with all providers healthy and prove the selected
+target is from priority 1; then cool/exclude the priority-1 candidates for one session and prove only
+that session advances to priority 2 while a second session still selects priority 1.
+
 ## Scope
 
 ### In scope
@@ -36,6 +68,8 @@ Virtual Router.
 - A single immutable route-selection plan that captures the matched optional tier, default floor,
   selection policy, and opaque targets before the one visible hit.
 - Priority, weighted, and round-robin selection with deterministic tests and isolated cursor state.
+- Weighted selection is priority-tiered: lower numeric priority is exhausted before SWRR can see a
+  higher numeric priority, and SWRR state is isolated by listener/group/pool/priority tier.
 - Exactly one `V3Router06... -> V3Router07...` consumption; the one-shot token cannot be cloned or
   reused for a second hit.
 - A typed handoff to Target Interpreter that contains opaque target identity and tier provenance but
@@ -85,6 +119,8 @@ Rules:
    plan must deduplicate it deterministically without changing declared order or weight semantics.
 7. Request protocol payload fields remain data-plane facts. Internal route decisions and selected
    tier identity remain typed control resources and must not be written into provider/client bodies.
+8. `previous_response_id` continuation ownership is resolved before this Router contract. Direct
+   exact-pin and Relay local-continuation lanes cannot be changed by pool priority or weight.
 
 ## Implementation order
 

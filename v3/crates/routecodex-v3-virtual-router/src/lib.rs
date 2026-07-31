@@ -560,19 +560,23 @@ fn ordered_target_indices(
     advance_state: bool,
 ) -> Vec<usize> {
     match strategy {
-        V3SelectionStrategy::Priority => {
-            let mut order = (0..targets.len()).collect::<Vec<_>>();
-            order.sort_by_key(|index| (targets[*index].priority.unwrap_or(0), *index));
-            order
-        }
+        V3SelectionStrategy::Priority => priority_tier_indices(targets, |target| target.priority)
+            .into_iter()
+            .flatten()
+            .collect(),
         V3SelectionStrategy::Weighted => {
-            let key = format!("{server_id}:{routing_group_id}:{pool_id}");
             let mut state = selection_state.lock().expect("router selection state lock");
-            let current = state.swrr_current.entry(key).or_default();
-            if current.len() != targets.len() {
-                *current = vec![0; targets.len()];
+            let mut order = Vec::with_capacity(targets.len());
+            for tier in priority_tier_indices(targets, |target| target.priority) {
+                let priority = targets[tier[0]].priority.unwrap_or(0);
+                let key = format!("{server_id}:{routing_group_id}:{pool_id}:priority:{priority}");
+                let current = state.swrr_current.entry(key).or_default();
+                if current.len() != tier.len() {
+                    *current = vec![0; tier.len()];
+                }
+                order.extend(swrr_order(targets, &tier, current, advance_state));
             }
-            swrr_order(targets, current, advance_state)
+            order
         }
         V3SelectionStrategy::RoundRobin => {
             let key = format!("{server_id}:{routing_group_id}:{pool_id}");
@@ -589,6 +593,23 @@ fn ordered_target_indices(
     }
 }
 
+/// Returns stable target-index buckets ordered by ascending numeric priority.
+/// Selection policies may reorder only inside one returned bucket; they must
+/// never move a higher numeric priority ahead of a lower one.
+pub fn priority_tier_indices<T>(
+    targets: &[T],
+    mut priority: impl FnMut(&T) -> Option<i32>,
+) -> Vec<Vec<usize>> {
+    let mut tiers = BTreeMap::<i32, Vec<usize>>::new();
+    for (index, target) in targets.iter().enumerate() {
+        tiers
+            .entry(priority(target).unwrap_or(0))
+            .or_default()
+            .push(index);
+    }
+    tiers.into_values().collect()
+}
+
 /// Smooth weighted round-robin (nginx SWRR), ported from the V2 engine: each
 /// step adds every target's weight to its running score, emits the highest
 /// score, then subtracts the total weight from the emitted target. Per request
@@ -596,28 +617,29 @@ fn ordered_target_indices(
 /// remaining ranks are secondary ordering computed on a scratch copy.
 fn swrr_order(
     targets: &[V3RoutePoolTargetManifest],
+    tier: &[usize],
     current: &mut Vec<i64>,
     advance_state: bool,
 ) -> Vec<usize> {
-    let weights = targets
+    let weights = tier
         .iter()
-        .map(|target| i64::from(target.weight.unwrap_or(1).max(1)))
+        .map(|index| i64::from(targets[*index].weight.unwrap_or(1).max(1)))
         .collect::<Vec<_>>();
     let total_weight: i64 = weights.iter().sum();
     let mut scratch = current.clone();
-    let mut order = Vec::with_capacity(targets.len());
-    let mut emitted = vec![false; targets.len()];
-    for rank in 0..targets.len() {
+    let mut order = Vec::with_capacity(tier.len());
+    let mut emitted = vec![false; tier.len()];
+    for rank in 0..tier.len() {
         for (index, weight) in weights.iter().enumerate() {
             scratch[index] += weight;
         }
-        let selected = (0..targets.len())
+        let selected = (0..tier.len())
             .filter(|index| !emitted[*index])
             .max_by_key(|index| (scratch[*index], std::cmp::Reverse(*index)))
             .expect("non-empty unemitted target set");
         scratch[selected] -= total_weight;
         emitted[selected] = true;
-        order.push(selected);
+        order.push(tier[selected]);
         if rank == 0 && advance_state {
             *current = scratch.clone();
         }

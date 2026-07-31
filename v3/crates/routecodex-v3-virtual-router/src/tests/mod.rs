@@ -761,6 +761,51 @@ fn weighted_selection_follows_smooth_weighted_round_robin_sequence() {
 }
 
 #[test]
+fn weighted_selection_never_opens_higher_numeric_priority_while_lower_tier_exists() {
+    let router = V3VirtualRouter::default();
+    let mut weighted = manifest(V3SelectionStrategy::Weighted);
+    let pool = weighted
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap();
+    pool.targets = vec![
+        target("priority-1-a", 1, 1),
+        target("priority-1-b", 1, 3),
+        target("priority-2-heavy", 2, 100),
+    ];
+
+    let mut first_choices = Vec::new();
+    for _request in 0..8 {
+        let plan = router
+            .resolve_route_pool_plan(
+                &weighted,
+                router
+                    .classify_request(&weighted, "s", "/v1/responses")
+                    .unwrap(),
+            )
+            .unwrap();
+        let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+        first_choices.push(hit.target_id.unwrap());
+    }
+
+    assert!(
+        first_choices
+            .iter()
+            .all(|target_id| target_id.starts_with("priority-1-")),
+        "priority-2 must remain closed while priority-1 exists: {first_choices:?}"
+    );
+    assert!(first_choices
+        .iter()
+        .any(|target_id| target_id == "priority-1-a"));
+    assert!(first_choices
+        .iter()
+        .any(|target_id| target_id == "priority-1-b"));
+}
+
+#[test]
 fn peek_does_not_advance_selection_state() {
     let router = V3VirtualRouter::default();
     let rr = manifest(V3SelectionStrategy::RoundRobin);

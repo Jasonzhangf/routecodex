@@ -22,6 +22,7 @@ const STEPS = [
   ['verify:v3-provider-session-cooldown', 'Provider failure cooldown and recovery are session-isolated'],
   ['test:v3-provider-session-cooldown-red-fixtures', 'Session cooldown architecture mutations are rejected'],
   ['test:v3-provider-session-cooldown', 'Session cooldown and cross-session revive behavior'],
+  ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
   ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
   ['verify:sse-architecture-boundary', 'SSE runtime dispatch remains Rust-owned'],
   ['verify:sse-transport-core-shared', 'SSE transport remains protocol-neutral'],

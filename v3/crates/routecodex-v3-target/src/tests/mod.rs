@@ -116,6 +116,86 @@ fn expanded_with(
         .unwrap()
 }
 
+fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
+    let mut manifest = manifest();
+    let mut provider_c = manifest.providers.get("b").unwrap().clone();
+    provider_c.id = "c".into();
+    provider_c.base_url = "http://c.invalid/v1".into();
+    provider_c.auth.entries[0].alias = "kc".into();
+    provider_c.auth.entries[0].env = Some("KEY_C".into());
+    manifest.providers.insert("c".into(), provider_c);
+
+    let forwarder = manifest.forwarders.get_mut("inner").unwrap();
+    forwarder.selection.strategy = V3SelectionStrategy::Weighted;
+    forwarder.targets = vec![
+        V3ForwarderTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("a".into()),
+            model: Some("m".into()),
+            key: Some("ka".into()),
+            priority: Some(1),
+            weight: Some(1),
+        },
+        V3ForwarderTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("b".into()),
+            model: Some("m".into()),
+            key: Some("kb".into()),
+            priority: Some(1),
+            weight: Some(3),
+        },
+        V3ForwarderTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("c".into()),
+            model: Some("m".into()),
+            key: Some("kc".into()),
+            priority: Some(2),
+            weight: Some(100),
+        },
+    ];
+    manifest
+}
+
+#[test]
+fn weighted_forwarder_advances_priority_only_after_current_session_exhausts_lower_tier() {
+    let manifest = weighted_priority_forwarder_manifest();
+    let target = V3TargetInterpreter::default();
+    let all_available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    let selected = target
+        .select_available(expanded_with(&manifest, &target, 4), &all_available, 0)
+        .unwrap();
+    assert_ne!(selected.candidate.provider_id, "c");
+
+    let one_priority_one_available = Availability {
+        blocked: BTreeSet::from(["b:kb:m".into()]),
+    };
+    let selected = target
+        .select_available(
+            expanded_with(&manifest, &target, 4),
+            &one_priority_one_available,
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "a");
+
+    let only_priority_two_available = Availability {
+        blocked: BTreeSet::from(["a:ka:m".into(), "b:kb:m".into()]),
+    };
+    let selected = target
+        .select_available(
+            expanded_with(&manifest, &target, 4),
+            &only_priority_two_available,
+            0,
+        )
+        .unwrap();
+    assert_eq!(selected.candidate.provider_id, "c");
+}
+
 fn expanded_tools() -> V3Target09CandidateSetExpanded {
     let manifest = manifest();
     let router = V3VirtualRouter::default();
@@ -1156,6 +1236,7 @@ fn forwarder_weighted_and_round_robin_order_are_deterministic() {
     let mut weighted = manifest();
     let inner = weighted.forwarders.get_mut("inner").unwrap();
     inner.selection.strategy = V3SelectionStrategy::Weighted;
+    inner.targets[1].priority = Some(1);
     inner.targets[0].weight = Some(1);
     inner.targets[1].weight = Some(3);
     let interpreter = V3TargetInterpreter::default();

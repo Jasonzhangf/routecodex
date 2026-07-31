@@ -4,7 +4,7 @@ use routecodex_v3_config::{
     V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
-use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
+use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -512,24 +512,31 @@ impl V3TargetInterpreter {
         let mut order = (0..targets.len()).collect::<Vec<_>>();
         match strategy {
             V3SelectionStrategy::Priority => {
-                order.sort_by_key(|index| (targets[*index].priority.unwrap_or(0), *index))
+                order = priority_tier_indices(targets, |target| target.priority)
+                    .into_iter()
+                    .flatten()
+                    .collect();
             }
             V3SelectionStrategy::Weighted => {
-                let total = targets
-                    .iter()
-                    .map(|target| u64::from(target.weight.unwrap_or(1)))
-                    .sum::<u64>();
-                let mut point = sample % total;
-                let mut chosen = 0;
-                for (index, target) in targets.iter().enumerate() {
-                    let weight = u64::from(target.weight.unwrap_or(1));
-                    if point < weight {
-                        chosen = index;
-                        break;
+                order.clear();
+                for mut tier in priority_tier_indices(targets, |target| target.priority) {
+                    let total = tier
+                        .iter()
+                        .map(|index| u64::from(targets[*index].weight.unwrap_or(1)))
+                        .sum::<u64>();
+                    let mut point = sample % total;
+                    let mut chosen = 0;
+                    for (tier_index, target_index) in tier.iter().enumerate() {
+                        let weight = u64::from(targets[*target_index].weight.unwrap_or(1));
+                        if point < weight {
+                            chosen = tier_index;
+                            break;
+                        }
+                        point -= weight;
                     }
-                    point -= weight;
+                    tier.rotate_left(chosen);
+                    order.extend(tier);
                 }
-                order.rotate_left(chosen);
             }
             V3SelectionStrategy::RoundRobin => {
                 let mut cursors = self.cursors.lock().expect("target cursor lock");
