@@ -1420,6 +1420,7 @@ features:
       - V3VirtualRouter::hit_opaque_target_plan_once
       - V3VirtualRouter::hit_opaque_target_plan_once_peek
       - V3VirtualRouter::process_shared
+      - priority_tier_indices
       - V3TargetInterpreter::expand_candidates
       - V3TargetInterpreter::select_available
       - project_v3_virtual_router_status
@@ -1431,6 +1432,7 @@ features:
       - docs/architecture/v3-mainline-call-map.yml
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/wiki/v3-responses-direct-mainline.md
+      - scripts/architecture/verify-v3-architecture-ci.mjs
     forbidden_paths:
       - v3/crates/routecodex-v3-server/src
       - v3/crates/routecodex-v3-provider-responses/src
@@ -1449,6 +1451,8 @@ features:
     required_contract:
       - "Non-built-in requested model ids are carried on V3Router07OpaqueTargetHitOnce; explicit model routes map inbound model to declared targets, while default/no-explicit-model paths are filtered by configured target model ids before provider send. Provider aliases are not runtime routing truth."
       - "The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in selector and is not narrowed to one provider model."
+      - "Weighted selection is priority-first: only equal-minimum-priority targets participate in one SWRR tier, higher numeric tiers remain ordered behind all lower tiers, and Target availability advances tiers only within the current session-bound health scope."
+      - "Continuation ownership remains upstream of ordinary Router allocation: a previous_response_id recorded as Direct or Relay cannot be changed by priority or weight."
     runtime_status: source_bound_cli_replay_verified
 
   - feature_id: v3.remote_continuation_contract_store

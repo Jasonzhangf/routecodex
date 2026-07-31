@@ -951,6 +951,7 @@ features:
       - v3/crates/routecodex-v3-virtual-router
       - v3/crates/routecodex-v3-target
       - v3/crates/routecodex-v3-runtime
+      - scripts/architecture/verify-v3-architecture-ci.mjs
       - v3/crates/routecodex-v3-server
     test_design:
       - docs/goals/v3-virtual-router-target-interpreter-plan.md
@@ -1006,7 +1007,8 @@ features:
       - input-token estimate uses tiktoken BPE with the legacy model-to-encoding table (cl100k fallback), max-merges chat messages and responses context, and omits media payload bytes
       - non-default pool match and no-match/default behavior
       - lower explicit precedence wins and only equal-best valid matches are rejected as ambiguous
-      - priority, smooth-weighted-round-robin (SWRR), and listener/group/pool isolated round-robin ordering; selection state persists across requests via the process-shared router and peek ordering never advances it
+      - priority, priority-tiered smooth-weighted-round-robin (SWRR), and listener/group/pool isolated round-robin ordering; weighted state is isolated by listener/group/pool/priority, selection state persists across requests via the process-shared router, and peek ordering never advances it
+      - high-weight higher-priority-number targets cannot win while any lower-priority-number target remains session-available; when the full lower tier is unavailable only that session advances
       - optional/default semantic target deduplication without second Router hit
       - Target internal Forwarder expansion and availability reselection across the captured plan
       - non-built-in requested model ids use explicit `match.models` pools as inbound-to-target mapping declarations; default/no-explicit-model paths filter Target candidates by configured target model ids, ignore provider aliases for runtime matching, and fail explicitly when no configured candidate matches
@@ -1019,6 +1021,7 @@ features:
       - selection plan is non-Clone and cannot be consumed twice
       - route facts, selection plan, and opaque target controls cannot enter provider/client payloads
       - frozen P6 remains Responses-only; future protocol and continuation facts enter through Hub v1 typed nodes
+      - previous_response_id continuation owner chooses Direct exact-pin or Relay local restore before ordinary priority/weight allocation and cannot be overridden by Router selection
     required_integration:
       - Runtime request facts select a non-default pool
       - optional Provider failure continues through the captured default floor with one Router hit
@@ -1032,6 +1035,8 @@ features:
       - npm run test:v3-source-gate-red-fixtures
       - npm run test:v3-compile-fail
       - npm run test:v3-p5-router-target
+      - npm run test:v3-provider-session-cooldown
+      - npm run test:v3-responses-direct-remote-continuation
       - npm run test:v3-p5-server-blackbox
       - npm run test:v3-responses-direct-blackbox
       - npm run test:v3-vr-full-function-cli
