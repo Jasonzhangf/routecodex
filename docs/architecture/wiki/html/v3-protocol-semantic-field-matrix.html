@@ -1121,7 +1121,7 @@
     <h4>response fields</h4>
     <ul class="field-list"><li><code>response.output[].function_call.call_id</code></li><li><code>response.output[].custom_tool_call.call_id</code></li></ul>
     <h4>transform</h4>
-    <div>Responses function/custom call_id maps to Chat tool call id; item id/status remain extensions.</div>
+    <div>Responses function/custom call_id maps to Chat tool call id and remains the call_* pairing key. When Chat canonical history is projected back to Responses wire, function_call.id and its paired function_call_output.id must use the same fc_* item id; item status remains an extension.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1373,7 +1373,7 @@
     <h4>response fields</h4>
     <ul class="field-list"><li><code>response.output[].function_call_output.call_id</code></li></ul>
     <h4>transform</h4>
-    <div>Responses function_call_output.call_id maps to Chat tool_call_id for pairing only.</div>
+    <div>Responses function_call_output.call_id maps to Chat tool_call_id for pairing only. Responses wire keeps this pairing key as call_* while the function_call_output item id shares the paired function_call fc_* item id.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -2245,7 +2245,7 @@
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
       <div>Client-selected response projection include list such as additional output details requested from a Responses-compatible provider.</div>
-      <details><summary>Chat shape / value rule</summary><div>Include is an output-shaping request extension. It must not be merged into response_format, metadata, or debug snapshot fields.</div></details>
+      <details><summary>Chat shape / value rule</summary><div>Include is an output-shaping request extension. It must not be merged into response_format, metadata, or debug snapshot fields. OpenAI Chat / Anthropic provider wires may elide it at the adjacent provider codec; it must never be forwarded as a raw provider-wire field when the target protocol cannot represent it.</div></details>
 
     </td>
     <td><span class="badge request">request</span><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>

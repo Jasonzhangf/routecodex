@@ -1,6 +1,4 @@
-use super::{
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubProviderWireProtocol, V3HubReqTarget06Resolved,
-};
+use super::{V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubReqTarget06Resolved};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,10 +20,6 @@ pub fn build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
 impl V3HubReqOutbound07ProviderSemantic {
     pub(crate) fn selected_target(&self) -> &routecodex_v3_target::V3TargetCandidate {
         &self.previous.selected_target
-    }
-
-    pub(crate) fn execution_mode(&self) -> V3HubExecutionMode {
-        self.previous.previous.execution
     }
 
     pub(crate) fn entry_protocol(&self) -> V3HubEntryProtocol {

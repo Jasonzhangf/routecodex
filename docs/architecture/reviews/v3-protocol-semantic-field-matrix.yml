@@ -1261,7 +1261,9 @@ chat_semantic_translation_groups:
         response_fields:
           - response.output[].function_call.call_id
           - response.output[].custom_tool_call.call_id
-        transform: Responses function/custom call_id maps to Chat tool call id; item id/status remain extensions.
+        transform: Responses function/custom call_id maps to Chat tool call id and remains the call_* pairing key. When Chat
+          canonical history is projected back to Responses wire, function_call.id and its paired function_call_output.id
+          must use the same fc_* item id; item status remains an extension.
       anthropic:
         request_fields:
           - request.messages[].content[].tool_use.id
@@ -1426,7 +1428,8 @@ chat_semantic_translation_groups:
           - request.input[].function_call_output.call_id
         response_fields:
           - response.output[].function_call_output.call_id
-        transform: Responses function_call_output.call_id maps to Chat tool_call_id for pairing only.
+        transform: Responses function_call_output.call_id maps to Chat tool_call_id for pairing only. Responses wire keeps
+          this pairing key as call_* while the function_call_output item id shares the paired function_call fc_* item id.
       anthropic:
         request_fields:
           - request.messages[].content[].tool_result.tool_use_id
@@ -2021,7 +2024,8 @@ chat_semantic_translation_groups:
     standard_semantic_meaning: Client-selected response projection include list such as additional output details requested
       from a Responses-compatible provider.
     chat_shape_rule: Include is an output-shaping request extension. It must not be merged into response_format, metadata,
-      or debug snapshot fields.
+      or debug snapshot fields. OpenAI Chat / Anthropic provider wires may elide it at the adjacent provider codec; it must
+      never be forwarded as a raw provider-wire field when the target protocol cannot represent it.
     protocol_mappings:
       responses:
         request_fields:

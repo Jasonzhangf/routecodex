@@ -4,8 +4,8 @@ use super::{
     build_v3_openai_responses_standard_request_from_chat_canonical,
     build_v3_responses_original_input_surface_from_chat_canonical,
     encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
-    V3HubExecutionMode, V3HubOpaquePayload, V3HubProviderWireProtocol,
-    V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError, V3ProviderCompatProfileId,
+    V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
+    V3ProviderCompatError, V3ProviderCompatProfileId,
 };
 use provider_compat_core::req_outbound_stage3_compat::{
     run_req_outbound_stage3_compat, AdapterContext, ReqOutboundCompatInput,
@@ -89,37 +89,33 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
     input: &V3HubReqOutbound07ProviderSemantic,
 ) -> Result<Value, String> {
     let selected = input.selected_target();
-    let provider_protocol_payload = if input.execution_mode() == V3HubExecutionMode::Direct {
-        input.provider_semantic_payload().clone()
-    } else {
-        match input.provider_protocol {
-            V3HubProviderWireProtocol::OpenAiChat => {
-                build_v3_openai_chat_standard_request_from_chat_canonical(
-                    input.provider_semantic_payload(),
-                )?
-            }
-            V3HubProviderWireProtocol::Responses => {
-                match build_v3_responses_original_input_surface_from_chat_canonical(
-                    input.provider_semantic_payload(),
-                    input.original_responses_payload(),
-                ) {
-                    Some(original_surface) => original_surface,
-                    None => build_v3_openai_responses_standard_request_from_chat_canonical(
-                        input.provider_semantic_payload(),
-                    )?,
-                }
-            }
-            V3HubProviderWireProtocol::Anthropic => {
-                let source = build_v3_anthropic_provider_request_source_from_chat_canonical(
-                    input.provider_semantic_payload(),
-                    input.original_responses_payload(),
-                    input.entry_protocol(),
-                )?;
-                encode_v3_responses_semantic_as_anthropic_request(source)
-                    .map_err(|error| error.to_string())?
-            }
-            V3HubProviderWireProtocol::Gemini => input.provider_semantic_payload().clone(),
+    let provider_protocol_payload = match input.provider_protocol {
+        V3HubProviderWireProtocol::OpenAiChat => {
+            build_v3_openai_chat_standard_request_from_chat_canonical(
+                input.provider_semantic_payload(),
+            )?
         }
+        V3HubProviderWireProtocol::Responses => {
+            match build_v3_responses_original_input_surface_from_chat_canonical(
+                input.provider_semantic_payload(),
+                input.original_responses_payload(),
+            ) {
+                Some(original_surface) => original_surface,
+                None => build_v3_openai_responses_standard_request_from_chat_canonical(
+                    input.provider_semantic_payload(),
+                )?,
+            }
+        }
+        V3HubProviderWireProtocol::Anthropic => {
+            let source = build_v3_anthropic_provider_request_source_from_chat_canonical(
+                input.provider_semantic_payload(),
+                input.original_responses_payload(),
+                input.entry_protocol(),
+            )?;
+            encode_v3_responses_semantic_as_anthropic_request(source)
+                .map_err(|error| error.to_string())?
+        }
+        V3HubProviderWireProtocol::Gemini => input.provider_semantic_payload().clone(),
     };
     bind_v3_selected_provider_model(provider_protocol_payload, selected)
         .map(V3SelectedProviderModelBinding::into_payload)
@@ -235,6 +231,124 @@ mod tests {
             selected_candidate(provider_protocol),
         );
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+    }
+
+    fn direct_req07_for_entry(
+        entry_protocol: V3HubEntryProtocol,
+        payload: serde_json::Value,
+        provider_protocol: V3HubProviderWireProtocol,
+    ) -> V3HubReqOutbound07ProviderSemantic {
+        let req01 = build_v3_hub_req_inbound_01_client_raw(
+            payload,
+            entry_protocol,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
+        let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
+            req02,
+            V3HubContinuationOwnership::New,
+        );
+        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+        let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+            req04,
+            V3HubExecutionMode::Direct,
+        );
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05,
+            V3HubTargetResolution::Routed,
+            selected_candidate(provider_protocol),
+        );
+        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+    }
+
+    #[test]
+    fn responses_openai_chat_field_parity_direct_provider_payload_uses_selected_protocol_projection(
+    ) {
+        let payload = json!({
+            "model": "client-route-alias",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "hello"}]
+            }],
+            "include": ["reasoning.encrypted_content"]
+        });
+
+        let chat_req07 = direct_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            payload.clone(),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        let chat_payload = build_v3_provider_standard_protocol_payload_from_req07(&chat_req07)
+            .expect("direct OpenAI Chat projection must succeed");
+        assert!(chat_payload.get("messages").is_some());
+        assert!(chat_payload.get("include").is_none());
+
+        let responses_req07 = direct_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            payload,
+            V3HubProviderWireProtocol::Responses,
+        );
+        let responses_payload =
+            build_v3_provider_standard_protocol_payload_from_req07(&responses_req07)
+                .expect("direct Responses projection must succeed");
+        assert!(responses_payload.get("input").is_some());
+        assert_eq!(
+            responses_payload["include"],
+            json!(["reasoning.encrypted_content"])
+        );
+    }
+
+    #[test]
+    fn direct_responses_projection_preserves_valid_original_fc_id_and_argument_bytes() {
+        let malformed_arguments =
+            "{\"cmd\":\"cd /Volumes/extension/code/zterm && git status --short\"}{\"cmd\":\"pwd\"}";
+        let req07 = direct_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_019fb564-9ef3-7423-bb90-30509ef6ae8c",
+                        "call_id": "call_6b0251fee24f41b2b045b04e",
+                        "name": "exec_command",
+                        "arguments": malformed_arguments
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_6b0251fee24f41b2b045b04e",
+                        "output": "failed to parse function arguments: trailing characters at line 1 column 66"
+                    }
+                ],
+                "include": ["reasoning.encrypted_content"]
+            }),
+            V3HubProviderWireProtocol::Responses,
+        );
+
+        let projected = build_v3_provider_standard_protocol_payload_from_req07(&req07)
+            .expect("direct Responses projection must preserve the original Responses surface");
+
+        assert_eq!(
+            projected["input"][1]["id"],
+            "fc_019fb564-9ef3-7423-bb90-30509ef6ae8c"
+        );
+        assert_eq!(
+            projected["input"][1]["call_id"],
+            "call_6b0251fee24f41b2b045b04e"
+        );
+        assert_eq!(projected["input"][1]["arguments"], malformed_arguments);
+        assert_eq!(
+            projected["input"][2]["call_id"],
+            projected["input"][1]["call_id"]
+        );
+        assert_eq!(projected["include"], json!(["reasoning.encrypted_content"]));
     }
 
     #[test]

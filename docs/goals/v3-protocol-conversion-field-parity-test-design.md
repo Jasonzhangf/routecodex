@@ -118,11 +118,20 @@ owner file, and required Rust test symbol. These case names are the source-test
 TODO list for the next runtime slice; labels cannot move to `covered` until those
 tests exist and pass.
 
+### Chat canonical -> Responses provider wire
+
+| Chat canonical field | Responses provider wire | Required test |
+| --- | --- | --- |
+| assistant `tool_calls[].id` | `function_call.call_id` keeps the stable `call_*` pairing key; `function_call.id` is the corresponding `fc_*` item id | `responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids` |
+| tool result `tool_call_id` | `function_call_output.call_id` keeps the same `call_*` pairing key; `function_call_output.id` equals the paired `function_call.id` | `responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids` |
+| `include` | preserved only on Responses provider wire | `responses_openai_chat_field_parity_responses_wire_preserves_include_projection` |
+
 ### Responses request -> OpenAI Chat provider wire
 
 | Responses field | OpenAI Chat provider wire | Required test |
 | --- | --- | --- |
 | `reasoning.effort` / `reasoning.summary` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
+| `include` | omitted from OpenAI Chat provider wire; preserved on Responses wire only | `responses_openai_chat_field_parity_include_is_elided_from_chat_wire` |
 | Historical malformed `function_call.arguments`, with or without matching `function_call_output` parse-failure truth | explicit `ProviderReqCompat06ProviderCompat` projection error naming the call id and parse-feedback presence before the incompatible OpenAI Chat target can send; enter typed Error05, reselect the lossless Responses target, and preserve the original arguments exactly; forbid deletion, replacement, empty-object repair, Error05 bypass, or send to the incompatible target | `responses_openai_chat_field_parity_malformed_arguments_fail_before_provider_send` |
 
 ### OpenAI Chat provider response -> Responses projection

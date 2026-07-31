@@ -299,6 +299,20 @@ for (const [owner, body, phrases] of [
   ]],
 ]) for (const phrase of phrases) requireText(body, owner, phrase);
 
+
+for (const phrase of [
+  'responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids',
+  'responses_openai_chat_field_parity_responses_wire_preserves_include_projection',
+  'responses_openai_chat_field_parity_include_is_elided_from_chat_wire',
+]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
+for (const phrase of [
+  'responses_openai_chat_field_parity_direct_provider_payload_uses_selected_protocol_projection',
+]) requireText(text.providerReqCompat, paths.providerReqCompat, phrase);
+for (const phrase of [
+  '--lib responses_openai_chat_field_parity',
+  '--test responses_relay_local_continuation_integration responses_openai_chat_field_parity',
+]) requireText(text.packageJson, 'package.json::test:v3-protocol-conversion-field-parity', phrase);
+
 const unpairedMalformedOpenAiChatTest = functionSlice(
   text.responsesTests,
   paths.responsesTests,

@@ -57,6 +57,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
         "logit_bias",
         "seed",
         "response_format",
+        "include",
         "metadata",
         "client_metadata",
         "stop",
@@ -454,13 +455,14 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
+    let item_id = compact_tool_id("fc_", call_id);
 
     Some(Value::Object(Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call".to_string()),
         ),
-        ("id".to_string(), Value::String(call_id.to_string())),
+        ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name.to_string())),
         ("arguments".to_string(), Value::String(arguments_text)),
@@ -483,13 +485,14 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
             other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
         })
         .unwrap_or_default();
+    let item_id = compact_tool_id("fc_", call_id);
 
     Some(Value::Object(Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call_output".to_string()),
         ),
-        ("id".to_string(), Value::String(call_id.to_string())),
+        ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("output".to_string(), Value::String(output)),
     ])))
@@ -579,6 +582,7 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
     let mut normalized = strip_private_fields(payload);
     if let Some(row) = normalized.as_object_mut() {
         row.remove("client_metadata");
+        row.remove("include");
         if let Some(max_output_tokens) = row.remove("max_output_tokens") {
             row.entry("max_completion_tokens".to_string())
                 .or_insert(max_output_tokens);
@@ -917,4 +921,74 @@ fn compact_tool_id(prefix: &str, raw: &str) -> String {
         id = format!("{prefix}{body}_{hash}");
     }
     id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_6b0251fee24f41b2b045b04e",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"cmd\":\"pwd\"}"
+                        }
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_6b0251fee24f41b2b045b04e",
+                    "content": "ok"
+                }
+            ]
+        });
+
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("Responses wire projection must succeed");
+        let input = request["input"]
+            .as_array()
+            .expect("Responses wire input must be an array");
+
+        assert_eq!(input[0]["call_id"], "call_6b0251fee24f41b2b045b04e");
+        assert_eq!(input[0]["id"], "fc_6b0251fee24f41b2b045b04e");
+        assert_eq!(input[1]["call_id"], input[0]["call_id"]);
+        assert_eq!(input[1]["id"], input[0]["id"]);
+    }
+
+    #[test]
+    fn responses_openai_chat_field_parity_responses_wire_preserves_include_projection() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}],
+            "include": ["reasoning.encrypted_content"]
+        });
+
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("Responses wire projection must succeed");
+
+        assert_eq!(request["include"], json!(["reasoning.encrypted_content"]));
+    }
+
+    #[test]
+    fn responses_openai_chat_field_parity_include_is_elided_from_chat_wire() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}],
+            "include": ["reasoning.encrypted_content"]
+        });
+
+        let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+            .expect("OpenAI Chat wire projection must succeed");
+
+        assert!(request.get("include").is_none());
+    }
 }
