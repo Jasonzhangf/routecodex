@@ -4983,3 +4983,10 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 
 ## 2026-07-31 - Session health map repair live baseline
 - After the session-health resource/function/mainline map repair, `npm run verify:v3-architecture-ci` passed 25/25. Global V3 CLI install SHA256 was `0e9b72f202489063986a5e3b36d6c4f242985e334a88131b1268ff58807551dd`; aggregate restart `routecodex restart --port 5555` ran instance `v3-b06a10c3d5bdd9790316` on 5520/5555/10000, all `/health` responses `status=ok`, `build_version=0.90.4004`. A real 5555 `/v1/responses` SSE with explicit `session_id` and `thread_id` returned HTTP 200, marker `RCC_V3_ARCH_CLOSEOUT_OK`, `response.completed`, and no `event:error`.
+
+
+## 2026-07-31 - V3 de-18 failure session scope lock
+- Verified architecture truth: `v3-de-18` is not a Provider Health mutation edge. It is the Server request data-plane builder edge into Error-owned `V3ProviderFailureSessionScope`, producing/writing `v3.provider.failure_session_scope` only.
+- Resource truth: `v3.provider.failure_session_scope` is a side-channel resource owned by `routecodex-v3-error`, identity `[serverId, routingGroup, sessionId]`, writer `V3ProviderFailureSessionScope::new`; it must not enter provider/client bodies and must not be written by Server or Provider Health.
+- Provider Health mutation truth remains with `routecodex-v3-provider-responses` / `V3ProviderHealthStore::record_provider_failure_in_session`, `record_provider_success_in_session`, and related session availability APIs.
+- Gate truth: `verify:v3-provider-session-cooldown` and its red fixtures must fail map drift that points `v3-de-18` to `V3ProviderHealthStateMutated` or `v3.provider.health_state`; review surfaces need edge-specific notes when module-level labels obscure the contract node.
