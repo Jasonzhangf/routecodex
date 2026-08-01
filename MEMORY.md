@@ -4996,3 +4996,60 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Verified field truth: Responses provider wire may preserve `include`; OpenAI Chat provider wire must elide non-standard `include`. Chat canonical tool history maps `tool_calls[].id` / `tool_call_id` to stable Responses `call_id=call_*`, while the Responses item `id` is the paired `fc_*` id for both `function_call` and `function_call_output`.
 - Gate truth: `npm run test:v3-protocol-conversion-field-parity` must run the lib-level protocol parity tests as well as integration tests; `verify:v3-protocol-conversion-field-parity` now locks the package script and test symbol wiring.
 - Live baseline: after install SHA `f85d3089f8fdfd3f11f37e08b61b6ba6eaa8b037d4aab0b174f463b07125b2bc` and aggregate restart, 5520/5555/10000 health passed and live 5555 `/v1/responses` SSE returned HTTP 201 with marker `RCC_V3_PROTOCOL_PARITY_OK`, `response.completed`, and no `event:error`.
+
+
+## 2026-07-31T11:25:44Z - V3 Direct passthrough and Responses fc item id closeout
+- Supersedes the earlier same-day Direct projection note: Codex review proved that provider compat must not project Direct requests through selected-provider protocol codecs. `ProviderReqCompat06` preserves Direct passthrough by returning Req07 current provider semantic payload shape unchanged with selected provider model binding; selected-provider protocol projection belongs to Relay provider compat only.
+- The Direct boundary is locked by `responses_openai_chat_field_parity_direct_provider_payload_passthrough_keeps_current_wire` and `responses_openai_chat_field_parity_direct_responses_passthrough_preserves_current_wire_and_arguments`.
+- Chat canonical -> Responses provider wire keeps `call_*` as `call_id`, generates paired `fc_*` item ids for `function_call.id` and `function_call_output.id`, and hashes full raw ids whenever normalization/truncation is lossy to avoid collisions.
+- The item-id boundary is locked by `responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids` and `responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions`.
+
+## 2026-07-31T11:52:52Z - V3 Direct passthrough requires selected model binding
+- ProviderReqCompat06 Direct mode must preserve Req07 payload shape and skip selected-provider protocol projection, but it must still apply selected provider model binding before provider wire. Shape passthrough is not permission to leak client alias model names upstream.
+- Required lock: Direct passthrough tests must be named with the package filter prefix (`responses_openai_chat_field_parity`) or they are not executed by `npm run test:v3-protocol-conversion-field-parity`.
+
+## 2026-07-31T12:17:00Z - V3 Direct Responses same-protocol surface correction
+- Supersedes the same-day over-broad Direct passthrough wording: production Responses Direct is kernel-owned, not ProviderReqCompat06-owned. The Direct kernel must preserve same-protocol Responses `input`/`include`/tool history while applying selected provider model binding; ProviderReqCompat06 remains Relay provider-wire projection only.
+- Cross-protocol projection remains Relay-only. Direct Responses must keep the client Responses wire shape after allowed governance/model binding.
+- Lock tests: `responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history`; package gate must run the lib filter plus the production Direct passthrough integration filter.
+
+## 2026-07-31T12:44:43Z - V3 protocol parity production Direct owner and fc prefix collision lock
+- Codex review proved synthetic `V3HubExecutionMode::Direct` tests inside ProviderReqCompat06 do not exercise production Direct. Production Responses Direct request-wire truth is kernel-owned via `responses_direct_tool_passthrough`; ProviderReqCompat06 remains Relay-only provider projection.
+- The package gate now runs both lib protocol parity and production Direct passthrough integration: lib filter has 5 tests, Direct integration filter has `responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history`.
+- Chat canonical to Responses `fc_*` item IDs treat stripping `functions.`, `call_`, or `fc_` as lossy and append a stable raw-id hash, preventing `call_same` / `fc_same` / `functions.same` collisions.
+- Verified closeout: protocol parity PASS, verifier PASS, red fixtures PASS (82), architecture CI PASS (25/25), install SHA `05a99dace505c9649ecf28be7cf2c0deccd2c72111e901c85204faee1818f7f2`, aggregate restart/health PASS, live 5555 SSE PASS HTTP 201 marker `RCC_V3_PROTOCOL_PARITY_OK` with no `event:error`.
+
+
+- 2026-07-31T14:50:11Z V3 protocol conversion boundary: Responses ReqInbound02 must normalize request data into Chat+extension before Chat Process/ReqOutbound. Do not carry original Responses payload across nodes for later provider reconstruction. Payload fields such as OpenAI Chat function.arguments stay data-plane and are projected only by adjacent codecs; routing/switch/continuation control belongs to MetadataCenter/control resources and must not rebuild payload fields. Verified by protocol parity gate/red fixtures, protocol parity tests, and isolated verify:v3-architecture-ci.
+
+## 2026-08-01 - V3 zterm malformed arguments boundary live baseline
+- Runtime truth: `/v1/responses` inbound must normalize to Chat canonical + explicit extension data before Chat Process/ReqOutbound; outbound codecs project from Chat canonical to selected target protocol. Raw/original Responses payload must not be carried across nodes for later provider reconstruction.
+- Payload/control truth: `function_call.arguments` is payload data-plane. OpenAI Chat `function.arguments` must preserve the exact original string at the adjacent codec projector; matching parse-failure tool output is normal payload history, not a conversion condition. Routing, provider switch, continuation, retry, and stopless control stay in MetadataCenter/control resources and must not rebuild payload fields.
+- Installed/live evidence: after `npm run install:global`, installed `rccv3 0.90.4004 (crate 0.1.0)` was restarted with `routecodex restart -c /Volumes/extension/.rcc/config.v3.toml`; 10000/5520/5555 health returned `status=ok`, `build_version=0.90.4004`. Live 5555 malformed-arguments and default `gpt-5.5` zterm-shaped replays completed, with no `provider_request_compat_error`, no `cannot losslessly project`, no `trailing characters`, no `Invalid URL (POST /responses)`, and no `response.failed`; default route returned marker `RCC_ZTERM_DEFAULT_ROUTE_OK`.
+- Install gate truth: isolated `install:global` must copy `.github` because `build:min` runs `verify:v3-architecture-ci`, which validates CI/build gate wiring. Package default `routecodex` command now points to `dist/bin/rccv3`; `test:v3-cli-distribution` locks global/release install and package/bin identity.
+- Closeout caveat: codex-review was attempted twice with the required prompt and failed due `cc` provider 402 quota before producing any `VERDICT`; review is blocked, not PASS.
+
+## 2026-08-01 - V3 Direct protocol plan must use session-bound availability
+- Runtime truth: `plan_v3_responses_protocol_execution_with_provider_health` is part of Direct request planning and must pass `provider_health.session_bound_availability(failure_session_scope)` into `V3TargetInterpreter::select_available`. Using the process/global health reader here can preselect a provider already cooled in the current session and defer failure to later Direct runtime handling.
+- Owner boundary: Virtual Router still owns opaque route/pool order and must not read Provider health. Target10 owns concrete provider selection from candidate set + session-scoped Provider availability. Provider health mutable truth stays in `V3ProviderHealthStore`.
+- Regression truth: `kernel::tests::direct_protocol_plan_uses_session_bound_cooldown_before_initial_target` locks both directions: session A skips the cooled provider before initial target, and session B can still select the same provider.
+- Live baseline: after V3 install/restart with sha256 `19ecd4fb74a1eb01e945ca7106e45733c51264a4231c7b4af0ec967597c2f831`, 10000/5520/5555 health passed and 5555 VR diagnostics dry-run selected healthy `cc-sol:key1:gpt-5.6-sol`.
+
+## 2026-08-01 - V3 live ASXS route order baseline
+- Live V3 config truth: `/Volumes/extension/.rcc/config.v3.toml` and `~/.rcc/config.v3.toml` are the same inode. ASXS paid forwarders are `fwd.paid.gpt-5.6-luna` (`asxs-cc.cc-oai.gpt-5.6-luna` via `${CC_OAI_KEY}`), `fwd.paid.composer-2.5` (`asxs-grok.cc-tt.composer-2.5` via `${CC_TT_KEY}`, alias `composer`), `fwd.paid.grok-4.5` (`asxs-grok.cc-tt.grok-4.5`), and `fwd.paid.gpt-5.5` (`asxs.crsa.gpt-5.5`).
+- Current 5520 default/coding/thinking/longcontext live order is `fable -> glm-5.2 -> composer-2.5 -> grok-4.5 -> gpt-5.6-luna -> gpt-5.5`; requested `glm-5.6` is not live provider truth, so GLM stays `glm-5.2` until provider config changes.
+- Current 5555 default/coding/thinking/longcontext live order is `gpt-5.6-luna -> gpt-5.5 -> grok-4.5 -> fable`. Search/web_search/tools on 5520 and 5555 resolve `gpt-5.6-sol -> gpt-5.6-luna -> gpt-5.5 -> composer-2.5 -> fable`; multimodal includes `gpt-5.6-luna` and `grok-4.5`.
+- Verification baseline: V3 config check passed, aggregate restart passed, 10000/5520/5555 `/health` returned `status=ok` with build `0.90.4004`, VR diagnostics status showed the expected resolved target order, and `/v1/responses` provider-request dry-run captured 5520 `modrouter_anthropic/claude-fable-5` and 5555 `asxs-cc/gpt-5.6-luna` with no provider network send.
+
+## 2026-08-01 - V3 install version bump truth
+- `npm run install:v3` must invoke `scripts/gen-build-info.mjs` before copying `package.json` into live `.rcc/install/current`; otherwise V3 CLI binary updates can install successfully while `/health.build_version`, `rccv3 --version`, root package, and installed package remain on the previous version.
+- The version bump owner remains `scripts/gen-build-info.mjs`; `install:v3` should call it, not implement a second bump path. Successful closeout evidence for this rule: install rerun auto-bumped `0.90.4004 -> 0.90.4005`, installed matching V3 binaries to `~/.rcc` and `/Volumes/extension/.rcc`, restarted aggregate 10000/5520/5555, and all health endpoints reported `build_version=0.90.4005`.
+## 2026-08-01 - V3 release default is V3-only
+- Default release/install for RouteCodex is now native V3: `routecodex`, `rcc`, and `rccv3` all resolve to `dist/bin/rccv3`; old V2/JS command output is explicit `--v2` only.
+- `install:v3` / default release gates must run with an isolated `CARGO_TARGET_DIR`; shared `v3/target` can stall in rustdoc during `test:v3-p5-router-target`.
+- V3 release runtime restart is config-scoped (`rcc restart -c /Volumes/extension/.rcc/config.v3.toml`) while health is checked by member port; do not use old `rcc restart --port` with native V3 CLI.
+
+## 2026-08-01 - V3 CLI dev/stable debug-snapshot split
+- Command truth: `routecodex` is the local dev/release entry and must default to snap + detailed debug. `rcc` and `rccv3` are the globally installed stable entries and must default with snap/debug off; only explicit `--snap` / `--debug` may enable those surfaces.
+- Owner boundary: this split belongs in generated CLI shims plus Rust V3 CLI/lifecycle controls. Do not implement it in Runtime, Virtual Router, provider compat, request/response payloads, or config fallback logic.
+- Restart-plan compatibility: false debug/console must be omitted from `restart.plan.json`; true console is carried only for explicit debug/dev-default restart.

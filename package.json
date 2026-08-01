@@ -1,12 +1,13 @@
 {
   "name": "routecodex",
-  "version": "0.90.4004",
+  "version": "0.90.4006",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "bin": {
-    "routecodex": "dist/cli.js",
+    "routecodex": "dist/bin/rccv3",
+    "rcc": "dist/bin/rccv3",
     "rccv3": "dist/bin/rccv3"
   },
   "exports": {
@@ -282,7 +283,7 @@
     "verify:v3-resource-relation-edge-lock": "node scripts/architecture/verify-v3-resource-relation-edge-lock.mjs",
     "test:v3-resource-relation-edge-lock-red-fixtures": "node scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs",
     "render:v3-protocol-semantic-field-matrix": "node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs",
-    "test:v3-protocol-conversion-field-parity": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_runtime_integration anthropic_responses_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_same_protocol_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_anthropic_provider_wire_integration -- --nocapture",
+    "test:v3-protocol-conversion-field-parity": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration responses_openai_chat_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_runtime_integration anthropic_responses_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_same_protocol_field_parity -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_anthropic_provider_wire_integration -- --nocapture",
     "verify:v3-protocol-conversion-field-parity": "node scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs",
     "test:v3-protocol-conversion-field-parity-red-fixtures": "node scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs",
     "verify:v3-protocol-conversion-field-parity-ci": "npm run verify:v3-protocol-conversion-field-parity && npm run test:v3-protocol-conversion-field-parity-red-fixtures && npm run test:v3-protocol-conversion-field-parity",
@@ -297,10 +298,12 @@
     "test:v3-compile-fail": "node scripts/tests/v3-compile-fail-boundaries.mjs",
     "verify:v3-cargo-fmt": "cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check",
     "verify:v3-clippy": "CARGO_NET_OFFLINE=true cargo +stable clippy --manifest-path v3/Cargo.toml --workspace --all-targets -- -D warnings",
-    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && npm run verify:v3-route-classifier-local-owner && npm run verify:route-classifier-core-file-size && npm run test:route-classifier-semantics && CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli",
+    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && npm run verify:v3-route-classifier-local-owner && npm run verify:route-classifier-core-file-size && npm run test:route-classifier-semantics && npm run test:v3-cli-distribution && CARGO_NET_OFFLINE=true cargo +stable build --manifest-path v3/Cargo.toml -p routecodex-v3-cli",
+    "test:v3-cli-distribution": "npm run jest:run -- --runTestsByPath tests/scripts/v3-cli-distribution.spec.ts",
     "test:v3-responses-direct-unit": "cargo test --manifest-path v3/Cargo.toml --workspace --lib -- --nocapture",
     "test:v3-responses-direct-blackbox": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server -- --nocapture",
     "test:v3-direct-response-observability": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test general_provider sse_request_accepts_json_provider_response_as_json_raw_body -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-provider-responses --test general_provider json_request_rejects_sse_provider_response_without_switching_response_kind -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_frame_console_infers_stop_finish_reason_from_completed_json_status -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib direct_stream_request_error06_projects_sse_error_not_json -- --nocapture",
+    "test:v3-direct-protocol-plan-session-cooldown": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_protocol_plan_uses_session_bound_cooldown_before_initial_target -- --nocapture",
     "test:v3-debug-contract": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --test debug_runtime_contract -- --nocapture",
     "verify:v3-debug-payload-budget": "node scripts/architecture/verify-v3-debug-payload-budget.mjs && npm run test:v3-debug-contract",
     "test:v3-debug-payload-budget-red-fixtures": "node scripts/tests/v3-debug-payload-budget-red-fixtures.mjs",

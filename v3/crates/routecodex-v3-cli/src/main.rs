@@ -33,6 +33,8 @@ enum Command {
         snapall: bool,
         #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
+        #[arg(long, default_value_t = false)]
+        debug: bool,
     },
     Status {
         #[arg(short, long)]
@@ -49,6 +51,8 @@ enum Command {
         snapall: bool,
         #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
+        #[arg(long, default_value_t = false)]
+        debug: bool,
     },
     Stop {
         #[arg(short, long)]
@@ -84,6 +88,8 @@ enum ServerCommand {
         snapall: bool,
         #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
+        #[arg(long, default_value_t = false)]
+        debug: bool,
     },
     Status {
         #[arg(short, long)]
@@ -100,6 +106,8 @@ enum ServerCommand {
         snapall: bool,
         #[arg(long, value_parser = parse_non_empty_snapshot_stages)]
         snap_stages: Option<String>,
+        #[arg(long, default_value_t = false)]
+        debug: bool,
     },
     Stop {
         #[arg(short, long)]
@@ -158,24 +166,28 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             snap,
             snapall,
             snap_stages,
+            debug,
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            let snap_flags = resolve_v3_cli_snapshot_flags(snap, snapall, snap_stages);
+            let debug = resolve_v3_cli_debug_flag(debug);
             emit_v3_cli_start_console_line(
                 "start",
                 &config,
                 &executable,
-                snap,
-                snapall,
-                snap_stages.as_deref(),
+                snap_flags.snap,
+                snap_flags.snapall,
+                snap_flags.snap_stages.as_deref(),
+                debug,
             );
             configure_v3_snapshot_flags(
                 V3ManagedLifecycle::new(config)?,
-                snap,
-                snapall,
-                snap_stages,
+                snap_flags.snap,
+                snap_flags.snapall,
+                snap_flags.snap_stages,
             )
-            .with_console_enabled(true)
+            .with_console_enabled(debug)
             .start_foreground(&executable)
             .await?;
         }
@@ -187,26 +199,30 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snap,
                     snapall,
                     snap_stages,
+                    debug,
                 },
         } => {
             let config = resolve_config_path(config)?;
+            let snap_flags = resolve_v3_cli_snapshot_flags(snap, snapall, snap_stages);
+            let debug = resolve_v3_cli_debug_flag(debug);
             if foreground {
                 let executable = std::env::current_exe()?;
                 emit_v3_cli_start_console_line(
                     "server start --foreground",
                     &config,
                     &executable,
-                    snap,
-                    snapall,
-                    snap_stages.as_deref(),
+                    snap_flags.snap,
+                    snap_flags.snapall,
+                    snap_flags.snap_stages.as_deref(),
+                    debug,
                 );
                 configure_v3_snapshot_flags(
                     V3ManagedLifecycle::new(config)?,
-                    snap,
-                    snapall,
-                    snap_stages,
+                    snap_flags.snap,
+                    snap_flags.snapall,
+                    snap_flags.snap_stages,
                 )
-                .with_console_enabled(true)
+                .with_console_enabled(debug)
                 .start_foreground(&executable)
                 .await?;
             } else {
@@ -216,17 +232,18 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     "server start",
                     &config,
                     &executable,
-                    snap,
-                    snapall,
-                    snap_stages.as_deref(),
+                    snap_flags.snap,
+                    snap_flags.snapall,
+                    snap_flags.snap_stages.as_deref(),
+                    debug,
                 );
                 let status = configure_v3_snapshot_flags(
                     V3ManagedLifecycle::new(config)?,
-                    snap,
-                    snapall,
-                    snap_stages,
+                    snap_flags.snap,
+                    snap_flags.snapall,
+                    snap_flags.snap_stages,
                 )
-                .with_console_enabled(true)
+                .with_console_enabled(debug)
                 .start(&executable, Duration::from_secs(15))
                 .await?;
                 emit_v3_cli_start_completed_console_line(&status);
@@ -258,16 +275,20 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     snap,
                     snapall,
                     snap_stages,
+                    debug,
                 },
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            let snap_flags = resolve_v3_cli_snapshot_flags(snap, snapall, snap_stages);
+            let debug = resolve_v3_cli_debug_flag(debug);
             let status = configure_v3_snapshot_flags(
                 V3ManagedLifecycle::new(config)?,
-                snap,
-                snapall,
-                snap_stages,
+                snap_flags.snap,
+                snap_flags.snapall,
+                snap_flags.snap_stages,
             )
+            .with_console_enabled(debug)
             .restart(&executable, Duration::from_millis(timeout_ms))
             .await?;
             println!("{}", serde_json::to_string(&status)?);
@@ -278,24 +299,29 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             snap,
             snapall,
             snap_stages,
+            debug,
         } => {
             let config = resolve_config_path(config)?;
             let executable = std::env::current_exe()?;
+            let snap_flags = resolve_v3_cli_snapshot_flags(snap, snapall, snap_stages);
+            let debug = resolve_v3_cli_debug_flag(debug);
             emit_v3_cli_start_console_line(
                 "restart",
                 &config,
                 &executable,
-                snap,
-                snapall,
-                snap_stages.as_deref(),
+                snap_flags.snap,
+                snap_flags.snapall,
+                snap_flags.snap_stages.as_deref(),
+                debug,
             );
             let manifest = load_manifest(&config)?;
             let status = configure_v3_snapshot_flags(
                 V3ManagedLifecycle::new(config)?,
-                snap,
-                snapall,
-                snap_stages,
+                snap_flags.snap,
+                snap_flags.snapall,
+                snap_flags.snap_stages,
             )
+            .with_console_enabled(debug)
             .restart_with_observer(
                 &executable,
                 Duration::from_millis(timeout_ms),
@@ -364,6 +390,38 @@ fn load_manifest(
     Ok(V3ConfigStore::new(config).load_snapshot()?)
 }
 
+struct V3CliSnapshotFlags {
+    snap: bool,
+    snapall: bool,
+    snap_stages: Option<String>,
+}
+
+fn resolve_v3_cli_snapshot_flags(
+    snap: bool,
+    snapall: bool,
+    snap_stages: Option<String>,
+) -> V3CliSnapshotFlags {
+    V3CliSnapshotFlags {
+        snap: snap || v3_cli_env_flag("ROUTECODEX_V3_DEV_DEFAULT_SNAP"),
+        snapall,
+        snap_stages,
+    }
+}
+
+fn resolve_v3_cli_debug_flag(debug: bool) -> bool {
+    debug || v3_cli_env_flag("ROUTECODEX_V3_DEV_DEFAULT_DEBUG")
+}
+
+fn v3_cli_env_flag(name: &str) -> bool {
+    let Ok(value) = std::env::var(name) else {
+        return false;
+    };
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 fn configure_v3_snapshot_flags(
     lifecycle: V3ManagedLifecycle,
     snap: bool,
@@ -403,9 +461,10 @@ fn emit_v3_cli_start_console_line(
     snap: bool,
     snapall: bool,
     snap_stages: Option<&str>,
+    debug: bool,
 ) {
     println!(
-        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={} snapall={} snap_stages={}",
+        "[RouteCodexV3] rccv3 {command} version={} crate={} binary={} config={} snap={} snapall={} snap_stages={} debug={}",
         resolve_routecodex_package_version_from_executable(executable)
             .unwrap_or_else(|| "unknown".to_string()),
         env!("CARGO_PKG_VERSION"),
@@ -413,7 +472,8 @@ fn emit_v3_cli_start_console_line(
         config.display(),
         snap,
         snapall,
-        snap_stages.unwrap_or("")
+        snap_stages.unwrap_or(""),
+        debug
     );
     flush_stdout_best_effort();
 }

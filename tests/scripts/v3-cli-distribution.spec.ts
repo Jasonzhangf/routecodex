@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 describe('V3 CLI distribution surface', () => {
+  const root = process.cwd();
   const read = (file: string) => fs.readFileSync(path.resolve(file), 'utf8');
   const packageJson = JSON.parse(read('package.json'));
   const cargo = read('v3/crates/routecodex-v3-cli/Cargo.toml');
@@ -12,10 +14,12 @@ describe('V3 CLI distribution surface', () => {
   const globalInstall = read('scripts/install-global.sh');
   const releaseInstall = read('scripts/install-release.sh');
   const releaseVerifier = read('scripts/verify-rcc-release-install.mjs');
+  const installV3Script = read('scripts/install-v3-cli.mjs');
 
-  it('publishes only the rccv3 command and artifact', () => {
+  it('publishes the V3 Rust binary as the default generated command surface', () => {
     expect(packageJson.bin).toEqual({
-      routecodex: 'dist/cli.js',
+      routecodex: 'dist/bin/rccv3',
+      rcc: 'dist/bin/rccv3',
       rccv3: 'dist/bin/rccv3',
     });
     expect(cargo).toContain('name = "rccv3"');
@@ -23,12 +27,33 @@ describe('V3 CLI distribution surface', () => {
     expect(copyScript).toContain("path.join(root, 'dist', 'bin'");
     expect(copyScript).toContain('legacyTargetBin');
     expect(copyScript).toContain('fs.rmSync(legacyTargetBin, { force: true })');
-    expect(packScript).toContain("mutated.bin.rccv3 = 'dist/bin/rccv3'");
+    expect(packScript).toContain("const v3BinEntries = {");
+    expect(packScript).toContain("routecodex: 'dist/bin/rccv3'");
+    expect(packScript).toContain("rcc: 'dist/bin/rccv3'");
+    expect(packScript).toContain("rccv3: 'dist/bin/rccv3'");
+    expect(packScript).toContain("mutated.bin = { ...v3BinEntries }");
+    expect(packScript).toContain("args.name === 'routecodex' && args.bin === 'routecodex'");
+    expect(packScript).toContain("args.name === 'rcc' && args.bin === 'rcc'");
+    expect(packScript).toContain("args.v2 === true");
+    expect(packScript).toContain("mutated.bin = { rccv2: 'dist/cli.js' }");
+    expect(packScript).toContain('[pack-mode] unsupported release identity:');
     expect(packScript).not.toContain("mutated.bin['routecodex-v3']");
+    expect(packageJson.scripts['test:v3-cli-distribution']).toContain(
+      'tests/scripts/v3-cli-distribution.spec.ts',
+    );
+    expect(packageJson.scripts['build:v3-cli']).toContain('npm run test:v3-cli-distribution');
   });
 
-  it('installs, shims, and verifies rccv3 globally', () => {
+  it('installs, shims, and verifies rcc/rccv3 globally through the V3-only default path', () => {
+    expect(shimScript.match(/currentRelativePath: path\.join\('dist', 'bin', 'rccv3'\)/g)).toHaveLength(3);
+    expect(shimScript.match(/native: true/g)).toHaveLength(3);
     expect(shimScript).toContain("writeShim(shimDir, 'rccv3', 'routecodex'");
+    expect(shimScript).toContain("writeShim(shimDir, 'rcc', 'routecodex'");
+    expect(shimScript).toContain("ROUTECODEX_V3_DEV_DEFAULT_SNAP=1");
+    expect(shimScript).toContain("ROUTECODEX_V3_DEV_DEFAULT_DEBUG=1");
+    expect(shimScript).toContain("writeShim(shimDir, 'routecodex', 'routecodex'");
+    expect(shimScript).toContain("devDefaults: true");
+    expect(shimScript).toContain("devDefaults: false");
     expect(shimScript).toContain("path.join('dist', 'bin', 'rccv3')");
     expect(shimScript).toContain("removeLegacyShim(shimDir, 'routecodex-v3')");
     expect(shimScript).toContain('removeExistingShimPath(shimPath)');
@@ -36,14 +61,69 @@ describe('V3 CLI distribution surface', () => {
     expect(shimScript).toContain('fs.rmSync(shimPath, { force: true })');
     expect(executableScript).toContain("path.join(process.cwd(), 'dist', 'bin', 'rccv3')");
     expect(executableScript).toContain("ensureGlobalBinTarget('rccv3')");
+    expect(executableScript).toContain("ensureGlobalBinTarget('rcc')");
     expect(globalInstall).toContain('$NPM_PREFIX/bin/rccv3');
+    expect(globalInstall).toContain('$NPM_PREFIX/bin/rcc');
+    expect(globalInstall).toContain('run_default_v3_install');
+    expect(globalInstall).toContain('node scripts/install-v3-cli.mjs');
+    expect(globalInstall).not.toContain('V3 install target missing current rccv3');
+    expect(releaseInstall).not.toContain('V3 install target missing current rccv3');
+    const installV3Cli = read('scripts/install-v3-cli.mjs');
+    expect(installV3Cli).toContain('uniqueInstallHomes');
+    expect(installV3Cli).not.toContain('V3 install target missing current rccv3');
+    expect(installV3Cli).toContain("homes.push(path.join(resolveHomeDir(), '.rcc'))");
+    expect(installV3Cli).toContain('copyExecutableAtomic(repoBin, target.currentBin)');
     expect(globalInstall).toContain('command -v rccv3');
+    expect(globalInstall).toContain('command -v rcc');
     expect(globalInstall).toContain('rccv3 --help');
+    expect(globalInstall).toContain('rcc --version');
+    expect(releaseInstall).toContain('run_default_v3_release_install');
+    expect(releaseInstall).toContain('node scripts/install-v3-cli.mjs');
+    expect(releaseInstall).toContain('rcc restart -c "$VERIFY_CONFIG"');
+    expect(releaseInstall).toContain('V3 release 验证缺少配置文件');
     expect(releaseInstall).toContain('command -v rccv3');
+    expect(releaseInstall).toContain('command -v rcc');
     expect(releaseInstall).toContain('rccv3 --help');
-    expect(releaseVerifier).toContain("extraBins: ['rccv3']");
+    expect(releaseVerifier).toContain("extraBins: ['rcc', 'rccv3']");
     expect(releaseVerifier).toContain("run(extraBinPath, ['--help']");
+    expect(globalInstall).toContain('默认 V3 产物：dist/bin/rccv3');
+    expect(releaseInstall).toContain('默认 V3 产物 $INSTALL_BUILD_ROOT/dist/bin/rccv3');
+    expect(globalInstall).toContain('V2 JS 兼容产物：dist/cli.js');
+    expect(releaseInstall).toContain('V2 JS 兼容产物 $INSTALL_BUILD_ROOT/dist/cli.js');
+    expect(globalInstall).toContain('INSTALL_V2_MODE');
+    expect(releaseInstall).toContain('INSTALL_V2_MODE');
+    expect(globalInstall).toContain('.gitignore .github AGENTS.md');
+    expect(releaseInstall).toContain('.gitignore .github AGENTS.md');
     expect(globalInstall).not.toContain('command -v routecodex-v3');
     expect(releaseInstall).not.toContain('command -v routecodex-v3');
+  });
+
+  it('rejects undeclared package/bin identities before mutating package metadata', () => {
+    const packageBefore = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/pack-mode.mjs', '--name', 'custom-rcc', '--bin', 'custom-rcc'],
+      { cwd: root, encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('[pack-mode] unsupported release identity:');
+    expect(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).toBe(packageBefore);
+    expect(fs.existsSync(path.join(root, 'package.json.bak.pack'))).toBe(false);
+  });
+
+  it('runs V3 install preflight gates and cargo build inside one isolated target dir', () => {
+    expect(installV3Script).toContain('function buildV3CargoEnv()');
+    expect(installV3Script).toContain("fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'))");
+    expect(installV3Script).toContain('env.CARGO_TARGET_DIR = cargoTargetDir');
+    expect(installV3Script).toContain("env.ROUTECODEX_SKIP_AUTO_BUMP = '1'");
+    const envStart = installV3Script.indexOf('const { env, cargoTargetDir } = buildV3CargoEnv();');
+    const architectureGate = installV3Script.indexOf('V3 architecture CI gate');
+    const semanticGate = installV3Script.indexOf('route classifier semantic gate');
+    const cargoBuild = installV3Script.indexOf('cargo build for routecodex-v3-cli');
+    expect(envStart).toBeGreaterThan(-1);
+    expect(envStart).toBeLessThan(architectureGate);
+    expect(envStart).toBeLessThan(semanticGate);
+    expect(envStart).toBeLessThan(cargoBuild);
   });
 });

@@ -166,8 +166,8 @@ if (rootPackage.dependencies?.esbuild) {
 }
 
 const releasePackages = [
-  { packageName: 'routecodex', binName: 'routecodex', extraBins: ['rccv3'], tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `routecodex-${version}.tgz`) },
-  { packageName: 'rcc', binName: 'rcc', tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `rcc-${version}.tgz`) },
+  { packageName: 'routecodex', binName: 'routecodex', extraBins: ['rcc', 'rccv3'], tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `routecodex-${version}.tgz`) },
+  { packageName: 'rcc', binName: 'rcc', extraBins: ['routecodex', 'rccv3'], tarballPath: path.join(PROJECT_ROOT, 'artifacts', 'pack', `rcc-${version}.tgz`) },
 ];
 
 const reports = [];

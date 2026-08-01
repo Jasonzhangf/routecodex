@@ -56,12 +56,17 @@ function buildShimContent({
   currentRelativePath,
   defaultInstallRoot,
   preferReleaseSnapshot,
-  native
+  native,
+  devDefaults
 }) {
   const localHome = normalizeCliPath(path.join(os.homedir(), '.rcc'));
   const launchCurrent = native ? 'exec "$CURRENT_CLI" "$@"' : 'exec node "$CURRENT_CLI" "$@"';
   const launchGlobal = native ? 'exec "$GLOBAL_CLI" "$@"' : 'exec node "$GLOBAL_CLI" "$@"';
   const launchRepo = native ? 'exec "$REPO_CLI" "$@"' : 'exec node "$REPO_CLI" "$@"';
+  const devDefaultExports = devDefaults ? `export ROUTECODEX_V3_DEV_DEFAULT_SNAP=1
+export ROUTECODEX_V3_DEV_DEFAULT_DEBUG=1
+
+` : '';
   const nodeRequirement = native ? '' : `if ! command -v node >/dev/null 2>&1; then
   echo "${binName}: node is required but was not found in PATH" >&2
   exit 127
@@ -128,7 +133,7 @@ REPO_CLI="${normalizeCliPath(repoCliPath)}"
 GLOBAL_CLI="${normalizeCliPath(globalCliPath)}"
 DEFAULT_INSTALL_ROOT="${defaultInstallRoot}"
 
-${nodeRequirement}${resolutionBlock}
+${devDefaultExports}${nodeRequirement}${resolutionBlock}
 
 echo "${binName}: unable to locate CLI entrypoint" >&2
 echo "  tried release snapshot: $CURRENT_CLI" >&2
@@ -160,7 +165,8 @@ function writeShim(shimDir, binName, packageName, options = {}) {
     currentRelativePath,
     defaultInstallRoot,
     preferReleaseSnapshot,
-    native: options.native === true
+    native: options.native === true,
+    devDefaults: options.devDefaults === true
   });
 
   fs.mkdirSync(shimDir, { recursive: true });
@@ -197,11 +203,20 @@ function main() {
   const shimDirs = resolveShimDirs();
   for (const shimDir of shimDirs) {
     removeLegacyShim(shimDir, 'routecodex-v3');
-    installed.push(writeShim(shimDir, 'routecodex', 'routecodex'));
-    installed.push(writeShim(shimDir, 'rcc', 'routecodex'));
+    installed.push(writeShim(shimDir, 'routecodex', 'routecodex', {
+      currentRelativePath: path.join('dist', 'bin', 'rccv3'),
+      native: true,
+      devDefaults: true
+    }));
+    installed.push(writeShim(shimDir, 'rcc', 'routecodex', {
+      currentRelativePath: path.join('dist', 'bin', 'rccv3'),
+      native: true,
+      devDefaults: false
+    }));
     installed.push(writeShim(shimDir, 'rccv3', 'routecodex', {
       currentRelativePath: path.join('dist', 'bin', 'rccv3'),
-      native: true
+      native: true,
+      devDefaults: false
     }));
   }
 

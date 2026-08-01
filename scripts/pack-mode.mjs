@@ -12,6 +12,7 @@ function parseArgs(argv) {
     if (a === '--name') { out.name = argv[++i]; continue; }
     if (a === '--bin') { out.bin = argv[++i]; continue; }
     if (a === '--tag') { out.tag = argv[++i]; continue; }
+    if (a === '--v2') { out.v2 = true; continue; }
   }
   return out;
 }
@@ -20,6 +21,16 @@ const projectRoot = process.cwd();
 const args = parseArgs(process.argv);
 if (!args.name || !args.bin) {
   console.error('Usage: node scripts/pack-mode.mjs --name <packageName> --bin <binName>');
+  process.exit(1);
+}
+
+const isRouteCodex = args.v2 !== true && args.name === 'routecodex' && args.bin === 'routecodex';
+const isRcc = args.v2 !== true && args.name === 'rcc' && args.bin === 'rcc';
+const isRccV2 = args.v2 === true && args.name === 'rccv2' && args.bin === 'rccv2';
+if (!isRouteCodex && !isRcc && !isRccV2) {
+  console.error(
+    `[pack-mode] unsupported release identity: name=${JSON.stringify(args.name)} bin=${JSON.stringify(args.bin)}`
+  );
   process.exit(1);
 }
 
@@ -136,9 +147,6 @@ function readLocalLlmsVersion() {
   }
 }
 
-const isRouteCodex = args.name === 'routecodex';
-const isRcc = args.name === 'rcc';
-
 function resolveBundledReleaseDependencies(pkg) {
   return Object.keys(pkg.dependencies || {}).sort();
 }
@@ -166,13 +174,19 @@ try {
   }
 
   const mutated = { ...original };
+  const v3BinEntries = {
+    routecodex: 'dist/bin/rccv3',
+    rcc: 'dist/bin/rccv3',
+    rccv3: 'dist/bin/rccv3',
+  };
   mutated.name = args.name;
-  mutated.bin = { [args.bin]: 'dist/cli.js' };
-  if (isRouteCodex) {
-    mutated.bin.rccv3 = 'dist/bin/rccv3';
+  if (isRccV2) {
+    mutated.bin = { rccv2: 'dist/cli.js' };
+  } else {
+    mutated.bin = { ...v3BinEntries };
   }
   // Ensure description mentions mode
-  const suffix = (isRcc || isRouteCodex) ? ' (release)' : ' (dev)';
+  const suffix = (isRcc || isRouteCodex || isRccV2) ? ' (release)' : ' (dev)';
   mutated.description = String(original.description || 'RouteCodex')
     .replace(/\s*\((dev|release)\)$/, '')
     .concat(suffix);

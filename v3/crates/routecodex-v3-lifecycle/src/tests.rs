@@ -159,6 +159,7 @@ fn restart_control_operation_is_explicit_protocol() {
         executable_path: "/tmp/rccv3-next".to_string(),
         snapshots: true,
         snapshot_direct: false,
+        console: true,
         snapshot_stages: Some("provider-request".to_string()),
     };
 
@@ -170,6 +171,7 @@ fn restart_control_operation_is_explicit_protocol() {
     assert!(rendered_plan.contains("\"executable_path\":\"/tmp/rccv3-next\""));
     assert!(rendered_plan.contains("\"snapshots\":true"));
     assert!(!rendered_plan.contains("\"snapshot_direct\""));
+    assert!(rendered_plan.contains("\"console\":true"));
     assert!(rendered_plan.contains("\"snapshot_stages\":\"provider-request\""));
 }
 
@@ -187,6 +189,7 @@ fn managed_child_reentry_removes_restart_plan_from_previous_control_identity() {
             executable_path: "/tmp/rccv3-next".to_string(),
             snapshots: true,
             snapshot_direct: false,
+            console: false,
             snapshot_stages: None,
         },
     )
@@ -655,6 +658,7 @@ fn restart_plan_omits_false_snapshot_direct_for_previous_release_child_compat() 
         executable_path: "/tmp/rccv3".to_string(),
         snapshots: false,
         snapshot_direct: false,
+        console: false,
         snapshot_stages: None,
     };
 
@@ -663,9 +667,14 @@ fn restart_plan_omits_false_snapshot_direct_for_previous_release_child_compat() 
         encoded.get("snapshot_direct").is_none(),
         "false snapshot_direct must not be written to restart.plan.json because previous-release managed children with deny_unknown_fields reject the newly-added field"
     );
+    assert!(
+        encoded.get("console").is_none(),
+        "false console must not be written to restart.plan.json because previous-release managed children with deny_unknown_fields reject newly-added false fields"
+    );
 
     let decoded: V3ManagedRestartPlanRecord = serde_json::from_value(encoded).unwrap();
     assert!(!decoded.snapshot_direct);
+    assert!(!decoded.console);
 }
 
 #[test]
@@ -677,6 +686,7 @@ fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
         executable_path: "/tmp/rccv3".to_string(),
         snapshots: true,
         snapshot_direct: true,
+        console: false,
         snapshot_stages: None,
     };
 
@@ -685,4 +695,22 @@ fn restart_plan_keeps_true_snapshot_direct_for_snapall_restart() {
         encoded.get("snapshot_direct"),
         Some(&serde_json::json!(true))
     );
+}
+
+#[test]
+fn restart_plan_keeps_true_console_for_explicit_debug_restart() {
+    let plan = V3ManagedRestartPlanRecord {
+        schema_version: SCHEMA_VERSION,
+        instance_id: "instance".to_string(),
+        start_nonce: "nonce".to_string(),
+        executable_path: "/tmp/rccv3".to_string(),
+        snapshots: false,
+        snapshot_direct: false,
+        console: true,
+        snapshot_stages: None,
+    };
+
+    let encoded = serde_json::to_value(&plan).unwrap();
+    assert_eq!(encoded.get("console"), Some(&serde_json::json!(true)));
+    assert!(encoded.get("snapshot_direct").is_none());
 }

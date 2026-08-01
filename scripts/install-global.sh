@@ -6,6 +6,13 @@ echo "🌍 全局安装 routecodex..."
 
 SOURCE_ROOT="$(pwd -P)"
 INSTALL_BUILD_ROOT=""
+INSTALL_V2_MODE=0
+for arg in "$@"; do
+    case "$arg" in
+        --v2) INSTALL_V2_MODE=1 ;;
+        *) echo "❌ 不支持的 install:global 参数: $arg"; exit 1 ;;
+    esac
+done
 source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"
 acquire_routecodex_install_lock
 
@@ -161,7 +168,7 @@ prepare_isolated_build_root() {
 
     for item in \
         package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
-        .gitignore AGENTS.md \
+        .gitignore .github AGENTS.md \
         src scripts config configsamples docs tests webui vendor; do
         copy_isolated_path "$item"
     done
@@ -181,12 +188,17 @@ build_project() {
     if [ "${ROUTECODEX_INSTALL_SKIP_BUILD:-0}" = "1" ]; then
         echo "🔨 使用 build:min 已通过审计的产物，跳过 install:global 内部构建"
         INSTALL_BUILD_ROOT="$SOURCE_ROOT"
-        if [ ! -f "$INSTALL_BUILD_ROOT/dist/cli.js" ]; then
-            echo "❌ 缺少 build:min 产物：dist/cli.js"
+        if [ ! -f "$INSTALL_BUILD_ROOT/dist/bin/rccv3" ]; then
+            echo "❌ 缺少 build:min 默认 V3 产物：dist/bin/rccv3"
             echo "💡 先执行: npm run build:min"
             exit 1
         fi
-        if [ ! -f "$INSTALL_BUILD_ROOT/dist/error-handling/route-error-hub.js" ]; then
+        if [ "$INSTALL_V2_MODE" = "1" ] && [ ! -f "$INSTALL_BUILD_ROOT/dist/cli.js" ]; then
+            echo "❌ 缺少 build:min V2 JS 兼容产物：dist/cli.js"
+            echo "💡 先执行: npm run build:min"
+            exit 1
+        fi
+        if [ "$INSTALL_V2_MODE" = "1" ] && [ ! -f "$INSTALL_BUILD_ROOT/dist/error-handling/route-error-hub.js" ]; then
             echo "❌ 缺少 build:min 产物：dist/error-handling/route-error-hub.js"
             echo "💡 先执行: npm run build:min"
             exit 1
@@ -248,7 +260,7 @@ global_install() {
         exit 1
     fi
     # The release shim may predate this install, but no concurrent installer can recreate it after this point.
-    rm -f "$NPM_PREFIX/bin/routecodex" "$NPM_PREFIX/bin/rccv3" "$NPM_PREFIX/bin/routecodex-v3"
+    rm -f "$NPM_PREFIX/bin/routecodex" "$NPM_PREFIX/bin/rcc" "$NPM_PREFIX/bin/rccv3" "$NPM_PREFIX/bin/routecodex-v3"
     npm install -g "$packed_path" --no-audit --no-fund --omit=optional --ignore-scripts --offline --progress=false --loglevel=warn
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
@@ -316,6 +328,11 @@ verify_install() {
         echo "✅ routecodex 已全局安装"
         ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node scripts/ensure-cli-command-shim.mjs || true
         routecodex --version
+        if ! command -v rcc >/dev/null 2>&1; then
+            echo "❌ 全局安装失败（未找到 rcc 命令）"
+            exit 1
+        fi
+        rcc --version
         if ! command -v rccv3 >/dev/null 2>&1; then
             echo "❌ 全局安装失败（未找到 rccv3 命令）"
             exit 1
@@ -377,8 +394,26 @@ cleanup_old_install() {
     echo "✅ 清理完成"
 }
 
+run_default_v3_install() {
+    check_node
+    check_tmux
+    node scripts/cleanup-stale-server-pids.mjs --quiet || true
+    echo "🔁 install:global 默认入口走 V3-only: node scripts/install-v3-cli.mjs"
+    node scripts/install-v3-cli.mjs
+    ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node scripts/ensure-cli-command-shim.mjs
+    node scripts/ensure-cli-executable.mjs
+    verify_install
+    restart_managed_dev_server_if_requested
+    node scripts/cleanup-stale-server-pids.mjs --quiet || true
+    echo "🎉 V3-only 全局安装完成: rcc -> rccv3"
+}
+
 # 主函数
 main() {
+    if [ "$INSTALL_V2_MODE" != "1" ]; then
+        run_default_v3_install
+        return
+    fi
     check_node
     check_tmux
     cleanup_old_install

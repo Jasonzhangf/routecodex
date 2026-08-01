@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'v3', 'Cargo.toml');
 const packageJsonPath = path.join(repoRoot, 'package.json');
+const buildInfoScript = path.join(repoRoot, 'scripts', 'gen-build-info.mjs');
 const routeClassifierFileSizeGate = path.join(
   repoRoot,
   'scripts',
@@ -25,6 +26,24 @@ const v3ArchitectureCiGate = path.join(
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
 const repoBin = path.join(repoRoot, 'dist', 'bin', binaryName);
 const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
+
+function buildV3CargoEnv() {
+  const env = { ...process.env };
+  if (!Object.prototype.hasOwnProperty.call(env, 'RUSTUP_TOOLCHAIN')) {
+    env.RUSTUP_TOOLCHAIN = 'stable';
+  }
+  if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
+    env.CARGO_NET_OFFLINE = 'true';
+  }
+  if (!Object.prototype.hasOwnProperty.call(env, 'ROUTECODEX_SKIP_AUTO_BUMP')) {
+    env.ROUTECODEX_SKIP_AUTO_BUMP = '1';
+  }
+  const cargoTargetDir = env.CARGO_TARGET_DIR
+    ? path.resolve(env.CARGO_TARGET_DIR)
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'));
+  env.CARGO_TARGET_DIR = cargoTargetDir;
+  return { env, cargoTargetDir };
+}
 
 function fail(message) {
   console.error(`[install-v3-cli] ${message}`);
@@ -68,15 +87,16 @@ function buildV3Cli() {
   if (!fs.existsSync(manifestPath)) {
     fail(`missing V3 manifest: ${manifestPath}`);
   }
+  const { env, cargoTargetDir } = buildV3CargoEnv();
   const v3ArchitectureGateResult = spawnSync(process.execPath, [v3ArchitectureCiGate], {
     cwd: repoRoot,
-    env: process.env,
+    env,
     stdio: 'inherit',
   });
   requireSpawnSuccess(v3ArchitectureGateResult, 'V3 architecture CI gate');
   const gateResult = spawnSync(process.execPath, [routeClassifierFileSizeGate], {
     cwd: repoRoot,
-    env: process.env,
+    env,
     stdio: 'inherit',
   });
   requireSpawnSuccess(gateResult, 'route classifier file-size gate');
@@ -85,22 +105,17 @@ function buildV3Cli() {
     ['run', 'test:route-classifier-semantics'],
     {
       cwd: repoRoot,
-      env: process.env,
+      env,
       stdio: 'inherit',
     },
   );
   requireSpawnSuccess(semanticGateResult, 'route classifier semantic gate');
-  const env = { ...process.env };
-  if (!Object.prototype.hasOwnProperty.call(env, 'RUSTUP_TOOLCHAIN')) {
-    env.RUSTUP_TOOLCHAIN = 'stable';
-  }
-  if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
-    env.CARGO_NET_OFFLINE = 'true';
-  }
-  const cargoTargetDir = env.CARGO_TARGET_DIR
-    ? path.resolve(env.CARGO_TARGET_DIR)
-    : fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'));
-  env.CARGO_TARGET_DIR = cargoTargetDir;
+  const buildInfoResult = spawnSync(process.execPath, [buildInfoScript], {
+    cwd: repoRoot,
+    env,
+    stdio: 'inherit',
+  });
+  requireSpawnSuccess(buildInfoResult, 'build-info/version generation');
   const result = spawnSync('cargo', [
     'build',
     '--manifest-path',
@@ -195,7 +210,7 @@ function defaultCandidateHomes() {
   return homes;
 }
 
-function uniqueExistingHomes(homes, explicit) {
+function uniqueInstallHomes(homes) {
   const seen = new Set();
   const unique = [];
   for (const home of homes) {
@@ -205,12 +220,6 @@ function uniqueExistingHomes(homes, explicit) {
     }
     seen.add(normalized);
     const currentBin = path.join(normalized, 'install', 'current', 'dist', 'bin', binaryName);
-    if (!fs.existsSync(currentBin)) {
-      if (explicit) {
-        fail(`V3 install target missing current rccv3: ${currentBin}`);
-      }
-      continue;
-    }
     unique.push({ home: normalized, currentBin });
   }
   return unique;
@@ -220,10 +229,10 @@ function resolveInstallTargets() {
   const explicitHomes = splitPathList(process.env.ROUTECODEX_V3_INSTALL_HOMES)
     .concat(splitPathList(process.env.RCC_V3_INSTALL_HOMES));
   const explicit = explicitHomes.length > 0;
-  const homes = uniqueExistingHomes(explicit ? explicitHomes : defaultCandidateHomes(), explicit);
+  const homes = uniqueInstallHomes(explicit ? explicitHomes : defaultCandidateHomes());
   if (homes.length === 0) {
     fail(
-      'no V3 install/current target found; set ROUTECODEX_V3_INSTALL_HOMES to one or more .rcc homes',
+      'no V3 install target resolved; set ROUTECODEX_V3_INSTALL_HOMES to one or more .rcc homes',
     );
   }
   return homes;

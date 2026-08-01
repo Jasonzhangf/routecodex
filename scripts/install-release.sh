@@ -6,10 +6,18 @@ echo "🌍 安装 RouteCodex release snapshot（独立构建 + 安装 + 健康�
 
 SOURCE_ROOT="$(pwd -P)"
 INSTALL_BUILD_ROOT=""
+INSTALL_V2_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --v2) INSTALL_V2_MODE=1 ;;
+    *) echo "❌ 不支持的 install:release 参数: $arg"; exit 1 ;;
+  esac
+done
 source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"
 acquire_routecodex_install_lock
 VERIFY_PORT="${ROUTECODEX_INSTALL_VERIFY_PORT:-5520}"
 VERIFY_HOST="${ROUTECODEX_INSTALL_VERIFY_HOST:-127.0.0.1}"
+VERIFY_CONFIG="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-/Volumes/extension/.rcc/config.v3.toml}}"
 VERIFY_BASE_URL="http://${VERIFY_HOST}:${VERIFY_PORT}"
 VERIFY_HEALTH_URL="http://${VERIFY_HOST}:${VERIFY_PORT}/health"
 EXPECTED_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || true)"
@@ -158,7 +166,7 @@ prepare_isolated_build_root() {
 
   for item in \
     package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
-    .gitignore AGENTS.md \
+    .gitignore .github AGENTS.md \
     src scripts config configsamples docs tests webui vendor; do
     copy_isolated_path "$item"
   done
@@ -228,8 +236,11 @@ build_release_project() {
     BUILD_MODE=release ROUTECODEX_SKIP_AUTO_BUMP="${ROUTECODEX_SKIP_AUTO_BUMP:-1}" npm run build:min
     node scripts/ensure-cli-executable.mjs
   )
-  if [ ! -f "$INSTALL_BUILD_ROOT/dist/cli.js" ]; then
-    fail "构建失败：缺少 $INSTALL_BUILD_ROOT/dist/cli.js"
+  if [ ! -f "$INSTALL_BUILD_ROOT/dist/bin/rccv3" ]; then
+    fail "构建失败：缺少默认 V3 产物 $INSTALL_BUILD_ROOT/dist/bin/rccv3"
+  fi
+  if [ "$INSTALL_V2_MODE" = "1" ] && [ ! -f "$INSTALL_BUILD_ROOT/dist/cli.js" ]; then
+    fail "构建失败：缺少 V2 JS 兼容产物 $INSTALL_BUILD_ROOT/dist/cli.js"
   fi
   echo "✅ release 构建完成"
 }
@@ -331,8 +342,12 @@ verify_cli_commands() {
 
 verify_runtime_health() {
   echo "🚦 验证 release runtime 启动与健康状态..."
+  EXPECTED_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || true)"
   if [ -z "${EXPECTED_VERSION:-}" ]; then
     fail "无法读取 package.json version，不能验证 release runtime 版本"
+  fi
+  if [ "$INSTALL_V2_MODE" != "1" ] && [ ! -f "$VERIFY_CONFIG" ]; then
+    fail "V3 release 验证缺少配置文件：$VERIFY_CONFIG；可用 ROUTECODEX_INSTALL_VERIFY_CONFIG 指定"
   fi
   echo "🔒 期望 release runtime version: ${EXPECTED_VERSION}"
 
@@ -352,13 +367,23 @@ verify_runtime_health() {
 
   restart_release_runtime_for_aggregate() {
     echo "♻️  使用成员端口 ${VERIFY_PORT} 定位并重启聚合 RouteCodex server instance（只请求一次）"
+    if [ "$INSTALL_V2_MODE" = "1" ]; then
+      ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
+      ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
+      RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
+      rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"
+      return
+    fi
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
     ROUTECODEX_RESTART_WAIT_MS="${ROUTECODEX_RESTART_WAIT_MS:-120000}" \
     RCC_RESTART_WAIT_MS="${RCC_RESTART_WAIT_MS:-120000}" \
-    rcc restart --port "$VERIFY_PORT" --host "$VERIFY_HOST"
+    rcc restart -c "$VERIFY_CONFIG"
   }
 
   start_release_runtime_when_stopped() {
+    if [ "$INSTALL_V2_MODE" != "1" ]; then
+      fail "${VERIFY_HEALTH_URL} 当前不可用；V3 release 默认验证不做旧 port fallback start，请先用 rcc start -c \"$VERIFY_CONFIG\" 启动后重试"
+    fi
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 \
     ROUTECODEX_START_DAEMON=1 \
     RCC_START_DAEMON=1 \
@@ -420,7 +445,29 @@ verify_runtime_health() {
   exit 1
 }
 
+run_default_v3_release_install() {
+  check_repo_root
+  check_node
+  check_tmux
+  check_rust
+  check_curl
+  echo "📦 当前源码版本: routecodex@$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")"
+  echo "🔁 install:release 默认入口走 V3-only: node scripts/install-v3-cli.mjs"
+  node scripts/install-v3-cli.mjs
+  ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs"
+  node scripts/ensure-cli-executable.mjs
+  verify_cli_commands
+  verify_runtime_health
+  echo ""
+  echo "🎉 V3-only release 安装完成"
+  echo "使用命令: rcc"
+}
+
 main() {
+  if [ "$INSTALL_V2_MODE" != "1" ]; then
+    run_default_v3_release_install
+    return
+  fi
   check_repo_root
   check_node
   check_tmux
