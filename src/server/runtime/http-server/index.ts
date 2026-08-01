@@ -1049,16 +1049,7 @@ export class RouteCodexHttpServer {
     const sourceMetadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
       ? input.metadata as Record<string, unknown>
       : undefined;
-    const metadata =
-      sourceMetadata
-        ? {
-            ...sourceMetadata,
-            __raw_request_body:
-              Object.prototype.hasOwnProperty.call(sourceMetadata, '__raw_request_body')
-                ? sourceMetadata.__raw_request_body
-                : input.body,
-          }
-        : { __raw_request_body: input.body };
+    const metadata = { ...(sourceMetadata ?? {}) };
     propagatePipelineDryRunControl(sourceMetadata, metadata);
     if (sourceMetadata) {
       bindExistingMetadataCenter(sourceMetadata, metadata);
@@ -1378,18 +1369,8 @@ export class RouteCodexHttpServer {
         'port-scoped provider health session directory'
       );
     }
-    const resumeProviderKey = (() => {
-      const resume = metadata.responsesResume;
-      if (!resume || typeof resume !== 'object' || Array.isArray(resume)) return undefined;
-      const value = (resume as Record<string, unknown>).providerKey;
-      return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-    })();
-    const resumeContinuationOwner = (() => {
-      const resume = metadata.responsesResume;
-      if (!resume || typeof resume !== 'object' || Array.isArray(resume)) return undefined;
-      const value = (resume as Record<string, unknown>).continuationOwner;
-      return value === 'direct' || value === 'relay' ? value : undefined;
-    })();
+    const resumeProviderKey = MetadataCenter.read(metadata)?.readRuntimeControl().retryProviderKey;
+    const resumeContinuationOwner = MetadataCenter.read(metadata)?.readContinuationContext().continuationOwner;
     if (
       resumeProviderKey
       && resumeContinuationOwner === 'direct'
@@ -1798,10 +1779,7 @@ export class RouteCodexHttpServer {
       };
     }
     const forceRelayOwnedResponsesContinuation =
-      metadataForHub.responsesResume
-      && typeof metadataForHub.responsesResume === 'object'
-      && !Array.isArray(metadataForHub.responsesResume)
-      && (metadataForHub.responsesResume as Record<string, unknown>).continuationOwner === 'relay';
+      MetadataCenter.read(metadataForHub)?.readContinuationContext().continuationOwner === 'relay';
     if (forceRelayOwnedResponsesContinuation) {
       this.logStage('router-direct.skipped', input.requestId, {
         reason: 'relay_owned_responses_continuation',

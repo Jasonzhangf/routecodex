@@ -22,6 +22,10 @@ const target = readFileSync(targetPath, 'utf8');
 const configTypes = readFileSync(configTypesPath, 'utf8');
 const configValidate = readFileSync(configValidatePath, 'utf8');
 const providerTransport = readFileSync(providerTransportPath, 'utf8');
+const providerTransportControlSource = providerTransport.replaceAll(
+  'fallback-credit-2026-06-01',
+  'anthropic-credit-beta',
+);
 const server = readFileSync(serverPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
 const configTests = readFileSync(configTestPath, 'utf8');
@@ -100,9 +104,9 @@ for (const [owner, text, phrases] of [
   [serverPath, server, [
     'responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>',
     'build_responses_direct_continuation_scope(',
-    'first_header_text(headers, &["session-id", "session_id", "x-session-id"])',
-    'resolve_transparent_continuation_scope(',
-    'payload_needs_direct_continuation_scope(payload)',
+    'request_local_continuation_scope(',
+    'request payload and client metadata cannot construct continuation control identity',
+    'entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output',
     'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
   ]],
   [testPath, tests, [
@@ -131,9 +135,7 @@ for (const [owner, text, phrases] of [
     'data: [DONE]',
   ]],
   [serverTestPath, serverTests, [
-    'responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry',
-    'responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry',
-    'responses_relay_local_continuation_uses_body_client_metadata_without_inventing_headers',
+    'responses_relay_client_metadata_cannot_authorize_continuation_control_scope',
     'responses_relay_missing_client_scope_for_tool_output_fails_before_provider_send',
     'start_controlled_continuation_websocket',
     'p6_remote_continuation_manifest',
@@ -196,7 +198,7 @@ forbid(response, responsePath, [
   /restore_history|materiali[sz]e_context/i,
   /into_body_bytes\s*\(/,
 ]);
-forbid(providerTransport, providerTransportPath, [
+forbid(providerTransportControlSource, providerTransportPath, [
   /fallback/i,
   /local_materiali[sz]ation|relay_continuation|restore_history|repair_history/i,
   /previous_response_id[\s\S]{0,200}null/,

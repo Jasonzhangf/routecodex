@@ -119,7 +119,6 @@ pub fn hub_pipeline_execute_json(handle: String, request_json: String) -> NapiRe
         "routingDecision": routing_decision,
         "routingDiagnostics": routing_diagnostics,
         "standardizedRequest": result.get("standardizedRequest"),
-        "entryOriginRequest": result.get("entryOriginRequest"),
         "effectPlan": result.get("effectPlan"),
         "diagnostics": result.get("diagnostics"),
         "error": result.get("error"),

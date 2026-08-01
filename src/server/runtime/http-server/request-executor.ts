@@ -23,7 +23,6 @@ import {
 } from './executor-metadata.js';
 import {
   rebindResponsesConversationRequestId,
-  captureResponsesRequestContextForRequest,
   clearResponsesConversationByRequestId
 } from '../../../modules/llmswitch/bridge/runtime-integrations.js';
 import {
@@ -33,10 +32,7 @@ import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
 import type { MetadataCenterWriter } from './metadata-center/metadata-center-types.js';
 import { writeMetadataCenterSlot } from './metadata-center/dualwrite-api.js';
-import {
-  readRuntimeContinuationResponsesResume,
-  readRuntimeControlProjection
-} from './metadata-center/request-truth-readers.js';
+import { readRuntimeControlProjection } from './metadata-center/request-truth-readers.js';
 import {
   markHubPipelineVirtualRouterConcurrencyScopeBusyNative,
   markHubPipelineVirtualRouterConcurrencyScopeIdleNative
@@ -187,161 +183,6 @@ export function writeProviderProtocolRuntimeControl(
     writer: REQUEST_EXECUTOR_RUNTIME_CONTROL_WRITER,
     reason: 'request provider protocol'
   });
-}
-
-function shouldCaptureResponsesConversationForEntry(entryEndpoint?: string): boolean {
-  return entryEndpoint === '/v1/responses' || entryEndpoint === '/v1/responses.submit_tool_outputs';
-}
-
-function readRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function readContextSnapshot(metadata: Record<string, unknown>): Record<string, unknown> | undefined {
-  return readRecord(metadata.contextSnapshot) ?? readRecord(metadata.responsesContext);
-}
-
-function readRawEntryPayload(metadata: Record<string, unknown>): Record<string, unknown> | undefined {
-  return readRecord(metadata.__raw_request_body);
-}
-
-function buildResponsesRequestContextFromOriginalPayload(
-  payload: Record<string, unknown>
-): Record<string, unknown> | undefined {
-  const input =
-    Array.isArray(payload.input)
-    || (typeof payload.input === 'string' && payload.input.length > 0)
-      ? payload.input
-      : undefined;
-  const toolsRaw = Array.isArray(payload.tools) ? payload.tools : undefined;
-  if (!input && !toolsRaw) {
-    return undefined;
-  }
-  return {
-    ...(input ? { input } : {}),
-    ...(toolsRaw ? { toolsRaw } : {})
-  };
-}
-
-function summarizeRecordKeys(value: Record<string, unknown> | undefined): string[] {
-  return value ? Object.keys(value).sort() : [];
-}
-
-function createResponsesRequestContextMissingError(args: {
-  input: PipelineExecutionInput;
-  metadata: Record<string, unknown>;
-  providerKey?: string;
-  currentPayload?: Record<string, unknown>;
-  rawEntryPayload?: Record<string, unknown>;
-}): Error {
-  const error = new Error('RESPONSES_STORE_MISSING_REQUEST_CONTEXT');
-  Object.assign(error, {
-    code: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
-    internalCode: 'RESPONSES_STORE_MISSING_REQUEST_CONTEXT',
-    stage: 'responsesConversation.capture',
-    details: {
-      requestId: args.input.requestId,
-      entryEndpoint: args.input.entryEndpoint,
-      providerKey: args.providerKey,
-      hasCurrentPayload: Boolean(args.currentPayload),
-      hasRawEntryPayload: Boolean(args.rawEntryPayload),
-      hasContextSnapshot: Boolean(readContextSnapshot(args.metadata)),
-      currentPayloadKeys: summarizeRecordKeys(args.currentPayload),
-      rawEntryPayloadKeys: summarizeRecordKeys(args.rawEntryPayload)
-    }
-  });
-  return error;
-}
-
-function readResponsesConversationMatchedPort(metadata: Record<string, unknown>): number | undefined {
-  const candidates = [
-    metadata.portScope,
-    metadata.matchedPort,
-    metadata.routecodexLocalPort,
-    metadata.localPort,
-    metadata.entryPort,
-    metadata.routecodexPort
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string') {
-      const parsed = Number(candidate.trim());
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return Math.floor(parsed);
-      }
-      continue;
-    }
-    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
-      return Math.floor(candidate);
-    }
-  }
-  return undefined;
-}
-
-export function resolveResponsesConversationRequestCaptureArgsForChatProcessEntry(args: {
-  input: PipelineExecutionInput;
-  metadata: Record<string, unknown>;
-  providerKey?: string;
-}): {
-  requestId: string;
-  payload: Record<string, unknown>;
-  context: Record<string, unknown>;
-  sessionId?: string;
-  conversationId?: string;
-  providerKey?: string;
-  entryKind: 'responses';
-  matchedPort?: number;
-  routingPolicyGroup?: string;
-} | null {
-  if (!shouldCaptureResponsesConversationForEntry(args.input.entryEndpoint)) {
-    return null;
-  }
-  const currentPayload = readRecord(args.input.body);
-  const rawEntryPayload = readRawEntryPayload(args.metadata);
-  const payload = readRuntimeContinuationResponsesResume(args.metadata)
-    ? currentPayload
-    : rawEntryPayload ?? currentPayload;
-  const context = payload
-    ? readContextSnapshot(args.metadata) ?? buildResponsesRequestContextFromOriginalPayload(payload)
-    : undefined;
-  if (!payload || !context) {
-    throw createResponsesRequestContextMissingError({
-      ...args,
-      currentPayload,
-      rawEntryPayload
-    });
-  }
-  const {
-    requestId: _requestTruthRequestId,
-    ...requestTruthScope
-  } = readRuntimeRequestTruthIdentifiers(args.metadata);
-  const matchedPort = readResponsesConversationMatchedPort(args.metadata);
-  const routingPolicyGroup =
-    readString(args.metadata.routecodexRoutingPolicyGroup)
-    ?? readString(args.metadata.routingPolicyGroup);
-  return {
-    requestId: args.input.requestId,
-    payload,
-    context,
-    ...requestTruthScope,
-    ...(args.providerKey ? { providerKey: args.providerKey } : {}),
-    entryKind: 'responses',
-    ...(matchedPort !== undefined ? { matchedPort } : {}),
-    ...(routingPolicyGroup ? { routingPolicyGroup } : {})
-  };
-}
-
-async function captureResponsesConversationRequestContextAtChatProcessEntry(args: {
-  input: PipelineExecutionInput;
-  metadata: Record<string, unknown>;
-  providerKey?: string;
-}): Promise<void> {
-  const captureArgs = resolveResponsesConversationRequestCaptureArgsForChatProcessEntry(args);
-  if (!captureArgs) {
-    return;
-  }
-  await captureResponsesRequestContextForRequest(captureArgs);
 }
 
 function resolvePipelineRouteName(pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>): string | undefined {
@@ -1159,11 +1000,6 @@ export class HubRequestExecutor implements RequestExecutor {
               }
             }
           }
-          await captureResponsesConversationRequestContextAtChatProcessEntry({
-            input,
-            metadata: mergedMetadata,
-            providerKey: target.providerKey
-          });
           logStage('provider.context_resolve.completed', input.requestId, {
             providerKey: target.providerKey,
             runtimeKey,

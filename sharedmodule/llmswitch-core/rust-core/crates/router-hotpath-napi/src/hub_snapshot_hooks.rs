@@ -985,16 +985,6 @@ fn clone_trimmed_string_field(
     }
 }
 
-fn clone_object_field_if_present(
-    source: &Map<String, Value>,
-    key: &str,
-    out: &mut Map<String, Value>,
-) {
-    if let Some(value) = source.get(key).and_then(Value::as_object) {
-        out.insert(key.to_string(), Value::Object(value.clone()));
-    }
-}
-
 fn build_runtime_request_truth_summary(runtime_metadata: Option<&Value>) -> Option<Value> {
     let metadata = runtime_metadata?.as_object()?;
     let mut summary = Map::<String, Value>::new();
@@ -1008,10 +998,6 @@ fn build_runtime_request_truth_summary(runtime_metadata: Option<&Value>) -> Opti
         "routeHint",
     ] {
         clone_trimmed_string_field(metadata, key, &mut summary);
-    }
-
-    for key in ["responsesResume", "continuation", "responsesRequestContext"] {
-        clone_object_field_if_present(metadata, key, &mut summary);
     }
 
     if let Some(runtime_control) = metadata.get("runtime_control").and_then(Value::as_object) {

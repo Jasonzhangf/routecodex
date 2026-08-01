@@ -174,25 +174,16 @@ fn build_route_projection(input: &Value) -> Value {
         );
     }
     let continuation_source = record(snapshot.and_then(|row| row.get("continuationContext")));
-    let mut continuation = project_primitives(
+    let continuation = project_primitives(
         continuation_source,
-        &["previousResponseId", "continuationOwner"],
-    );
-    let resume = project_primitives(
-        record(continuation_source.and_then(|row| row.get("responsesResume"))),
         &[
             "previousResponseId",
             "responseId",
-            "requestId",
-            "chainId",
             "continuationOwner",
-            "continuationScope",
+            "chainId",
             "stickyScope",
         ],
     );
-    if !resume.is_empty() {
-        continuation.insert("responsesResume".to_string(), Value::Object(resume));
-    }
     if !continuation.is_empty() {
         projected_snapshot.insert(
             "continuationContext".to_string(),

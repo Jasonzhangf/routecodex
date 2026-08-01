@@ -146,15 +146,6 @@ pub(crate) fn resolve_adapter_context_object_carriers(metadata: &Value) -> Value
     if let Some(runtime) = metadata_obj.get("runtime").and_then(|v| v.as_object()) {
         out.insert("runtime".to_string(), Value::Object(runtime.clone()));
     }
-    if let Some(captured_chat_request) = metadata_obj
-        .get("capturedChatRequest")
-        .and_then(|v| v.as_object())
-    {
-        out.insert(
-            "capturedChatRequest".to_string(),
-            Value::Object(captured_chat_request.clone()),
-        );
-    }
     if let Some(client_connection_state) = metadata_obj
         .get("clientConnectionState")
         .and_then(|v| v.as_object())

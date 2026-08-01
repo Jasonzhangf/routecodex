@@ -7,7 +7,7 @@
 This is the human review surface for the RouteCodex V3 Rust foundation and first business lifecycle. The order is Config -> Server -> Debug -> Error/Provider health -> Virtual Router/Target -> Responses direct Pipeline/Provider.
 
 Virtual Router classification consumes typed `V3RouterRequestFacts`; pool-match planning and the non-empty default floor remain inside the Router owner before the one opaque target hit.
-After `V3Target10ConcreteProviderSelected`, Runtime immediately evaluates `V3Execution11ProtocolDecision`: same entry/provider protocol may enter Direct, protocol mismatch with Relay allowed must leave Direct and enter Hub Relay, and mismatch without Relay fails before provider send.
+After `V3Target10ConcreteProviderSelected`, Runtime immediately evaluates `V3Execution11ProtocolDecision`: selected Responses providers with `provider.responses.process=chat` must leave Direct and enter Hub Relay, other same entry/provider protocol may enter Direct, protocol mismatch with Relay allowed must leave Direct and enter Hub Relay, and mismatch without Relay fails before provider send.
 
 Canonical documents:
 

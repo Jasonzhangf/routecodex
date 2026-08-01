@@ -46,13 +46,6 @@ pub fn build_v3_server_03_http_request_raw(
 pub struct V3Req04StandardizedResponses {
     pub body: Value,
     pub protocol_context: V3ProtocolContext,
-    pub route_classifier_metadata: V3RouteClassifierMetadata,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct V3RouteClassifierMetadata {
-    pub has_image_attachment: bool,
-    pub stopless_followup: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +56,7 @@ pub struct V3ProtocolContext {
     pub execution_id: String,
     pub endpoint: String,
     pub method: String,
+    pub previous_response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +64,7 @@ pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
     pub request_body: Value,
+    pub previous_response_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,9 +112,30 @@ pub struct V3Resp15ClientPayload {
 
 pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
-) -> V3Req04StandardizedResponses {
-    let route_classifier_metadata = extract_v3_route_classifier_metadata(&raw.body);
-    V3Req04StandardizedResponses {
+) -> Result<V3Req04StandardizedResponses, String> {
+    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
+        return Err(format!(
+            "RouteCodex side-channel field {key} cannot enter request payload"
+        ));
+    }
+    let mut body = raw.body;
+    let previous_response_id = match body.get("previous_response_id") {
+        None => None,
+        Some(Value::String(value)) => {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err("previous_response_id must be a non-empty string".to_string());
+            }
+            Some(value.to_string())
+        }
+        Some(_) => return Err("previous_response_id must be a non-empty string".to_string()),
+    };
+    if previous_response_id.is_some() {
+        body.as_object_mut()
+            .ok_or_else(|| "Responses request payload must be an object".to_string())?
+            .remove("previous_response_id");
+    }
+    Ok(V3Req04StandardizedResponses {
         protocol_context: V3ProtocolContext {
             server_id: raw.server_id,
             failure_session_scope: raw.failure_session_scope,
@@ -127,24 +143,24 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             execution_id: raw.execution_id,
             endpoint: raw.path,
             method: raw.method,
+            previous_response_id,
         },
-        body: raw.body,
-        route_classifier_metadata,
-    }
+        body,
+    })
 }
 
 pub fn build_v3_router_request_facts_from_v3_req_04(
     standardized: &V3Req04StandardizedResponses,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    build_v3_router_request_facts_for_entry_with_metadata(
+    build_v3_router_request_facts_for_entry_with_control(
         &standardized.body,
         "responses",
         configured_v3_longcontext_threshold_tokens(
             manifest,
             &standardized.protocol_context.server_id,
         ),
-        standardized.route_classifier_metadata,
+        false,
     )
 }
 
@@ -153,29 +169,30 @@ pub fn build_v3_router_request_facts_for_entry(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    build_v3_router_request_facts_for_entry_with_metadata(
+    build_v3_router_request_facts_for_entry_with_control(
         body,
         entry_protocol,
         longcontext_threshold_tokens,
-        extract_v3_route_classifier_metadata(body),
+        false,
     )
 }
 
-fn build_v3_router_request_facts_for_entry_with_metadata(
+fn build_v3_router_request_facts_for_entry_with_control(
     body: &Value,
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
-    route_classifier_metadata: V3RouteClassifierMetadata,
+    stopless_followup: bool,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
     let active_turn = extract_active_turn_signals(body);
+    let has_image_attachment = has_v3_protocol_image_attachment(body);
     let route_classification = classify_route(&RouteClassifierInput {
         reached_long_context: longcontext_threshold_tokens
             .is_some_and(|threshold| input_tokens >= threshold),
-        has_image_attachment: route_classifier_metadata.has_image_attachment,
+        has_image_attachment,
         latest_message_from_user: active_turn.latest_message_from_user,
-        stopless_followup: route_classifier_metadata.stopless_followup,
+        stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
         last_assistant_tool_category: active_turn
             .last_assistant_tool
@@ -187,7 +204,7 @@ fn build_v3_router_request_facts_for_entry_with_metadata(
     for capability in &route_classification.required_capabilities {
         capabilities.insert(capability.clone());
     }
-    if route_classifier_metadata.has_image_attachment {
+    if has_image_attachment {
         capabilities.insert("multimodal".to_string());
         capabilities.insert("vision".to_string());
     }
@@ -208,16 +225,24 @@ fn build_v3_router_request_facts_for_entry_with_metadata(
     }
 }
 
-pub fn extract_v3_route_classifier_metadata(body: &Value) -> V3RouteClassifierMetadata {
-    V3RouteClassifierMetadata {
-        has_image_attachment: body
-            .pointer("/metadata/hasImageAttachment")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        stopless_followup: body
-            .pointer("/metadata/runtime_control/serverToolFollowup")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+fn has_v3_protocol_image_attachment(body: &Value) -> bool {
+    ["messages", "input", "contents"]
+        .into_iter()
+        .filter_map(|field| body.get(field))
+        .any(value_contains_v3_protocol_image)
+}
+
+fn value_contains_v3_protocol_image(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(value_contains_v3_protocol_image),
+        Value::Object(values) => {
+            detect_v3_media_kind(values) == Some("image")
+                || ["content", "parts"]
+                    .into_iter()
+                    .filter_map(|field| values.get(field))
+                    .any(value_contains_v3_protocol_image)
+        }
+        _ => false,
     }
 }
 
@@ -280,6 +305,7 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
         target: selected,
         request_id: standardized.protocol_context.request_id.clone(),
         request_body: standardized.body.clone(),
+        previous_response_id: standardized.protocol_context.previous_response_id.clone(),
     }
 }
 
@@ -383,10 +409,45 @@ fn entry_protocol_wire_protocol(
 
 #[cfg(test)]
 mod tests {
-    use super::build_v3_router_request_facts_for_entry;
+    use super::{
+        build_v3_req_04_standardized_responses_from_v3_server_03,
+        build_v3_router_request_facts_for_entry, build_v3_server_03_http_request_raw,
+    };
+    use routecodex_v3_error::V3ProviderFailureSessionScope;
     use serde_json::json;
 
     const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
+
+    #[test]
+    fn req04_preserves_responses_data_and_extracts_typed_continuation_locator() {
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            json!({
+                "model":"gpt-5.5",
+                "previous_response_id":"resp_typed_1",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],
+                "include":["reasoning.encrypted_content"]
+            }),
+        );
+
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("Responses inbound must preserve same-protocol data");
+
+        assert!(normalized.body.get("messages").is_none());
+        assert!(normalized.body.get("input").is_some());
+        assert_eq!(normalized.body["include"][0], "reasoning.encrypted_content");
+        assert!(normalized.body.get("previous_response_id").is_none());
+        assert_eq!(
+            normalized.protocol_context.previous_response_id.as_deref(),
+            Some("resp_typed_1")
+        );
+    }
 
     #[test]
     fn v3_routing_token_estimate_omits_image_payload_bytes() {
@@ -441,10 +502,9 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_use_metadata_attachment_as_only_multimodal_signal() {
+    fn v3_routing_facts_use_protocol_image_as_multimodal_signal() {
         let request = json!({
             "model": "gpt-5.6-sol",
-            "metadata": {"hasImageAttachment": true},
             "input": [
                 {
                     "role": "user",
@@ -468,15 +528,14 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_do_not_infer_multimodal_from_payload_image() {
+    fn v3_routing_facts_ignore_client_metadata_image_claim_without_protocol_image() {
         let request = json!({
             "model": "gpt-5.6-sol",
-            "metadata": {"hasImageAttachment": false},
+            "metadata": {"hasImageAttachment": true},
             "input": [{
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": "Describe this image [Image #1]."},
-                    {"type": "input_image", "image_url": {"url": "data:image/png;base64,AAAA"}}
+                    {"type": "input_text", "text": "Describe this image [Image #1]."}
                 ]
             }]
         });
@@ -489,6 +548,27 @@ mod tests {
 
         assert!(!facts.capabilities.contains("multimodal"));
         assert!(!facts.capabilities.contains("vision"));
+    }
+
+    #[test]
+    fn v3_routing_facts_ignore_client_runtime_control_metadata() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "metadata": {"runtime_control": {"serverToolFollowup": true}},
+            "input": [{"role":"user","content":"continue"}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
+
+        assert_eq!(facts.route_classification.route_name, "thinking");
+        assert_eq!(
+            facts.route_classification.candidates,
+            ["thinking", "default"]
+        );
     }
 
     #[test]

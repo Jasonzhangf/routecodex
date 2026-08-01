@@ -88,7 +88,10 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
         json!({"name":"lookup","arguments":"{\"q\":\"x\"}"})
     );
     assert_eq!(normalized.payload()["messages"][3]["role"], "tool");
-    assert_eq!(normalized.payload()["messages"][3]["tool_call_id"], "toolu_1");
+    assert_eq!(
+        normalized.payload()["messages"][3]["tool_call_id"],
+        "toolu_1"
+    );
     assert_eq!(normalized.payload()["messages"][3]["content"], "ok");
     assert_eq!(
         normalized.payload()["messages"][3]["routecodex_chat_extension"],

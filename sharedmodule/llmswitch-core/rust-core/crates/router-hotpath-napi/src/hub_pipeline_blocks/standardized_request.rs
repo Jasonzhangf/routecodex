@@ -299,12 +299,7 @@ fn derive_model_from_continuation_metadata(
     metadata: Option<&Map<String, Value>>,
 ) -> Option<String> {
     let metadata = metadata?;
-    let provider_key = read_trimmed_string(metadata.get("retryProviderKey")).or_else(|| {
-        metadata
-            .get("responsesResume")
-            .and_then(Value::as_object)
-            .and_then(|resume| read_trimmed_string(resume.get("providerKey")))
-    })?;
+    let provider_key = read_trimmed_string(metadata.get("retryProviderKey"))?;
     let model = derive_model_id(provider_key.as_str());
     let model = model.trim();
     if model.is_empty() {

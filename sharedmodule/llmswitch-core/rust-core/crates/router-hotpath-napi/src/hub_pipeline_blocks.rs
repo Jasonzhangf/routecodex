@@ -7,7 +7,6 @@ pub(crate) mod policy;
 pub(crate) mod process_mode;
 pub(crate) mod protocol;
 pub(crate) mod responses_context;
-pub(crate) mod responses_resume;
 pub(crate) mod router_metadata_input;
 pub(crate) mod runtime_metadata;
 pub(crate) mod standardized_request;

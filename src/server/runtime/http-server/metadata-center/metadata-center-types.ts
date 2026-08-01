@@ -55,12 +55,9 @@ export type MetadataCenterRequestTruth = {
 };
 
 export type MetadataCenterContinuationContext = {
-  responsesResume?: Record<string, unknown>;
   previousResponseId?: string;
   responseId?: string;
-  toolOutputs?: unknown[];
   continuationOwner?: string;
-  resumeFrom?: Record<string, unknown>;
   chainId?: string;
   stickyScope?: string;
 };

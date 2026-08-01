@@ -216,12 +216,9 @@ export class MetadataCenter {
 
   readContinuationContext(): MetadataCenterContinuationContext {
     return {
-      responsesResume: this.state.continuationContext.responsesResume?.value as Record<string, unknown> | undefined,
       previousResponseId: this.state.continuationContext.previousResponseId?.value as string | undefined,
       responseId: this.state.continuationContext.responseId?.value as string | undefined,
-      toolOutputs: this.state.continuationContext.toolOutputs?.value as unknown[] | undefined,
       continuationOwner: this.state.continuationContext.continuationOwner?.value as string | undefined,
-      resumeFrom: this.state.continuationContext.resumeFrom?.value as Record<string, unknown> | undefined,
       chainId: this.state.continuationContext.chainId?.value as string | undefined,
       stickyScope: this.state.continuationContext.stickyScope?.value as string | undefined
     };

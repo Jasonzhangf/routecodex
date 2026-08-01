@@ -207,6 +207,33 @@ fn responses_direct_request_projection_hook(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
+    let mut request_body = request_body;
+    if request_body.get("previous_response_id").is_some() {
+        return Err(build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ResponsesDirect11Policy",
+            "direct_continuation_payload_source_violation",
+            "Direct continuation locator must come from typed protocol context",
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        ));
+    }
+    if let Some(previous_response_id) = &policy.previous_response_id {
+        request_body
+            .as_object_mut()
+            .ok_or_else(|| {
+                build_v3_error_01_source_raised_internal(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ResponsesDirect11Policy",
+                    "direct_continuation_wire_payload_not_object",
+                    "Direct Responses provider wire payload must be an object",
+                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                )
+            })?
+            .insert(
+                "previous_response_id".to_string(),
+                serde_json::Value::String(previous_response_id.clone()),
+            );
+    }
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,
@@ -579,6 +606,7 @@ mod tests {
             },
             request_id: "req-direct-model-binding".to_string(),
             request_body: json!({"model": client_model, "input": "hello"}),
+            previous_response_id: None,
         }
     }
 

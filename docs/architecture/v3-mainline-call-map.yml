@@ -2,6 +2,38 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.codex_sample_retention_snap_scope
+  owner_feature_id: v3.codex_sample_retention_snap_scope
+  summary: Debug-bounded request and response copies move from explicit manifest authorization to Server-owned filesystem persistence without entering MetadataCenter or normal payload truth.
+  edges:
+  - step_id: v3-codex-sample-01
+    from_node: V3CodexSample02ManifestAuthorizationPublished
+    to_node: V3DebugPayloadBudgetApplied
+    caller_symbol: capture_v3_live_raw_request
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3DebugRuntime::redact_payload_for_side_channel
+    callee_file: v3/crates/routecodex-v3-debug/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    resource_flow:
+      consumes: [v3.debug.codex_sample_authorization]
+      produces: [v3.debug.payload_budget]
+      side_channel_reads: [v3.debug.codex_sample_authorization]
+      side_channel_writes: [v3.debug.payload_budget]
+  - step_id: v3-codex-sample-02
+    from_node: V3DebugPayloadBudgetApplied
+    to_node: V3CodexSample06RetentionEnforced
+    caller_symbol: capture_v3_live_raw_request
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: persist_v3_codex_sample_payload
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    resource_flow:
+      consumes: [v3.debug.payload_budget]
+      produces: [v3.debug.codex_sample_filesystem]
+      side_channel_reads: [v3.debug.payload_budget]
+      side_channel_writes: [v3.debug.codex_sample_filesystem]
 - chain_id: v3.server.managed_lifecycle
   owner_feature_id: v3.managed_server_lifecycle
   summary: One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill.
@@ -643,11 +675,13 @@ chains:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
       - v3.request.normal_payload
+      - v3.request.protocol_context
       produces:
       - v3.responses_direct.policy
       side_channel_reads:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
+      - v3.request.protocol_context
       side_channel_writes:
       - v3.responses_direct.policy
   - step_id: v3-rd-10
@@ -1152,6 +1186,7 @@ chains:
     status: anchored
     binding_kind: relay_response_source_slice
     owner_feature_id: v3.hub_relay_response_semantics
+    semantic_io: Responses response semantics are projected once at Resp04 into Chat canonical messages; response id and scope remain explicit control parameters and never enter the stored Chat payload.
     resource_flow:
       consumes:
       - v3.response.provider_raw
@@ -3743,7 +3778,10 @@ chains:
 - chain_id: v3.protocol_conversion_field_parity
   owner_feature_id: v3.protocol_conversion_field_parity
   binding_kind: protocol_field_parity_test_over_existing_relay_chain
-  summary: Field-parity contract overlay over existing V3 Relay chains. It binds adjacent codec/projector owner functions and focused tests; arguments and other payload fields stay in the data plane, routing/switch/continuation control stays in MetadataCenter, and neither side reconstructs the other. It does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.
+  summary: Field-parity contract overlay over existing V3 Relay chains. Source wire is decoded to Chat canonical plus registered payload extensions before Chat Process; outbound projection consumes only governed Chat semantics. Arguments, client metadata, reasoning effort/budget/summary/context/mode/include/display, and other payload fields stay in the data plane. Routing/switch/retry/continuation control stays in typed control resources/MetadataCenter, and neither side reconstructs the other. It does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.
+  design_contract: docs/design/v3-protocol-request-field-projection.md
+  lifecycle_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.yml
+  module_boundary_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml
   edges:
   - step_id: v3-protocol-field-parity-responses-chat-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
@@ -3806,11 +3844,13 @@ chains:
   - step_id: v3-protocol-field-parity-responses-anthropic-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
-    caller_symbol: responses_relay_reasoning_request_config_projects_anthropic_system_marker
+    caller_symbol: responses_relay_reasoning_effort_projects_anthropic_output_config_effort
     caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs
     callee_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
     status: anchored
+    design_conformance: pending
+    nonconformance: Current bound test asserts a reasoning-policy system marker; implementation must replace it with exact effort projection or canonical UnmappedOutboundFields before this edge is conformant.
     binding_kind: protocol_field_parity_test_over_existing_relay_chain
     owner_feature_id: v3.protocol_conversion_field_parity
     resource_flow:
@@ -5367,13 +5407,10 @@ chains:
     status: anchored
     owner_feature_id: v3.responses_session_inflight_admission
     resource_flow:
-      consumes:
-      - v3.server.validated_http_input
-      produces:
-      - v3.server.responses_session_admission
+      consumes: [v3.server.validated_http_input]
+      produces: [v3.server.responses_session_admission]
       side_channel_reads: []
-      side_channel_writes:
-      - v3.server.responses_session_admission
+      side_channel_writes: [v3.server.responses_session_admission]
   - step_id: v3-responses-admission-error-02
     from_node: V3Server03ResponsesSessionAdmissionBlock
     to_node: V3Error01SourceRaised
@@ -5384,13 +5421,10 @@ chains:
     status: anchored
     owner_feature_id: v3.responses_session_inflight_admission
     resource_flow:
-      consumes:
-      - v3.server.responses_session_admission
-      produces:
-      - v3.error.chain
+      consumes: [v3.server.responses_session_admission]
+      produces: [v3.error.chain]
       side_channel_reads: []
-      side_channel_writes:
-      - v3.error.chain
+      side_channel_writes: [v3.error.chain]
   - step_id: v3-responses-admission-release-03
     from_node: V3Server03ResponsesSessionAdmissionBlock
     to_node: V3ServerRespOutbound06ClientFrame
@@ -5401,16 +5435,12 @@ chains:
     status: anchored
     edge_kind: side_channel_lifetime_boundary
     owner_feature_id: v3.responses_session_inflight_admission
-    semantic_input: handler response body with exact listener-local admission permit
-    semantic_output: unchanged HTTP response body whose EOF/error/drop releases only that permit
     resource_flow:
-      consumes:
-      - v3.server.responses_session_admission
-      - v3.response.client_payload
+      consumes: [v3.server.responses_session_admission, v3.response.client_payload]
       produces: []
-      side_channel_reads:
-      - v3.server.responses_session_admission
+      side_channel_reads: [v3.server.responses_session_admission]
       side_channel_writes: []
+
 - chain_id: v3.sse.http_keepalive_boundary
   owner_feature_id: v3.sse_http_keepalive_boundary
   summary: Successful Direct and Relay Responses SSE adds transport-only initial and idle comments after client semantic projection; Error06 keeps event error as its first frame, and EOF/error/drop ends scheduling.

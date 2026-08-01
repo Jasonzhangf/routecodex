@@ -159,7 +159,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
                 "input":[{"role":"user","content":[{"type":"input_text","text":"Return exactly: RCC_V3_MINIMAX_BASIC_OK"}]}],
                 "stream":false,
                 "max_output_tokens":64,
-                "user":"anthropic-user-1"
+                "metadata":{"user_id":"anthropic-user-1"}
             }),
         },
         &transport,
@@ -383,13 +383,13 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
     let observability = output.observability.as_ref().expect("observability");
     assert!(observability.provider_failure_events.iter().all(|failure| {
         failure.error_type.as_deref() == Some("provider_request_compat_error")
-            && failure.message.contains("metadata.unsupported")
+            && failure.message.contains("$.request.client_metadata.client")
     }), "unmappable Responses metadata must be projected through the provider error chain: {observability:?}");
     assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
 #[tokio::test]
-async fn responses_relay_reasoning_request_config_projects_anthropic_system_marker() {
+async fn responses_relay_codex_request_extension_rejects_non_equivalent_anthropic_fields() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -404,11 +404,166 @@ async fn responses_relay_reasoning_request_config_projects_anthropic_system_mark
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-responses-reasoning-to-anthropic-marker".into(),
+            request_id: "req-responses-codex-fields-to-anthropic".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":"hello",
+                "client_metadata": {
+                    "session_id":"session-1",
+                    "thread_id":"thread-1",
+                    "turn_id":"turn-1",
+                    "x-codex-installation-id":"installation-1"
+                },
+                "prompt_cache_key":"session-1",
+                "store":false,
+                "text":{"verbosity":"high"},
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 502);
+    let observability = output.observability.as_ref().expect("observability");
+    let failure = observability
+        .provider_failure_events
+        .first()
+        .expect("provider compatibility failure");
+    for path in [
+        "$.request.client_metadata.session_id",
+        "$.request.client_metadata.thread_id",
+        "$.request.client_metadata.turn_id",
+        "$.request.client_metadata.x-codex-installation-id",
+        "$.request.prompt_cache_key",
+        "$.request.store",
+        "$.request.text.output_config.verbosity",
+    ] {
+        assert!(
+            failure.message.contains(path),
+            "missing {path}: {failure:?}"
+        );
+    }
+    assert!(transport.captured_body.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn responses_tool_search_call_and_output_project_through_chat_to_anthropic_wire() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-tool-search-history-to-anthropic".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[
+                    {
+                        "type":"tool_search_call",
+                        "call_id":"call_search",
+                        "status":"completed",
+                        "execution":"client",
+                        "arguments":{"query":"node repl","limit":8}
+                    },
+                    {
+                        "type":"tool_search_output",
+                        "id":"tso_search",
+                        "call_id":"call_search",
+                        "status":"completed",
+                        "execution":"client",
+                        "tools":[{
+                            "type":"namespace",
+                            "name":"mcp__node_repl",
+                            "tools":[{
+                                "type":"function",
+                                "name":"js",
+                                "description":"Run JS",
+                                "parameters":{"type":"object"}
+                            }]
+                        }]
+                    },
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    }
+                ],
+                "tools":[{
+                    "type":"function",
+                    "name":"tool_search",
+                    "description":"Discover tools",
+                    "parameters":{"type":"object"}
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200, "{output:?}");
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let messages = captured["messages"].as_array().expect("Anthropic messages");
+    let tool_use = messages
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_use" && part["id"] == "call_search")
+        .unwrap_or_else(|| panic!("tool_search call did not reach Anthropic tool_use: {captured}"));
+    assert_eq!(tool_use["name"], "tool_search");
+    assert_eq!(tool_use["input"], json!({"query":"node repl","limit":8}));
+    let tool_result = messages
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_result" && part["tool_use_id"] == "call_search")
+        .unwrap_or_else(|| {
+            panic!("tool_search output did not reach Anthropic tool_result: {captured}")
+        });
+    assert!(tool_result["content"]
+        .to_string()
+        .contains("mcp__node_repl"));
+    assert!(
+        captured.to_string().contains("mcp__node_repl"),
+        "discovered tool payload must remain in the Anthropic tool_result data plane: {captured}"
+    );
+    assert!(
+        !captured.to_string().contains("routecodex_chat_extension")
+            && !captured.to_string().contains("tool_search_output"),
+        "Chat extension/source protocol shape must not cross the adjacent Anthropic codec: {captured}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_reasoning_effort_projects_anthropic_output_config_effort() {
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-reasoning-to-anthropic-effort".into(),
             payload: json!({
                 "model":"MiniMax-M3",
                 "input":[{"role":"user","content":[{"type":"input_text","text":"Use reasoning before answer"}]}],
-                "reasoning":{"effort":"medium","summary":"detailed"},
+                "reasoning":{"effort":"medium"},
                 "stream":false
             }),
         },
@@ -421,20 +576,20 @@ async fn responses_relay_reasoning_request_config_projects_anthropic_system_mark
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert!(
         captured.get("thinking").is_none(),
-        "Anthropic provider request must not synthesize thinking budget from Responses effort/summary: {captured}"
+        "Anthropic provider request must not synthesize thinking budget from Responses effort: {captured}"
     );
     assert!(
         captured.get("reasoning").is_none(),
         "Anthropic provider request must not leak Responses reasoning object: {captured}"
     );
-    assert!(
-        captured["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
-        "Anthropic compatible projection must preserve summary policy as target-valid system marker: {captured}"
-    );
+    assert_eq!(captured["output_config"]["effort"], json!("medium"));
+    assert!(!captured
+        .to_string()
+        .contains("routecodex_reasoning_request"));
 }
 
 #[tokio::test]
-async fn responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker() {
+async fn responses_relay_reasoning_summary_fails_without_anthropic_equivalent() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -449,11 +604,11 @@ async fn responses_relay_string_input_reasoning_request_config_projects_anthropi
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-responses-string-reasoning-to-anthropic-marker".into(),
+            request_id: "req-responses-reasoning-summary-unmapped".into(),
             payload: json!({
                 "model":"MiniMax-M3",
                 "input":"Use reasoning before answering this string-input request",
-                "reasoning":{"effort":"medium","summary":"detailed"},
+                "reasoning":{"summary":"detailed"},
                 "stream":false
             }),
         },
@@ -462,20 +617,13 @@ async fn responses_relay_string_input_reasoning_request_config_projects_anthropi
     .await
     .unwrap();
 
-    assert_eq!(output.status, 200);
-    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
-    assert!(
-        captured.get("thinking").is_none(),
-        "Anthropic provider request must not synthesize thinking budget from Responses effort/summary for string input: {captured}"
-    );
-    assert!(
-        captured.get("reasoning").is_none(),
-        "Anthropic provider request must not leak Responses reasoning for string input: {captured}"
-    );
-    assert!(
-        captured["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
-        "Anthropic compatible projection must preserve string-input summary policy as target-valid system marker: {captured}"
-    );
+    assert_eq!(output.status, 502);
+    let observability = output.observability.as_ref().expect("observability");
+    assert!(observability.provider_failure_events.iter().all(|failure| {
+        failure.error_type.as_deref() == Some("provider_request_compat_error")
+            && failure.message.contains("reasoning_summary_policy")
+    }), "summary policy must fail at Anthropic outbound with its Chat semantic path: {observability:?}");
+    assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
 struct AnthropicProviderJsonReasoningTransport;

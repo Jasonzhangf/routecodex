@@ -14,6 +14,22 @@ pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
+    if payload.get("previous_response_id").is_some() {
+        return Err(
+            "UnmappedOutboundFields target_protocol=responses paths=$.previous_response_id"
+                .to_string(),
+        );
+    }
+    build_v3_openai_responses_request_from_chat_canonical(payload)
+}
+
+fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {
+    if payload.get("reasoning").is_some() {
+        return Err(
+            "RawPayloadShortcut target_protocol=responses path=$.reasoning; use registered Chat reasoning fields"
+                .to_string(),
+        );
+    }
     let projected_source = project_outbound_payload_for_target_protocol(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
@@ -55,6 +71,17 @@ pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
         "moderation",
         "stream_options",
         "stop",
+        "service_tier",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "store",
+        "background",
+        "conversation",
+        "max_tool_calls",
+        "prompt",
+        "text",
+        "truncation",
+        "web_search_options",
     ] {
         if let Some(value) = projected_source.get(key) {
             responses_payload.insert(key.to_string(), value.clone());
@@ -275,13 +302,110 @@ fn apply_outbound_projection_transforms(
 ) -> Result<(), String> {
     match target_protocol {
         V3OutboundTargetProtocol::OpenAiResponses => {
+            project_responses_request_chat_extension_to_openai_responses(projected)?;
             project_openai_responses_client_metadata_to_metadata(projected)?;
-            project_openai_responses_reasoning_effort_to_reasoning(projected);
+            validate_openai_metadata(projected, "responses")?;
+            project_openai_responses_reasoning_extensions_to_reasoning(projected)?;
         }
-        V3OutboundTargetProtocol::OpenAiChat
-        | V3OutboundTargetProtocol::Anthropic
-        | V3OutboundTargetProtocol::Gemini => {}
+        V3OutboundTargetProtocol::OpenAiChat => {
+            project_responses_request_chat_extension_to_openai_chat(projected)?;
+            validate_openai_metadata(projected, "openai_chat")?;
+        }
+        V3OutboundTargetProtocol::Anthropic | V3OutboundTargetProtocol::Gemini => {}
     }
+    Ok(())
+}
+
+fn project_responses_request_chat_extension_to_openai_responses(
+    projected: &mut Value,
+) -> Result<(), String> {
+    let Some(extension) = take_responses_request_chat_extension(projected)? else {
+        return Ok(());
+    };
+    let row = projected
+        .as_object_mut()
+        .ok_or_else(|| "OpenAI Responses projection requires an object".to_string())?;
+    for key in ["client_metadata", "prompt_cache_key", "store", "text"] {
+        if let Some(value) = extension.get(key) {
+            insert_unless_matching(row, key, value.clone(), "responses")?;
+        }
+    }
+    Ok(())
+}
+
+fn project_responses_request_chat_extension_to_openai_chat(
+    projected: &mut Value,
+) -> Result<(), String> {
+    let Some(mut extension) = take_responses_request_chat_extension(projected)? else {
+        return Ok(());
+    };
+    let row = projected
+        .as_object_mut()
+        .ok_or_else(|| "OpenAI Chat projection requires an object".to_string())?;
+    if let Some(client_metadata) = extension.remove("client_metadata") {
+        insert_unless_matching(row, "metadata", client_metadata, "openai_chat")?;
+    }
+    for key in ["prompt_cache_key", "store"] {
+        if let Some(value) = extension.remove(key) {
+            insert_unless_matching(row, key, value, "openai_chat")?;
+        }
+    }
+    if let Some(text) = extension.remove("text") {
+        let text = text.as_object().ok_or_else(|| {
+            "MalformedOutboundField target_protocol=openai_chat path=$.text".to_string()
+        })?;
+        if let Some(verbosity) = text.get("verbosity") {
+            insert_unless_matching(row, "verbosity", verbosity.clone(), "openai_chat")?;
+        }
+        if let Some(format) = text.get("format") {
+            insert_unless_matching(row, "response_format", format.clone(), "openai_chat")?;
+        }
+    }
+    Ok(())
+}
+
+fn take_responses_request_chat_extension(
+    projected: &mut Value,
+) -> Result<Option<Map<String, Value>>, String> {
+    let Some(row) = projected.as_object_mut() else {
+        return Ok(None);
+    };
+    let Some(extension) = row.remove("routecodex_chat_extension") else {
+        return Ok(None);
+    };
+    let mut extension = extension
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "MalformedOutboundField path=$.routecodex_chat_extension".to_string())?;
+    let responses_request = extension.remove("responses_request");
+    if !extension.is_empty() {
+        row.insert(
+            "routecodex_chat_extension".to_string(),
+            Value::Object(extension),
+        );
+    }
+    responses_request
+        .map(|value| {
+            value.as_object().cloned().ok_or_else(|| {
+                "MalformedOutboundField path=$.routecodex_chat_extension.responses_request"
+                    .to_string()
+            })
+        })
+        .transpose()
+}
+
+fn insert_unless_matching(
+    row: &mut Map<String, Value>,
+    field: &str,
+    value: Value,
+    target_protocol: &str,
+) -> Result<(), String> {
+    if row.get(field).is_some_and(|existing| existing != &value) {
+        return Err(format!(
+            "ConflictingOutboundField target_protocol={target_protocol} path=$.{field}"
+        ));
+    }
+    row.insert(field.to_string(), value);
     Ok(())
 }
 
@@ -304,24 +428,88 @@ fn project_openai_responses_client_metadata_to_metadata(
     )
 }
 
-fn project_openai_responses_reasoning_effort_to_reasoning(projected: &mut Value) {
-    let Some(row) = projected.as_object_mut() else {
-        return;
+fn validate_openai_metadata(projected: &Value, target_protocol: &str) -> Result<(), String> {
+    let Some(metadata) = projected.get("metadata") else {
+        return Ok(());
     };
-    let Some(reasoning_effort) = row.remove("reasoning_effort") else {
-        return;
-    };
-    match row.get_mut("reasoning") {
-        Some(Value::Object(reasoning)) => {
-            reasoning
-                .entry("effort".to_string())
-                .or_insert(reasoning_effort);
+    let metadata = metadata.as_object().ok_or_else(|| {
+        format!("MalformedOutboundField target_protocol={target_protocol} path=$.metadata")
+    })?;
+    if metadata.len() > 16 {
+        return Err(format!("MalformedOutboundField target_protocol={target_protocol} path=$.metadata reason=max_16_pairs"));
+    }
+    for (key, value) in metadata {
+        if key.chars().count() > 64 {
+            return Err(format!("MalformedOutboundField target_protocol={target_protocol} path=$.metadata[{key:?}] reason=key_max_64"));
         }
-        Some(_) => {}
-        None => {
-            row.insert("reasoning".to_string(), json!({"effort": reasoning_effort}));
+        let value = value.as_str().ok_or_else(|| format!("MalformedOutboundField target_protocol={target_protocol} path=$.metadata[{key:?}] reason=value_must_be_string"))?;
+        if value.chars().count() > 512 {
+            return Err(format!("MalformedOutboundField target_protocol={target_protocol} path=$.metadata[{key:?}] reason=value_max_512"));
         }
     }
+    Ok(())
+}
+
+fn project_openai_responses_reasoning_extensions_to_reasoning(
+    projected: &mut Value,
+) -> Result<(), String> {
+    let Some(row) = projected.as_object_mut() else {
+        return Ok(());
+    };
+    let mut fields = Vec::new();
+    for (source, target) in [
+        ("reasoning_effort", "effort"),
+        ("reasoning_summary_policy", "summary"),
+        ("reasoning_context_policy", "context"),
+        ("reasoning_mode", "mode"),
+    ] {
+        if let Some(value) = row.remove(source) {
+            let valid = match source {
+                "reasoning_effort" => value.as_str().is_some_and(|value| {
+                    matches!(
+                        value,
+                        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+                    )
+                }),
+                "reasoning_summary_policy" => value
+                    .as_str()
+                    .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed")),
+                "reasoning_context_policy" => value
+                    .as_str()
+                    .is_some_and(|value| matches!(value, "auto" | "current_turn" | "all_turns")),
+                "reasoning_mode" => value.as_str().is_some_and(|value| !value.trim().is_empty()),
+                _ => false,
+            };
+            if !valid {
+                return Err(format!(
+                    "MalformedOutboundField target_protocol=responses path=$.request.{source}"
+                ));
+            }
+            fields.push((target, value));
+        }
+    }
+    if fields.is_empty() {
+        return Ok(());
+    }
+    let reasoning = row
+        .entry("reasoning".to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| {
+            "ConflictingOutboundFields target_protocol=responses path=$.reasoning".to_string()
+        })?;
+    for (key, value) in fields {
+        if reasoning
+            .get(key)
+            .is_some_and(|existing| existing != &value)
+        {
+            return Err(format!(
+                "ConflictingOutboundFields target_protocol=responses path=$.reasoning.{key}"
+            ));
+        }
+        reasoning.insert(key.to_string(), value);
+    }
+    Ok(())
 }
 
 fn collect_outbound_control_field_paths(value: &Value) -> Vec<String> {
@@ -491,7 +679,6 @@ fn allowed_top_level_outbound_fields(
             "n",
             "frequency_penalty",
             "presence_penalty",
-            "reasoning",
             "reasoning_effort",
             "audio",
             "modalities",
@@ -505,6 +692,7 @@ fn allowed_top_level_outbound_fields(
             "store",
             "verbosity",
             "web_search_options",
+            "routecodex_chat_extension",
             "function_call",
             "functions",
         ],
@@ -538,6 +726,21 @@ fn allowed_top_level_outbound_fields(
             "moderation",
             "client_metadata",
             "reasoning_effort",
+            "reasoning_summary_policy",
+            "reasoning_context_policy",
+            "reasoning_mode",
+            "service_tier",
+            "prompt_cache_key",
+            "prompt_cache_retention",
+            "store",
+            "background",
+            "conversation",
+            "max_tool_calls",
+            "prompt",
+            "text",
+            "truncation",
+            "web_search_options",
+            "routecodex_chat_extension",
         ],
         V3OutboundTargetProtocol::Anthropic => &[
             "model",
@@ -559,12 +762,21 @@ fn allowed_top_level_outbound_fields(
             "stop_sequences",
             "metadata",
             "user",
-            "thinking",
-            "reasoning",
             "reasoning_effort",
-            "reasoning_effort",
+            "reasoning_budget_tokens",
+            "reasoning_summary_policy",
+            "reasoning_context_policy",
+            "reasoning_mode",
+            "reasoning_include_thoughts",
+            "reasoning_display_policy",
+            "reasoning_thinking_mode",
+            "client_metadata",
             "parallel_tool_calls",
             "response_format",
+            "anthropic_entry_system",
+            "context_management",
+            "output_config",
+            "routecodex_chat_extension",
         ],
         V3OutboundTargetProtocol::Gemini => &[
             "model",
@@ -634,8 +846,10 @@ fn chat_content_to_responses_content(content: &Value, role: &str) -> Result<Valu
     }
 }
 
-fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
-    let row = call.as_object()?;
+fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>, String> {
+    let Some(row) = call.as_object() else {
+        return Ok(None);
+    };
     let function = row.get("function").and_then(Value::as_object);
     let responses_tool_call_type = row
         .get("routecodex_chat_extension")
@@ -648,13 +862,19 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
         .or_else(|| row.get("id"))
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty())?;
+        .filter(|value| !value.is_empty());
+    let Some(call_id) = call_id else {
+        return Ok(None);
+    };
     let name = function
         .and_then(|entry| entry.get("name"))
         .or_else(|| row.get("name"))
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty())?;
+        .filter(|value| !value.is_empty());
+    let Some(name) = name else {
+        return Ok(None);
+    };
     let arguments = function
         .and_then(|entry| entry.get("arguments"))
         .or_else(|| row.get("arguments"))
@@ -672,7 +892,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
             .ok()
             .and_then(|value| value.get("input").cloned())
             .unwrap_or_else(|| Value::String(arguments_text.clone()));
-        return Some(Value::Object(Map::from_iter([
+        return Ok(Some(Value::Object(Map::from_iter([
             (
                 "type".to_string(),
                 Value::String("custom_tool_call".to_string()),
@@ -681,10 +901,28 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
             ("call_id".to_string(), Value::String(call_id.to_string())),
             ("name".to_string(), Value::String(name.to_string())),
             ("input".to_string(), input),
-        ])));
+        ]))));
     }
 
-    Some(Value::Object(Map::from_iter([
+    if responses_tool_call_type == "tool_search_call" {
+        let arguments = serde_json::from_str::<Value>(&arguments_text).map_err(|error| {
+            format!(
+                "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_call.arguments: {error}"
+            )
+        })?;
+        let mut item = Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("tool_search_call".to_string()),
+            ),
+            ("call_id".to_string(), Value::String(call_id.to_string())),
+            ("arguments".to_string(), arguments),
+        ]);
+        project_responses_item_extension_fields(row, &mut item);
+        return Ok(Some(Value::Object(item)));
+    }
+
+    Ok(Some(Value::Object(Map::from_iter([
         (
             "type".to_string(),
             Value::String("function_call".to_string()),
@@ -693,7 +931,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("name".to_string(), Value::String(name.to_string())),
         ("arguments".to_string(), Value::String(arguments_text)),
-    ])))
+    ]))))
 }
 
 fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&str> {
@@ -704,7 +942,9 @@ fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&st
         .filter(|value| !value.is_empty())
 }
 
-fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
+fn chat_tool_result_to_responses_input_item(
+    row: &Map<String, Value>,
+) -> Result<Option<Value>, String> {
     let responses_tool_output_type = row
         .get("routecodex_chat_extension")
         .and_then(|extension| extension.get("responses_tool_output_type"))
@@ -716,7 +956,10 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
         .or_else(|| row.get("id"))
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|value| !value.is_empty())?;
+        .filter(|value| !value.is_empty());
+    let Some(call_id) = call_id else {
+        return Ok(None);
+    };
     let output = row
         .get("content")
         .or_else(|| row.get("output"))
@@ -729,7 +972,31 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| compact_tool_id("fc_", call_id));
 
-    Some(Value::Object(Map::from_iter([
+    if responses_tool_output_type == "tool_search_output" {
+        let tools = serde_json::from_str::<Value>(&output).map_err(|error| {
+            format!(
+                "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_output.tools: {error}"
+            )
+        })?;
+        if !tools.is_array() {
+            return Err(
+                "MalformedOutboundField target_protocol=responses path=$.input[].tool_search_output.tools"
+                    .to_string(),
+            );
+        }
+        let mut item = Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("tool_search_output".to_string()),
+            ),
+            ("call_id".to_string(), Value::String(call_id.to_string())),
+            ("tools".to_string(), tools),
+        ]);
+        project_responses_item_extension_fields(row, &mut item);
+        return Ok(Some(Value::Object(item)));
+    }
+
+    Ok(Some(Value::Object(Map::from_iter([
         (
             "type".to_string(),
             Value::String(responses_tool_output_type.to_string()),
@@ -737,7 +1004,28 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
         ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
         ("output".to_string(), Value::String(output)),
-    ])))
+    ]))))
+}
+
+fn project_responses_item_extension_fields(
+    chat_item: &Map<String, Value>,
+    responses_item: &mut Map<String, Value>,
+) {
+    let Some(extension) = chat_item
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    for (source, target) in [
+        ("responses_item_id", "id"),
+        ("responses_status", "status"),
+        ("responses_execution", "execution"),
+    ] {
+        if let Some(value) = extension.get(source) {
+            responses_item.insert(target.to_string(), value.clone());
+        }
+    }
 }
 
 pub(crate) fn build_responses_input_from_chat_messages(
@@ -754,7 +1042,7 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .unwrap_or("user")
             .trim();
         if role.eq_ignore_ascii_case("tool") {
-            if let Some(item) = chat_tool_result_to_responses_input_item(row) {
+            if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
                 output.push(item);
             }
             continue;
@@ -763,7 +1051,10 @@ pub(crate) fn build_responses_input_from_chat_messages(
             if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
                 let items = tool_calls
                     .iter()
-                    .filter_map(chat_tool_call_to_responses_input_item)
+                    .map(chat_tool_call_to_responses_input_item)
+                    .collect::<Result<Vec<Option<Value>>, String>>()?
+                    .into_iter()
+                    .flatten()
                     .collect::<Vec<Value>>();
                 if !items.is_empty() {
                     output.extend(items);
@@ -1236,137 +1527,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
-        let payload = json!({
-            "model": "gpt-test",
-            "messages": [
+    fn tool_search_chat_extensions_round_trip_to_responses_fields() {
+        let input = build_responses_input_from_chat_messages(&[
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_search",
+                    "type": "function",
+                    "function": {
+                        "name": "tool_search",
+                        "arguments": "{\"query\":\"node repl\",\"limit\":8}"
+                    },
+                    "routecodex_chat_extension": {
+                        "responses_tool_call_type": "tool_search_call",
+                        "responses_status": "completed",
+                        "responses_execution": "client"
+                    }
+                }]
+            }),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_search",
+                "content": "[{\"type\":\"namespace\",\"name\":\"mcp__node_repl\",\"tools\":[]}]",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_type": "tool_search_output",
+                    "responses_output_field": "tools",
+                    "responses_item_id": "tso_123",
+                    "responses_status": "completed",
+                    "responses_execution": "client"
+                }
+            }),
+        ])
+        .expect("registered Chat extensions must project back to Responses wire fields");
+
+        assert_eq!(
+            input,
+            json!([
                 {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_6b0251fee24f41b2b045b04e",
-                        "type": "function",
-                        "function": {
-                            "name": "exec_command",
-                            "arguments": "{\"cmd\":\"pwd\"}"
-                        }
-                    }]
+                    "type": "tool_search_call",
+                    "call_id": "call_search",
+                    "arguments": {"query": "node repl", "limit": 8},
+                    "status": "completed",
+                    "execution": "client"
                 },
                 {
-                    "role": "tool",
-                    "tool_call_id": "call_6b0251fee24f41b2b045b04e",
-                    "content": "ok"
+                    "type": "tool_search_output",
+                    "id": "tso_123",
+                    "call_id": "call_search",
+                    "tools": [{"type": "namespace", "name": "mcp__node_repl", "tools": []}],
+                    "status": "completed",
+                    "execution": "client"
                 }
-            ]
-        });
-
-        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-            .expect("Responses wire projection must succeed");
-        let input = request["input"]
-            .as_array()
-            .expect("Responses wire input must be an array");
-
-        assert_eq!(input[0]["call_id"], "call_6b0251fee24f41b2b045b04e");
-        let item_id = input[0]["id"].as_str().expect("function_call id");
-        assert!(item_id.starts_with("fc_6b0251fee24f41b2b045b04e_"));
-        assert!(item_id.len() <= 64);
-        assert_eq!(input[1]["call_id"], input[0]["call_id"]);
-        assert_eq!(input[1]["id"], input[0]["id"]);
-    }
-
-    #[test]
-    fn responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids() {
-        let repeated_prefix = "call_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
-        let first_call_id = format!("{repeated_prefix}_left");
-        let second_call_id = format!("{repeated_prefix}_right");
-        let payload = json!({
-            "model": "gpt-test",
-            "messages": [{
-                "role": "assistant",
-                "content": null,
-                "tool_calls": [
-                    {
-                        "id": first_call_id,
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    },
-                    {
-                        "id": second_call_id,
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    }
-                ]
-            }]
-        });
-
-        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-            .expect("Responses wire projection must succeed");
-        let input = request["input"]
-            .as_array()
-            .expect("Responses wire input must be an array");
-
-        assert_ne!(input[0]["id"], input[1]["id"]);
-        assert!(input[0]["id"].as_str().unwrap().starts_with("fc_"));
-        assert!(input[1]["id"].as_str().unwrap().starts_with("fc_"));
-        assert!(input[0]["id"].as_str().unwrap().len() <= 64);
-        assert!(input[1]["id"].as_str().unwrap().len() <= 64);
-    }
-
-    #[test]
-    fn responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions() {
-        let payload = json!({
-            "model": "gpt-test",
-            "messages": [{
-                "role": "assistant",
-                "content": null,
-                "tool_calls": [
-                    {
-                        "id": "call_same/value",
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    },
-                    {
-                        "id": "call_same:value",
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    },
-                    {
-                        "id": "call_same",
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    },
-                    {
-                        "id": "fc_same",
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    },
-                    {
-                        "id": "functions.same",
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{}"}
-                    }
-                ]
-            }]
-        });
-
-        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-            .expect("Responses wire projection must succeed");
-        let input = request["input"]
-            .as_array()
-            .expect("Responses wire input must be an array");
-
-        let ids = input
-            .iter()
-            .map(|item| item["id"].as_str().expect("Responses item id"))
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(
-            ids.len(),
-            input.len(),
-            "Responses fc_* item ids collided: {input:?}"
+            ])
         );
-        for item in input {
-            assert!(item["id"].as_str().unwrap().starts_with("fc_same"));
-        }
     }
 
     #[test]
@@ -1402,36 +1616,98 @@ mod tests {
     }
 
     #[test]
-    fn openai_chat_wire_preserves_same_protocol_request_fields() {
+    fn openai_responses_wire_rebuilds_registered_reasoning_fields_only() {
         let payload = json!({
             "model": "gpt-test",
             "messages": [{"role": "user", "content": "hello"}],
-            "audio": {"format":"wav", "voice":"alloy"},
-            "modalities": ["text", "audio"],
-            "prediction": {"type":"content", "content":"expected"},
-            "prompt_cache_key": "cache-key",
-            "prompt_cache_options": {"ttl":"24h"},
-            "prompt_cache_retention": "24h",
-            "service_tier": "priority",
-            "store": false,
-            "web_search_options": {"search_context_size":"low"}
+            "reasoning_effort": "max",
+            "reasoning_summary_policy": "detailed",
+            "reasoning_context_policy": "current_turn",
+            "reasoning_mode": "standard"
         });
 
-        let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-            .expect("same-protocol Chat fields must reach provider wire unchanged");
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("registered Chat reasoning fields must project to Responses reasoning");
 
-        for key in [
-            "audio",
-            "modalities",
-            "prediction",
-            "prompt_cache_key",
-            "prompt_cache_options",
-            "prompt_cache_retention",
-            "service_tier",
-            "store",
-            "web_search_options",
+        assert_eq!(
+            request["reasoning"],
+            json!({
+                "effort":"max",
+                "summary":"detailed",
+                "context":"current_turn",
+                "mode":"standard"
+            })
+        );
+        for field in [
+            "reasoning_effort",
+            "reasoning_summary_policy",
+            "reasoning_context_policy",
+            "reasoning_mode",
         ] {
-            assert_eq!(request[key], payload[key], "field {key} drifted");
+            assert!(request.get(field).is_none(), "{request}");
+        }
+    }
+
+    #[test]
+    fn openai_responses_wire_rejects_non_responses_reasoning_extensions() {
+        for field in [
+            "reasoning_budget_tokens",
+            "reasoning_include_thoughts",
+            "reasoning_display_policy",
+            "reasoning_thinking_mode",
+        ] {
+            let mut payload = json!({
+                "model": "gpt-test",
+                "messages": [{"role": "user", "content": "hello"}]
+            });
+            payload
+                .as_object_mut()
+                .unwrap()
+                .insert(field.to_string(), json!(2048));
+            let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+                .expect_err("non-Responses reasoning semantic must be unmapped");
+            assert!(error.contains(field), "{error}");
+        }
+    }
+
+    #[test]
+    fn anthropic_thinking_chat_fields_are_unmapped_for_responses_wire() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "reasoning"}],
+            "reasoning_thinking_mode": "enabled",
+            "reasoning_budget_tokens": 1024
+        });
+        let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect_err("Anthropic thinking mode and numeric budget have no Responses field");
+        assert!(error.contains("reasoning_thinking_mode"), "{error}");
+        assert!(error.contains("reasoning_budget_tokens"), "{error}");
+    }
+
+    #[test]
+    fn openai_responses_metadata_limits_fail_before_wire() {
+        let cases = [
+            (json!({"k": 1}), "value_must_be_string"),
+            (json!({"k".repeat(65): "v"}), "key_max_64"),
+            (json!({"k": "v".repeat(513)}), "value_max_512"),
+            (
+                Value::Object(
+                    (0..17)
+                        .map(|index| (format!("k{index}"), json!("v")))
+                        .collect(),
+                ),
+                "max_16_pairs",
+            ),
+        ];
+        for (metadata, expected) in cases {
+            let payload = json!({
+                "model": "gpt-test",
+                "messages": [{"role": "user", "content": "hello"}],
+                "client_metadata": metadata
+            });
+            let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+                .expect_err("invalid OpenAI metadata must fail before wire");
+            assert!(error.contains(expected), "{error}");
         }
     }
 

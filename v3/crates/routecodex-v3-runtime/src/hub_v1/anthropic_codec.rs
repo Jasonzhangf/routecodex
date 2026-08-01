@@ -13,8 +13,7 @@ use responses_to_anthropic::{
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
 const ANTHROPIC_ENTRY_SYSTEM_EXTENSION: &str = "anthropic_entry_system";
-const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] =
-    &["context_management", "output_config"];
+const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] = &["context_management"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3AnthropicCodecStage {
@@ -93,6 +92,8 @@ pub enum V3AnthropicCodecError {
     MalformedProviderError,
     #[error("Anthropic codec malformed {field}")]
     MalformedField { field: &'static str },
+    #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
+    UnmappedOutboundFields { paths: String },
 }
 
 pub fn validate_v3_anthropic_client_input_payload(
@@ -267,8 +268,56 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
             anthropic_tool_choice_as_responses_tool_choice(tool_choice),
         );
     }
-    if let Some(thinking) = object.get("thinking") {
-        output.insert("reasoning".to_string(), json!({"thinking":thinking}));
+    if let Some(thinking) = object.get("thinking").and_then(Value::as_object) {
+        for (source, target) in [
+            ("type", "reasoning_thinking_mode"),
+            ("budget_tokens", "reasoning_budget_tokens"),
+            ("display", "reasoning_display_policy"),
+        ] {
+            if let Some(value) = thinking.get(source) {
+                output.insert(target.to_string(), value.clone());
+            }
+        }
+    }
+    if let Some(output_config) = object.get("output_config").and_then(Value::as_object) {
+        if let Some(effort) = output_config.get("effort") {
+            output.insert("reasoning_effort".to_string(), effort.clone());
+        }
+    }
+    let mut responses_request_extension = Map::new();
+    if let Some(metadata) = object.get("metadata") {
+        let metadata = metadata
+            .as_object()
+            .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
+        if metadata.keys().any(|key| key != "user_id") {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "metadata.unsupported",
+            });
+        }
+        if let Some(user_id) = metadata.get("user_id").filter(|value| !value.is_null()) {
+            let user_id = user_id
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "metadata.user_id",
+                })?;
+            responses_request_extension
+                .insert("client_metadata".to_string(), json!({"user_id": user_id}));
+        }
+    }
+    if let Some(format) = object
+        .get("output_config")
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("format"))
+    {
+        responses_request_extension.insert("text".to_string(), json!({"format": format}));
+    }
+    if !responses_request_extension.is_empty() {
+        output.insert(
+            "routecodex_chat_extension".to_string(),
+            json!({"responses_request": responses_request_extension}),
+        );
     }
     for key in ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS {
         if let Some(value) = object.get(*key) {
@@ -276,7 +325,6 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
         }
     }
     for key in [
-        "metadata",
         "temperature",
         "top_p",
         "top_k",
@@ -315,6 +363,8 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
+    let responses_request_extension = responses_request_chat_extension(object)?;
+    reject_unmapped_anthropic_payload_extensions(object, responses_request_extension)?;
     let mut output = Map::new();
     output.insert(
         "model".to_string(),
@@ -332,9 +382,6 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
         .and_then(responses_system_as_anthropic_system)
     {
         system_parts.push(system);
-    }
-    if let Some(marker) = responses_reasoning_policy_as_anthropic_system_marker(object) {
-        system_parts.push(marker);
     }
     let messages = if let Some(messages) = object.get("messages") {
         chat_messages_as_anthropic_messages(messages, &mut system_parts)?
@@ -362,7 +409,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
             responses_tool_choice_as_anthropic_tool_choice(tool_choice)?,
         );
     }
-    if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {
+    if let Some(thinking) = responses_reasoning_fields_as_anthropic_thinking(object)? {
         output.insert("thinking".to_string(), thinking);
     }
     for key in ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS {
@@ -370,13 +417,18 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
             output.insert((*key).to_string(), value.to_owned());
         }
     }
+    project_responses_text_as_anthropic_output_config(&mut output, responses_request_extension)?;
+    project_chat_reasoning_effort_as_anthropic_output_config(&mut output, object)?;
     for key in ["temperature", "top_p", "top_k"] {
         if let Some(value) = object.get(key) {
             output.insert(key.to_string(), value.to_owned());
         }
     }
-    if let Some(metadata) = responses_metadata_as_anthropic_metadata(object)? {
+    if let Some(metadata) = responses_metadata_as_anthropic_metadata(responses_request_extension)? {
         output.insert("metadata".to_string(), metadata);
+    }
+    if responses_prompt_cache_key_for_anthropic(responses_request_extension)?.is_some() {
+        output.insert("cache_control".to_string(), json!({"type": "ephemeral"}));
     }
     if let Some(value) = object
         .get("max_output_tokens")
@@ -455,110 +507,336 @@ fn parse_claude_code_system_prompt_blocks(content: &str) -> Result<Vec<Value>, S
 }
 
 fn responses_metadata_as_anthropic_metadata(
+    responses_request_extension: Option<&Map<String, Value>>,
+) -> Result<Option<Value>, V3AnthropicCodecError> {
+    Ok(responses_client_user_id(responses_request_extension)?
+        .map(|user_id| json!({"user_id": user_id})))
+}
+
+fn responses_prompt_cache_key_for_anthropic(
+    extension: Option<&Map<String, Value>>,
+) -> Result<Option<&str>, V3AnthropicCodecError> {
+    let Some(value) = extension.and_then(|row| row.get("prompt_cache_key")) else {
+        return Ok(None);
+    };
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(Some)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension.responses_request.prompt_cache_key",
+        })
+}
+
+fn responses_request_chat_extension(
+    object: &Map<String, Value>,
+) -> Result<Option<&Map<String, Value>>, V3AnthropicCodecError> {
+    let Some(extension) = object.get("routecodex_chat_extension") else {
+        return Ok(None);
+    };
+    let extension = extension
+        .as_object()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension",
+        })?;
+    let responses_request =
+        extension
+            .get("responses_request")
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "routecodex_chat_extension.responses_request",
+            })?;
+    responses_request
+        .as_object()
+        .map(Some)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension.responses_request",
+        })
+}
+
+fn responses_client_user_id(
+    extension: Option<&Map<String, Value>>,
+) -> Result<Option<&str>, V3AnthropicCodecError> {
+    let Some(client_metadata) = extension.and_then(|row| row.get("client_metadata")) else {
+        return Ok(None);
+    };
+    let client_metadata =
+        client_metadata
+            .as_object()
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "routecodex_chat_extension.responses_request.client_metadata",
+            })?;
+    if client_metadata.len() != 1 {
+        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+            paths: client_metadata
+                .keys()
+                .map(|key| format!("$.request.client_metadata.{key}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        });
+    }
+    client_metadata
+        .get("user_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(Some)
+        .ok_or(V3AnthropicCodecError::UnmappedOutboundFields {
+            paths: "$.request.client_metadata.user_id".to_string(),
+        })
+}
+
+fn project_responses_text_as_anthropic_output_config(
+    output: &mut Map<String, Value>,
+    extension: Option<&Map<String, Value>>,
+) -> Result<(), V3AnthropicCodecError> {
+    let Some(text) = extension.and_then(|row| row.get("text")) else {
+        return Ok(());
+    };
+    let text = text
+        .as_object()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension.responses_request.text",
+        })?;
+    let mut output_config = output
+        .remove("output_config")
+        .map(into_object)
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(verbosity) = text.get("verbosity") {
+        let verbosity = verbosity
+            .as_str()
+            .filter(|value| matches!(*value, "low" | "medium" | "high"))
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "routecodex_chat_extension.responses_request.text.verbosity",
+            })?;
+        insert_matching_anthropic_output_config_field(
+            &mut output_config,
+            "effort",
+            Value::String(verbosity.to_string()),
+        )?;
+    }
+    if let Some(format) = text.get("format") {
+        match format.get("type").and_then(Value::as_str) {
+            Some("text") => {}
+            Some("json_schema") => {
+                if format.get("strict").and_then(Value::as_bool) == Some(false) {
+                    return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+                        paths: "$.request.text.output_config.format.strict".to_string(),
+                    });
+                }
+                let schema =
+                    format
+                        .get("schema")
+                        .cloned()
+                        .ok_or(V3AnthropicCodecError::MalformedField {
+                            field: "routecodex_chat_extension.responses_request.text.format.schema",
+                        })?;
+                insert_matching_anthropic_output_config_field(
+                    &mut output_config,
+                    "format",
+                    json!({"type":"json_schema","schema":schema}),
+                )?;
+            }
+            _ => {
+                return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+                    paths: "$.request.text.output_config.format.type".to_string(),
+                });
+            }
+        }
+    }
+    if !output_config.is_empty() {
+        output.insert("output_config".to_string(), Value::Object(output_config));
+    }
+    Ok(())
+}
+
+fn insert_matching_anthropic_output_config_field(
+    output_config: &mut Map<String, Value>,
+    field: &'static str,
+    value: Value,
+) -> Result<(), V3AnthropicCodecError> {
+    if output_config
+        .get(field)
+        .is_some_and(|existing| existing != &value)
+    {
+        return Err(V3AnthropicCodecError::MalformedField { field });
+    }
+    output_config.insert(field.to_string(), value);
+    Ok(())
+}
+
+fn responses_reasoning_fields_as_anthropic_thinking(
     object: &Map<String, Value>,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
-    let user = object.get("user").and_then(Value::as_str).map(str::trim);
-    let user = user.filter(|value| !value.is_empty());
-    let metadata = object.get("metadata");
-    let mut user_id: Option<String> = user.map(str::to_string);
-    if let Some(metadata) = metadata {
-        let metadata = metadata
-            .as_object()
-            .ok_or(V3AnthropicCodecError::MalformedField { field: "metadata" })?;
-        for (key, value) in metadata {
-            if key != "user_id" {
+    let mode = object.get("reasoning_thinking_mode");
+    let explicit_budget = object
+        .get("reasoning_budget_tokens")
+        .map(|value| {
+            responses_reasoning_budget_tokens(value).ok_or(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_budget_tokens",
+            })
+        })
+        .transpose()?;
+    let display = object.get("reasoning_display_policy");
+    if mode.is_none() && explicit_budget.is_none() && display.is_none() {
+        return Ok(None);
+    }
+    let mode = mode
+        .and_then(Value::as_str)
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning_thinking_mode",
+        })?;
+    let mut thinking = Map::new();
+    match mode {
+        "enabled" => {
+            let budget = explicit_budget.ok_or(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_budget_tokens",
+            })?;
+            if budget < 1024 {
                 return Err(V3AnthropicCodecError::MalformedField {
-                    field: "metadata.unsupported",
+                    field: "reasoning_budget_tokens",
                 });
             }
-            let candidate = value
-                .as_str()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "metadata.user_id",
-                })?;
-            if user_id
-                .as_deref()
-                .is_some_and(|existing| existing != candidate)
+            if object
+                .get("max_output_tokens")
+                .or_else(|| object.get("max_completion_tokens"))
+                .or_else(|| object.get("max_tokens"))
+                .and_then(Value::as_u64)
+                .is_some_and(|max_tokens| budget >= max_tokens)
             {
                 return Err(V3AnthropicCodecError::MalformedField {
-                    field: "metadata.user_id",
+                    field: "reasoning_budget_tokens",
                 });
             }
-            user_id = Some(candidate.to_string());
+            thinking.insert("type".to_string(), Value::String("enabled".to_string()));
+            thinking.insert("budget_tokens".to_string(), json!(budget));
+        }
+        "adaptive" => {
+            if explicit_budget.is_some() {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "reasoning_budget_tokens",
+                });
+            }
+            thinking.insert("type".to_string(), Value::String("adaptive".to_string()));
+        }
+        "disabled" => {
+            if explicit_budget.is_some() || display.is_some() {
+                return Err(V3AnthropicCodecError::MalformedField {
+                    field: "reasoning_thinking_mode",
+                });
+            }
+            thinking.insert("type".to_string(), Value::String("disabled".to_string()));
+        }
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_thinking_mode",
+            });
         }
     }
-    Ok(user_id.map(|user_id| json!({"user_id": user_id})))
-}
-
-fn responses_reasoning_request_config_as_anthropic_thinking(
-    object: &Map<String, Value>,
-) -> Option<Value> {
-    let reasoning = object.get("reasoning");
-    if let Some(thinking) = reasoning.and_then(|reasoning| reasoning.get("thinking")) {
-        return Some(thinking.clone());
-    }
-    let explicit_budget = reasoning
-        .and_then(|reasoning| reasoning.get("budget_tokens"))
-        .or_else(|| reasoning.and_then(|reasoning| reasoning.get("thinking_budget")))
-        .and_then(responses_reasoning_budget_tokens)?;
-    let mut thinking = Map::new();
-    thinking.insert("type".to_string(), Value::String("enabled".to_string()));
-    thinking.insert("budget_tokens".to_string(), json!(explicit_budget));
-    if let Some(display) = reasoning.and_then(|reasoning| reasoning.get("display")) {
+    if let Some(display) = display {
+        if !display
+            .as_str()
+            .is_some_and(|value| matches!(value, "summarized" | "omitted"))
+        {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_display_policy",
+            });
+        }
         thinking.insert("display".to_string(), display.clone());
     }
-    Some(Value::Object(thinking))
+    Ok(Some(Value::Object(thinking)))
 }
 
-fn responses_reasoning_policy_as_anthropic_system_marker(
+fn reject_unmapped_anthropic_payload_extensions(
     object: &Map<String, Value>,
-) -> Option<String> {
-    let reasoning = object.get("reasoning")?.as_object()?;
-    let mut policies = Vec::new();
-    if let Some(summary) = reasoning.get("summary") {
-        if let Some(value) = reasoning_policy_value(summary) {
-            policies.push(format!("summary_policy={value}"));
+    extension: Option<&Map<String, Value>>,
+) -> Result<(), V3AnthropicCodecError> {
+    let mut paths = Vec::new();
+    for key in [
+        "reasoning_summary_policy",
+        "reasoning_context_policy",
+        "reasoning_mode",
+        "reasoning_include_thoughts",
+    ] {
+        if object.contains_key(key) {
+            paths.push(format!("$.request.{key}"));
         }
     }
-    if let Some(context) = reasoning.get("context") {
-        if let Some(value) = reasoning_policy_value(context) {
-            policies.push(format!("context_policy={value}"));
+    if let Some(extension) = extension {
+        for key in extension.keys() {
+            if !matches!(key.as_str(), "client_metadata" | "text") {
+                paths.push(format!("$.request.{key}"));
+            }
+        }
+        if let Some(client_metadata) = extension.get("client_metadata") {
+            let client_metadata =
+                client_metadata
+                    .as_object()
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "routecodex_chat_extension.responses_request.client_metadata",
+                    })?;
+            if client_metadata.is_empty() {
+                paths.push("$.request.client_metadata".to_string());
+            }
+            for key in client_metadata
+                .keys()
+                .filter(|key| key.as_str() != "user_id")
+            {
+                paths.push(format!("$.request.client_metadata.{key}"));
+            }
+        }
+        if let Some(text) = extension.get("text") {
+            let text = text
+                .as_object()
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "routecodex_chat_extension.responses_request.text",
+                })?;
+            for key in text
+                .keys()
+                .filter(|key| key.as_str() != "format")
+            {
+                paths.push(format!("$.request.text.output_config.{key}"));
+            }
         }
     }
-    if let Some(mode) = reasoning.get("mode") {
-        if let Some(value) = reasoning_policy_value(mode) {
-            policies.push(format!("mode_policy={value}"));
-        }
-    }
-    if policies.is_empty() {
-        None
+    if paths.is_empty() {
+        Ok(())
     } else {
-        Some(format!(
-            "<routecodex_reasoning_request {}></routecodex_reasoning_request>",
-            policies.join(" ")
-        ))
+        Err(V3AnthropicCodecError::UnmappedOutboundFields {
+            paths: paths.join(","),
+        })
     }
 }
 
-fn reasoning_policy_value(value: &Value) -> Option<String> {
-    match value {
-        Value::Bool(false) | Value::Null => None,
-        Value::Bool(true) => Some("true".to_string()),
-        Value::String(text) => {
-            let text = text.trim();
-            (!text.is_empty()
-                && !matches!(
-                    text.to_ascii_lowercase().as_str(),
-                    "none" | "off" | "disabled" | "disable" | "false"
-                ))
-            .then(|| text.to_string())
-        }
-        Value::Number(number) => Some(number.to_string()),
-        Value::Array(items) => (!items.is_empty()).then(|| "array".to_string()),
-        Value::Object(object) => (!object.is_empty()).then(|| "object".to_string()),
+fn project_chat_reasoning_effort_as_anthropic_output_config(
+    output: &mut Map<String, Value>,
+    object: &Map<String, Value>,
+) -> Result<(), V3AnthropicCodecError> {
+    let Some(effort) = object.get("reasoning_effort") else {
+        return Ok(());
+    };
+    let effort = effort
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "reasoning_effort",
+        })?
+        .to_ascii_lowercase();
+    if !matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max") {
+        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+            paths: "$.request.reasoning_effort".to_string(),
+        });
     }
+    let output_config = output
+        .entry("output_config".to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "output_config",
+        })?;
+    insert_matching_anthropic_output_config_field(output_config, "effort", Value::String(effort))
 }
 
 fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
@@ -1234,4 +1512,70 @@ fn anthropic_tool_choice_as_responses_tool_choice(value: &Value) -> Value {
         }
     }
     value.to_owned()
+}
+
+#[cfg(test)]
+mod field_projection_tests {
+    use super::*;
+
+    fn base_chat() -> Value {
+        json!({
+            "model":"claude-test",
+            "messages":[{"role":"user","content":"hello"}],
+            "max_tokens":4096
+        })
+    }
+
+    #[test]
+    fn anthropic_thinking_fields_require_valid_exact_shape() {
+        let mut enabled = base_chat();
+        enabled["reasoning_thinking_mode"] = json!("enabled");
+        enabled["reasoning_budget_tokens"] = json!(2048);
+        enabled["reasoning_display_policy"] = json!("omitted");
+        let wire = encode_v3_responses_semantic_as_anthropic_request(enabled)
+            .expect("valid enabled thinking must project exactly");
+        assert_eq!(
+            wire["thinking"],
+            json!({"type":"enabled","budget_tokens":2048,"display":"omitted"})
+        );
+
+        let mut missing_budget = base_chat();
+        missing_budget["reasoning_thinking_mode"] = json!("enabled");
+        assert!(encode_v3_responses_semantic_as_anthropic_request(missing_budget).is_err());
+
+        let mut disabled_with_budget = base_chat();
+        disabled_with_budget["reasoning_thinking_mode"] = json!("disabled");
+        disabled_with_budget["reasoning_budget_tokens"] = json!(2048);
+        assert!(encode_v3_responses_semantic_as_anthropic_request(disabled_with_budget).is_err());
+
+        let mut excessive_budget = base_chat();
+        excessive_budget["reasoning_thinking_mode"] = json!("enabled");
+        excessive_budget["reasoning_budget_tokens"] = json!(4096);
+        assert!(encode_v3_responses_semantic_as_anthropic_request(excessive_budget).is_err());
+    }
+
+    #[test]
+    fn anthropic_client_metadata_projects_only_exact_user_id() {
+        let mut exact = base_chat();
+        exact["routecodex_chat_extension"] = json!({
+            "responses_request":{"client_metadata":{"user_id":"opaque-user"}}
+        });
+        let wire = encode_v3_responses_semantic_as_anthropic_request(exact)
+            .expect("exact client_metadata.user_id must project");
+        assert_eq!(wire["metadata"], json!({"user_id":"opaque-user"}));
+
+        let mut session = base_chat();
+        session["routecodex_chat_extension"] =
+            json!({"responses_request":{"client_metadata":{"session_id":"session"}}});
+        let error = encode_v3_responses_semantic_as_anthropic_request(session)
+            .expect_err("session_id must not be reconstructed as Anthropic metadata.user_id");
+        assert!(error.to_string().contains("client_metadata.session_id"));
+
+        let mut unsupported = base_chat();
+        unsupported["routecodex_chat_extension"] =
+            json!({"responses_request":{"client_metadata":{"turn":"unsupported"}}});
+        let error = encode_v3_responses_semantic_as_anthropic_request(unsupported)
+            .expect_err("unknown client_metadata must remain fail-fast");
+        assert!(error.to_string().contains("client_metadata.turn"));
+    }
 }

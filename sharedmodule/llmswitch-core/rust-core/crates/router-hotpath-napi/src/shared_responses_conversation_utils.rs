@@ -2892,92 +2892,6 @@ fn responses_build_requested_scope_keys(scope: &Map<String, Value>) -> Vec<Strin
     keys
 }
 
-fn responses_read_submit_payload_scope_value<'a>(
-    payload: &'a Map<String, Value>,
-    metadata: Option<&'a Map<String, Value>>,
-    direct_keys: &[&str],
-    metadata_keys: &[&str],
-) -> Option<String> {
-    for key in direct_keys {
-        if let Some(value) = responses_scope_token(payload.get(*key)) {
-            return Some(value);
-        }
-    }
-    if let Some(metadata) = metadata {
-        for key in metadata_keys {
-            if let Some(value) = responses_scope_token(metadata.get(*key)) {
-                return Some(value);
-            }
-        }
-    }
-    None
-}
-
-fn responses_read_resume_scope_keys_from_submit_payload(payload: &Value) -> Vec<String> {
-    let Some(payload_obj) = payload.as_object() else {
-        return Vec::new();
-    };
-    let metadata = payload_obj.get("metadata").and_then(Value::as_object);
-    let port_context = metadata
-        .and_then(|row| row.get("portContext"))
-        .and_then(Value::as_object);
-    let session_id = responses_read_submit_payload_scope_value(
-        payload_obj,
-        metadata,
-        &["session_id", "sessionId"],
-        &["session_id", "sessionId"],
-    );
-    let conversation_id = responses_read_submit_payload_scope_value(
-        payload_obj,
-        metadata,
-        &["conversation_id", "conversationId"],
-        &["conversation_id", "conversationId"],
-    );
-    let continuation_owner = responses_read_submit_payload_scope_value(
-        payload_obj,
-        metadata,
-        &["continuationOwner"],
-        &["continuationOwner"],
-    )
-    .or_else(|| {
-        metadata
-            .and_then(|row| row.get("responsesResume"))
-            .and_then(Value::as_object)
-            .and_then(|row| responses_scope_token(row.get("continuationOwner")))
-    });
-
-    let mut scope = Map::new();
-    if let Some(session_id) = session_id {
-        scope.insert("sessionId".to_string(), Value::String(session_id));
-    }
-    if let Some(conversation_id) = conversation_id {
-        scope.insert("conversationId".to_string(), Value::String(conversation_id));
-    }
-    if let Some(continuation_owner) = continuation_owner {
-        scope.insert(
-            "continuationOwner".to_string(),
-            Value::String(continuation_owner),
-        );
-    }
-    if let Some(value) = metadata
-        .and_then(|row| row.get("matchedPort"))
-        .or_else(|| port_context.and_then(|row| row.get("matchedPort")))
-    {
-        scope.insert("matchedPort".to_string(), value.clone());
-    }
-    if let Some(value) = metadata
-        .and_then(|row| row.get("routingPolicyGroup"))
-        .or_else(|| port_context.and_then(|row| row.get("routingPolicyGroup")))
-    {
-        scope.insert("routingPolicyGroup".to_string(), value.clone());
-    }
-    scope.insert(
-        "entryKind".to_string(),
-        Value::String("responses".to_string()),
-    );
-    responses_build_requested_scope_keys(&scope)
-}
-
 fn build_responses_conversation_scope_plan(input: &Value) -> Value {
     let obj = input.as_object().cloned().unwrap_or_default();
     let mode = responses_scope_token(obj.get("mode")).unwrap_or_default();
@@ -3002,9 +2916,6 @@ fn build_responses_conversation_scope_plan(input: &Value) -> Value {
             )
         }
         "requested" => responses_build_requested_scope_keys(&scope_obj),
-        "submit_payload" => responses_read_resume_scope_keys_from_submit_payload(
-            obj.get("payload").unwrap_or(&Value::Null),
-        ),
         _ => Vec::new(),
     };
     serde_json::json!({
@@ -3207,23 +3118,6 @@ fn responses_store_build_stored_scope_keys_from_resolved(
         scope.insert("portScopeKey".to_string(), Value::String(port_scope_key));
     }
     responses_store_build_scope_keys(Value::Object(scope), "stored").0
-}
-
-fn responses_store_resume_scope_keys_from_submit_payload(payload: &Value) -> Vec<String> {
-    build_responses_conversation_scope_plan(&serde_json::json!({
-        "mode": "submit_payload",
-        "payload": payload,
-    }))
-    .as_object()
-    .and_then(|row| row.get("keys"))
-    .and_then(Value::as_array)
-    .map(|items| {
-        items
-            .iter()
-            .filter_map(|item| read_trimmed_string(Some(item)))
-            .collect::<Vec<_>>()
-    })
-    .unwrap_or_default()
 }
 
 fn responses_store_project_resume_candidate(
@@ -4017,7 +3911,7 @@ impl ResponsesConversationStoreState {
                 ));
             }
         }
-        for scope_key in responses_store_resume_scope_keys_from_submit_payload(&submit_payload) {
+        for scope_key in responses_store_build_scope_keys(options.clone(), "requested").0 {
             if let Some(request_id) = self.scope_index.get(&scope_key) {
                 if let Some(candidate) = self.request_map.get(request_id) {
                     entries_by_request_id.insert(request_id.clone(), candidate.clone());
@@ -5511,28 +5405,6 @@ pub fn build_responses_conversation_port_scope_for_http_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-fn copy_trimmed_string_field(
-    input: &Map<String, Value>,
-    output: &mut Map<String, Value>,
-    key: &str,
-) {
-    if let Some(value) = read_trimmed_string(input.get(key)) {
-        output.insert(key.to_string(), Value::String(value));
-    }
-}
-
-fn copy_boolean_field(input: &Map<String, Value>, output: &mut Map<String, Value>, key: &str) {
-    if let Some(value) = input.get(key).and_then(Value::as_bool) {
-        output.insert(key.to_string(), Value::Bool(value));
-    }
-}
-
-fn copy_number_field(input: &Map<String, Value>, output: &mut Map<String, Value>, key: &str) {
-    if let Some(value) = input.get(key).filter(|value| value.is_number()) {
-        output.insert(key.to_string(), value.clone());
-    }
-}
-
 fn first_trimmed_field(input: &Map<String, Value>, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| read_trimmed_string(input.get(*key)))
@@ -5546,63 +5418,19 @@ fn build_responses_resume_control_for_continuation_context_for_http_value(
         .ok_or_else(|| "resumeMeta must be object".to_string())?;
     let mut output = serde_json::Map::new();
 
-    for key in [
-        "responseId",
-        "restoredFromResponseId",
-        "previousRequestId",
-        "requestId",
-        "scopeKey",
-        "entryKind",
-        "continuationOwner",
-        "materializedMode",
-    ] {
-        copy_trimmed_string_field(input, &mut output, key);
+    if let Some(response_id) = first_trimmed_field(input, &["responseId", "restoredFromResponseId"])
+    {
+        output.insert("responseId".to_string(), Value::String(response_id.clone()));
+        output.insert("previousResponseId".to_string(), Value::String(response_id));
     }
-    if matches!(
-        output.get("continuationOwner").and_then(Value::as_str),
-        Some("direct")
-    ) {
-        copy_trimmed_string_field(input, &mut output, "providerKey");
+    if let Some(owner) = first_trimmed_field(input, &["continuationOwner"]) {
+        output.insert("continuationOwner".to_string(), Value::String(owner));
     }
-    for key in ["restored", "materialized"] {
-        copy_boolean_field(input, &mut output, key);
+    if let Some(chain_id) = first_trimmed_field(input, &["previousRequestId", "requestId"]) {
+        output.insert("chainId".to_string(), Value::String(chain_id));
     }
-    for key in [
-        "deltaInputItems",
-        "toolOutputs",
-        "incomingInputItems",
-        "continuationDeltaItems",
-        "fullInputItems",
-    ] {
-        copy_number_field(input, &mut output, key);
-    }
-    if let Some(items) = input.get("toolOutputsDetailed").and_then(Value::as_array) {
-        let tool_outputs: Vec<Value> = items
-            .iter()
-            .filter_map(|item| {
-                let row = item.as_object()?;
-                let call_id = first_trimmed_field(
-                    row,
-                    &["callId", "originalId", "call_id", "tool_call_id", "id"],
-                )?;
-                let output_text =
-                    first_trimmed_field(row, &["outputText", "output_text", "output"])?;
-                let mut item_output = serde_json::Map::new();
-                item_output.insert("callId".to_string(), Value::String(call_id));
-                if let Some(original_id) = first_trimmed_field(row, &["originalId", "original_id"])
-                {
-                    item_output.insert("originalId".to_string(), Value::String(original_id));
-                }
-                item_output.insert("outputText".to_string(), Value::String(output_text));
-                Some(Value::Object(item_output))
-            })
-            .collect();
-        if !tool_outputs.is_empty() {
-            output.insert(
-                "toolOutputsDetailed".to_string(),
-                Value::Array(tool_outputs),
-            );
-        }
+    if let Some(sticky_scope) = first_trimmed_field(input, &["scopeKey"]) {
+        output.insert("stickyScope".to_string(), Value::String(sticky_scope));
     }
 
     Ok(Value::Object(output))
@@ -5694,10 +5522,6 @@ fn build_responses_pipeline_metadata_for_http(input: &Value) -> Result<Value, St
     if let Some(headers) = obj.get("clientHeaders").and_then(Value::as_object) {
         metadata.insert("clientHeaders".to_string(), Value::Object(headers.clone()));
     }
-    if let Some(resume) = responses_resume.clone() {
-        metadata.insert("responsesResume".to_string(), resume);
-    }
-
     let mut writes = vec![
         responses_pipeline_metadata_write(
             "runtime_control",
@@ -5728,23 +5552,41 @@ fn build_responses_pipeline_metadata_for_http(input: &Value) -> Result<Value, St
     ];
 
     if let Some(resume) = responses_resume {
-        writes.push(responses_pipeline_metadata_write(
-            "continuation_context",
-            "responsesResume",
-            resume.clone(),
-            None,
-        ));
-        if matches!(
-            resume.get("continuationOwner").and_then(Value::as_str),
-            Some("direct")
-        ) {
-            if let Some(provider_key) = read_trimmed_string(resume.get("providerKey")) {
-                writes.push(responses_pipeline_metadata_write(
-                    "runtime_control",
-                    "retryProviderKey",
-                    Value::String(provider_key),
-                    Some("direct responses continuation provider pin"),
-                ));
+        if let Some(resume_fields) = resume.as_object() {
+            for key in [
+                "previousResponseId",
+                "responseId",
+                "continuationOwner",
+                "chainId",
+                "stickyScope",
+            ] {
+                if let Some(value) = resume_fields.get(key) {
+                    writes.push(responses_pipeline_metadata_write(
+                        "continuation_context",
+                        key,
+                        value.clone(),
+                        Some("typed responses continuation control"),
+                    ));
+                }
+            }
+            if matches!(
+                resume_fields
+                    .get("continuationOwner")
+                    .and_then(Value::as_str),
+                Some("direct")
+            ) {
+                if let Some(provider_key) = obj
+                    .get("resumeMeta")
+                    .and_then(Value::as_object)
+                    .and_then(|resume_meta| read_trimmed_string(resume_meta.get("providerKey")))
+                {
+                    writes.push(responses_pipeline_metadata_write(
+                        "runtime_control",
+                        "retryProviderKey",
+                        Value::String(provider_key),
+                        Some("direct continuation owner provider pin"),
+                    ));
+                }
             }
         }
     }

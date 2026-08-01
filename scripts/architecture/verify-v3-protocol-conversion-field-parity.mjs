@@ -10,6 +10,9 @@ import {
 
 const paths = {
   design: 'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
+  requestFieldProjectionDesign: 'docs/design/v3-protocol-request-field-projection.md',
+  requestFieldProjectionManifest: 'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
+  requestFieldProjectionModules: 'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
   gapCloseoutPlan: 'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
@@ -46,6 +49,81 @@ const fieldMatrix = YAML.parse(text.fieldMatrix);
 const functionMap = YAML.parse(text.functionMap);
 const mainlineMap = YAML.parse(text.mainlineMap);
 const verificationMap = YAML.parse(text.verificationMap);
+const requestFieldProjectionManifest = YAML.parse(text.requestFieldProjectionManifest);
+const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModules);
+
+for (const phrase of [
+  'request.reasoning_effort',
+  'request.reasoning_budget_tokens',
+  'request.reasoning_summary_policy',
+  'request.reasoning_context_policy',
+  'request.reasoning_mode',
+  'request.reasoning_include_thoughts',
+  'request.reasoning_display_policy',
+  'request.reasoning_thinking_mode',
+  'output_config.effort',
+  'There is no `approximate`',
+  'MetadataCenter is not a payload extension registry',
+]) requireText(text.requestFieldProjectionDesign, paths.requestFieldProjectionDesign, phrase);
+for (const semantic of [
+  'request.client_metadata',
+  'request.prompt_cache_key',
+  'request.store',
+  'request.text.output_config',
+  'request.reasoning_effort',
+  'request.reasoning_budget_tokens',
+  'request.reasoning_summary_policy',
+  'request.reasoning_context_policy',
+  'request.reasoning_mode',
+  'request.reasoning_include_thoughts',
+  'request.reasoning_display_policy',
+  'request.reasoning_thinking_mode',
+]) {
+  if (!(requestFieldProjectionManifest?.payload_semantics ?? []).includes(semantic)) failures.push(`${paths.requestFieldProjectionManifest}: missing payload semantic ${semantic}`);
+}
+if (requestFieldProjectionManifest?.status !== 'design' || requestFieldProjectionManifest?.runtime_conformance !== 'pending') {
+  failures.push(`${paths.requestFieldProjectionManifest}: design must not claim active runtime conformance before online verification`);
+}
+const projectionSemantics = new Map((requestFieldProjectionManifest?.semantic_registry ?? []).map((entry) => [entry?.semantic_id, entry]));
+for (const [semanticId, chatStorage, projections] of [
+  ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'metadata_user_id_only', gemini: 'unmapped' }],
+  ['request.reasoning_effort', 'reasoning_effort', { responses: 'reasoning.effort', openai_chat: 'reasoning_effort', anthropic: 'output_config.effort_shared_domain_only', gemini: 'generationConfig.thinkingConfig.thinkingLevel_shared_domain_only' }],
+  ['request.reasoning_budget_tokens', 'reasoning_budget_tokens', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.budget_tokens_with_thinking_constraints', gemini: 'generationConfig.thinkingConfig.thinkingBudget_with_model_constraints' }],
+  ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
+  ['request.reasoning_context_policy', 'reasoning_context_policy', { responses: 'reasoning.context', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
+  ['request.reasoning_mode', 'reasoning_mode', { responses: 'reasoning.mode', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
+  ['request.reasoning_include_thoughts', 'reasoning_include_thoughts', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'generationConfig.thinkingConfig.includeThoughts' }],
+  ['request.reasoning_display_policy', 'reasoning_display_policy', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.display', gemini: 'unmapped' }],
+  ['request.reasoning_thinking_mode', 'reasoning_thinking_mode', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.type', gemini: 'unmapped' }],
+]) {
+  const entry = projectionSemantics.get(semanticId);
+  if (!entry) {
+    failures.push(`${paths.requestFieldProjectionManifest}: missing semantic_registry entry ${semanticId}`);
+    continue;
+  }
+  if (entry.chat_storage !== chatStorage) failures.push(`${paths.requestFieldProjectionManifest}: ${semanticId} chat_storage must be ${chatStorage}`);
+  for (const [protocol, projection] of Object.entries(projections)) {
+    if (entry?.projections?.[protocol] !== projection) failures.push(`${paths.requestFieldProjectionManifest}: ${semanticId} ${protocol} projection must be ${projection}`);
+  }
+}
+if (requestFieldProjectionModules?.global_module_registry_status !== 'pending') failures.push(`${paths.requestFieldProjectionModules}: must not claim complete global module registry`);
+if (requestFieldProjectionModules?.status !== 'design_feature_scope' || requestFieldProjectionModules?.runtime_conformance !== 'pending') {
+  failures.push(`${paths.requestFieldProjectionModules}: feature module registry must remain design/pending until runtime verification`);
+}
+const scopedOwnedPaths = (requestFieldProjectionModules?.modules ?? []).flatMap((module) => module.owned_paths ?? []);
+for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.geminiCodec, paths.providerReqCompat]) {
+  if (scopedOwnedPaths.filter((ownedPath) => ownedPath === path).length !== 1) failures.push(`${paths.requestFieldProjectionModules}: ${path} must have exactly one feature-scoped module owner`);
+}
+for (const [from, to, direction] of [
+  ['V3HubReqChatProcess04Governed', 'v3.protocol_codec.provider_compat_dispatch', 'outbound'],
+  ['v3.protocol_codec.provider_compat_dispatch', 'v3.protocol_codec.openai_outbound', 'outbound_openai'],
+  ['v3.protocol_codec.provider_compat_dispatch', 'v3.protocol_codec.anthropic', 'outbound_anthropic'],
+  ['v3.protocol_codec.provider_compat_dispatch', 'v3.protocol_codec.gemini', 'outbound_gemini_dispatch'],
+]) {
+  if (!(requestFieldProjectionModules?.allowed_edges ?? []).some((edge) => edge?.from === from && edge?.to === to && edge?.direction === direction)) {
+    failures.push(`${paths.requestFieldProjectionModules}: missing adjacent ${direction} edge ${from} -> ${to}`);
+  }
+}
 
 const outboundContract = fieldMatrix?.outbound_projection_contract;
 for (const status of ['mapped', 'transformed', 'consumed_by_transform', 'target_unsupported', 'control_forbidden']) {
@@ -63,7 +141,9 @@ for (const phrase of [
   'Anthropic Messages entry -> Responses provider wire -> Anthropic Messages client projection',
   'OpenAI Chat entry -> OpenAI Chat provider wire -> OpenAI Chat client projection',
   'Responses entry -> Anthropic Messages provider wire -> Responses client projection',
-  'OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.',
+  'OpenAI metadata projection requires at most 16 string pairs',
+  'Responses reasoning.summary, reasoning.context, and reasoning.mode',
+  'Required red-first pairs for request-field projection',
   'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md#canonical-textual-truth-for-the-field-matrix-audit',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   'Shape-branch contract that gates must preserve before runtime closeout',
@@ -98,16 +178,26 @@ for (const phrase of [
   '"tool_choice"',
   '"parallel_tool_calls"',
   '"response_format"',
-  '"metadata"',
-  '"client_metadata"',
   '"stop"',
-  '"max_completion_tokens"',
-  'responses_reasoning_request_config_as_openai_chat_reasoning_effort',
-  'if let Some(marker) = responses_reasoning_policy_as_target_valid_system_marker(root) {',
-  'responses_reasoning_policy_as_target_valid_system_marker',
-  '<routecodex_reasoning_request',
+  '.entry("max_completion_tokens".to_string())',
+  '"routecodex_chat_extension"',
+  '"responses_request"',
+  '"client_metadata"',
+  '"prompt_cache_key"',
+  '"store"',
+  '"text"',
+  'project_responses_reasoning_to_chat_fields',
+  '"generate_summary"',
+  'Unsupported Responses reasoning field',
+  '"reasoning_summary_policy"',
+  '"reasoning_context_policy"',
+  '"reasoning_mode"',
   '"reasoning_effort"',
 ]) requireText(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, phrase);
+forbid(responsesToChat, `${paths.responsesOpenaiCodec}::reasoning_policy_is_payload_not_prompt`, [
+  /responses_reasoning_policy_as_target_valid_system_marker/,
+  /<routecodex_reasoning_request/,
+]);
 for (const phrase of [
   'fn read_v3_responses_function_call_arguments_for_openai_chat',
   'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String',
@@ -141,14 +231,14 @@ forbid(responsesArgumentProjector, `${paths.responsesOpenaiCodec}::responses_arg
   /serde_json::to_string|Value::String|Map::new|json!\(\{\}\)|"\{\}"\.to_string\(\)|matching_parse_feedback|function_call_output|tool_result/,
 ]);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
-  '"metadata"',
-  '"client_metadata"',
   '"stop"',
-  '"max_completion_tokens"',
+  'let client_metadata = match (root.get("metadata"), root.get("client_metadata"))',
+  '.entry("max_completion_tokens".to_string())',
 ]);
 forbid(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, [
   /fallback/i,
   /MetadataCenter|metadata_center|runtime_control/i,
+  /"anthropic_entry_system"|"context_management"|"output_config"|"safety_identifier"|"moderation"|"include"|"stream_options"/,
   /summary_requests_reasoning \|\| object\.get\("context"\)\.is_some\(\).*medium/s,
   /if\s+matching_parse_feedback\s*\{/,
 ]);
@@ -189,7 +279,7 @@ forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_st
 ]);
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_client_metadata_projection`, 'fn project_openai_responses_client_metadata_to_metadata');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_client_metadata_projection_call`, 'project_openai_responses_client_metadata_to_metadata(projected)?;');
-requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_effort_projection`, 'fn project_openai_responses_reasoning_effort_to_reasoning');
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
   'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
@@ -228,7 +318,9 @@ for (const phrase of [
   '"top_k"',
   '"parallel_tool_calls"',
   'object.get("stop_sequences")',
-  'json!({"thinking":thinking})',
+  '"reasoning_thinking_mode"',
+  '"reasoning_budget_tokens"',
+  '"reasoning_display_policy"',
   'anthropic_tool_choice_as_responses_tool_choice',
 ]) requireText(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, phrase);
 forbid(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
@@ -241,19 +333,21 @@ const responsesRequestToAnthropic = functionSlice(
 );
 for (const phrase of [
   'pub fn encode_v3_responses_semantic_as_anthropic_request',
-  'if let Some(thinking) = responses_reasoning_request_config_as_anthropic_thinking(object) {',
-  'responses_reasoning_request_config_as_anthropic_thinking',
-  'if let Some(marker) = responses_reasoning_policy_as_anthropic_system_marker(object) {',
-  'responses_reasoning_policy_as_anthropic_system_marker',
-  '<routecodex_reasoning_request',
+  'responses_reasoning_fields_as_anthropic_thinking',
+  'project_chat_reasoning_effort_as_anthropic_output_config',
+  'reject_unmapped_anthropic_payload_extensions',
+  '"output_config"',
+  '"effort"',
   '"budget_tokens"',
   'output.insert("thinking".to_string(), thinking)',
   '.or_else(|| object.get("max_completion_tokens"))',
   'output.insert("max_tokens".to_string(), value.to_owned())',
   'responses_metadata_as_anthropic_metadata',
-  '"metadata.unsupported"',
+  'responses_request_chat_extension',
+  'project_responses_text_as_anthropic_output_config',
+  '$.request.client_metadata',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
-forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
+forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
 
 const providerReqCompat = functionSlice(
   text.providerReqCompat,
@@ -341,7 +435,6 @@ for (const [owner, body, phrases] of [
     'responses_openai_chat_field_parity_response_matrix',
     '"metadata":{"client":"metadata-kept"}',
     'body["reasoning_effort"]',
-    '<routecodex_reasoning_request summary_policy=detailed>',
     'body["max_completion_tokens"]',
     'OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort',
     'OpenAI Chat provider wire must reject unsupported client_metadata',
@@ -354,12 +447,12 @@ for (const [owner, body, phrases] of [
     'http://chatwire.invalid/v1/chat/completions',
   ]],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
-    'responses_relay_reasoning_request_config_projects_anthropic_system_marker',
-    'responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker',
+    'responses_relay_reasoning_effort_projects_anthropic_output_config_effort',
+    'responses_relay_reasoning_summary_fails_without_anthropic_equivalent',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
     'responses_relay_anthropic_provider_rejects_unmappable_metadata',
-    'must not synthesize thinking budget from Responses effort/summary',
-    '<routecodex_reasoning_request summary_policy=detailed>',
+    'must not synthesize thinking budget from Responses effort',
+    'reasoning_summary_policy',
     '"type":"thinking"',
   ]],
   [paths.anthropicTests, text.anthropicTests, [
@@ -471,7 +564,8 @@ for (const [owner, body, phrases] of [
     'Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
     'build_v3_chat_canonical_request_from_responses_payload',
     'project_v3_responses_arguments_to_openai_chat_wire',
-    'arguments and other protocol fields remain payload data-plane semantics projected only by adjacent codecs, while routing, switching, and continuation remain control semantics in MetadataCenter; neither side may mirror or reconstruct the other',
+    'All inbound protocols decode into Chat canonical plus registered payload extensions',
+    'reasoning_policy_system_marker',
     'execute_v3_responses_relay_runtime_inner',
     'build_v3_openai_chat_standard_request_from_chat_canonical',
     'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
@@ -483,15 +577,17 @@ for (const [owner, body, phrases] of [
     'v3-protocol-field-parity-responses-chat-malformed-arguments-project-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
-    'arguments and other payload fields stay in the data plane, routing/switch/continuation control stays in MetadataCenter, and neither side reconstructs the other',
+    'Source wire is decoded to Chat canonical plus registered payload extensions before Chat Process',
+    'design_conformance: pending',
   ]],
   [paths.verificationMap, text.verificationMap, [
     'feature_id: v3.protocol_conversion_field_parity',
     'Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop',
     'Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire',
     'Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect',
-    'Anthropic thinking is preserved under Responses reasoning.thinking',
-    'Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker',
+    'Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields',
+    'Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain',
+    'Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions',
     'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
     'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
     'npm run render:v3-protocol-semantic-field-matrix',
@@ -664,16 +760,17 @@ forbid(allowedBlock, `${paths.functionMap}::v3.protocol_conversion_field_parity.
 
 for (const phrase of [
   'V3 protocol semantic normalization matrix review',
-  'OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.',
+  '`client_metadata` must first exist as a Chat payload extension',
   'Gemini still needs clearer semantic ownership',
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 213',
+  '`extension_declared` | 223',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',
   '`codec_shape_only` | 14',
+  '`runtime_conformance_pending` | 1',
   '`partial` | 112',
   'Gap audit for runtime closeout',
   'gap.runtime_extension_declared',
@@ -684,7 +781,7 @@ for (const phrase of [
 requireText(
   text.gapCloseoutPlan,
   paths.gapCloseoutPlan,
-  'OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.',
+  'Anthropic metadata accepts exactly `user_id`',
 );
 
 for (const [source, sha256] of [
@@ -726,9 +823,9 @@ requireClassificationCoversSourceInventory(fieldMatrix);
 for (const [semantic, protocol, fields] of [
   ['content.audio', 'openai_chat', ['request.audio.format', 'response.choices[].message.audio']],
   ['tool.choice_and_parallelism', 'gemini', ['request.toolConfig.functionCallingConfig.mode', 'request.toolConfig.functionCallingConfig.allowedFunctionNames']],
-  ['reasoning.request_config', 'anthropic', ['request.thinking.type']],
-  ['reasoning.request_config', 'gemini', ['request.generationConfig.thinkingConfig.thinkingLevel']],
-  ['reasoning.request_summary_policy', 'anthropic', ['request.thinking.display']],
+  ['reasoning.request_effort', 'anthropic', ['request.output_config.effort']],
+  ['reasoning.request_effort', 'gemini', ['request.generationConfig.thinkingConfig.thinkingLevel']],
+  ['reasoning.request_display_policy', 'anthropic', ['request.thinking.display']],
   ['reasoning.request_include_thoughts', 'gemini', ['request.generationConfig.thinkingConfig.includeThoughts']],
   ['reasoning.request_budget_tokens', 'anthropic', ['request.thinking.budget_tokens']],
   ['reasoning.request_budget_tokens', 'gemini', ['request.generationConfig.thinkingConfig.thinkingBudget']],
@@ -751,7 +848,7 @@ for (const [protocol, section, fields] of [
   ['gemini', 'part_fields', ['text', 'inlineData', 'fileData', 'functionCall', 'functionResponse', 'executableCode', 'codeExecutionResult']],
   ['gemini', 'response_fields', ['candidates', 'promptFeedback', 'usageMetadata', 'finishReason', 'safetyRatings', 'citationMetadata', 'groundingMetadata', 'avgLogprobs', 'logprobsResult']],
 ]) requireMatrixFields(fieldMatrix, protocol, section, fields);
-for (const semantic of ['model.identity', 'turn.messages', 'message.content_parts', 'tool.declarations', 'tool.calls', 'tool.result', 'reasoning.request_config', 'reasoning.visible_content', 'usage.tokens', 'response.finish_reason']) {
+for (const semantic of ['model.identity', 'turn.messages', 'message.content_parts', 'tool.declarations', 'tool.calls', 'tool.result', 'reasoning.request_fields', 'reasoning.visible_content', 'usage.tokens', 'response.finish_reason']) {
   if (!fieldMatrix?.canonical_chat_semantics?.[semantic]) failures.push(`${paths.fieldMatrix}: missing canonical_chat_semantics.${semantic}`);
 }
 for (const gapId of ['gap.client_metadata.target_dependent', 'gap.gemini.field_coverage', 'gap.openai_chat.long_tail_fields', 'gap.responses.long_tail_fields']) {
@@ -1064,6 +1161,7 @@ function requireAuditTruthContract(matrix) {
   const requiredStatuses = [
     'covered',
     'covered_but_target_dependent',
+    'runtime_conformance_pending',
     'partial',
     'extension_declared',
     'semantic_declared',
@@ -1087,7 +1185,7 @@ function requireAuditTruthContract(matrix) {
   const gaps = Array.isArray(contract?.gap_audit) ? contract.gap_audit : [];
   const byId = new Map(gaps.map((gap) => [gap?.gap_id, gap]));
   for (const [gapId, status, closeoutStatus] of [
-    ['gap.client_metadata.target_dependent', 'covered_but_target_dependent', 'gated_no_runtime_gap'],
+    ['gap.client_metadata.target_dependent', 'runtime_conformance_pending', 'runtime_conformance_pending'],
     ['gap.runtime_extension_declared', 'extension_declared', 'needs_runtime_goal'],
     ['gap.semantic_declared_runtime_closeout', 'semantic_declared', 'needs_runtime_goal'],
     ['gap.partial_cross_protocol_semantics', 'partial', 'needs_runtime_goal'],
@@ -1530,6 +1628,11 @@ function requireGeminiThinkingConfigSemanticContract(matrix) {
   const byId = new Map(groups.map((group) => [group?.group_id, group]));
   const effort = byId.get('reasoning.request_effort');
   if (effort) {
+    const anthropic = new Set(effort.protocol_mappings?.anthropic?.request_fields ?? []);
+    if (!anthropic.has('request.output_config.effort')) failures.push(`${paths.fieldMatrix}: reasoning.request_effort must map Anthropic output_config.effort`);
+    for (const field of ['request.thinking.type', 'request.thinking.budget_tokens']) {
+      if (anthropic.has(field)) failures.push(`${paths.fieldMatrix}: reasoning.request_effort must not collapse into Anthropic ${field}`);
+    }
     const gemini = new Set(effort.protocol_mappings?.gemini?.request_fields ?? []);
     if (!gemini.has('request.generationConfig.thinkingConfig.thinkingLevel')) failures.push(`${paths.fieldMatrix}: reasoning.request_effort must map Gemini thinkingLevel`);
     for (const field of ['request.generationConfig.thinkingConfig.includeThoughts', 'request.generationConfig.thinkingConfig.thinkingBudget']) {
@@ -1554,6 +1657,14 @@ function requireGeminiThinkingConfigSemanticContract(matrix) {
     if (!gemini.includes('request.generationConfig.thinkingConfig.thinkingBudget')) failures.push(`${paths.fieldMatrix}: reasoning.request_budget_tokens must map Gemini thinkingBudget`);
     if ((budget.protocol_mappings?.gemini?.request_fields ?? []).includes('request.generationConfig.maxOutputTokens')) failures.push(`${paths.fieldMatrix}: Gemini thinkingBudget must not collapse into maxOutputTokens`);
   }
+  const mode = byId.get('reasoning.request_mode');
+  if (!mode || !(mode.chat_fields ?? []).includes('request.reasoning_mode')) failures.push(`${paths.fieldMatrix}: missing independent reasoning.request_mode semantic group`);
+  const context = byId.get('reasoning.request_context_policy');
+  if ((context?.protocol_mappings?.responses?.request_fields ?? []).includes('request.reasoning.mode')) failures.push(`${paths.fieldMatrix}: reasoning mode must not collapse into context policy`);
+  const display = byId.get('reasoning.request_display_policy');
+  if (!display || !(display.protocol_mappings?.anthropic?.request_fields ?? []).includes('request.thinking.display')) failures.push(`${paths.fieldMatrix}: missing independent Anthropic reasoning display policy`);
+  const summary = byId.get('reasoning.request_summary_policy');
+  if ((summary?.protocol_mappings?.anthropic?.request_fields ?? []).includes('request.thinking.display')) failures.push(`${paths.fieldMatrix}: OpenAI summary policy must not collapse into Anthropic display policy`);
   for (const [field, expected, forbidden] of [
     ['request.reasoning_effort', ['request.generationConfig.thinkingConfig.thinkingLevel'], ['request.generationConfig.thinkingConfig.includeThoughts', 'request.generationConfig.thinkingConfig.thinkingBudget']],
     ['request.reasoning_include_thoughts', ['request.generationConfig.thinkingConfig.includeThoughts'], ['request.generationConfig.thinkingConfig.thinkingBudget', 'request.generationConfig.thinkingConfig.thinkingLevel']],

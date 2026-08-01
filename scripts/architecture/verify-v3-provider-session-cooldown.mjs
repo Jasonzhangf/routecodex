@@ -97,6 +97,8 @@ const files = {
     "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs",
   server: "v3/crates/routecodex-v3-server/src/lib.rs",
   serverTests: "v3/crates/routecodex-v3-server/src/tests/mod.rs",
+  serverBlackbox: "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
+  packageJson: "package.json",
   resourceMap: "docs/architecture/v3-resource-operation-map.yml",
   functionMap: "docs/architecture/v3-function-map.yml",
   mainlineMap: "docs/architecture/v3-mainline-call-map.yml",
@@ -185,6 +187,27 @@ requireMatch(
   source.resourceMap,
   /resource_id:\s*v3\.provider\.availability_projection[\s\S]*identity:\s*\[providerId,\s*authAlias,\s*modelId,\s*available,\s*blockedScopes\]/u,
   "Resource map availability projection must expose blocked session scopes rather than pretending provider-global truth",
+);
+const validatedHttpInputResource = extractYamlItem(
+  source.resourceMap,
+  "resource_id",
+  "v3.server.validated_http_input",
+  "v3.server.validated_http_input resource",
+);
+requireBlockLine(
+  validatedHttpInputResource,
+  /identity:\s*\[[^\]]*requestSessionIdHeader[^\]]*\]/u,
+  "Validated HTTP input must declare the existing request session ID header",
+);
+requireBlockLine(
+  validatedHttpInputResource,
+  /allowed_readers:\s*\[[^\]]*build_v3_provider_failure_session_scope_for_request[^\]]*\]/u,
+  "Validated HTTP input must allow only the Server scope builder to consume the session control header",
+);
+requireBlockLine(
+  validatedHttpInputResource,
+  /may_enter_provider_body:\s*false[\s\S]*may_enter_client_body:\s*false/u,
+  "Validated HTTP input control header must not enter provider or client bodies",
 );
 const failureSessionScopeResource = extractYamlItem(
   source.resourceMap,
@@ -307,7 +330,7 @@ requireBlockLine(
 requireBlockLine(
   de18Edge,
   /consumes:[\s\S]*- v3\.server\.validated_http_input[\s\S]*- v3\.request\.protocol_context/u,
-  "Mainline map v3-de-18 must consume only current request input and protocol context",
+  "Mainline map v3-de-18 must consume only validated HTTP-boundary input and protocol context",
 );
 requireBlockLine(
   de18Edge,
@@ -383,8 +406,23 @@ requireMatch(
 );
 requireMatch(
   source.serverTests,
-  /async fn missing_failure_session_fails_before_any_provider_send\(\)/u,
-  "Server must lock missing-session failure before the provider-send cutpoint with a behavior test",
+  /fn provider_failure_scope_uses_existing_session_header\(\)/u,
+  "Server must lock the existing request session header as provider failure scope",
+);
+requireMatch(
+  source.serverTests,
+  /fn provider_failure_scope_rejects_missing_existing_session_header\(\)/u,
+  "Server must fail closed when the existing request session header is missing",
+);
+requireMatch(
+  source.serverBlackbox,
+  /async fn responses_direct_missing_failure_session_fails_before_any_provider_send\(\)/u,
+  "Server blackbox must prove missing existing session fails before provider send",
+);
+requireMatch(
+  source.packageJson,
+  /"test:v3-provider-session-cooldown":[^\n]*-p routecodex-v3-provider-responses --lib health::tests[^\n]*responses_direct_missing_failure_session_fails_before_any_provider_send/u,
+  "Provider session cooldown gate must avoid unrelated integration binaries and run the missing-session blackbox",
 );
 const serverFailureSessionScopeBuilder = extractBracedBlock(
   source.server,
@@ -393,13 +431,18 @@ const serverFailureSessionScopeBuilder = extractBracedBlock(
 );
 requireMatch(
   serverFailureSessionScopeBuilder,
-  /first_header_text[\s\S]*TURN_METADATA_SESSION_PATHS[\s\S]*BODY_SESSION_PATHS/u,
-  "Server failure scope builder must read only the current request data plane",
+  /first_header_text[\s\S]*"session-id"[\s\S]*"session_id"[\s\S]*"x-session-id"[\s\S]*"x-rcc-session-id"/u,
+  "Server failure scope builder must consume the existing request session header",
+);
+requireMatch(
+  serverFailureSessionScopeBuilder,
+  /V3ProviderFailureSessionScope::new\(&server\.id,\s*&server\.routing_group,\s*&session_id\)/u,
+  "Server failure scope builder must construct the typed scope from the validated session control header",
 );
 forbidMatch(
   serverFailureSessionScopeBuilder,
-  /resolve_transparent_continuation_scope|conversation_id|request_id|unwrap_or/u,
-  "Server failure scope builder must not derive session identity from continuation, conversation, or request fallback",
+  /request_id|parse_codex_turn_metadata|TURN_METADATA_SESSION_PATHS|BODY_SESSION_PATHS|client_metadata|metadata|conversation_id|unwrap_or/u,
+  "Server failure scope builder must not derive control identity from request identity or payload metadata",
 );
 requireMatch(
   `${source.kernel}\n${source.directSse}\n${source.responses}\n${source.openaiChat}\n${source.anthropic}\n${source.gemini}`,

@@ -77,7 +77,7 @@ forbidMatch(
   "Session admission must not create middleware JSON parsing or parsed-payload bypass owners",
 );
 requireMatch(
-  server,
+  `${server}\n${admission}`,
   /hold_response_body_admission_permit[\s\S]*body\.into_data_stream\(\)[\s\S]*Body::from_stream/,
   "Admission permit must be held by the HTTP response body lifetime",
 );

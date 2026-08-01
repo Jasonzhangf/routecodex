@@ -5,6 +5,14 @@ description: RouteCodex 调试与架构路由入口
 
 # RCC Dev Skills
 
+## P0 架构阻断（先于任何路由）
+
+- 禁止脚本批量替换：严禁用 Python / Node / Perl / `sed` / `awk`、临时脚本、shell loop、正则替换命令、编辑器宏或生成式 transformation script，对跨文件或同一文件多位置做语义批量替换。必须逐文件读取并核实上下文，再用明确、可审查的 `apply_patch` hunk 手工修改。既有 formatter / canonical generator 仅可生成其声明的机械或生成产物，绝不能用于语义改写。
+- RouteCodex 控制语义只能走 typed carrier / MetadataCenter 控制资源 / Error 链，绝不能进入、镜像到或借协议 `metadata` 混入 provider/client 正常 payload。
+- normal payload 也不得重建 routing、switching、continuation、retry、provider selection、health、debug、snapshot、error、scope、stopless/servertool 状态。
+- 命中泄漏必须在 owning boundary fail-fast；禁止 silent strip，禁止请求侧 cleanup，禁止 handler/SSE/outbound 补偿。先执行本块，再查 map、路由或实现。
+- 强制顺序：读涉及模块定义 -> 审查方案是否越界 -> 写代码 -> 审实际 diff 是否越界 -> 验证功能 -> 运行时安装/重启/在线旧样本 -> code review。前一步未通过禁止进入下一步；review 必须逐模块检查 owner、owned/allowed/forbidden paths、相邻边和资源关系。
+
 ## 何时用
 - RouteCodex / llmswitch-core 请求链调试
 - Hub Pipeline / Virtual Router / Provider Runtime owner 定位
@@ -37,6 +45,13 @@ description: RouteCodex 调试与架构路由入口
 5. 在 `docs/architecture/wiki/mainline-call-graph.md`（或功能 wiki）核对节点闭环。
 6. 若相关 skill 已覆盖现成流程/经验，优先复用；如果没有，任务结束时必须回查并沉淀到对应 skill。
 
+## 模块边界审查（实现前后各一次）
+
+1. 实现前：列出所有涉及模块及其 registry/module id、唯一 owner、`owned_paths`、allowed/forbidden paths、相邻 caller/callee、读写资源和禁止直连资源。
+2. 方案审查：逐项证明拟修改文件、调用边、数据流和资源操作都落在允许边界；任一项无法证明即停止实现，先补 map/contract 或调整方案。
+3. 实现后：对实际 diff 重新做同一清单，不以“方案原本合规”代替 diff 审查；检查新增 helper、import、payload 字段和调用边是否产生越界。
+4. 只有越界自检通过后才跑功能验证；运行时任务在线闭环后才允许 Codex review。Reviewer 必须收到模块定义和实际 diff，并将模块越界列为 P0/P1。
+
 ## 多 worker 协作（RouteCodex 本地协议）
 
 - 项目协作真源是 `.agent-collab/PROTOCOL.md`；不要假设共享控制面、共享 worker 内存、可靠实时消息或可见工具状态。
@@ -61,6 +76,7 @@ description: RouteCodex 调试与架构路由入口
 - 合同没锁清楚时，禁止直接 grep 后改实现。
 - 1-2 次查询内找不到唯一 owner 或唯一主线边，先补 map/contract。
 - 数据/控制分流先验：如果数据字段能从原始请求/响应负载直接拿到，就不要从 `MetadataCenter`、上下文 carrier、日志投影、matchedPort/localPort 之类中间语义里再取一遍；`MetadataCenter` 只用于控制语义，不能当数据面第二真源。
+- Outbound 字段硬锁不得跨 continuation owner：`previous_response_id` 必须先在 Req03 判定 remote/direct 或 local/relay，并在下一轮 request Chat Process 恢复本地状态；不得把它当普通 Relay provider-wire 字段补进 allowlist。`resp_chatprocess save -> next req_chatprocess restore` 区间禁止清理、重建或恢复语义；合规清理优先放响应侧相邻 owner。同协议默认 Direct，只有配置显式 force-Relay（当前 `provider.responses.process=chat`）才进入 Relay。
 - Provider 错误调试高优先级：先修请求侧 provider-bound 字段生成链，目标是让原始请求不再生成/发出会触发上游或 codec 错误的字段；禁止把焦点放到错误投影、错误显示、事后包裹、静默清理、无契约依据的空对象兼容或绕过错误。闭环证据必须是同一真实样本重新生成的 provider request / live replay 不再发生原错误。
 - Provider 返回 HTTP 200 但 SSE/JSON 内容是诊断文本、零 usage 或 provider 特征错误时，归类为 provider semantic error：先在 `config.v3.toml` 的 `error.provider_error_action_policy` / `error.client_error_projection_policy` 配置并经 V3 config manifest 编译，再让 Resp03 前的 runtime 消费 manifest 进入 provider failure/reselect；禁止把 provider-specific 短语硬编码到 SSE crate、server handler、RespOutbound 或 Error06 显示层。
 - SSE 错误调试高优先级：先分 transport / provider body / provider event codec / error policy owner；`malformed SSE` 文案不是 owner 证据。SSE crate/server handler 只能 opaque framing/backpressure/closeout，禁止补 provider payload、tool、reasoning、continuation、retry 语义。
@@ -90,6 +106,7 @@ description: RouteCodex 调试与架构路由入口
 ## 全局安装 / release 验证硬规则
 
 - 交付顺序固定：定向测试 -> 编译构建 -> 全局安装 -> 聚合重启 -> 全部成员 health -> 真实旧样本/同入口在线 replay -> Codex review -> 精准 commit/push。禁止在全局安装和在线验证前运行交付 review；review 后若代码、测试、构建或运行配置发生变化，旧 PASS 作废，必须从受影响验证重新跑到在线 replay，再重新 review。
+- Codex review 不能替代自验证，也不能与 source/live gate 并行抢跑；只有当前工作树对应产物已完成上述 install/restart/同入口 replay 并留下证据后，才允许启动 review。review 请求、旧 PASS、源码静态判断都不能豁免前置验证。
 - 所有交付级 RouteCodex 测试必须使用全局安装版本。单元测试、编译、repo-local build 只能作为前置 gate，不能作为“已修复/已启动/已可用”的最终证据。
 - Hub Pipeline / runtime rustification 的每个实现轮次必须按顺序完成：定向测试 -> native/build -> release/global install -> `routecodex restart --port <locator-port>` 聚合重启一次 -> 配置全部成员端口 `/health.version` 一致 -> 检查目标 server log/样本目录错误 -> 修复发现的问题。缺任一项只能声明 source gate 通过，不能声明本轮完成。
 - 实验测试和 live closeout 使用 `routecodex` 安装面执行：先安装目标产物，再用全局 `routecodex --version` 确认版本，用任一成员端口作为 locator 执行一次 `routecodex restart --port <locator-port>`，然后验证该 aggregate instance 的全部配置成员端口。禁止逐端口循环 restart。

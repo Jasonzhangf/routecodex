@@ -1,0 +1,170 @@
+lifecycle_id: v3.protocol_request_field_projection
+status: design
+runtime_conformance: pending
+owner_feature_id: v3.protocol_conversion_field_parity
+canonical_doc: docs/design/v3-protocol-request-field-projection.md
+resource_id: v3.protocol_conversion.field_parity_contract
+nodes:
+  - id: ProtocolField01SourceWire
+    owner: adjacent_inbound_codec
+  - id: ProtocolField02ChatSemantic
+    owner: chat_payload_extension_registry
+  - id: ProtocolField03GovernedChatSemantic
+    owner: V3HubReqChatProcess04Governed
+  - id: ProtocolField04TargetProjection
+    owner: adjacent_outbound_codec
+  - id: ProtocolField05TargetWire
+    owner: V3ProviderReqOutbound08WirePayload
+  - id: ProtocolFieldErr01Unmapped
+    owner: adjacent_outbound_codec
+edges:
+  - from: ProtocolField01SourceWire
+    to: ProtocolField02ChatSemantic
+    transform: exact_inbound_decode
+  - from: ProtocolField02ChatSemantic
+    to: ProtocolField03GovernedChatSemantic
+    transform: typed_payload_preservation
+  - from: ProtocolField03GovernedChatSemantic
+    to: ProtocolField04TargetProjection
+    transform: adjacent_outbound_projection
+  - from: ProtocolField04TargetProjection
+    to: ProtocolField05TargetWire
+    transform: exact_conditional_or_field_specific_compatible
+  - from: ProtocolField04TargetProjection
+    to: ProtocolFieldErr01Unmapped
+    transform: explicit_unmapped_outbound_fields
+payload_semantics:
+  - request.client_metadata
+  - request.prompt_cache_key
+  - request.store
+  - request.text.output_config
+  - request.reasoning_effort
+  - request.reasoning_budget_tokens
+  - request.reasoning_summary_policy
+  - request.reasoning_context_policy
+  - request.reasoning_mode
+  - request.reasoning_include_thoughts
+  - request.reasoning_display_policy
+  - request.reasoning_thinking_mode
+semantic_registry:
+  - semantic_id: request.client_metadata
+    chat_storage: routecodex_chat_extension.responses_request.client_metadata
+    type: object
+    projections:
+      responses: metadata_openai_limits
+      openai_chat: metadata_openai_limits
+      anthropic: metadata_user_id_only
+      gemini: unmapped
+  - semantic_id: request.prompt_cache_key
+    chat_storage: routecodex_chat_extension.responses_request.prompt_cache_key
+    type: string
+    projections:
+      responses: prompt_cache_key
+      openai_chat: prompt_cache_key
+      anthropic: unmapped
+      gemini: unmapped
+  - semantic_id: request.store
+    chat_storage: routecodex_chat_extension.responses_request.store
+    type: boolean
+    projections:
+      responses: store
+      openai_chat: store
+      anthropic: unmapped
+      gemini: unmapped
+  - semantic_id: request.text.output_config
+    chat_storage: routecodex_chat_extension.responses_request.text
+    type: typed_object
+    projections:
+      responses: text
+      openai_chat: fieldwise_response_format_and_verbosity
+      anthropic: semantic_matrix_exact_fields_only
+      gemini: semantic_matrix_exact_fields_only
+  - semantic_id: request.reasoning_effort
+    chat_storage: reasoning_effort
+    type: qualitative_enum
+    projections:
+      responses: reasoning.effort
+      openai_chat: reasoning_effort
+      anthropic: output_config.effort_shared_domain_only
+      gemini: generationConfig.thinkingConfig.thinkingLevel_shared_domain_only
+  - semantic_id: request.reasoning_budget_tokens
+    chat_storage: reasoning_budget_tokens
+    type: integer
+    projections:
+      responses: unmapped
+      openai_chat: unmapped
+      anthropic: thinking.budget_tokens_with_thinking_constraints
+      gemini: generationConfig.thinkingConfig.thinkingBudget_with_model_constraints
+  - semantic_id: request.reasoning_summary_policy
+    chat_storage: reasoning_summary_policy
+    type: enum_auto_concise_detailed
+    inbound_aliases:
+      responses:
+        - reasoning.summary
+        - reasoning.generate_summary_deprecated
+    alias_conflict_policy: reject
+    projections:
+      responses: reasoning.summary
+      openai_chat: unmapped
+      anthropic: unmapped
+      gemini: unmapped
+  - semantic_id: request.reasoning_context_policy
+    chat_storage: reasoning_context_policy
+    type: enum_auto_current_turn_all_turns
+    projections:
+      responses: reasoning.context
+      openai_chat: unmapped
+      anthropic: unmapped
+      gemini: unmapped
+  - semantic_id: request.reasoning_mode
+    chat_storage: reasoning_mode
+    type: open_string_standard_pro
+    projections:
+      responses: reasoning.mode
+      openai_chat: unmapped
+      anthropic: unmapped
+      gemini: unmapped
+  - semantic_id: request.reasoning_include_thoughts
+    chat_storage: reasoning_include_thoughts
+    type: boolean
+    projections:
+      responses: unmapped
+      openai_chat: unmapped
+      anthropic: unmapped
+      gemini: generationConfig.thinkingConfig.includeThoughts
+  - semantic_id: request.reasoning_display_policy
+    chat_storage: reasoning_display_policy
+    type: enum_summarized_omitted
+    projections:
+      responses: unmapped
+      openai_chat: unmapped
+      anthropic: thinking.display
+      gemini: unmapped
+  - semantic_id: request.reasoning_thinking_mode
+    chat_storage: reasoning_thinking_mode
+    type: enum_enabled_adaptive_disabled
+    projections:
+      responses: unmapped
+      openai_chat: unmapped
+      anthropic: thinking.type
+      gemini: unmapped
+forbidden_carriers:
+  - MetadataCenter
+  - routing
+  - switching
+  - continuation
+  - retry
+  - provider_health
+forbidden_transforms:
+  - approximate_effort_budget_conversion
+  - reasoning_policy_system_marker
+  - silent_strip
+  - raw_payload_shortcut
+  - control_from_payload_reconstruction
+  - cross_semantic_reconstruction
+  - duplicate_representation_precedence
+verification_gates:
+  - npm run verify:v3-protocol-conversion-field-parity
+  - npm run test:v3-protocol-conversion-field-parity-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries

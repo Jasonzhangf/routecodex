@@ -130,6 +130,44 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
     compile_v3_config_05_manifest(authoring).unwrap()
 }
 
+pub(super) fn responses_process_chat_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.grok]
+type = "responses"
+base_url = "http://grok.invalid/v1"
+default_model = "grok-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GROK_KEY" }] }
+responses = { process = "chat", streaming = "always" }
+[providers.grok.models.grok-test]
+wire_name = "grok-wire"
+
+[forwarders.grok]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "grok", model = "grok-test", key = "key", priority = 1 }]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "grok", priority = 1 }]
+"#,
+    )
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
 pub(super) fn optional_default_manifest() -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(
         r#"

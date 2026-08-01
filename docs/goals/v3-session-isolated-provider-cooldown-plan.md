@@ -17,14 +17,16 @@ commit or recovery witness must not affect session B.
 
 ## 2. Typed Session Contract
 
-Server/ReqInbound is the only origin of `session_id`. It reads the current HTTP request data plane,
-validates a non-empty value and constructs `V3ProviderFailureSessionScope`. Direct and every Relay
-runtime input carry that type explicitly through JSON, SSE and post-commit paths.
+Server/ReqInbound is the only origin of `session_id`. It reads the existing request
+`session-id` header (accepting the established equivalent spellings), validates a non-empty value and constructs
+`V3ProviderFailureSessionScope`. The header is consumed into the typed side-channel and never
+copied into provider/client normal payload. Direct and every Relay runtime input carry that type
+explicitly through JSON, SSE and post-commit paths.
 
-Missing `session_id` enters Error01-06 before provider send. The runtime must not derive or replace it
-with routing group, request ID, conversation ID, continuation scope, console identity,
-MetadataCenter, debug data, thread-local state or a process singleton. There is no legacy global-key
-fallback.
+Missing `session_id` enters Error01-06 before provider send. The runtime must not derive or replace
+it with body `metadata`/`client_metadata`, routing group, request ID,
+conversation ID, continuation scope, console identity, MetadataCenter, debug data, thread-local
+state or a process singleton. There is no legacy global-key fallback.
 
 ## 3. Owners And Boundaries
 

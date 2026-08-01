@@ -15,7 +15,6 @@ import {
 import {
   attachRuntimeCarrier,
   bindSingleRuntimeCarrierFromSources,
-  readRuntimeContinuationResponsesResume,
   readRuntimeControlProjection,
   writeRuntimeControlSlot
 } from '../metadata-center/request-truth-readers.js';
@@ -72,14 +71,7 @@ function resolveAttemptRetryProviderKey(args: {
   if (existing) {
     return existing;
   }
-  const responsesResume = readRecord(readRuntimeContinuationResponsesResume(args.metadataForAttempt));
-  if (!responsesResume) {
-    return undefined;
-  }
-  if (readTrimmedString(responsesResume.continuationOwner) === 'relay') {
-    return undefined;
-  }
-  return readTrimmedString(responsesResume.providerKey);
+  return undefined;
 }
 
 export type PreparedRequestExecutorAttemptState = {

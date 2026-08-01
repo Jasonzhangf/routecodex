@@ -63,9 +63,10 @@
 | tool_choice | `full` | `full` | `full` | Anthropic 顶层保留；Gemini 通过 metadata passthrough 保留 |
 | parallel_tool_calls | `full` | `dropped` | `dropped` | 目标协议无完全等价表达，必须 audit |
 | include | `full` | `dropped` | `dropped` | Responses 专属恢复语义 |
-| store | `full` | `dropped` | `dropped` | Responses 专属持久化语义 |
-| prompt_cache_key | `full` | `dropped` | `dropped` | 目标协议无等价字段 |
-| response_format / structured output | `full` | `unsupported` | `unsupported` | 当前 Anthropic/Gemini 路径不承诺等价 structured output |
+| client_metadata | `full` | `lossy` | `unsupported` | Anthropic 只接收一个 `metadata.user_id`；按已声明优先级投影一个 opaque id，其余 client detail 在相邻 codec 消费 |
+| store | `full` | `conditional` | `dropped` | Anthropic `store:false` 等价于无状态默认；`store:true` 显式失败 |
+| prompt_cache_key | `full` | `lossy` | `dropped` | Anthropic 以 prompt prefix 管 cache identity；只把 caching intent 投影为 `cache_control: ephemeral`，不发送 OpenAI key |
+| text / structured output | `full` | `lossy` | `unsupported` | verbosity 映射 `output_config.effort`；兼容 JSON schema 映射 `output_config.format` |
 | reasoning | `full` | `lossy` | `lossy` | Anthropic 映射到 `thinking/output_config`；Gemini 映射到 `generationConfig.thinkingConfig` |
 | previous_response_id / submit_tool_outputs continuity | `full` | `lossy` | `lossy` | 统一由 `semantics.continuation` / `semantics.responses.resume` 承接 |
 | required_action / tool outputs | `full` | `lossy` | `lossy` | 目标协议表面不同，但统一语义可恢复到 chat process |

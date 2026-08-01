@@ -21,6 +21,12 @@ V2 reference files are read-only comparison sources:
 
 Protocol field inventory sources are recorded in
 `docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml#source_inventory`.
+The normative request-field projection rules are defined in
+`docs/design/v3-protocol-request-field-projection.md` and the executable lifecycle
+shape is `docs/architecture/manifests/v3.protocol_request_field_projection.yml`.
+Responses reasoning.summary, reasoning.context, and reasoning.mode are three
+separate source-roundtrip payload semantics; no non-Responses target may turn
+them into prompt text.
 This inventory is downloaded from OpenAI OpenAPI / OpenAI SDK types / Anthropic SDK
 types / Gemini discovery schema and is broader than the current supported Relay
 runtime. Fields such as Responses `background` / `prompt_cache_options`, OpenAI
@@ -51,7 +57,7 @@ protocol nests them under one object.
 | Responses request -> OpenAI Chat provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs` + `v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs` | Adjacent Req02/Req07 Chat canonical -> provider standard mapping only |
 | OpenAI Chat provider response -> Responses semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs` | Provider RespInbound codec / semantic projection only |
 | Anthropic request -> Responses provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs` | Anthropic entry codec mapping only |
-| Responses request -> Anthropic provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs` + `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs` | Req07/Compat06 must preserve original Responses request reasoning config until Anthropic thinking wire encoding |
+| Responses request -> Anthropic provider semantic | `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs`; `provider_req_compat_06_provider_compat.rs` dispatches only | Anthropic outbound codec consumes governed Chat fields and emits Anthropic wire; no Responses object survives to this edge |
 | Responses provider response -> Anthropic client projection | `v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs` | Client protocol projection only |
 | Chat request/response pass-through | `v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs` and `openai_chat_relay_runtime.rs` | Preserve same-protocol payload; no cross-protocol repair |
 
@@ -59,10 +65,10 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 
 ## Data-plane / control-plane rule
 
-- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. They must remain normal payload fields only when the target protocol can represent them; OpenAI Chat provider wire preserves `metadata` but rejects non-standard `client_metadata` before provider send, while OpenAI Responses provider wire explicitly renames `client_metadata` to `metadata`.
-- OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.
+- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. `client_metadata` first becomes the registered Chat payload extension `request.client_metadata`; it is not a raw wire shortcut.
+- OpenAI metadata projection requires at most 16 string pairs, key length at most 64, and value length at most 512. Anthropic projection accepts exactly one `user_id` string key. Other target shapes fail as `UnmappedOutboundFields`.
 - RouteCodex-created control fields (`metadata_center`, `routeHint`, `stoplessCenter`, `requestCapabilities`, etc.) must fail before provider/client normal payload.
-- Unsupported target-protocol fields must not be silently dropped. This slice either maps them, preserves them under the target protocol when legal, or fail-fast tests them when malformed.
+- Unsupported target-protocol fields must not be silently dropped or prompt-encoded. This slice either maps an exact target semantic or fails with the canonical Chat semantic path.
 
 ## Field matrix
 
@@ -84,7 +90,7 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `stream` | preserved | request matrix |
 | `response_format` | preserved | request matrix |
 | `max_output_tokens` / `max_tokens` | preserve target-compatible token limit; do not drop the explicit client field | request matrix |
-| `metadata` / `client_metadata` | `metadata` preserved when target supports it; `client_metadata` rejected before OpenAI Chat provider wire and explicitly renamed to `metadata` before OpenAI Responses provider wire | request matrix |
+| `metadata` / `client_metadata` | `request.client_metadata` Chat extension, then target-schema-validated `metadata` or explicit unmapped error | request matrix + metadata limits negative matrix |
 | `stop` | preserved | request matrix |
 | RouteCodex control fields | rejected before wire | negative gate already existing; keep covered |
 
@@ -133,6 +139,8 @@ tests exist and pass.
 | Direct surface | Required behavior | Required test |
 | --- | --- | --- |
 | `V3HubExecutionMode::Direct` | production Direct kernel must keep same-protocol Responses provider wire as the client Responses surface with selected provider model binding; it must preserve `input`/`include`/tool history and must not synthesize Chat `messages` | `responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history` |
+| Direct continuation | Req04 extracts `previous_response_id` before normal payload projection; Direct policy carries the typed locator and Provider12 receives it without reading or reconstructing control state from the business payload | `json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry`; `sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact_pin` |
+| Control-field rejection | RouteCodex-created control fields found in client payload fail at the ReqInbound02 owning boundary before Chat Process or provider transport; recognized protocol data such as `include` remains untouched and control state is carried separately | `direct_runtime_rejects_routecodex_control_payload_before_provider_send`; `req04_preserves_responses_data_and_extracts_typed_continuation_locator` |
 
 ### Responses request -> OpenAI Chat provider wire
 
@@ -160,9 +168,17 @@ tests exist and pass.
 
 | Responses field | Anthropic provider wire | Required test |
 | --- | --- | --- |
-| `reasoning.effort` / `reasoning.summary` | top-level `thinking` request config with deterministic `budget_tokens` | `responses_reasoning_request_config_projects_to_anthropic_thinking_wire` and runtime provider-wire matrix |
-| `reasoning.thinking` | exact top-level `thinking` object preserved for Anthropic-compatible local projection | `responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape` |
-| original Responses request surface after Req04 governance | preserved through `ProviderReqCompat06ProviderCompat` before Anthropic wire codec for both `input[]` and string `input` request forms | `responses_relay_reasoning_request_config_projects_anthropic_system_marker` and `responses_relay_string_input_reasoning_request_config_projects_anthropic_system_marker` |
+| `reasoning.effort=low/medium/high/xhigh/max` | `output_config.effort` with identical value | positive effort intersection matrix |
+| `reasoning.effort=none/minimal` | `UnmappedOutboundFields` at Anthropic outbound codec | negative effort value-domain matrix |
+| `reasoning.summary/context/mode` | registered Chat extensions, then `UnmappedOutboundFields`; never system text | paired source-roundtrip and Anthropic rejection tests |
+| `reasoning.budget_tokens` / `reasoning.thinking` | not declared by the audited OpenAI Responses `Reasoning` schema; Responses inbound rejects them rather than treating Anthropic fields as OpenAI extensions | malformed source-schema negative tests |
+| `client_metadata.user_id` | registered `request.client_metadata`, then Anthropic `metadata.user_id` | positive metadata projection test |
+| any other `client_metadata` key or mixed object | `UnmappedOutboundFields` with the canonical Chat key path | negative metadata projection tests |
+| `prompt_cache_key` | `UnmappedOutboundFields`; Anthropic per-content `cache_control` is not reconstructed from an OpenAI request cache key | negative cache semantic test |
+| `store=false` / `store=true` | `UnmappedOutboundFields`; no Anthropic Messages request field is declared equivalent | paired storage semantic tests |
+| `text.verbosity` | `UnmappedOutboundFields`; verbosity is never converted into Anthropic reasoning effort | negative cross-semantic test |
+| `text.format` | text default is consumed; compatible strict JSON schema maps to `output_config.format`; incompatible schema policy fails | paired output config tests |
+| governed Chat semantic after Req04 | preserved through `ProviderReqCompat06ProviderCompat`; original Responses raw body is unavailable | Req02/Req04/Req07/Compat06 node snapshot assertions |
 | Anthropic provider `thinking` JSON response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` |
 | Anthropic request history `thinking/signature` and `redacted_thinking/data` | ordered Responses `reasoning.summary/encrypted_content`; malformed blocks fail before Hub semantic | `anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasoning`, `anthropic_malformed_thinking_history_fails_instead_of_disappearing` |
 | Responses reasoning history `summary/content/encrypted_content` | Anthropic `thinking/signature` or `redacted_thinking/data`; no silent skip | `responses_replay_reasoning_restores_anthropic_thinking_and_redacted_blocks` |
@@ -180,8 +196,11 @@ tests exist and pass.
 | `tool_result` | Responses `function_call_output` | request matrix |
 | `tools[].name/description/input_schema` | Responses function tool `name/description/parameters` | request matrix |
 | `tool_choice` | target-compatible `tool_choice` | request matrix |
-| `thinking` | `reasoning` with original `thinking` carried for lossless local projection | request matrix |
-| `metadata` | preserved as data-plane `metadata` | request matrix |
+| `thinking.type` | `request.reasoning_thinking_mode`; Responses outbound rejects because execution mode is not equivalent | source decomposition and negative Responses target matrix |
+| `output_config.effort` | `request.reasoning_effort`, then Responses `reasoning.effort` for target-supported values | bidirectional effort matrix |
+| `thinking.budget_tokens` | `request.reasoning_budget_tokens`; Responses outbound rejects because it has no numeric budget field | negative Responses target matrix |
+| `thinking.display` | `request.reasoning_display_policy`; non-Anthropic outbound rejects | source-roundtrip and negative cross-protocol matrix |
+| `metadata.user_id` | `request.client_metadata.user_id`, then target-schema-validated projection | request matrix |
 | `temperature`, `top_p`, `max_tokens`, `max_output_tokens`, `stream` | preserved/mapped | request matrix |
 | `stop_sequences` | `stop` | request matrix |
 | `top_k` | preserved as `top_k` compatibility field until provider-specific layer rejects/handles | request matrix |
@@ -223,3 +242,14 @@ CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3
 ```
 
 Required closeout after source green: V3 fmt, protocol characterization gates, relay request/response gates, architecture review gates, global install, managed restart, and same-entry live replay.
+
+## Required red-first pairs for request-field projection
+
+| Positive lock | Negative lock |
+| --- | --- |
+| OpenAI `medium` -> Chat effort -> Anthropic `output_config.effort=medium` | OpenAI `minimal` -> Anthropic fails; no invented `thinking` budget |
+| Anthropic `output_config.effort=xhigh` -> Chat effort -> Responses `reasoning.effort=xhigh` | Unsupported target-model effort fails before transport |
+| Anthropic numeric budget -> Chat budget -> valid Gemini `thinkingBudget` | Numeric budget never becomes OpenAI qualitative effort |
+| `client_metadata.user_id` -> Anthropic `metadata.user_id` | `client_metadata.session_id` and mixed-key objects fail without MetadataCenter copy |
+| Responses summary/context/mode round-trip back to Responses | Anthropic projection fails and no system marker is emitted |
+| Gemini includeThoughts round-trips to Gemini | It never becomes Anthropic display or OpenAI summary |

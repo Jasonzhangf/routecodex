@@ -58,9 +58,8 @@ fn provider_request_dry_run_response_payload_for_request(
     responses_payload: &Value,
 ) -> Value {
     let text = "routecodex provider-request dry-run stopped before provider send";
-    if provider_request_url_path_ends_with(request.url(), "/v1/messages") {
+    if provider_request_url_path(request.url()).ends_with("/v1/messages") {
         return json!({
-            "id": format!("dry_run_{}", request.request_id()),
             "type": "message",
             "role": "assistant",
             "model": request.body().get("model").cloned().unwrap_or(Value::Null),
@@ -68,9 +67,8 @@ fn provider_request_dry_run_response_payload_for_request(
             "stop_reason": "end_turn"
         });
     }
-    if provider_request_url_path_ends_with(request.url(), "/chat/completions") {
+    if provider_request_url_path(request.url()).ends_with("/chat/completions") {
         return json!({
-            "id": format!("dry_run_{}", request.request_id()),
             "object": "chat.completion",
             "model": request.body().get("model").cloned().unwrap_or(Value::Null),
             "choices": [{
@@ -80,12 +78,25 @@ fn provider_request_dry_run_response_payload_for_request(
             }]
         });
     }
+    if provider_request_url_path(request.url()).ends_with("/v1/responses")
+        || provider_request_url_path(request.url()).ends_with("/responses")
+    {
+        return json!({
+            "object": "response",
+            "status": "completed",
+            "output_text": text,
+            "output": [{"type":"output_text","text":text}]
+        });
+    }
     responses_payload.clone()
 }
 
-fn provider_request_url_path_ends_with(url: &str, suffix: &str) -> bool {
-    let path = url.split('?').next().unwrap_or(url);
-    path.trim_end_matches('/').ends_with(suffix)
+fn provider_request_url_path(url: &str) -> String {
+    url.split('?')
+        .next()
+        .unwrap_or(url)
+        .trim_end_matches('/')
+        .to_string()
 }
 
 #[cfg(test)]
@@ -97,7 +108,7 @@ mod tests {
     };
 
     #[test]
-    fn dry_run_terminal_payload_matches_anthropic_provider_protocol() {
+    fn dry_run_terminal_payload_is_protocol_compatible_without_continuation_id() {
         let request = build_v3_transport_13_responses_http_request_from_parts(
             "req-dry-run",
             "anthropic_provider",
@@ -115,9 +126,8 @@ mod tests {
             &json!({"unused":true}),
         );
         assert_eq!(payload["type"], "message");
-        assert_eq!(
-            payload["content"][0]["text"],
-            "routecodex provider-request dry-run stopped before provider send"
-        );
+        assert_eq!(payload["stop_reason"], "end_turn");
+        assert!(payload.get("id").is_none());
+        assert!(payload.get("previous_response_id").is_none());
     }
 }

@@ -543,47 +543,67 @@ fn local_continuation_context_preserves_request_history_tools_and_response_delta
     )
     .unwrap();
     assert_eq!(
-        context["input"],
+        context["messages"],
         json!([
+            {"role": "system", "content": "base instructions with stopreason"},
             {"role": "user", "content": "original task"},
             {
-                "type": "function_call",
-                "call_id": "call_stopless_reasoning",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_stopless_reasoning",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                    }
+                }]
             }
         ])
     );
     assert_eq!(context["tools"], canonical_request["tools"]);
-    assert_eq!(context["instructions"], canonical_request["instructions"]);
+    assert!(context.get("instructions").is_none());
 
     let mut current = json!({
-        "input": [{
-            "type": "function_call_output",
-            "call_id": "call_stopless_reasoning",
-            "output": ""
+        "messages": [{
+            "role": "tool",
+            "tool_call_id": "call_stopless_reasoning",
+            "content": "",
+            "routecodex_chat_extension": {
+                "responses_tool_output_type": "function_call_output"
+            }
         }]
     });
     merge_v3_relay_restored_local_context_at_req04(&mut current, &context).unwrap();
     assert_eq!(
-        current["input"],
+        current["messages"],
         json!([
+            {"role": "system", "content": "base instructions with stopreason"},
             {"role": "user", "content": "original task"},
             {
-                "type": "function_call",
-                "call_id": "call_stopless_reasoning",
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_stopless_reasoning",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                    }
+                }]
             },
             {
-                "type": "function_call_output",
-                "call_id": "call_stopless_reasoning",
-                "output": ""
+                "role": "tool",
+                "tool_call_id": "call_stopless_reasoning",
+                "content": "",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_type": "function_call_output"
+                }
             }
         ])
     );
     assert_eq!(current["tools"], canonical_request["tools"]);
-    assert_eq!(current["instructions"], canonical_request["instructions"]);
+    assert!(current.get("instructions").is_none());
 }
 
 #[test]
@@ -620,4 +640,20 @@ fn local_continuation_context_never_carries_stopless_center_state() {
             "relay local continuation context leaked stopless control field {forbidden}: {serialized}"
         );
     }
+}
+
+#[test]
+fn req04_rejects_responses_shaped_continuation_instead_of_rebuilding_chat() {
+    let mut current = json!({
+        "messages": [{"role":"tool","tool_call_id":"call_old","content":"ok"}]
+    });
+    let restored = json!({
+        "input": [{"type":"function_call","call_id":"call_old","name":"lookup","arguments":"{}"}],
+        "output": []
+    });
+
+    let error = merge_v3_relay_restored_local_context_at_req04(&mut current, &restored)
+        .expect_err("Req04 must not rebuild Chat from a stored Responses payload");
+
+    assert!(error.to_string().contains("Chat canonical messages"));
 }

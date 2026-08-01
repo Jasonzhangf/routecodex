@@ -28,12 +28,9 @@ families:
   continuation_context:
     write_policy: replaceable_by_owner_only
     slots:
-      - responsesResume
       - previousResponseId
       - responseId
-      - toolOutputs
       - continuationOwner
-      - resumeFrom
       - chainId
       - stickyScope
   runtime_control:

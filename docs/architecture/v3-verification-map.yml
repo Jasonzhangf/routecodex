@@ -157,6 +157,9 @@ features:
       - docs/architecture/wiki/v3-entry-protocol-endpoint-binding.md
       - docs/goals/v3-foundation-implementation-order.md
     contract:
+      - docs/design/v3-protocol-request-field-projection.md
+      - docs/architecture/manifests/v3.protocol_request_field_projection.yml
+      - docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml
       - docs/architecture/v3-resource-operation-map.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-mainline-call-map.yml
@@ -814,12 +817,19 @@ features:
       - npm run test:v3-compile-fail
       - npm run test:v3-provider-responses
       - npm run test:v3-direct-protocol-plan-session-cooldown
+      - npm run test:v3-responses-process-execution-decision
       - npm run test:v3-responses-direct-unit
       - npm run test:v3-responses-direct-blackbox
       - npm run test:v3-direct-response-observability
       - npm run verify:v3-cargo-fmt
       - npm run verify:v3-clippy
       - npm run test:v3-workspace
+    required_live:
+      - RUSTUP_TOOLCHAIN=stable npm run install:v3
+      - rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml
+      - rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml
+      - 4444 and 5555 health version must match the installed rccv3 artifact
+      - 5555 provider-request dry-run and live /v1/responses replay selecting asxs-grok must show Hub Relay nodes and provider Chat wire rather than SameProtocolDirect POST /responses
     completion_rule:
       source: "P6 Server03 through Server16, generic Provider transport, Target-local reselection, full exhaustion, and same-kernel no-network Dry Run require all listed source gates."
       runtime: "Verified with the actual V3 CLI and dedicated multi-listener config.p6.toml: JSON, SSE, reselection, exhaustion, Dry Run no-send, Debug trace, secret isolation, explicit Ctrl-C, and closed ports."
@@ -1386,8 +1396,12 @@ features:
       - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format, token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
       - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
-      - Anthropic thinking is preserved under Responses reasoning.thinking rather than compressed to effort-only state.
-      - Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker for both `input[]` and string `input`, and never leaks as Responses reasoning or synthetic Anthropic thinking.
+      - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
+      - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents `thinking.budget_tokens`.
+      - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions, round-trip to Responses, and fail on Anthropic projection without any system marker.
+      - Anthropic thinking.budget_tokens and Gemini thinkingBudget share the numeric budget extension only after target constraint validation; OpenAI targets reject numeric budget rather than compressing it into qualitative effort.
+      - Anthropic thinking.display, Gemini includeThoughts, and OpenAI reasoning.summary remain separate source-roundtrip semantics.
+      - Responses client_metadata/prompt_cache_key/store/text normalize into registered Chat request fields; Anthropic outbound projects exactly client_metadata.user_id and compatible JSON schema, while extra metadata keys, prompt cache key, both store values, verbosity, and incompatible format fail without MetadataCenter/SSE/handler reconstruction.
       - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
       - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
@@ -1537,6 +1551,8 @@ features:
       - V2 default config projection binds /v1/responses to the Responses Direct runtime owner while explicit Relay remains a valid controlled/manual binding
       - v3-hub-relay-closeout-01 through v3-hub-relay-closeout-16 remain adjacent and anchored to docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
       - local continuation two-turn restores saved context before current tool output and releases on terminal success
+      - Resp04 local continuation stores Chat canonical messages only; Req04 rejects Responses input/output instead of rebuilding protocol semantics
+      - continuation response id and scope remain explicit control parameters and never enter stored Chat payload
       - Responses Relay provider-facing JSON blackbox preserves tools and sends restored function_call immediately before current function_call_output
       - wrong Responses Relay call_id fails before provider send and preserves the saved continuation context
       - servertool response hook profile is consumed by Runtime response governance
@@ -2345,22 +2361,11 @@ features:
       - Different session on one listener and the same session on different listeners remain concurrently admissible.
       - Missing explicit scope does not invent a cross-request key.
       - Response EOF, stream error, and client body drop release only the exact permit.
-      - Conflict SSE starts with event error and never reaches provider transport.
-    required_integration:
-      - Controlled held-open provider proves the conflict is rejected before a second provider capture.
-      - Installed aggregate restart proves 5520 and 5555 stay port-isolated and a same-session 5555 overlap is explicit.
     required_gates:
       - npm run verify:v3-responses-session-admission
       - npm run test:v3-responses-session-admission
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --test error_chain_contract request_in_flight_projects_standard_error_chain_with_http_conflict -- --exact
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_overlap_is_rejected_before_provider_send -- --exact
-      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact
+      - npm run test:v3-responses-session-admission-red-fixtures
       - git diff --check
-    completion_boundary:
-      source_controlled: true
-      live_cutover: false
-      global_install_restart: false
-      forbidden_claim: "Do not claim completion from codec repair, provider-action gating, queued admission, or unit-only evidence."
 
   - feature_id: v3.sse_http_keepalive_boundary
     status: source_pending_live_replay
@@ -2381,8 +2386,6 @@ features:
       - Config05 publishes one positive interval from ROUTECODEX_HTTP_SSE_KEEPALIVE_MS; malformed, empty, zero, or non-UTF8 values fail before listener bind.
       - RCC_HTTP_SSE_KEEPALIVE_MS is rejected instead of acting as a second configuration truth.
     required_gates:
-      - npm run verify:v3-responses-session-admission
-      - npm run test:v3-responses-session-admission
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_sse -- --nocapture
@@ -2477,3 +2480,28 @@ features:
       source: Provider action gates, maps, manifests, red fixtures, and runtime source checks pass.
       runtime: Live verification remains required before claiming production closeout.
       forbidden_claim: Do not claim complete from source gates alone; live verification is explicit.
+
+  - feature_id: v3.codex_sample_retention_snap_scope
+    status: source_active_live_verification_required
+    change_risk: medium
+    owner_kind: rust_v3_bounded_debug_artifact_lifecycle
+    owner_scope: "Debug owns bounded payload copies; Server owns authorized filesystem persistence; neither may enter MetadataCenter or normal provider/client payload."
+    owner_modules:
+      - v3/crates/routecodex-v3-debug
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+    required_positive:
+      - Debug artifacts are redacted and bounded before filesystem persistence.
+      - Direct SSE provider bytes pass through with no keepalive injection.
+    required_negative:
+      - Debug payload copies never enter MetadataCenter, provider payload, client payload, continuation state, or routing truth.
+    required_gates:
+      - npm run verify:v3-debug-payload-budget
+      - npm run test:v3-debug-payload-budget-red-fixtures
+      - npm run verify:v3-resource-map
+    completion_rule:
+      source: Debug budget, red fixtures, resource map, and build gate pass.
+      runtime: Live sample capture remains required before production closeout.

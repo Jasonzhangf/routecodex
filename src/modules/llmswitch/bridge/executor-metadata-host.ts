@@ -7,6 +7,5 @@
  */
 
 export {
-  extractServertoolCliResultRouteHintFromRequestNative,
   extractSessionIdentifiersFromMetadataNative,
 } from './native-exports.js';

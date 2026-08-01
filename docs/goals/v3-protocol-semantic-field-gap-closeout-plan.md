@@ -60,7 +60,7 @@ Out of scope:
 | `gap.source_inventory_only` | 0 | Keep this at zero; new source fields must receive manual semantic owner/classification before runtime edits. |
 | `gap.shape_branch_transform` | 18 | `shape_branch_cases` are now documented/gated for the content/media/file rows; next closeout must add the named Rust positive/negative tests and adjacent codec implementation before changing any status. |
 | `gap.gemini_codec_shape_only` | 14 | Expand Gemini deep semantics or mark unsupported/lossy explicitly. |
-| `gap.client_metadata.target_dependent` | 1 | Keep target-dependent provider-wire behavior gated: OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`. |
+| `gap.client_metadata.target_dependent` | 1 | Keep target-dependent projection gated: OpenAI metadata requires bounded string pairs; Anthropic metadata accepts exactly `user_id`; unsupported keys fail at the adjacent outbound codec. |
 | `gap.edge_only_transport_state` | 3 | Keep as edge-only transport state; no business runtime closeout. |
 
 Progress evidence:

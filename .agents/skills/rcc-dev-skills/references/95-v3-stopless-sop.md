@@ -302,6 +302,7 @@ Req04 Chat Process:
 - Provider request 不得含 `call_stopless_reasoning`、`routecodex hook run reasoningStop`、CLI stdout、`--input-json`、`repeatCount`、`schemaFeedback`、`triggerHint`、`missingFields`、`runtime_control`、`metadata_center`。
 - Provider request 不得含 canonical stop_schema 对象本身；`next_step_prompt` 只能投影为普通当前轮文字提示，不得以 `stop_schema` / `nextStep` / `next_step` 字段形式进入 provider/client normal payload。
 - Provider request 中由 stopless 生成的 continuation/guideline 最多只能有一条；重复 dry-run 或多轮真实续杯都不得让旧 generated guideline 累积。
+- Responses→Chat canonicalization 若同时保留 `original_responses_payload` 供目标协议出站，Req04 必须在同一治理步骤清理 canonical 与 retained-original 两个数据面；只清 canonical 会让 Anthropic/Responses ReqOutbound 从旧原始面复活 `call_stopless_reasoning`。正向锁所有 stopless CLI call/output/guidance 均消失，反向锁真实 tool call/output/arguments 原样保留；禁止去 provider codec 去重或随机化稳定 call id。
 - Req04 重新注入 guidance + exactly-one `reasoningStop` 后，才能进入 VR/provider wire。
 
 ### Provider prompt preservation audit

@@ -228,46 +228,6 @@ type NativeChatProcessNodeResultSemantics = {
   ) => string;
 };
 
-function parseServertoolCliRouteHintCandidate(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const routeHint =
-    typeof record.routeHint === 'string' && record.routeHint.trim()
-      ? record.routeHint.trim()
-      : typeof record.route_hint === 'string' && record.route_hint.trim()
-        ? record.route_hint.trim()
-        : undefined;
-  return routeHint || undefined;
-}
-
-function readServertoolCliRouteHintFromRequestValue(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim()) {
-    try {
-      return parseServertoolCliRouteHintCandidate(JSON.parse(value));
-    } catch {
-      return undefined;
-    }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  for (const candidate of [
-    record.output,
-    record.content,
-    record.text,
-    record.outputText,
-  ]) {
-    const routeHint = readServertoolCliRouteHintFromRequestValue(candidate);
-    if (routeHint) {
-      return routeHint;
-    }
-  }
-  return parseServertoolCliRouteHintCandidate(record);
-}
-
 type NativeRouterHotpathJsonBinding = {
   // -- req_executor_pipeline_attempt batch #1 --
   normalizeExplicitRoutePoolJson?: (inputJson: string) => string;
@@ -2104,40 +2064,6 @@ export function updateResponsesSseTransportTerminalStateNative(input: {
     state: state as Record<string, unknown>,
     observedTerminal: sawTerminalEvent,
   };
-}
-
-export function extractServertoolCliResultRouteHintFromRequestNative(input: {
-  adapterContext?: Record<string, unknown>;
-  runtimeMetadata?: Record<string, unknown>;
-}): string | undefined {
-  const adapterContext =
-    input.adapterContext && typeof input.adapterContext === 'object' && !Array.isArray(input.adapterContext)
-      ? input.adapterContext
-      : undefined;
-  const rawRequestBody =
-    adapterContext?.__raw_request_body
-      && typeof adapterContext.__raw_request_body === 'object'
-      && !Array.isArray(adapterContext.__raw_request_body)
-      ? (adapterContext.__raw_request_body as Record<string, unknown>)
-      : undefined;
-  if (!rawRequestBody) {
-    return undefined;
-  }
-  const toolOutputs = Array.isArray(rawRequestBody.tool_outputs) ? rawRequestBody.tool_outputs : [];
-  for (const item of toolOutputs) {
-    const routeHint = readServertoolCliRouteHintFromRequestValue(item);
-    if (routeHint) {
-      return routeHint;
-    }
-  }
-  const inputItems = Array.isArray(rawRequestBody.input) ? rawRequestBody.input : [];
-  for (const item of inputItems) {
-    const routeHint = readServertoolCliRouteHintFromRequestValue(item);
-    if (routeHint) {
-      return routeHint;
-    }
-  }
-  return undefined;
 }
 
 export function resolveProviderRetryExecutionPolicyNative(input: {

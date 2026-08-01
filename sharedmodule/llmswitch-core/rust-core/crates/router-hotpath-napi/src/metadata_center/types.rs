@@ -25,13 +25,9 @@ pub struct RequestTruth {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ContinuationContext {
-    pub responses_request_context: Option<Value>,
-    pub responses_resume: Option<Value>,
     pub previous_response_id: Option<String>,
     pub response_id: Option<String>,
-    pub tool_outputs: Option<Vec<Value>>,
     pub continuation_owner: Option<String>,
-    pub resume_from: Option<Value>,
     pub chain_id: Option<String>,
     pub sticky_scope: Option<String>,
 }

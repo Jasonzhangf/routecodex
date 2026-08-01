@@ -12,7 +12,7 @@ use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc, time::Instant};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::TcpStream,
     sync::{mpsc, oneshot, Mutex, Semaphore},
     time::{sleep, timeout, Duration},
@@ -651,6 +651,22 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+async fn assert_no_remote_continuation_provider_send(
+    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+) {
+    while let Ok(Some(extra)) = timeout(Duration::from_millis(100), captures.recv()).await {
+        assert_ne!(
+            extra
+                .body
+                .get("previous_response_id")
+                .and_then(Value::as_str),
+            Some("resp_server_remote_1"),
+            "client payload headers must not authorize a second continuation provider send: {}",
+            extra.body
+        );
+    }
+}
+
 #[derive(Clone)]
 struct ProviderState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
@@ -660,6 +676,36 @@ struct ProviderState {
 struct HeldProviderState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
     release: Arc<Semaphore>,
+}
+
+async fn controlled_held_responses_upstream(
+    State(state): State<Arc<HeldProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    let release = Arc::clone(&state.release);
+    let body = futures_util::stream::once(async {
+        Ok::<_, std::io::Error>(
+            b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_held\",\"status\":\"in_progress\"}}\n\n"
+                .to_vec(),
+        )
+    })
+    .chain(futures_util::stream::once(async move {
+        let _permit = release.acquire_owned().await.unwrap();
+        Ok::<_, std::io::Error>(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+                .to_vec(),
+        )
+    }));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(body))
+        .unwrap()
 }
 
 async fn controlled_responses_upstream(
@@ -687,36 +733,6 @@ async fn controlled_responses_upstream(
             .body(Body::from(r#"{"id":"resp_json","output_text":"ok"}"#))
             .unwrap()
     }
-}
-
-async fn controlled_held_responses_upstream(
-    State(state): State<Arc<HeldProviderState>>,
-    headers: HeaderMap,
-    axum::Json(body): axum::Json<Value>,
-) -> Response<Body> {
-    state
-        .captures
-        .send(ProviderCapture::from_http(&headers, body))
-        .unwrap();
-    let release = Arc::clone(&state.release);
-    let body = futures_util::stream::once(async {
-        Ok::<_, std::io::Error>(
-            b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_held\",\"status\":\"in_progress\"}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"held\"}\n\n"
-                .to_vec(),
-        )
-    })
-    .chain(futures_util::stream::once(async move {
-        let _permit = release.acquire_owned().await.unwrap();
-        Ok::<_, std::io::Error>(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
-                .to_vec(),
-        )
-    }));
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "text/event-stream")
-        .body(Body::from_stream(body))
-        .unwrap()
 }
 
 async fn controlled_responses_relay_upstream(
@@ -1501,7 +1517,7 @@ async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
 }
 
 #[tokio::test]
-async fn responses_relay_local_continuation_uses_body_client_metadata_without_inventing_headers() {
+async fn responses_relay_client_metadata_cannot_authorize_continuation_control_scope() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -1550,60 +1566,21 @@ async fn responses_relay_local_continuation_uses_body_client_metadata_without_in
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 200);
+    assert_eq!(second.status(), 400);
     let second_body: Value = second.json().await.unwrap();
-    assert_eq!(second_body["status"], "completed");
-    assert_eq!(second_body["output_text"], "RCCV3_BODY_METADATA_TURN2_OK");
+    assert!(second_body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("typed RouteCodex control scope"));
 
-    let first_capture = captures.recv().await.unwrap();
-    let second_capture = captures.recv().await.unwrap();
+    let first_capture = timeout(Duration::from_secs(2), captures.recv())
+        .await
+        .expect("first request must reach provider")
+        .unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
-    assert_eq!(second_capture.body["model"], "wire-test");
-    let second_input = second_capture.body["input"]
-        .as_array()
-        .expect("second provider input must remain Responses input array");
-    assert!(
-        second_input.iter().any(|item| item
-            == &json!({
-                "type":"function_call",
-                "call_id":"call_body_metadata",
-                "name":"lookup_weather",
-                "arguments":"{\"city\":\"Paris\"}"
-            })),
-        "{:?}",
-        second_capture.body
-    );
-    assert!(
-        second_input.iter().any(|item| item
-            == &json!({
-                "type":"function_call_output",
-                "call_id":"call_body_metadata",
-                "output":"weather=clear RCCV3_BODY_METADATA_TURN2_OK"
-            })),
-        "{:?}",
-        second_capture.body
-    );
-    for body in [&first_capture.body, &second_capture.body] {
-        assert_eq!(
-            body["client_metadata"]["session_id"],
-            "rccv3-body-session-test"
-        );
-        assert_eq!(
-            body["client_metadata"]["thread_id"],
-            "rccv3-body-thread-test"
-        );
-        assert!(body.get("session_id").is_none(), "{body}");
-        assert!(body.get("thread_id").is_none(), "{body}");
-        assert!(body.get("routecodex_session_id").is_none(), "{body}");
-        assert!(body.get("continuation_owner").is_none(), "{body}");
-    }
-    for capture in [&first_capture, &second_capture] {
-        assert_eq!(capture.session_id, None);
-        assert_eq!(capture.thread_id, None);
-        assert_eq!(capture.x_session_id, None);
-        assert_eq!(capture.x_conversation_id, None);
-        assert_eq!(capture.x_codex_turn_metadata, None);
-    }
+    assert_eq!(first_capture.body["metadata"], client_metadata);
+    assert!(first_capture.body.get("client_metadata").is_none());
+    assert_no_remote_continuation_provider_send(&mut captures).await;
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
@@ -1611,7 +1588,7 @@ async fn responses_relay_local_continuation_uses_body_client_metadata_without_in
 }
 
 #[tokio::test]
-async fn responses_relay_body_client_metadata_scope_mismatch_fails_before_provider_send() {
+async fn responses_relay_different_client_metadata_still_cannot_build_control_scope() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -1661,7 +1638,7 @@ async fn responses_relay_body_client_metadata_scope_mismatch_fails_before_provid
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 500);
+    assert_eq!(second.status(), 400);
     let error_chain = second
         .headers()
         .get("x-routecodex-v3-error-chain")
@@ -1673,14 +1650,14 @@ async fn responses_relay_body_client_metadata_scope_mismatch_fails_before_provid
     assert!(second_body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("scope mismatch"));
+        .contains("typed RouteCodex control scope"));
     assert_eq!(error_chain.split(',').count(), 6);
     let _first_capture = captures.recv().await.unwrap();
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
             .is_err(),
-        "scope mismatch must fail before the second provider send"
+        "payload metadata must fail before the second provider send"
     );
 
     handle.shutdown().await;
@@ -1741,7 +1718,7 @@ async fn responses_relay_missing_client_scope_for_tool_output_fails_before_provi
     assert!(body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("requires client-provided session_id and thread_id"));
+        .contains("typed RouteCodex control scope"));
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
@@ -2091,163 +2068,50 @@ async fn responses_same_listener_same_session_overlap_is_rejected_before_provide
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
-    std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", "25");
-    let mut controlled_manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
-    controlled_manifest.debug.snapshots = false;
-    controlled_manifest.debug.codex_samples = false;
-    controlled_manifest.debug.snapshot_stages = None;
-    let handle = spawn_v3_server_aggregate(controlled_manifest)
-        .await
-        .unwrap();
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let second_listener_endpoint = format!("http://{}/v1/responses", handle.listeners[1].addr);
-    let request = json!({
-        "model": "client-test",
-        "input": "held",
-        "stream": true,
-        "client_metadata": {
-            "session_id": "session-overlap",
-            "thread_id": "conversation-overlap"
-        }
-    });
+    let request = json!({"model":"client-test","input":"held","stream":true});
 
     let first_client = client.clone();
     let first_endpoint = endpoint.clone();
     let first_request = request.clone();
-    let first_request_task = tokio::spawn(async move {
+    let first_task = tokio::spawn(async move {
         first_client
             .post(first_endpoint)
             .header("accept", "text/event-stream")
+            .header("session-id", "session-overlap")
+            .header("thread-id", "conversation-overlap")
             .json(&first_request)
             .send()
             .await
             .unwrap()
     });
-    let _first_capture = timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
+    captures.recv().await.expect("first provider request");
 
-    let different_session_client = client.clone();
-    let different_session_endpoint = endpoint.clone();
-    let different_session_task = tokio::spawn(async move {
-        different_session_client
-            .post(different_session_endpoint)
-            .header("accept", "text/event-stream")
-            .json(&json!({
-                "model": "client-test",
-                "input": "different session",
-                "stream": true,
-                "client_metadata": {
-                    "session_id": "session-control",
-                    "thread_id": "conversation-control"
-                }
-            }))
-            .send()
-            .await
-            .unwrap()
-    });
-    let _different_session_capture = timeout(Duration::from_secs(2), captures.recv())
+    let second = client
+        .post(&endpoint)
+        .header("accept", "text/event-stream")
+        .header("session-id", "session-overlap")
+        .header("thread-id", "conversation-overlap")
+        .json(&request)
+        .send()
         .await
-        .unwrap()
         .unwrap();
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+    assert!(second.text().await.unwrap().contains("request_in_flight"));
+    assert!(timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_err());
 
-    let different_listener_client = client.clone();
-    let different_listener_request = request.clone();
-    let different_listener_task = tokio::spawn(async move {
-        different_listener_client
-            .post(second_listener_endpoint)
-            .header("accept", "text/event-stream")
-            .json(&different_listener_request)
-            .send()
-            .await
-            .unwrap()
-    });
-    let _different_listener_capture = timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-
-    let second_response = timeout(
-        Duration::from_secs(2),
-        client
-            .post(&endpoint)
-            .header("accept", "text/event-stream")
-            .json(&request)
-            .send(),
-    )
-    .await
-    .expect("overlap rejection must be immediate")
-    .unwrap();
-    let second_status = second_response.status();
-    assert_eq!(second_status, StatusCode::CONFLICT);
-    let second_body = second_response.text().await.unwrap();
-    assert!(second_body.starts_with("event: error\n"), "{second_body}");
-    assert!(second_body.contains("\"code\":\"request_in_flight\""));
-    assert!(
-        timeout(Duration::from_millis(100), captures.recv())
-            .await
-            .is_err(),
-        "conflicting request must not create a fourth provider transport"
-    );
-
-    release.add_permits(3);
-    let first_response = timeout(Duration::from_secs(5), first_request_task)
-        .await
-        .unwrap()
-        .unwrap();
-    let different_session_response = timeout(Duration::from_secs(5), different_session_task)
-        .await
-        .unwrap()
-        .unwrap();
-    let different_listener_response = timeout(Duration::from_secs(5), different_listener_task)
-        .await
-        .unwrap()
-        .unwrap();
-    for response in [
-        first_response,
-        different_session_response,
-        different_listener_response,
-    ] {
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response.text().await.unwrap();
-        assert!(body.starts_with(": keepalive\n\n"), "{body}");
-        assert!(body.contains("response.completed"), "{body}");
-    }
-
-    let retry_client = client.clone();
-    let retry_endpoint = endpoint.clone();
-    let retry_request = request.clone();
-    let retry_task = tokio::spawn(async move {
-        retry_client
-            .post(retry_endpoint)
-            .header("accept", "text/event-stream")
-            .json(&retry_request)
-            .send()
-            .await
-            .unwrap()
-    });
-    let _retry_capture = timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .expect("EOF must release the original session for a later provider send")
-        .unwrap();
     release.add_permits(1);
-    let retry_response = timeout(Duration::from_secs(5), retry_task)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(retry_response.status(), StatusCode::OK);
-    assert!(retry_response
-        .text()
-        .await
-        .unwrap()
-        .starts_with(": keepalive\n\n"));
-
+    assert_eq!(first_task.await.unwrap().status(), StatusCode::OK);
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
-    std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
 #[tokio::test]
@@ -2256,91 +2120,40 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-drop");
-    std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", "25");
-    let mut controlled_manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
-    controlled_manifest.debug.snapshots = false;
-    controlled_manifest.debug.codex_samples = false;
-    controlled_manifest.debug.snapshot_stages = None;
-    let handle = spawn_v3_server_aggregate(controlled_manifest)
-        .await
-        .unwrap();
-    let client = reqwest::Client::new();
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
     let listener_addr = handle.listeners[0].addr;
-    let endpoint = format!("http://{listener_addr}/v1/responses");
-    let request = json!({
-        "model": "client-test",
-        "input": "drop before provider eof",
-        "stream": true,
-        "client_metadata": {
-            "session_id": "session-client-drop",
-            "thread_id": "conversation-client-drop"
-        }
-    });
-
+    let request = json!({"model":"client-test","input":"drop","stream":true});
     let request_body = serde_json::to_vec(&request).unwrap();
     let request_head = format!(
-        "POST /v1/responses HTTP/1.1\r\nHost: {listener_addr}\r\nAccept: text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST /v1/responses HTTP/1.1\r\nHost: {listener_addr}\r\nAccept: text/event-stream\r\nSession-Id: session-client-drop\r\nThread-Id: conversation-client-drop\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         request_body.len()
     );
-    let mut dropped_socket = TcpStream::connect(listener_addr).await.unwrap();
-    dropped_socket
-        .write_all(request_head.as_bytes())
-        .await
-        .unwrap();
-    dropped_socket.write_all(&request_body).await.unwrap();
-    let _first_capture = timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let mut received = Vec::new();
-    let mut buffer = [0_u8; 4096];
-    timeout(Duration::from_secs(2), async {
-        while !received
-            .windows(b": keepalive\n\n".len())
-            .any(|window| window == b": keepalive\n\n")
-        {
-            let read = dropped_socket.read(&mut buffer).await.unwrap();
-            assert!(read > 0, "server closed before the initial keepalive");
-            received.extend_from_slice(&buffer[..read]);
-        }
-    })
-    .await
-    .expect("client must receive the initial keepalive before disconnect");
-    drop(dropped_socket);
+    let mut socket = TcpStream::connect(listener_addr).await.unwrap();
+    socket.write_all(request_head.as_bytes()).await.unwrap();
+    socket.write_all(&request_body).await.unwrap();
+    captures.recv().await.expect("first provider request");
+    drop(socket);
     sleep(Duration::from_millis(100)).await;
 
-    let retry_client = client.clone();
-    let retry_endpoint = endpoint.clone();
-    let retry_request = request.clone();
-    let retry_task = tokio::spawn(async move {
-        retry_client
-            .post(retry_endpoint)
-            .header("accept", "text/event-stream")
-            .json(&retry_request)
-            .send()
-            .await
-            .unwrap()
-    });
-    let _retry_capture = timeout(Duration::from_secs(2), captures.recv())
+    let retry = reqwest::Client::new()
+        .post(format!("http://{listener_addr}/v1/responses"))
+        .header("accept", "text/event-stream")
+        .header("session-id", "session-client-drop")
+        .header("thread-id", "conversation-client-drop")
+        .json(&request);
+    let retry_task = tokio::spawn(async move { retry.send().await.unwrap() });
+    timeout(Duration::from_secs(2), captures.recv())
         .await
         .expect("client drop must release admission before provider EOF")
         .unwrap();
     release.add_permits(1);
-    let retry_response = timeout(Duration::from_secs(5), retry_task)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(retry_response.status(), StatusCode::OK);
-    assert!(retry_response
-        .text()
-        .await
-        .unwrap()
-        .starts_with(": keepalive\n\n"));
-
+    assert_eq!(retry_task.await.unwrap().status(), StatusCode::OK);
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
-    std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
 #[tokio::test]
@@ -2435,8 +2248,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
 }
 
 #[tokio::test]
-async fn responses_direct_server_replays_two_turn_remote_continuation_with_header_scope_and_no_router_reentry(
-) {
+async fn responses_direct_client_headers_cannot_authorize_remote_continuation_control_scope() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
         start_controlled_continuation_websocket().await;
@@ -2501,17 +2313,12 @@ async fn responses_direct_server_replays_two_turn_remote_continuation_with_heade
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 200);
-    let second_trace = second.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(second_trace.contains("V3HubReqContinuation03Classified"));
-    assert!(second_trace.contains("V3HubReqTarget06Resolved"));
-    assert!(!second_trace.contains("V3Router07OpaqueTargetHitOnce"));
-    assert!(!second_trace.contains("V3TargetLocalReselected"));
+    assert_eq!(second.status(), 400);
     let second_body: Value = second.json().await.unwrap();
-    assert_eq!(second_body["id"], "resp_server_remote_2");
+    assert!(second_body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("typed RouteCodex control scope"));
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -2519,17 +2326,11 @@ async fn responses_direct_server_replays_two_turn_remote_continuation_with_heade
         Some("Bearer secret-p6-continuation")
     );
     let first_capture = captures.recv().await.unwrap();
-    let second_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["model"], "wire-test");
-    assert_eq!(second_capture.body["model"], "wire-test");
     assert_eq!(first_capture.body["type"], "response.create");
     assert!(first_capture.body.get("stream").is_none());
     assert!(first_capture.body.get("background").is_none());
-    assert_eq!(
-        second_capture.body["previous_response_id"],
-        "resp_server_remote_1"
-    );
-    for body in [&first_capture.body, &second_capture.body] {
+    for body in [&first_capture.body] {
         for forbidden in [
             "session_id",
             "thread_id",
@@ -2542,14 +2343,15 @@ async fn responses_direct_server_replays_two_turn_remote_continuation_with_heade
             assert!(body.get(forbidden).is_none(), "{forbidden}: {body}");
         }
     }
+    assert_no_remote_continuation_provider_send(&mut captures).await;
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
-    shutdown.send(()).unwrap();
+    let _ = shutdown.send(());
 }
 
 #[tokio::test]
-async fn responses_direct_server_replays_two_turn_sse_remote_continuation_without_router_reentry() {
+async fn responses_direct_sse_client_headers_cannot_authorize_remote_continuation_control_scope() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
         start_controlled_continuation_websocket().await;
@@ -2599,21 +2401,13 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 200);
+    assert_eq!(second.status(), 400);
     assert_eq!(second.headers()["content-type"], "text/event-stream");
-    let second_trace = second.headers()["x-routecodex-v3-node-trace"]
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(second_trace.contains("V3HubReqContinuation03Classified"));
-    assert!(second_trace.contains("V3HubReqTarget06Resolved"));
-    assert!(!second_trace.contains("V3Router07OpaqueTargetHitOnce"));
-    assert!(!second_trace.contains("V3TargetLocalReselected"));
     assert!(second
         .text()
         .await
         .unwrap()
-        .contains("resp_server_remote_2"));
+        .contains("typed RouteCodex control scope"));
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -2621,19 +2415,13 @@ async fn responses_direct_server_replays_two_turn_sse_remote_continuation_withou
         Some("Bearer secret-p6-continuation-sse")
     );
     let first_capture = captures.recv().await.unwrap();
-    let second_capture = captures.recv().await.unwrap();
     assert!(first_capture.body.get("stream").is_none());
-    assert!(second_capture.body.get("stream").is_none());
-    assert_eq!(
-        second_capture.body["previous_response_id"],
-        "resp_server_remote_1"
-    );
     assert_control_fields_absent(&first_capture.body);
-    assert_control_fields_absent(&second_capture.body);
+    assert_no_remote_continuation_provider_send(&mut captures).await;
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
-    shutdown.send(()).unwrap();
+    let _ = shutdown.send(());
 }
 
 #[tokio::test]
@@ -3314,6 +3102,40 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
 }
 
 #[tokio::test]
+async fn responses_direct_missing_failure_session_fails_before_any_provider_send() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"missing session must fail closed"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "malformed_json");
+    assert!(body["error"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("existing request session-id header")));
+    assert!(
+        timeout(Duration::from_millis(100), captures.recv())
+            .await
+            .is_err(),
+        "missing existing session header must fail before provider send"
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn responses_direct_shared_provider_health_cools_first_provider_after_three_failures() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failed_provider_base_url, mut failed_captures, failed_shutdown) =
@@ -3337,10 +3159,10 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_thre
     for index in 0..3 {
         let response = client
             .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header("session-id", session_id)
             .json(&json!({
                 "model":"client-test",
-                "input":format!("hello {index}"),
-                "client_metadata":{"session_id":session_id,"thread_id":"shared-provider-health-thread"}
+                "input":format!("hello {index}")
             }))
             .send()
             .await
@@ -3356,10 +3178,10 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_thre
 
     let cooled_response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("session-id", session_id)
         .json(&json!({
             "model":"client-test",
-            "input":"cooled provider should be skipped",
-            "client_metadata":{"session_id":session_id,"thread_id":"shared-provider-health-thread"}
+            "input":"cooled provider should be skipped"
         }))
         .send()
         .await
@@ -3402,10 +3224,12 @@ async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provide
     .await
     .unwrap();
     let client = reqwest::Client::new();
+    let session_id = "shared-provider-health-dry-run-session";
 
     for index in 0..3 {
         let response = client
             .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header("session-id", session_id)
             .json(&json!({"model":"client-test","input":format!("cool first {index}")}))
             .send()
             .await
@@ -3417,6 +3241,7 @@ async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provide
 
     let dry_run_response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("session-id", session_id)
         .header("x-routecodex-dry-run", "provider-request")
         .json(&json!({"model":"client-test","input":"dry-run must not heal cooldown"}))
         .send()
@@ -3441,6 +3266,7 @@ async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provide
 
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("session-id", session_id)
         .json(&json!({"model":"client-test","input":"cooldown must remain after dry-run"}))
         .send()
         .await
@@ -3847,9 +3673,22 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
     );
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
     assert_eq!(
-        body["providerRequest"]["body"]["input"],
+        body["providerRequest"]["body"]["input"][0]["content"][0]["text"],
         "dry-run no upstream send"
     );
+    assert!(
+        !response_body.contains("\"id\":\"dry_run_")
+            && !response_body.contains("\"previous_response_id\":\"dry_run_"),
+        "provider-request dry-run must not expose client-consumable continuation ids: {response_body}"
+    );
+    assert_eq!(
+        body["dry_run"]["response_payload"]["object"],
+        "routecodex.provider_request_dry_run_terminal"
+    );
+    assert!(body["dry_run"]["response_payload"].get("id").is_none());
+    assert!(body["dry_run"]["response_payload"]
+        .get("previous_response_id")
+        .is_none());
     assert!(
         !provider_hit,
         "provider-request dry-run must not call the controlled upstream"
@@ -4093,9 +3932,22 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     );
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
     assert_eq!(
-        body["providerRequest"]["body"]["input"],
+        body["providerRequest"]["body"]["input"][0]["content"][0]["text"],
         "relay dry-run no upstream send"
     );
+    assert!(
+        !response_body.contains("\"id\":\"dry_run_")
+            && !response_body.contains("\"previous_response_id\":\"dry_run_"),
+        "Responses Relay provider-request dry-run must not expose client-consumable continuation ids: {response_body}"
+    );
+    assert_eq!(
+        body["dry_run"]["response_payload"]["object"],
+        "routecodex.provider_request_dry_run_terminal"
+    );
+    assert!(body["dry_run"]["response_payload"].get("id").is_none());
+    assert!(body["dry_run"]["response_payload"]
+        .get("previous_response_id")
+        .is_none());
     assert!(
         !provider_hit,
         "Responses Relay provider-request dry-run must not call upstream"

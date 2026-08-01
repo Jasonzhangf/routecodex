@@ -41,7 +41,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         });
     }
     if input.entry_protocol == V3HubEntryProtocol::Anthropic {
-        let responses_semantic = if input
+        let mut responses_semantic = if input
             .payload
             .0
             .get("input")
@@ -53,6 +53,9 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             encode_v3_anthropic_request_as_responses_semantic(input.payload.0.clone())
                 .map_err(|error| format!("Anthropic inbound semantic projection failed: {error}"))?
         };
+        let anthropic_reasoning_effort = responses_semantic
+            .as_object_mut()
+            .and_then(|object| object.remove("reasoning_effort"));
         let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
             &responses_semantic,
         )
@@ -67,6 +70,9 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             ] {
                 if let Some(value) = semantic_object.get(key) {
                     canonical_object.insert(key.to_string(), value.clone());
+                }
+                if let Some(value) = anthropic_reasoning_effort.as_ref() {
+                    canonical_object.insert("reasoning_effort".to_string(), value.clone());
                 }
             }
         }
@@ -176,6 +182,44 @@ mod tests {
     }
 
     #[test]
+    fn responses_request_data_fields_enter_typed_chat_extension_without_raw_field_carry() {
+        let client_metadata = json!({
+            "session_id": "session-1",
+            "thread_id": "thread-1",
+            "turn_id": "turn-1"
+        });
+        let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+            json!({
+                "model": "gpt-5.5",
+                "input": "hello",
+                "client_metadata": client_metadata,
+                "prompt_cache_key": "session-1",
+                "store": false,
+                "text": {"verbosity": "high"}
+            }),
+            V3HubEntryProtocol::Responses,
+            super::super::V3HubInvocationSource::Client,
+            super::super::V3HubTransportIntent::Json,
+        );
+
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("Responses request fields must normalize into Chat extension data");
+        let payload = &normalized.previous.payload.0;
+        let extension = &payload["routecodex_chat_extension"]["responses_request"];
+
+        assert_eq!(extension["client_metadata"], client_metadata);
+        assert_eq!(extension["prompt_cache_key"], "session-1");
+        assert_eq!(extension["store"], false);
+        assert_eq!(extension["text"], json!({"verbosity":"high"}));
+        for raw_field in ["client_metadata", "prompt_cache_key", "store", "text"] {
+            assert!(
+                payload.get(raw_field).is_none(),
+                "Responses field {raw_field} must not cross ReqInbound as a raw top-level payload field: {payload}"
+            );
+        }
+    }
+
+    #[test]
     fn responses_continuation_locator_does_not_enter_chat_canonical_payload() {
         let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
             json!({
@@ -238,9 +282,10 @@ mod tests {
             normalized.previous.payload.0["context_management"],
             json!({"edits":[{"type":"clear_thinking_20251015","keep":"all"}]})
         );
-        assert_eq!(
-            normalized.previous.payload.0["output_config"],
-            json!({"effort":"high"})
+        assert_eq!(normalized.previous.payload.0["reasoning_effort"], "high");
+        assert!(
+            normalized.previous.payload.0.get("output_config").is_none(),
+            "Anthropic effort must normalize into Chat reasoning_effort before Chat Process"
         );
     }
 }

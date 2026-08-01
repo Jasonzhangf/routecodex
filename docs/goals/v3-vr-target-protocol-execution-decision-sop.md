@@ -26,8 +26,9 @@ flowchart TD
   H --> I[V3Target08KindClassified]
   I --> J[V3Target09CandidateSetExpanded]
   J --> K[V3Target10ConcreteProviderSelected]
-  K --> L[V3Execution11ProtocolDecision\nentry_protocol x selected_provider_protocol x allowed_modes]
-  L -->|same protocol + Direct allowed| M[V3ResponsesDirect11Policy]
+  K --> L[V3Execution11ProtocolDecision\nentry_protocol x selected_provider_protocol x selected responses.process x allowed_modes]
+  L -->|same protocol + process!=chat + Direct allowed| M[V3ResponsesDirect11Policy]
+  L -->|responses provider process=chat + Relay allowed| N
   L -->|protocol mismatch + Relay allowed| N[Hub Relay runtime dispatch]
   L -->|protocol mismatch + Relay forbidden| O[V3Error06ClientProjected\nfail-fast config/execution error]
   M --> P[Provider wire same protocol]
@@ -39,11 +40,14 @@ flowchart TD
 Inputs:
 - `entry_protocol`: protocol implied by endpoint and request, for example `responses`.
 - `selected_provider_protocol`: derived from the concrete selected target's `provider_type`, not from provider id strings.
+- `selected_provider.responses_process`: the selected target's compiled `provider.responses.process` value. It remains provider config / target data and is consumed only by the adjacent Target10 -> Execution11 decision.
 - `allowed_modes`: server execution declaration from compiled manifest.
 - `continuation_owner`: direct or relay continuation owner, when restoring a continuation.
 
 Rules:
-- If `entry_protocol == selected_provider_protocol` and Direct is allowed, choose `SameProtocolDirect`.
+- If selected provider protocol is `responses` and `selected_provider.responses_process == "chat"`, choose `HubRelay` when Relay is allowed.
+- If selected provider protocol is `responses`, `selected_provider.responses_process == "chat"`, and Relay is not allowed, fail fast with an execution/config error.
+- If `entry_protocol == selected_provider_protocol`, selected provider is not `responses.process=chat`, and Direct is allowed, choose `SameProtocolDirect`.
 - If `entry_protocol != selected_provider_protocol` and Relay is allowed, choose `HubRelay`.
 - If `entry_protocol != selected_provider_protocol` and Relay is not allowed, fail fast with an execution/config error.
 - If a Direct continuation pins a provider whose current protocol no longer matches the entry protocol, fail fast before Direct policy.
@@ -51,7 +55,8 @@ Rules:
 
 ## Allowed Paths
 
-- `responses -> responses provider -> Direct -> /responses`
+- `responses -> responses provider process!=chat -> Direct -> /responses`
+- `responses -> responses provider process=chat -> Relay -> provider protocol codec -> Responses client projection`
 - `responses -> openai_chat provider -> Relay -> /chat/completions -> Responses client projection`
 - `responses -> anthropic provider -> Relay -> /messages -> Responses client projection`
 - `openai_chat -> openai_chat provider -> Direct or OpenAI Chat relay according to endpoint SOP`
@@ -62,6 +67,7 @@ Rules:
 - Server entry binding deciding final Direct/Relay before VR/Target selected-provider truth.
 - Server scanning route candidates and changing execution mode as the main owner.
 - Responses Direct receiving `openai_chat`, `anthropic`, or `gemini` selected providers.
+- Responses Direct receiving selected `responses` providers whose `provider.responses.process` is `chat`.
 - Direct response/parser/SSE layer repairing cross-protocol provider output.
 - SSE transport or server handler inferring provider protocol or adding fake semantic events.
 - Provider runtime deciding route or Direct/Relay policy from response shape.
@@ -116,7 +122,7 @@ Live gates after source green:
 - `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml`
 - `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml`
 - 4444 and 5555 `/health`
-- 5555 `/v1/responses` live probe selecting `glmrelay_openai` proves provider URL `/chat/completions`, client SSE terminal, and zero `provider_response_sse_empty` for the request id.
+- 5555 provider-request dry-run plus `/v1/responses` live probe selecting `asxs-grok` with `provider.responses.process=chat` proves Target10 carries `responsesProcess=chat`, Execution11 selects Hub Relay, provider wire uses Chat protocol instead of Direct `POST /responses`, client SSE reaches terminal, and the request has no provider HTTP 400 from the wrong endpoint.
 
 ## Execution Plan After Review
 

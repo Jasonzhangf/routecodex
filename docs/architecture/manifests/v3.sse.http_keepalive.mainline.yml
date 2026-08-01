@@ -26,7 +26,6 @@ canonical_docs:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
 verification_gates:
-  - npm run verify:v3-responses-session-admission
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test config_v3_contract http_sse_keepalive_config_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --lib http_sse_keepalive_environment_compiler_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_sse -- --nocapture

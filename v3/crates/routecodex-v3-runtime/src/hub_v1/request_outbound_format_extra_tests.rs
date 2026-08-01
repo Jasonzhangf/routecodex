@@ -1,6 +1,103 @@
 use super::*;
 
 #[test]
+fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_6b0251fee24f41b2b045b04e",
+                    "type": "function",
+                    "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"}
+                }]
+            },
+            {"role": "tool", "tool_call_id": "call_6b0251fee24f41b2b045b04e", "content": "ok"}
+        ]
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projection must succeed");
+    let input = request["input"]
+        .as_array()
+        .expect("Responses wire input array");
+    assert_eq!(input[0]["call_id"], "call_6b0251fee24f41b2b045b04e");
+    let item_id = input[0]["id"].as_str().expect("function_call id");
+    assert!(item_id.starts_with("fc_6b0251fee24f41b2b045b04e_"));
+    assert!(item_id.len() <= 64);
+    assert_eq!(input[1]["call_id"], input[0]["call_id"]);
+    assert_eq!(input[1]["id"], input[0]["id"]);
+}
+
+#[test]
+fn responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids() {
+    let repeated_prefix = "call_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+                {"id": format!("{repeated_prefix}_left"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
+                {"id": format!("{repeated_prefix}_right"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
+            ]
+        }]
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projection must succeed");
+    let input = request["input"]
+        .as_array()
+        .expect("Responses wire input array");
+    assert_ne!(input[0]["id"], input[1]["id"]);
+    for item in input {
+        assert!(item["id"].as_str().unwrap().starts_with("fc_"));
+        assert!(item["id"].as_str().unwrap().len() <= 64);
+    }
+}
+
+#[test]
+fn responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions() {
+    let tool_calls = [
+        "call_same/value",
+        "call_same:value",
+        "call_same",
+        "fc_same",
+        "functions.same",
+    ]
+    .into_iter()
+    .map(|id| {
+        json!({"id": id, "type": "function", "function": {"name": "exec_command", "arguments": "{}"}})
+    })
+    .collect::<Vec<_>>();
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{
+            "role": "assistant",
+            "content": null,
+            "tool_calls": tool_calls
+        }]
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projection must succeed");
+    let input = request["input"]
+        .as_array()
+        .expect("Responses wire input array");
+    let ids = input
+        .iter()
+        .map(|item| item["id"].as_str().expect("Responses item id"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        ids.len(),
+        input.len(),
+        "Responses fc_* item ids collided: {input:?}"
+    );
+    for item in input {
+        assert!(item["id"].as_str().unwrap().starts_with("fc_same"));
+    }
+}
+
+#[test]
 fn responses_wire_reuses_chat_extension_responses_item_id() {
     let payload = json!({
         "model": "gpt-test",
@@ -148,4 +245,38 @@ fn outbound_projection_allows_payload_owned_underscore_fields() {
         "string"
     );
     assert_eq!(request["metadata"]["_tenant"], "client-owned");
+}
+
+#[test]
+fn openai_chat_wire_preserves_same_protocol_request_fields() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "audio": {"format":"wav", "voice":"alloy"},
+        "modalities": ["text", "audio"],
+        "prediction": {"type":"content", "content":"expected"},
+        "prompt_cache_key": "cache-key",
+        "prompt_cache_options": {"ttl":"24h"},
+        "prompt_cache_retention": "24h",
+        "service_tier": "priority",
+        "store": false,
+        "web_search_options": {"search_context_size":"low"}
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("same-protocol Chat fields must reach provider wire unchanged");
+
+    for key in [
+        "audio",
+        "modalities",
+        "prediction",
+        "prompt_cache_key",
+        "prompt_cache_options",
+        "prompt_cache_retention",
+        "service_tier",
+        "store",
+        "web_search_options",
+    ] {
+        assert_eq!(request[key], payload[key], "field {key} drifted");
+    }
 }

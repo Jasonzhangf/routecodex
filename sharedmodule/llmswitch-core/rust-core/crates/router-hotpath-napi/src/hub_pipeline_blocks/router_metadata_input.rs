@@ -2,10 +2,6 @@ use crate::hub_pipeline_blocks::metadata::{
     resolve_router_metadata_runtime_flags, resolve_stop_message_router_metadata,
 };
 // feature_id: hub.route_metadata_surface
-use crate::hub_pipeline_blocks::responses_resume::{
-    read_continuation_from_semantics_node, read_responses_resume_from_semantics_node,
-    synthesize_continuation_from_responses_resume,
-};
 use serde_json::{Map, Value};
 
 fn read_snapshot_runtime_control_retry_provider_key(row: &Map<String, Value>) -> Option<&Value> {
@@ -49,23 +45,30 @@ fn read_snapshot_request_truth_string(row: &Map<String, Value>, key: &str) -> Op
         .filter(|value| !value.is_empty())
 }
 
-fn read_snapshot_continuation_context_responses_resume(row: &Map<String, Value>) -> Option<Value> {
-    row.get("metadataCenterSnapshot")
+fn read_snapshot_continuation_context(row: &Map<String, Value>) -> Option<Value> {
+    let continuation_context = row
+        .get("metadataCenterSnapshot")
         .and_then(|value| value.as_object())
         .and_then(|snapshot| snapshot.get("continuationContext"))
-        .and_then(|value| value.as_object())
-        .and_then(|continuation_context| continuation_context.get("responsesResume"))
-        .filter(|value| value.is_object())
-        .cloned()
-}
-
-fn read_continuation_owner(value: Option<&Value>) -> Option<String> {
-    value
-        .and_then(|node| node.as_object())
-        .and_then(|row| row.get("continuationOwner"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+        .and_then(|value| value.as_object())?;
+    let mut out = Map::new();
+    for key in [
+        "previousResponseId",
+        "responseId",
+        "continuationOwner",
+        "chainId",
+        "stickyScope",
+    ] {
+        if let Some(value) = continuation_context
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            out.insert(key.to_string(), Value::String(value.to_string()));
+        }
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
 }
 
 fn read_retry_exclusion_set(row: &Map<String, Value>) -> Result<Option<Value>, String> {
@@ -128,22 +131,13 @@ pub(crate) fn build_router_metadata_input(input: &Value) -> Result<Value, String
     let provider_protocol = read_snapshot_runtime_control_provider_protocol(row);
     let stream = row.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     let metadata_node = row.get("metadata").unwrap_or(&Value::Null);
-    let request_semantics = row.get("requestSemantics");
     let stop_message_metadata = resolve_stop_message_router_metadata(metadata_node);
     let runtime_flags = resolve_router_metadata_runtime_flags(metadata_node);
     let include_estimated_input_tokens = row
         .get("includeEstimatedInputTokens")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let responses_resume_from_semantics =
-        read_responses_resume_from_semantics_node(request_semantics);
-    let responses_resume_from_snapshot = read_snapshot_continuation_context_responses_resume(row);
-    let responses_resume_for_output = responses_resume_from_snapshot
-        .clone()
-        .or_else(|| responses_resume_from_semantics.clone());
-    let continuation = read_continuation_from_semantics_node(request_semantics).or_else(|| {
-        synthesize_continuation_from_responses_resume(responses_resume_for_output.as_ref())
-    });
+    let continuation = read_snapshot_continuation_context(row);
 
     let mut out = Map::<String, Value>::new();
     out.insert("requestId".to_string(), Value::String(request_id));

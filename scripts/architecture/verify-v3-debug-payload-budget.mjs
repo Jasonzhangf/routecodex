@@ -107,12 +107,12 @@ const directProjection =
     : "";
 requireMatch(
   directProjection,
-  /V3Server16Body::Sse\(stream\)[\s\S]*v3_client_sse_body\(stream,\s*false\)/,
+  /V3Server16Body::Sse\(stream\)[\s\S]*v3_client_sse_body\(stream,\s*None\)/,
   "Direct SSE projection must preserve provider bytes without keepalive injection",
 );
 forbidMatch(
   directProjection,
-  /v3_client_sse_body\(stream,\s*true\)|successful_sse/,
+  /v3_client_sse_body\(stream,\s*Some\(|successful_sse/,
   "Direct SSE projection must not derive or enable transport keepalive",
 );
 requireMatch(

@@ -21,9 +21,9 @@ context rejection, and request-local failure exclusion remain Target/Error conce
    not use that request option as the active-turn route owner.
 5. V3 used a fixed `180000` route threshold instead of the current server route group's configured
    `longcontext.match.min_input_tokens` value.
-6. V3 scans request payloads for image shapes. The required contract is the request-scoped
-   `metadata.hasImageAttachment` truth only; payload image shapes and placeholders are not a
-   second route-classification source.
+6. V3 trusted client `metadata.hasImageAttachment` as routing truth. Client protocol metadata is
+   payload data, not RouteCodex control; image capability must come from actual protocol image
+   items in the normalized request.
 7. The V2-to-V3 config compiler emitted `longcontext` as a capability-only pool and discarded
    `virtualrouter.classifier.longContextThresholdTokens`, so a V2-authored listener could never
    activate V3's config-owned longcontext classifier.
@@ -34,7 +34,7 @@ context rejection, and request-local failure exclusion remain Target/Error conce
 | --- | --- | --- |
 | fresh user text below longcontext threshold | `thinking` | `default` |
 | fresh-user, thinking/search/tools, or background turn at or above longcontext threshold | `longcontext` | `default` |
-| request-scoped metadata attachment signal | `multimodal` | triggered `longcontext`, then `default` |
+| actual protocol image item | `multimodal` | triggered `longcontext`, then `default` |
 | fresh user web intent, independent of declared tools | `thinking` + required capability `web_search` | triggered `longcontext`, then `default` |
 | actual web-search tool continuation in the active turn | `tools` + required capability `web_search` | triggered `longcontext`, then `default` |
 | coding tool output below longcontext threshold | `coding` | `default` |
@@ -53,9 +53,8 @@ context rejection, and request-local failure exclusion remain Target/Error conce
   independent implementation and does not call, import, or link the V2/shared classifier.
 - V3 request-fact extraction scopes user text, tool calls, tool outputs, and last assistant tool
   category to the active turn.
-- V2 and V3 consume the request-scoped `metadata.hasImageAttachment` boolean as the only
-  multimodal route signal. V3 ReqInbound extracts it once into typed
-  `V3RouteClassifierMetadata`; the classifier never scans payload image shapes.
+- V3 derives multimodal capability from actual image items in current normalized protocol data.
+  Client `metadata` never becomes routing or MetadataCenter control.
 - V3 Virtual Router captures every configured candidate route tier in shared-contract order and one
   mandatory `default` tier, with one VR hit.
 - Target preserves configured candidate order and applies only genuine capability/health/request-local
@@ -82,8 +81,8 @@ context rejection, and request-local failure exclusion remain Target/Error conce
   becoming a silently unreachable route.
 - Declared web-search tools of every spelling and shape contribute zero route signal.
 - Historical web-search intent does not add `web_search` capability or select a web_search pool.
-- Payload images, stringified image JSON, image placeholders, and tool descriptions do not select
-  `multimodal` when `metadata.hasImageAttachment` is absent or false.
+- Client metadata claims, stringified image JSON, image placeholders, and tool descriptions do not
+  select `multimodal` without an actual protocol image item.
 - Missing optional route pools are skipped while the already captured `default` tier remains; no
   second Virtual Router call or runtime fallback is introduced.
 - Malformed shell/apply_patch/write_stdin calls are not classified; `cargo test` and mutating git

@@ -2,6 +2,8 @@ matrix_version: 1
 owner_feature_id: v3.protocol_conversion_field_parity
 audit_truth_contract:
   canonical_text_doc: docs/architecture/reviews/v3-protocol-semantic-matrix-review.md
+  request_field_projection_doc: docs/design/v3-protocol-request-field-projection.md
+  request_field_projection_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.yml
   generated_review_surface: docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html
   closeout_goal_doc: docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
   gate: npm run verify:v3-protocol-conversion-field-parity
@@ -18,7 +20,8 @@ audit_truth_contract:
   status_legend:
     covered: Runtime/test owner currently implements the audited semantic for the named path.
     covered_but_target_dependent: Runtime implements the field only where the target protocol legally supports it;
-      target-incompatible projection must be stripped or rejected by the provider-wire owner.
+      target-incompatible projection must be rejected by the adjacent outbound codec.
+    runtime_conformance_pending: Design and owner are fixed, but positive/negative runtime and live evidence have not passed.
     partial: Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.
     extension_declared: The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.
     source_inventory_only: The source field is inventoried and searchable, but no runtime semantic mapping is claimed.
@@ -29,9 +32,10 @@ audit_truth_contract:
       rule, but runtime conversion closeout is not claimed.
   audited_status_counts:
     covered: 160
-    covered_but_target_dependent: 1
+    covered_but_target_dependent: 0
+    runtime_conformance_pending: 1
     partial: 112
-    extension_declared: 213
+    extension_declared: 223
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -39,19 +43,19 @@ audit_truth_contract:
     semantic_declared: 50
   gap_audit:
     - gap_id: gap.client_metadata.target_dependent
-      category: fixed_doc_gate
+      category: runtime_closeout
       affected_statuses:
-        - covered_but_target_dependent
+        - runtime_conformance_pending
       affected_count: 1
-      evidence: OpenAI Chat provider wire preserves standard metadata but rejects non-standard client_metadata; OpenAI Responses provider wire explicitly renames client_metadata to metadata.
+      evidence: OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only an exact client_metadata.user_id mapping is allowed and all other keys must fail.
       required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
-      closeout_status: gated_no_runtime_gap
-      closeout_rule: Keep target-dependent provider-wire behavior explicit; do not use MetadataCenter or fallback to preserve unsupported client_metadata.
+      closeout_status: runtime_conformance_pending
+      closeout_rule: Keep target-dependent provider-wire behavior explicit in the adjacent outbound codec; never use MetadataCenter, generic silent strip, or fallback.
     - gap_id: gap.runtime_extension_declared
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 213
+      affected_count: 223
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -215,6 +219,7 @@ source_inventory:
       - request.reasoning.mode
       - request.reasoning.effort
       - request.reasoning.summary
+      - request.reasoning.generate_summary
       - request.reasoning.context
       - request.safety_identifier
       - request.service_tier
@@ -1526,7 +1531,7 @@ chat_semantic_translation_groups:
     chat_fields:
       - request.reasoning_effort
     direction: request
-    standard_semantic_meaning: Requested reasoning budget/effort, not visible reasoning content.
+    standard_semantic_meaning: Requested qualitative reasoning effort, not a numeric token budget or visible reasoning content.
     chat_shape_rule: Chat reasoning_effort is a request option. Visible thinking/reasoning content is response/message
       content semantics.
     protocol_mappings:
@@ -1538,21 +1543,21 @@ chat_semantic_translation_groups:
           response reasoning content are separate semantics.
       anthropic:
         request_fields:
-          - request.thinking.type
+          - request.output_config.effort
         response_fields: []
-        transform: Anthropic thinking.type maps to reasoning effort enablement. budget_tokens and display are separate reasoning
-          extension semantics.
+        transform: Anthropic output_config.effort maps directly for the shared low/medium/high/xhigh/max values. OpenAI
+          none/minimal have no Anthropic equivalent. thinking.type, budget_tokens, and display are separate semantics.
       gemini:
         request_fields:
           - request.generationConfig.thinkingConfig.thinkingLevel
         response_fields: []
-        transform: Gemini thinkingLevel maps to Chat reasoning effort/level. includeThoughts and thinkingBudget are separate
-          reasoning extension semantics; thoughtsTokenCount is usage, not request effort.
+        transform: Gemini thinkingLevel maps by enum identity for minimal/low/medium/high only after target-model capability
+          validation. includeThoughts and thinkingBudget are separate semantics; thoughtsTokenCount is usage.
     chat_extension_fields:
       - request.reasoning_effort
     current_impl: partial
-    gap: Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. Anthropic
-      thinking.budget_tokens outbound projection requires Jason auth. reasoning content and usage stay separate. Grok explicitly rejects reasoning_effort/reasoning object on wire.
+    gap: Runtime must project Anthropic output_config.effort instead of silently allowing reasoning_effort, validate the
+      concrete target value domain, and reject non-intersection values. No effort-to-budget approximation is permitted.
   - group_id: reasoning.request_summary_policy
     standard_chat_field: request.reasoning_summary_policy
     chat_fields:
@@ -1567,14 +1572,14 @@ chat_semantic_translation_groups:
       responses:
         request_fields:
           - request.reasoning.summary
+          - request.reasoning.generate_summary
         response_fields: []
         transform: Preserve as request summary policy.
       anthropic:
-        request_fields:
-          - request.thinking.display
+        request_fields: []
         response_fields: []
-        transform: Compatible mapping may use Anthropic thinking display policy when thinking is enabled; exact summary levels
-          are target-dependent.
+        transform: Anthropic thinking.display controls summarized versus omitted visibility and is not equivalent to OpenAI
+          auto/concise/detailed summary policy.
       gemini:
         request_fields: []
         response_fields: []
@@ -1582,7 +1587,7 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_summary_policy
     current_impl: extension_declared
-    gap: Compatible outbound mapping needs explicit target policy and Jason decision for non-equivalent targets.
+    gap: Source-roundtrip only. Anthropic/OpenAI Chat/Gemini outbound must report request.reasoning_summary_policy as unmapped.
   - group_id: reasoning.request_context_policy
     standard_chat_field: request.reasoning_context_policy
     chat_fields:
@@ -1594,9 +1599,8 @@ chat_semantic_translation_groups:
       responses:
         request_fields:
           - request.reasoning.context
-          - request.reasoning.mode
         response_fields: []
-        transform: Preserve as protocol-neutral request policy until a target protocol has a compatible context/mode knob.
+        transform: Preserve the Responses context value without combining it with execution mode.
       anthropic:
         request_fields: []
         response_fields: []
@@ -1608,7 +1612,32 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_context_policy
     current_impl: extension_declared
-    gap: No runtime outbound mapping claimed; requires compatibility decision before target projection.
+    gap: Source-roundtrip only. Non-Responses outbound must report request.reasoning_context_policy as unmapped.
+  - group_id: reasoning.request_mode
+    standard_chat_field: request.reasoning_mode
+    chat_fields:
+      - request.reasoning_mode
+    direction: request
+    standard_semantic_meaning: Requested reasoning execution mode; distinct from context retention, effort, and budget.
+    chat_shape_rule: Preserve the source value as a registered payload extension. It must not become RouteCodex routing or provider selection.
+    protocol_mappings:
+      responses:
+        request_fields:
+          - request.reasoning.mode
+        response_fields: []
+        transform: Responses mode maps directly and round-trips only to Responses.
+      anthropic:
+        request_fields: []
+        response_fields: []
+        transform: Anthropic thinking.type and output_config.effort are not execution-mode equivalents.
+      gemini:
+        request_fields: []
+        response_fields: []
+        transform: No exact Gemini equivalent in the audited request schema.
+    chat_extension_fields:
+      - request.reasoning_mode
+    current_impl: extension_declared
+    gap: Source-roundtrip only. Non-Responses outbound must report request.reasoning_mode as unmapped.
   - group_id: reasoning.request_include_thoughts
     standard_chat_field: request.reasoning_include_thoughts
     chat_fields:
@@ -1624,8 +1653,7 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic display is a display-mode policy handled by reasoning.request_summary_policy, not a boolean include
-          flag.
+        transform: Anthropic display has a different value domain and continuity behavior; no boolean mapping is claimed.
       gemini:
         request_fields:
           - request.generationConfig.thinkingConfig.includeThoughts
@@ -1634,7 +1662,57 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_include_thoughts
     current_impl: partial
-    gap: Gemini source codec extracts includeThoughts; cross-protocol runtime closeout pending.
+    gap: Gemini source-roundtrip only; non-Gemini outbound must report request.reasoning_include_thoughts as unmapped.
+  - group_id: reasoning.request_display_policy
+    standard_chat_field: request.reasoning_display_policy
+    chat_fields:
+      - request.reasoning_display_policy
+    direction: request
+    standard_semantic_meaning: Anthropic policy selecting summarized or omitted thinking display while retaining Anthropic continuity behavior.
+    chat_shape_rule: Display policy is not OpenAI summary detail and not Gemini includeThoughts.
+    protocol_mappings:
+      responses:
+        request_fields: []
+        response_fields: []
+        transform: OpenAI reasoning.summary has a different value domain and meaning.
+      anthropic:
+        request_fields:
+          - request.thinking.display
+        response_fields: []
+        transform: Preserve summarized or omitted exactly within Anthropic thinking.
+      gemini:
+        request_fields: []
+        response_fields: []
+        transform: Gemini includeThoughts is boolean and does not preserve Anthropic continuity behavior.
+    chat_extension_fields:
+      - request.reasoning_display_policy
+    current_impl: extension_declared
+    gap: Anthropic source-roundtrip only; other targets must report request.reasoning_display_policy as unmapped.
+  - group_id: reasoning.request_thinking_mode
+    standard_chat_field: request.reasoning_thinking_mode
+    chat_fields:
+      - request.reasoning_thinking_mode
+    direction: request
+    standard_semantic_meaning: Anthropic thinking activation strategy enabled, adaptive, or disabled; not qualitative effort or OpenAI execution mode.
+    chat_shape_rule: Preserve the Anthropic source value as a registered payload extension and never infer a budget or effort value from it.
+    protocol_mappings:
+      responses:
+        request_fields: []
+        response_fields: []
+        transform: OpenAI reasoning effort and mode are not Anthropic thinking activation equivalents.
+      anthropic:
+        request_fields:
+          - request.thinking.type
+        response_fields: []
+        transform: Preserve enabled, adaptive, or disabled exactly.
+      gemini:
+        request_fields: []
+        response_fields: []
+        transform: No exact Gemini equivalent in the audited request schema.
+    chat_extension_fields:
+      - request.reasoning_thinking_mode
+    current_impl: extension_declared
+    gap: Anthropic source-roundtrip only; other targets must report request.reasoning_thinking_mode as unmapped.
   - group_id: reasoning.request_budget_tokens
     standard_chat_field: request.reasoning_budget_tokens
     chat_fields:
@@ -1661,7 +1739,7 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_budget_tokens
     current_impl: partial
-    gap: Gemini source codec extracts thinkingBudget; cross-protocol runtime closeout pending.
+    gap: Anthropic/Gemini conditional-exact projection needs target constraint validation; OpenAI targets must report the field as unmapped.
   - group_id: sampling.temperature
     standard_chat_field: request.temperature
     chat_fields:
@@ -2775,6 +2853,7 @@ field_classification:
       - request.reasoning.mode
       - request.reasoning.effort
       - request.reasoning.summary
+      - request.reasoning.generate_summary
       - request.reasoning.context
       - request.temperature
       - request.text.format
@@ -3217,7 +3296,7 @@ protocols:
       - field: previous_response_id
         semantic: continuation.remote_response_id
         chat_extension: protocol_specific_chat_extension
-        current_impl: partial
+        current_impl: runtime_conformance_pending
       - field: store
         semantic: continuation.remote_store_policy
         chat_extension: protocol_specific_chat_extension
@@ -3249,7 +3328,7 @@ protocols:
       - field: client_metadata
         semantic: client.codex_data_plane_metadata
         chat_extension: protocol_specific_chat_extension
-        current_impl: covered_but_target_dependent
+        current_impl: partial
       - field: temperature
         semantic: sampling.temperature
         chat_extension: canonical_chat
@@ -3275,8 +3354,8 @@ protocols:
         chat_extension: canonical_chat
         current_impl: covered
       - field: reasoning
-        semantic: reasoning.request_config
-        chat_extension: canonical_chat
+        semantic: reasoning.request_fields
+        chat_extension: registered_chat_fields
         current_impl: partial
       - field: text
         semantic: text.output_config
@@ -3607,8 +3686,8 @@ protocols:
         chat_extension: protocol_specific_chat_extension
         current_impl: covered
       - field: thinking
-        semantic: reasoning.request_config
-        chat_extension: canonical_chat
+        semantic: reasoning.request_thinking_mode_and_budget
+        chat_extension: registered_chat_fields
         current_impl: covered
     content_block_fields:
       - field: type
@@ -3952,9 +4031,9 @@ semantic_correspondence:
         - request.messages[].tool_calls[].custom.input
       anthropic: null
       gemini: null
-  reasoning.request_config:
-    canonical_path: chat.reasoning.request_config
-    chat_extension: canonical_chat
+  reasoning.request_effort:
+    canonical_path: chat.reasoning_effort
+    chat_extension: request.reasoning_effort
     current_impl: partial
     paths:
       responses:
@@ -3962,7 +4041,7 @@ semantic_correspondence:
       openai_chat:
         - request.reasoning_effort
       anthropic:
-        - request.thinking.type
+        - request.output_config.effort
       gemini:
         - request.generationConfig.thinkingConfig.thinkingLevel
   reasoning.request_summary_policy:
@@ -3972,9 +4051,9 @@ semantic_correspondence:
     paths:
       responses:
         - request.reasoning.summary
+        - request.reasoning.generate_summary
       openai_chat: []
-      anthropic:
-        - request.thinking.display
+      anthropic: []
       gemini: []
   reasoning.request_context_policy:
     canonical_path: chat.reasoning_context_policy
@@ -3982,11 +4061,61 @@ semantic_correspondence:
     current_impl: extension_declared
     paths:
       responses:
-        - request.reasoning.mode
         - request.reasoning.context
       openai_chat: []
       anthropic: []
       gemini: []
+  reasoning.request_mode:
+    canonical_path: chat.reasoning_mode
+    chat_extension: request.reasoning_mode
+    current_impl: extension_declared
+    paths:
+      responses:
+        - request.reasoning.mode
+      openai_chat: []
+      anthropic: []
+      gemini: []
+  reasoning.request_include_thoughts:
+    canonical_path: chat.reasoning_include_thoughts
+    chat_extension: request.reasoning_include_thoughts
+    current_impl: partial
+    paths:
+      responses: []
+      openai_chat: []
+      anthropic: []
+      gemini:
+        - request.generationConfig.thinkingConfig.includeThoughts
+  reasoning.request_display_policy:
+    canonical_path: chat.reasoning_display_policy
+    chat_extension: request.reasoning_display_policy
+    current_impl: extension_declared
+    paths:
+      responses: []
+      openai_chat: []
+      anthropic:
+        - request.thinking.display
+      gemini: []
+  reasoning.request_thinking_mode:
+    canonical_path: chat.reasoning_thinking_mode
+    chat_extension: request.reasoning_thinking_mode
+    current_impl: extension_declared
+    paths:
+      responses: []
+      openai_chat: []
+      anthropic:
+        - request.thinking.type
+      gemini: []
+  reasoning.request_budget_tokens:
+    canonical_path: chat.reasoning_budget_tokens
+    chat_extension: request.reasoning_budget_tokens
+    current_impl: partial
+    paths:
+      responses: []
+      openai_chat: []
+      anthropic:
+        - request.thinking.budget_tokens
+      gemini:
+        - request.generationConfig.thinkingConfig.thinkingBudget
   reasoning.visible_and_opaque:
     canonical_path: chat.reasoning.items
     chat_extension: canonical_chat
@@ -4457,27 +4586,6 @@ semantic_correspondence:
       anthropic:
         - request.messages[].content[].tool_result.is_error
       gemini: []
-  reasoning.request_include_thoughts:
-    canonical_path: chat.reasoning_include_thoughts
-    chat_extension: request.reasoning_include_thoughts
-    current_impl: partial
-    paths:
-      responses: []
-      openai_chat: []
-      anthropic: []
-      gemini:
-        - request.generationConfig.thinkingConfig.includeThoughts
-  reasoning.request_budget_tokens:
-    canonical_path: chat.reasoning_budget_tokens
-    chat_extension: request.reasoning_budget_tokens
-    current_impl: partial
-    paths:
-      responses: []
-      openai_chat: []
-      anthropic:
-        - request.thinking.budget_tokens
-      gemini:
-        - request.generationConfig.thinkingConfig.thinkingBudget
 canonical_chat_semantics:
   model.identity:
     response_restore: preserve source model if target response protocol supports model; otherwise keep in extension block.
@@ -4493,8 +4601,8 @@ canonical_chat_semantics:
     response_restore: call_id/name/arguments/input must preserve function vs custom distinction.
   tool.result:
     response_restore: tool output must bind by call_id and content; pairing governance not in codec normalization.
-  reasoning.request_config:
-    response_restore: preserve provider-specific request knobs under canonical reasoning extension.
+  reasoning.request_fields:
+    response_restore: preserve each registered reasoning request semantic independently; never reconstruct one field from another.
   reasoning.visible_content:
     response_restore: visible reasoning summary/thinking maps to canonical reasoning item.
   reasoning.encrypted_payload:
@@ -4650,7 +4758,7 @@ extended_openai_chat_semantic_superset:
     - unsupported_blocked
   field_count: 259
   source_field_counts:
-    responses: 122
+    responses: 123
     openai_chat: 84
     anthropic: 86
     gemini: 121
@@ -5421,15 +5529,14 @@ extended_openai_chat_semantic_superset:
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
       current_impl: partial
-      gap: Gemini thinkingLevel source is codec-bound; budget/visibility are separate request.reasoning.* extension rows;
-        runtime mapping remains partial.
+      gap: Anthropic output_config.effort and Gemini thinkingLevel require explicit outbound projection plus model/value validation.
       equivalent_fields:
         responses:
           - request.reasoning.effort
         openai_chat:
           - request.reasoning_effort
         anthropic:
-          - request.thinking.type
+          - request.output_config.effort
         gemini:
           - request.generationConfig.thinkingConfig.thinkingLevel
       source_classification: canonical_chat_fields
@@ -5437,6 +5544,9 @@ extended_openai_chat_semantic_superset:
         - extension_id: thinking_and_cache_control
           extension_owner: chat.extensions.anthropic.thinking_cache
           current_impl: partial
+        - extension_id: container_and_output_config
+          extension_owner: chat.extensions.anthropic.container_output
+          current_impl: extension_declared
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: partial
@@ -5446,14 +5556,13 @@ extended_openai_chat_semantic_superset:
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
-      gap: Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a compatible target
-        policy and needs explicit outbound owner.
+      gap: Responses summary policy is source-roundtrip only; other targets must reject it as unmapped.
       equivalent_fields: &a1
         responses:
           - request.reasoning.summary
+          - request.reasoning.generate_summary
         openai_chat: []
-        anthropic:
-          - request.thinking.display
+        anthropic: []
         gemini: []
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association:
@@ -5466,10 +5575,9 @@ extended_openai_chat_semantic_superset:
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
-      gap: Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.
+      gap: Responses context policy is source-roundtrip only and must remain separate from reasoning mode.
       equivalent_fields: &a2
         responses:
-          - request.reasoning.mode
           - request.reasoning.context
         openai_chat: []
         anthropic: []
@@ -5497,6 +5605,57 @@ extended_openai_chat_semantic_superset:
         - extension_id: generation_config
           extension_owner: chat.extensions.gemini.generation_config
           current_impl: partial
+    - extended_openai_chat_field: request.reasoning_mode
+      semantic_id: request.reasoning_mode
+      direction: request
+      mapping_status: extension_added
+      semantic_owner: chat.extension_semantics
+      current_impl: extension_declared
+      gap: Responses reasoning mode is source-roundtrip only.
+      equivalent_fields: &a176
+        responses:
+          - request.reasoning.mode
+        openai_chat: []
+        anthropic: []
+        gemini: []
+      source_classification: protocol_specific_chat_extension_fields
+      chat_extension_association: []
+    - extended_openai_chat_field: request.reasoning_display_policy
+      semantic_id: request.reasoning_display_policy
+      direction: request
+      mapping_status: extension_added
+      semantic_owner: chat.extension_semantics
+      current_impl: extension_declared
+      gap: Anthropic thinking display is source-roundtrip only and is not OpenAI summary or Gemini includeThoughts.
+      equivalent_fields: &a177
+        responses: []
+        openai_chat: []
+        anthropic:
+          - request.thinking.display
+        gemini: []
+      source_classification: protocol_specific_chat_extension_fields
+      chat_extension_association:
+        - extension_id: thinking_and_cache_control
+          extension_owner: chat.extensions.anthropic.thinking_cache
+          current_impl: extension_declared
+    - extended_openai_chat_field: request.reasoning_thinking_mode
+      semantic_id: request.reasoning_thinking_mode
+      direction: request
+      mapping_status: extension_added
+      semantic_owner: chat.extension_semantics
+      current_impl: extension_declared
+      gap: Anthropic thinking type is source-roundtrip only and is not reasoning effort or OpenAI execution mode.
+      equivalent_fields: &a178
+        responses: []
+        openai_chat: []
+        anthropic:
+          - request.thinking.type
+        gemini: []
+      source_classification: protocol_specific_chat_extension_fields
+      chat_extension_association:
+        - extension_id: thinking_and_cache_control
+          extension_owner: chat.extensions.anthropic.thinking_cache
+          current_impl: extension_declared
     - extended_openai_chat_field: request.reasoning_budget_tokens
       semantic_id: request.reasoning_budget_tokens
       direction: request
@@ -6918,24 +7077,6 @@ extended_openai_chat_semantic_superset:
         gemini: []
       source_classification: protocol_specific_chat_extension_fields
       chat_extension_association: []
-    - extended_openai_chat_field: request.output_config.effort
-      semantic_id: request.output_config.effort
-      direction: request
-      mapping_status: extension_added
-      semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
-      gap: runtime mapping partial or extension-only gap
-      equivalent_fields: &a79
-        responses: []
-        openai_chat: []
-        anthropic:
-          - request.output_config.effort
-        gemini: []
-      source_classification: protocol_specific_chat_extension_fields
-      chat_extension_association:
-        - extension_id: container_and_output_config
-          extension_owner: chat.extensions.anthropic.container_output
-          current_impl: extension_declared
     - extended_openai_chat_field: request.previous_response_id
       semantic_id: request.previous_response_id
       direction: request
@@ -8824,10 +8965,10 @@ extended_openai_chat_semantic_superset:
       chat_extension_association: []
 implementation_gaps:
   - id: gap.client_metadata.target_dependent
-    severity: fixed_doc_gate
-    evidence: request_outbound_format rejects client_metadata before OpenAI Chat wire and renames it to metadata for OpenAI Responses wire.
+    severity: runtime_closeout
+    evidence: "Design requires exact target validation: OpenAI bounded metadata; Anthropic exactly user_id; Gemini unmapped. Runtime and live conformance remain pending."
     required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
-    closeout_status: gated_no_runtime_gap
+    closeout_status: runtime_conformance_pending
     required_gate: npm run verify:v3-protocol-conversion-field-parity
   - id: gap.gemini.field_coverage
     severity: open_design_gap
@@ -8866,8 +9007,7 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: extension_declared
     source_fields: *a1
-    projection_rule: Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a
-      compatible target policy and needs explicit outbound owner.
+    projection_rule: Responses source-roundtrip only; all non-Responses targets must report this semantic path as unmapped.
   - field: request.reasoning_context_policy
     semantic_id: request.reasoning_context_policy
     direction: request
@@ -8875,7 +9015,7 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: extension_declared
     source_fields: *a2
-    projection_rule: Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.
+    projection_rule: Responses context source-roundtrip only; mode is a separate registered extension.
   - field: request.reasoning_include_thoughts
     semantic_id: request.reasoning_include_thoughts
     direction: request
@@ -8883,7 +9023,7 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: partial
     source_fields: *a3
-    projection_rule: Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.
+    projection_rule: Gemini source-roundtrip only; non-Gemini targets must report this semantic path as unmapped.
   - field: request.reasoning_budget_tokens
     semantic_id: request.reasoning_budget_tokens
     direction: request
@@ -8891,7 +9031,31 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: partial
     source_fields: *a4
-    projection_rule: Gemini source codec extracts thinkingBudget; Anthropic budget_tokens and runtime cross-protocol closeout pending.
+    projection_rule: Conditional-exact Anthropic/Gemini projection after target validation; OpenAI targets must report unmapped.
+  - field: request.reasoning_mode
+    semantic_id: request.reasoning_mode
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a176
+    projection_rule: Responses source-roundtrip only; never reconstruct routing or provider selection.
+  - field: request.reasoning_display_policy
+    semantic_id: request.reasoning_display_policy
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a177
+    projection_rule: Anthropic source-roundtrip only; not equivalent to OpenAI summary or Gemini includeThoughts.
+  - field: request.reasoning_thinking_mode
+    semantic_id: request.reasoning_thinking_mode
+    direction: request
+    stratum: request_payload
+    owner: chat.extension_semantics
+    current_impl: extension_declared
+    source_fields: *a178
+    projection_rule: Anthropic source-roundtrip only; never infer effort, budget, or OpenAI execution mode.
   - field: request.tool_choice.allowed_function_names
     semantic_id: request.tool_choice.allowed_function_names
     direction: request
@@ -9475,14 +9639,6 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: partial
     source_fields: *a78
-    projection_rule: runtime mapping partial or extension-only gap
-  - field: request.output_config.effort
-    semantic_id: request.output_config.effort
-    direction: request
-    stratum: request_payload
-    owner: chat.extension_semantics
-    current_impl: extension_declared
-    source_fields: *a79
     projection_rule: runtime mapping partial or extension-only gap
   - field: request.previous_response_id
     semantic_id: request.previous_response_id
@@ -10255,7 +10411,11 @@ canonical_extension_registry:
 
 outbound_projection_contract:
   owner_feature_id: v3.protocol_conversion_field_parity
-  projector: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs::project_outbound_payload_for_target_protocol
+  projector_owner: adjacent_outbound_codec
+  projectors:
+    openai_chat_and_responses: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    anthropic: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+    gemini: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
   statuses:
     mapped: Source field is emitted under an equivalent target field.
     transformed: Source field is emitted through an adjacent codec shape conversion.
@@ -10279,12 +10439,19 @@ outbound_projection_contract:
         - request.background
         - request.context_management
         - request.conversation
-        - request.prompt_cache_key
         - request.prompt_cache_options.*
         - request.prompt_cache_retention
         - request.service_tier
         - request.truncation
-        - request.text.*
+    - source_protocol: responses
+      target_protocol: openai_chat
+      status: transformed
+      fields:
+        - request.client_metadata -> request.metadata
+        - request.prompt_cache_key -> request.prompt_cache_key
+        - request.store -> request.store
+        - request.text.verbosity -> request.verbosity
+        - request.text.format -> request.response_format
     - source_protocol: openai_chat
       target_protocol: responses
       status: target_unsupported
@@ -10293,8 +10460,6 @@ outbound_projection_contract:
         - request.modalities
         - request.web_search_options
         - request.prediction
-        - request.store
-        - request.prompt_cache_key
         - request.prompt_cache_options.*
         - request.prompt_cache_retention
     - source_protocol: openai_chat
@@ -10302,15 +10467,38 @@ outbound_projection_contract:
       status: transformed
       fields:
         - request.client_metadata -> request.metadata
+        - request.prompt_cache_key -> request.prompt_cache_key
+        - request.store -> request.store
         - request.reasoning_effort -> request.reasoning.effort
     - source_protocol: anthropic
       target_protocol: any_cross_protocol_outbound
       status: target_unsupported
       fields:
         - request.container
-        - request.output_config
+        - request.output_config.format
         - request.cache_control
         - request.user_profile_id
+    - source_protocol: responses
+      target_protocol: anthropic
+      status: transformed
+      fields:
+        - request.reasoning.effort[low|medium|high|xhigh|max] -> request.output_config.effort
+        - request.client_metadata.user_id -> request.metadata.user_id
+        - request.text.format.json_schema -> request.output_config.format.json_schema
+    - source_protocol: responses
+      target_protocol: anthropic
+      status: target_unsupported
+      fields:
+        - request.reasoning.effort[none|minimal]
+        - request.reasoning.summary
+        - request.reasoning.generate_summary
+        - request.reasoning.context
+        - request.reasoning.mode
+        - request.client_metadata.* except user_id
+        - request.prompt_cache_key
+        - request.store
+        - request.text.verbosity
+        - request.text.format.strict=false
     - source_protocol: gemini
       target_protocol: any_cross_protocol_outbound
       status: target_unsupported

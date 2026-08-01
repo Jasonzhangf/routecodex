@@ -92,10 +92,10 @@
       </div>
       <div class="stat-row">
         <span class="stat-card"><strong>5</strong><span>source documents</span></span>
-        <span class="stat-card"><strong>414</strong><span>source field paths</span></span>
-        <span class="stat-card"><strong>413</strong><span>classified fields</span></span>
-        <span class="stat-card"><strong>70</strong><span>manual semantic groups</span></span>
-        <span class="stat-card"><strong>44</strong><span>semantic rows</span></span>
+        <span class="stat-card"><strong>415</strong><span>source field paths</span></span>
+        <span class="stat-card"><strong>414</strong><span>classified fields</span></span>
+        <span class="stat-card"><strong>73</strong><span>manual semantic groups</span></span>
+        <span class="stat-card"><strong>47</strong><span>semantic rows</span></span>
         <span class="stat-card"><strong>5</strong><span>implementation gaps</span></span>
       </div>
     </header>
@@ -164,9 +164,9 @@
       </div>
     </article>
       </div>
-      <div class="protocol-title"><h3>Responses source fields</h3><span class="muted">122 fields</span></div><details>
-        <summary>Responses · request_fields (35)</summary>
-        <ul class="field-list"><li><code>request.background</code></li><li><code>request.context_management</code></li><li><code>request.conversation</code></li><li><code>request.include</code></li><li><code>request.input</code></li><li><code>request.instructions</code></li><li><code>request.max_output_tokens</code></li><li><code>request.metadata</code></li><li><code>request.model</code></li><li><code>request.moderation</code></li><li><code>request.parallel_tool_calls</code></li><li><code>request.previous_response_id</code></li><li><code>request.prompt</code></li><li><code>request.prompt_cache_key</code></li><li><code>request.prompt_cache_options.ttl</code></li><li><code>request.prompt_cache_options.mode</code></li><li><code>request.prompt_cache_retention</code></li><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.context</code></li><li><code>request.safety_identifier</code></li><li><code>request.service_tier</code></li><li><code>request.store</code></li><li><code>request.stream</code></li><li><code>request.stream_options.include_obfuscation</code></li><li><code>request.temperature</code></li><li><code>request.text.format</code></li><li><code>request.text.verbosity</code></li><li><code>request.tool_choice</code></li><li><code>request.tools</code></li><li><code>request.top_logprobs</code></li><li><code>request.top_p</code></li><li><code>request.truncation</code></li><li><code>request.user</code></li></ul>
+      <div class="protocol-title"><h3>Responses source fields</h3><span class="muted">123 fields</span></div><details>
+        <summary>Responses · request_fields (36)</summary>
+        <ul class="field-list"><li><code>request.background</code></li><li><code>request.context_management</code></li><li><code>request.conversation</code></li><li><code>request.include</code></li><li><code>request.input</code></li><li><code>request.instructions</code></li><li><code>request.max_output_tokens</code></li><li><code>request.metadata</code></li><li><code>request.model</code></li><li><code>request.moderation</code></li><li><code>request.parallel_tool_calls</code></li><li><code>request.previous_response_id</code></li><li><code>request.prompt</code></li><li><code>request.prompt_cache_key</code></li><li><code>request.prompt_cache_options.ttl</code></li><li><code>request.prompt_cache_options.mode</code></li><li><code>request.prompt_cache_retention</code></li><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li><li><code>request.reasoning.context</code></li><li><code>request.safety_identifier</code></li><li><code>request.service_tier</code></li><li><code>request.store</code></li><li><code>request.stream</code></li><li><code>request.stream_options.include_obfuscation</code></li><li><code>request.temperature</code></li><li><code>request.text.format</code></li><li><code>request.text.verbosity</code></li><li><code>request.tool_choice</code></li><li><code>request.tools</code></li><li><code>request.top_logprobs</code></li><li><code>request.top_p</code></li><li><code>request.truncation</code></li><li><code>request.user</code></li></ul>
       </details>
 <details>
         <summary>Responses · input_fields (38)</summary>
@@ -250,8 +250,13 @@
   </tr>
 <tr>
     <td><span class="badge covered_but_target_dependent">covered_but_target_dependent</span></td>
+    <td><code>0</code></td>
+    <td>Runtime implements the field only where the target protocol legally supports it; target-incompatible projection must be rejected by the adjacent outbound codec.</td>
+  </tr>
+<tr>
+    <td><span class="badge runtime_conformance_pending">runtime_conformance_pending</span></td>
     <td><code>1</code></td>
-    <td>Runtime implements the field only where the target protocol legally supports it; target-incompatible projection must be stripped or rejected by the provider-wire owner.</td>
+    <td>Design and owner are fixed, but positive/negative runtime and live evidence have not passed.</td>
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
@@ -260,7 +265,7 @@
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>213</code></td>
+    <td><code>223</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -294,15 +299,15 @@
     <thead><tr><th>gap id</th><th>category</th><th>affected status/count</th><th>evidence</th><th>owner / closeout rule</th></tr></thead>
     <tbody><tr>
     <td><code>gap.client_metadata.target_dependent</code></td>
-    <td><span class="badge fixed_doc_gate">fixed_doc_gate</span></td>
-    <td><ul class="field-list"><li><code>covered_but_target_dependent</code></li></ul><div>count: <code>1</code></div></td>
-    <td>OpenAI Chat provider wire preserves standard metadata but rejects non-standard client_metadata; OpenAI Responses provider wire explicitly renames client_metadata to metadata.</td>
-    <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge gated_no_runtime_gap">gated_no_runtime_gap</span><br><span class="muted">Keep target-dependent provider-wire behavior explicit; do not use MetadataCenter or fallback to preserve unsupported client_metadata.</span></td>
+    <td><span class="badge runtime_closeout">runtime_closeout</span></td>
+    <td><ul class="field-list"><li><code>runtime_conformance_pending</code></li></ul><div>count: <code>1</code></div></td>
+    <td>OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only an exact client_metadata.user_id mapping is allowed and all other keys must fail.</td>
+    <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Keep target-dependent provider-wire behavior explicit in the adjacent outbound codec; never use MetadataCenter, generic silent strip, or fallback.</span></td>
   </tr>
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>213</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>223</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -1530,11 +1535,11 @@
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
-      <div>Requested reasoning budget/effort, not visible reasoning content.</div>
+      <div>Requested qualitative reasoning effort, not a numeric token budget or visible reasoning content.</div>
       <details><summary>Chat shape / value rule</summary><div>Chat reasoning_effort is a request option. Visible thinking/reasoning content is response/message content semantics.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; cross-protocol runtime mapping remains partial. Anthropic thinking.budget_tokens outbound projection requires Jason auth. reasoning content and usage stay separate. Grok explicitly rejects reasoning_effort/reasoning object on wire.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Runtime must project Anthropic output_config.effort instead of silently allowing reasoning_effort, validate the concrete target value domain, and reject non-intersection values. No effort-to-budget approximation is permitted.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.effort</code></li></ul>
@@ -1546,11 +1551,11 @@
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.thinking.type</code></li></ul>
+    <ul class="field-list"><li><code>request.output_config.effort</code></li></ul>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic thinking.type maps to reasoning effort enablement. budget_tokens and display are separate reasoning extension semantics.</div>
+    <div>Anthropic output_config.effort maps directly for the shared low/medium/high/xhigh/max values. OpenAI none/minimal have no Anthropic equivalent. thinking.type, budget_tokens, and display are separate semantics.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1559,7 +1564,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini thinkingLevel maps to Chat reasoning effort/level. includeThoughts and thinkingBudget are separate reasoning extension semantics; thoughtsTokenCount is usage, not request effort.</div>
+    <div>Gemini thinkingLevel maps by enum identity for minimal/low/medium/high only after target-model capability validation. includeThoughts and thinkingBudget are separate semantics; thoughtsTokenCount is usage.</div>
 
   </div></td>
   </tr>
@@ -1576,10 +1581,10 @@
       <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized thinking; otherwise the field remains decision-required.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Compatible outbound mapping needs explicit target policy and Jason decision for non-equivalent targets.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Source-roundtrip only. Anthropic/OpenAI Chat/Gemini outbound must report request.reasoning_summary_policy as unmapped.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.reasoning.summary</code></li></ul>
+    <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
@@ -1588,11 +1593,11 @@
   </div></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.thinking.display</code></li></ul>
+    <span class="muted">— no request field</span>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Compatible mapping may use Anthropic thinking display policy when thinking is enabled; exact summary levels are target-dependent.</div>
+    <div>Anthropic thinking.display controls summarized versus omitted visibility and is not equivalent to OpenAI auto/concise/detailed summary policy.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1618,14 +1623,14 @@
       <details><summary>Chat shape / value rule</summary><div>Context policy is not effort, budget, visible reasoning text, or response summary.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">No runtime outbound mapping claimed; requires compatibility decision before target projection.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Source-roundtrip only. Non-Responses outbound must report request.reasoning_context_policy as unmapped.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
-    <ul class="field-list"><li><code>request.reasoning.context</code></li><li><code>request.reasoning.mode</code></li></ul>
+    <ul class="field-list"><li><code>request.reasoning.context</code></li></ul>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Preserve as protocol-neutral request policy until a target protocol has a compatible context/mode knob.</div>
+    <div>Preserve the Responses context value without combining it with execution mode.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1649,6 +1654,48 @@
   </tr>
 <tr>
     <td class="standard-cell">
+      <code>request.reasoning_mode</code>
+      <div class="muted">group <code>reasoning.request_mode</code></div>
+      <div><ul class="field-list"><li><code>request.reasoning_mode</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_mode</code></li></ul>
+    </td>
+    <td class="standard-cell">
+      <strong>Standard Chat semantic meaning</strong>
+      <div>Requested reasoning execution mode; distinct from context retention, effort, and budget.</div>
+      <details><summary>Chat shape / value rule</summary><div>Preserve the source value as a registered payload extension. It must not become RouteCodex routing or provider selection.</div></details>
+
+    </td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Source-roundtrip only. Non-Responses outbound must report request.reasoning_mode as unmapped.</span></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.reasoning.mode</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Responses mode maps directly and round-trips only to Responses.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Anthropic thinking.type and output_config.effort are not execution-mode equivalents.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>No exact Gemini equivalent in the audited request schema.</div>
+
+  </div></td>
+  </tr>
+<tr>
+    <td class="standard-cell">
       <code>request.reasoning_include_thoughts</code>
       <div class="muted">group <code>reasoning.request_include_thoughts</code></div>
       <div><ul class="field-list"><li><code>request.reasoning_include_thoughts</code></li></ul></div>
@@ -1660,7 +1707,7 @@
       <details><summary>Chat shape / value rule</summary><div>Boolean request governance. It must not be projected as assistant-visible reasoning text or usage.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts includeThoughts; cross-protocol runtime closeout pending.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini source-roundtrip only; non-Gemini outbound must report request.reasoning_include_thoughts as unmapped.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
@@ -1676,7 +1723,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic display is a display-mode policy handled by reasoning.request_summary_policy, not a boolean include flag.</div>
+    <div>Anthropic display has a different value domain and continuity behavior; no boolean mapping is claimed.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1686,6 +1733,90 @@
     <span class="muted">— no response field</span>
     <h4>transform</h4>
     <div>Gemini includeThoughts maps to request.reasoning_include_thoughts and never to response reasoning content.</div>
+
+  </div></td>
+  </tr>
+<tr>
+    <td class="standard-cell">
+      <code>request.reasoning_display_policy</code>
+      <div class="muted">group <code>reasoning.request_display_policy</code></div>
+      <div><ul class="field-list"><li><code>request.reasoning_display_policy</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_display_policy</code></li></ul>
+    </td>
+    <td class="standard-cell">
+      <strong>Standard Chat semantic meaning</strong>
+      <div>Anthropic policy selecting summarized or omitted thinking display while retaining Anthropic continuity behavior.</div>
+      <details><summary>Chat shape / value rule</summary><div>Display policy is not OpenAI summary detail and not Gemini includeThoughts.</div></details>
+
+    </td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Anthropic source-roundtrip only; other targets must report request.reasoning_display_policy as unmapped.</span></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>OpenAI reasoning.summary has a different value domain and meaning.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.thinking.display</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Preserve summarized or omitted exactly within Anthropic thinking.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Gemini includeThoughts is boolean and does not preserve Anthropic continuity behavior.</div>
+
+  </div></td>
+  </tr>
+<tr>
+    <td class="standard-cell">
+      <code>request.reasoning_thinking_mode</code>
+      <div class="muted">group <code>reasoning.request_thinking_mode</code></div>
+      <div><ul class="field-list"><li><code>request.reasoning_thinking_mode</code></li></ul></div>
+      <ul class="field-list"><li><code>request.reasoning_thinking_mode</code></li></ul>
+    </td>
+    <td class="standard-cell">
+      <strong>Standard Chat semantic meaning</strong>
+      <div>Anthropic thinking activation strategy enabled, adaptive, or disabled; not qualitative effort or OpenAI execution mode.</div>
+      <details><summary>Chat shape / value rule</summary><div>Preserve the Anthropic source value as a registered payload extension and never infer a budget or effort value from it.</div></details>
+
+    </td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Anthropic source-roundtrip only; other targets must report request.reasoning_thinking_mode as unmapped.</span></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>OpenAI reasoning effort and mode are not Anthropic thinking activation equivalents.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.thinking.type</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Preserve enabled, adaptive, or disabled exactly.</div>
+
+  </div></td>
+    <td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <span class="muted">— no request field</span>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>No exact Gemini equivalent in the audited request schema.</div>
 
   </div></td>
   </tr>
@@ -1702,7 +1833,7 @@
       <details><summary>Chat shape / value rule</summary><div>Numeric request governance. It must not collapse into max_completion_tokens, maxOutputTokens, or usage thoughtsTokenCount.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts thinkingBudget; cross-protocol runtime closeout pending.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Anthropic/Gemini conditional-exact projection needs target constraint validation; OpenAI targets must report the field as unmapped.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
@@ -3336,8 +3467,8 @@
       <p>这一张是主审计表：每行以 OpenAI Chat 字段为主键。若是 OpenAI Chat 原生字段，主键必须和 OpenAI Chat source inventory 完全同名；若 OpenAI Chat 没有该语义，主键才是新增 extension 字段。表中逐字段列出 semantic id、request/response direction、Responses / OpenAI Chat / Anthropic / Gemini 等价字段，以及 owner、current_impl、gap。没有等价语义会明确显示 <code>—</code>，方便审计是否还有超集外语义。</p>
       <div class="grid">
     <article class="card"><h3>Contract</h3><div class="source-meta"><div>Chat Process protocol is OpenAI Chat plus extension fields. The canonical semantic id is the same string as fields[].extended_openai_chat_field. OpenAI Chat native request/response fields keep their exact OpenAI Chat field paths, including [] item notation; only semantics absent from OpenAI Chat receive protocol-neutral top-level request./response./edge. extension fields. Every source protocol field is mapped exactly once or explicitly classified as edge_only / unsupported_blocked. Runtime does not read this audit artifact.</div><div>base protocol: <code>openai_chat</code></div></div></article>
-    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>259</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>174</code></div><div>source fields: <ul class="field-list"><li><code>responses=122</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
-    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>174</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
+    <article class="card"><h3>Coverage</h3><div class="source-meta"><div>OpenAI Chat superset rows: <code>261</code></div><div>native OpenAI Chat exact-name rows: <code>84</code></div><div>added extension rows: <code>176</code></div><div>source fields: <ul class="field-list"><li><code>responses=123</code></li><li><code>openai_chat=84</code></li><li><code>anthropic=86</code></li><li><code>gemini=121</code></li></ul></div></div></article>
+    <article class="card"><h3>Mapping status</h3><div class="source-meta"><div><span class="badge mapped">mapped</span> <code>80</code></div><div><span class="badge extension_added">extension_added</span> <code>176</code></div><div><span class="badge edge_only">edge_only</span> <code>5</code></div></div></article>
   </div><div class="table-wrap"><table>
     <thead><tr><th>OpenAI Chat field (native or extension)</th><th>canonical semantic id</th><th>direction / status</th><th>Responses equivalent fields</th><th>OpenAI Chat native / extended fields</th><th>Anthropic equivalent fields</th><th>Gemini equivalent fields</th><th>owner / current_impl / gap</th></tr></thead>
     <tbody><tr>
@@ -3806,29 +3937,29 @@
     <td><span class="badge request">request</span><br><span class="badge mapped">mapped</span></td>
     <td><ul class="field-list"><li><code>request.reasoning.effort</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.reasoning_effort</code></li></ul></td>
-    <td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.output_config.effort</code></li></ul></td>
     <td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini thinkingLevel source is codec-bound; budget/visibility are separate request.reasoning.* extension rows; runtime mapping remains partial.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge partial">partial</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Anthropic output_config.effort and Gemini thinkingLevel require explicit outbound projection plus model/value validation.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge partial">partial</span></div></details><details><summary>extension <code>container_and_output_config</code></summary><div>owner: <code>chat.extensions.anthropic.container_output</code></div><div><span class="badge extension_declared">extension_declared</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_summary_policy</code><br><span class="muted">added Chat extension field</span></td>
     <td class="standard-cell"><code>request.reasoning_summary_policy</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.summary</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
-    <td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses summary policy has no native OpenAI Chat field; Anthropic thinking display is only a compatible target policy and needs explicit outbound owner.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses summary policy is source-roundtrip only; other targets must reject it as unmapped.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_context_policy</code><br><span class="muted">added Chat extension field</span></td>
     <td class="standard-cell"><code>request.reasoning_context_policy</code></td>
     <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.context</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.reasoning.context</code></li></ul></td>
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses reasoning mode/context policy has no compatible Anthropic/OpenAI Chat/Gemini outbound mapping yet.</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses context policy is source-roundtrip only and must remain separate from reasoning mode.</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_include_thoughts</code><br><span class="muted">added Chat extension field</span></td>
@@ -3839,6 +3970,36 @@
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
     <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Gemini source codec extracts includeThoughts; runtime cross-protocol closeout pending.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details><details><summary>extension <code>generation_config</code></summary><div>owner: <code>chat.extensions.gemini.generation_config</code></div><div><span class="badge partial">partial</span></div></details></td>
+  </tr>
+<tr>
+    <td class="standard-cell"><code>request.reasoning_mode</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_mode</code></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li></ul></td>
+    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
+    <td><span class="muted">— no Anthropic equivalent</span></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses reasoning mode is source-roundtrip only.</span></td>
+  </tr>
+<tr>
+    <td class="standard-cell"><code>request.reasoning_display_policy</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_display_policy</code></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
+    <td><span class="muted">— no Responses equivalent</span></td>
+    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
+    <td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Anthropic thinking display is source-roundtrip only and is not OpenAI summary or Gemini includeThoughts.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+  </tr>
+<tr>
+    <td class="standard-cell"><code>request.reasoning_thinking_mode</code><br><span class="muted">added Chat extension field</span></td>
+    <td class="standard-cell"><code>request.reasoning_thinking_mode</code></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
+    <td><span class="muted">— no Responses equivalent</span></td>
+    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
+    <td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td>
+    <td><span class="muted">— no Gemini equivalent</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Anthropic thinking type is source-roundtrip only and is not reasoning effort or OpenAI execution mode.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_budget_tokens</code><br><span class="muted">added Chat extension field</span></td>
@@ -4719,16 +4880,6 @@
     <td><ul class="field-list"><li><code>request.messages[].content[].web_search_tool_result.content</code></li></ul></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
     <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
-  </tr>
-<tr>
-    <td class="standard-cell"><code>request.output_config.effort</code><br><span class="muted">added Chat extension field</span></td>
-    <td class="standard-cell"><code>request.output_config.effort</code></td>
-    <td><span class="badge request">request</span><br><span class="badge extension_added">extension_added</span></td>
-    <td><span class="muted">— no Responses equivalent</span></td>
-    <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
-    <td><ul class="field-list"><li><code>request.output_config.effort</code></li></ul></td>
-    <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span><details><summary>extension <code>container_and_output_config</code></summary><div>owner: <code>chat.extensions.anthropic.container_output</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.previous_response_id</code><br><span class="muted">added Chat extension field</span></td>
@@ -5951,7 +6102,7 @@
       <div>protocol-specific extension: <code>44</code></div>
       <div>edge-only: <code>1</code></div>
       <div>unsupported/lossy: <code>0</code></div>
-      <div>without semantic row: <code>23</code></div>
+      <div>without semantic row: <code>22</code></div>
     </div></article><article class="card"><h3>Gemini</h3><div class="source-meta">
       <div>protocol-specific extension: <code>94</code></div>
       <div>edge-only: <code>0</code></div>
@@ -7176,7 +7327,7 @@
         <td><span class="badge extension_declared">extension_declared</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><span class="muted">— no semantic_correspondence row</span></td>
+        <td><ul class="field-list"><li><code>reasoning.request_effort -&gt; chat.reasoning_effort</code></li></ul></td>
         <td><details><summary><code>container_and_output_config</code> · <span class="badge extension_declared">extension_declared</span></summary><div>owner: <code>chat.extensions.anthropic.container_output</code></div></details></td>
       </tr>
 <tr>
@@ -7226,7 +7377,7 @@
         <td><span class="badge partial">partial</span></td>
         <td><code>request_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_summary_policy -&gt; chat.reasoning_summary_policy</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_display_policy -&gt; chat.reasoning_display_policy</code></li></ul></td>
         <td><details><summary><code>thinking_and_cache_control</code> · <span class="badge partial">partial</span></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div></details></td>
       </tr>
 <tr>
@@ -8216,7 +8367,7 @@
         <td><span class="badge source_inventory_only">source_inventory_only</span></td>
         <td><code>generation_config_fields</code></td>
         <td><span class="badge request">request</span></td>
-        <td><ul class="field-list"><li><code>reasoning.request_config -&gt; chat.reasoning.request_config</code></li></ul></td>
+        <td><ul class="field-list"><li><code>reasoning.request_effort -&gt; chat.reasoning_effort</code></li></ul></td>
         <td><span class="muted">— no Chat extension owner</span></td>
       </tr>
 <tr>
@@ -8592,25 +8743,60 @@
     <td><ul class="field-list"><li><code>request.input[].custom_tool_call.call_id</code></li><li><code>request.input[].custom_tool_call.input</code></li><li><code>response.output[].custom_tool_call.input</code></li></ul></td><td><ul class="field-list"><li><code>request.messages[].tool_calls[].custom.name</code></li><li><code>request.messages[].tool_calls[].custom.input</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
   </tr>
 <tr>
-    <td><code>reasoning.request_config</code></td>
-    <td><code>chat.reasoning.request_config</code></td>
-    <td><span class="badge canonical_chat">canonical_chat</span></td>
+    <td><code>reasoning.request_effort</code></td>
+    <td><code>chat.reasoning_effort</code></td>
+    <td><span class="badge request_reasoning_effort">request.reasoning_effort</span></td>
     <td><span class="badge partial">partial</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.effort</code></li></ul></td><td><ul class="field-list"><li><code>request.reasoning_effort</code></li></ul></td><td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul></td>
+    <td><ul class="field-list"><li><code>request.reasoning.effort</code></li></ul></td><td><ul class="field-list"><li><code>request.reasoning_effort</code></li></ul></td><td><ul class="field-list"><li><code>request.output_config.effort</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul></td>
   </tr>
 <tr>
     <td><code>reasoning.request_summary_policy</code></td>
     <td><code>chat.reasoning_summary_policy</code></td>
     <td><span class="badge request_reasoning_summary_policy">request.reasoning_summary_policy</span></td>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.summary</code></li></ul></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td><td><span class="muted">—</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
   </tr>
 <tr>
     <td><code>reasoning.request_context_policy</code></td>
     <td><code>chat.reasoning_context_policy</code></td>
     <td><span class="badge request_reasoning_context_policy">request.reasoning_context_policy</span></td>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.context</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.context</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_mode</code></td>
+    <td><code>chat.reasoning_mode</code></td>
+    <td><span class="badge request_reasoning_mode">request.reasoning_mode</span></td>
+    <td><span class="badge extension_declared">extension_declared</span></td>
+    <td><ul class="field-list"><li><code>request.reasoning.mode</code></li></ul></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_include_thoughts</code></td>
+    <td><code>chat.reasoning_include_thoughts</code></td>
+    <td><span class="badge request_reasoning_include_thoughts">request.reasoning_include_thoughts</span></td>
+    <td><span class="badge partial">partial</span></td>
+    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_display_policy</code></td>
+    <td><code>chat.reasoning_display_policy</code></td>
+    <td><span class="badge request_reasoning_display_policy">request.reasoning_display_policy</span></td>
+    <td><span class="badge extension_declared">extension_declared</span></td>
+    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.display</code></li></ul></td><td><span class="muted">—</span></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_thinking_mode</code></td>
+    <td><code>chat.reasoning_thinking_mode</code></td>
+    <td><span class="badge request_reasoning_thinking_mode">request.reasoning_thinking_mode</span></td>
+    <td><span class="badge extension_declared">extension_declared</span></td>
+    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.type</code></li></ul></td><td><span class="muted">—</span></td>
+  </tr>
+<tr>
+    <td><code>reasoning.request_budget_tokens</code></td>
+    <td><code>chat.reasoning_budget_tokens</code></td>
+    <td><span class="badge request_reasoning_budget_tokens">request.reasoning_budget_tokens</span></td>
+    <td><span class="badge partial">partial</span></td>
+    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.budget_tokens</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingBudget</code></li></ul></td>
   </tr>
 <tr>
     <td><code>reasoning.visible_and_opaque</code></td>
@@ -8821,20 +9007,6 @@
     <td><span class="badge chat_extension">chat_extension</span></td>
     <td><span class="badge extension_declared">extension_declared</span></td>
     <td><ul class="field-list"><li><code>request.input[].function_call_output.status</code></li></ul></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.messages[].content[].tool_result.is_error</code></li></ul></td><td><span class="muted">—</span></td>
-  </tr>
-<tr>
-    <td><code>reasoning.request_include_thoughts</code></td>
-    <td><code>chat.reasoning_include_thoughts</code></td>
-    <td><span class="badge request_reasoning_include_thoughts">request.reasoning_include_thoughts</span></td>
-    <td><span class="badge partial">partial</span></td>
-    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul></td>
-  </tr>
-<tr>
-    <td><code>reasoning.request_budget_tokens</code></td>
-    <td><code>chat.reasoning_budget_tokens</code></td>
-    <td><span class="badge request_reasoning_budget_tokens">request.reasoning_budget_tokens</span></td>
-    <td><span class="badge partial">partial</span></td>
-    <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><ul class="field-list"><li><code>request.thinking.budget_tokens</code></li></ul></td><td><ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingBudget</code></li></ul></td>
   </tr></tbody>
   </table></div>
     </section>
@@ -8894,7 +9066,7 @@
     <td><span class="muted">—</span></td>
   </tr>
 <tr>
-    <td><code>reasoning.request_config</code></td>
+    <td><code>reasoning.request_fields</code></td>
     <td><code>missing</code></td>
     <td></td>
     <td><span class="badge declared">declared</span></td>
@@ -9049,9 +9221,9 @@
       <span class="marker">field-classification</span>
       <h2>Field classification / 每字段分类</h2>
       <p>每个 source inventory 字段必须且只能属于一个分类：canonical、protocol extension、edge-only、unsupported/lossy。</p>
-      <div class="protocol-title"><h3>Responses</h3><span class="muted">122 classified fields</span></div><div class="bucket-grid"><details open>
-        <summary>Canonical Chat fields (50)</summary>
-        <ul class="field-list"><li><code>request.instructions</code></li><li><code>request.max_output_tokens</code></li><li><code>request.model</code></li><li><code>request.parallel_tool_calls</code></li><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.context</code></li><li><code>request.temperature</code></li><li><code>request.text.format</code></li><li><code>request.tool_choice</code></li><li><code>request.top_p</code></li><li><code>request.input[].message.id</code></li><li><code>request.input[].message.role</code></li><li><code>request.input[].message.content</code></li><li><code>request.input[].message.type</code></li><li><code>request.input[].message.status</code></li><li><code>request.input[].input_text.text</code></li><li><code>request.input[].input_text.type</code></li><li><code>request.input[].input_image.file_id</code></li><li><code>request.input[].input_file.file_id</code></li><li><code>request.input[].custom_tool_call.call_id</code></li><li><code>request.input[].custom_tool_call.input</code></li><li><code>request.input[].custom_tool_call.name</code></li><li><code>request.input[].custom_tool_call.id</code></li><li><code>request.input[].reasoning.summary[].text</code></li><li><code>request.input[].reasoning.content[].text</code></li><li><code>request.input[].item_reference.id</code></li><li><code>response.id</code></li><li><code>response.created_at</code></li><li><code>response.model</code></li><li><code>response.status</code></li><li><code>response.output_text</code></li><li><code>response.instructions</code></li><li><code>response.parallel_tool_calls</code></li><li><code>response.reasoning</code></li><li><code>response.text</code></li><li><code>response.tool_choice</code></li><li><code>response.usage.input_tokens</code></li><li><code>response.usage.output_tokens</code></li><li><code>response.usage.total_tokens</code></li><li><code>response.output[].message.id</code></li><li><code>response.output[].message.role</code></li><li><code>response.output[].message.status</code></li><li><code>response.output[].output_text.text</code></li><li><code>response.output[].custom_tool_call.call_id</code></li><li><code>response.output[].custom_tool_call.input</code></li><li><code>response.output[].custom_tool_call.name</code></li><li><code>response.output[].reasoning.summary[].text</code></li><li><code>response.output[].reasoning.content[].text</code></li></ul>
+      <div class="protocol-title"><h3>Responses</h3><span class="muted">123 classified fields</span></div><div class="bucket-grid"><details open>
+        <summary>Canonical Chat fields (51)</summary>
+        <ul class="field-list"><li><code>request.instructions</code></li><li><code>request.max_output_tokens</code></li><li><code>request.model</code></li><li><code>request.parallel_tool_calls</code></li><li><code>request.reasoning.mode</code></li><li><code>request.reasoning.effort</code></li><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li><li><code>request.reasoning.context</code></li><li><code>request.temperature</code></li><li><code>request.text.format</code></li><li><code>request.tool_choice</code></li><li><code>request.top_p</code></li><li><code>request.input[].message.id</code></li><li><code>request.input[].message.role</code></li><li><code>request.input[].message.content</code></li><li><code>request.input[].message.type</code></li><li><code>request.input[].message.status</code></li><li><code>request.input[].input_text.text</code></li><li><code>request.input[].input_text.type</code></li><li><code>request.input[].input_image.file_id</code></li><li><code>request.input[].input_file.file_id</code></li><li><code>request.input[].custom_tool_call.call_id</code></li><li><code>request.input[].custom_tool_call.input</code></li><li><code>request.input[].custom_tool_call.name</code></li><li><code>request.input[].custom_tool_call.id</code></li><li><code>request.input[].reasoning.summary[].text</code></li><li><code>request.input[].reasoning.content[].text</code></li><li><code>request.input[].item_reference.id</code></li><li><code>response.id</code></li><li><code>response.created_at</code></li><li><code>response.model</code></li><li><code>response.status</code></li><li><code>response.output_text</code></li><li><code>response.instructions</code></li><li><code>response.parallel_tool_calls</code></li><li><code>response.reasoning</code></li><li><code>response.text</code></li><li><code>response.tool_choice</code></li><li><code>response.usage.input_tokens</code></li><li><code>response.usage.output_tokens</code></li><li><code>response.usage.total_tokens</code></li><li><code>response.output[].message.id</code></li><li><code>response.output[].message.role</code></li><li><code>response.output[].message.status</code></li><li><code>response.output[].output_text.text</code></li><li><code>response.output[].custom_tool_call.call_id</code></li><li><code>response.output[].custom_tool_call.input</code></li><li><code>response.output[].custom_tool_call.name</code></li><li><code>response.output[].reasoning.summary[].text</code></li><li><code>response.output[].reasoning.content[].text</code></li></ul>
       </details>
 <details open>
         <summary>Protocol-specific Chat extensions (69)</summary>
@@ -9123,7 +9295,7 @@
         <summary>request_top_level_fields (25)</summary>
         <div class="table-wrap"><table>
           <thead><tr><th>field</th><th>semantic</th><th>chat_extension</th><th>current_impl</th></tr></thead>
-          <tbody><tr><td><code>model</code></td><td><code>model.identity</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>input</code></td><td><code>turn.items</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>instructions</code></td><td><code>system.instructions</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>previous_response_id</code></td><td><code>continuation.remote_response_id</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge partial">partial</span></td></tr><tr><td><code>store</code></td><td><code>continuation.remote_store_policy</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge semantic_declared">semantic_declared</span></td></tr><tr><td><code>stream</code></td><td><code>transport.intent</code></td><td><span class="badge edge_only">edge_only</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tools</code></td><td><code>tool.declarations</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>additional_tools</code></td><td><code>tool.declarations.embedded</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tool_choice</code></td><td><code>tool.choice</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>parallel_tool_calls</code></td><td><code>tool.parallel_policy</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>metadata</code></td><td><code>client.data_plane_metadata</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>client_metadata</code></td><td><code>client.codex_data_plane_metadata</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered_but_target_dependent">covered_but_target_dependent</span></td></tr><tr><td><code>temperature</code></td><td><code>sampling.temperature</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>top_p</code></td><td><code>sampling.top_p</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>max_output_tokens</code></td><td><code>sampling.max_output_tokens</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>max_tokens</code></td><td><code>sampling.max_output_tokens_alias</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>stop</code></td><td><code>sampling.stop_sequences</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>response_format</code></td><td><code>output.format</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>reasoning</code></td><td><code>reasoning.request_config</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge partial">partial</span></td></tr><tr><td><code>text</code></td><td><code>text.output_config</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge partial">partial</span></td></tr><tr><td><code>truncation</code></td><td><code>context.truncation_policy</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge semantic_declared">semantic_declared</span></td></tr><tr><td><code>include</code></td><td><code>response.include_fields</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge semantic_declared">semantic_declared</span></td></tr><tr><td><code>user</code></td><td><code>end_user.id</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>seed</code></td><td><code>sampling.seed</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>logit_bias</code></td><td><code>sampling.logit_bias</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr></tbody>
+          <tbody><tr><td><code>model</code></td><td><code>model.identity</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>input</code></td><td><code>turn.items</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>instructions</code></td><td><code>system.instructions</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>previous_response_id</code></td><td><code>continuation.remote_response_id</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge runtime_conformance_pending">runtime_conformance_pending</span></td></tr><tr><td><code>store</code></td><td><code>continuation.remote_store_policy</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge semantic_declared">semantic_declared</span></td></tr><tr><td><code>stream</code></td><td><code>transport.intent</code></td><td><span class="badge edge_only">edge_only</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tools</code></td><td><code>tool.declarations</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>additional_tools</code></td><td><code>tool.declarations.embedded</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tool_choice</code></td><td><code>tool.choice</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>parallel_tool_calls</code></td><td><code>tool.parallel_policy</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>metadata</code></td><td><code>client.data_plane_metadata</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>client_metadata</code></td><td><code>client.codex_data_plane_metadata</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge partial">partial</span></td></tr><tr><td><code>temperature</code></td><td><code>sampling.temperature</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>top_p</code></td><td><code>sampling.top_p</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>max_output_tokens</code></td><td><code>sampling.max_output_tokens</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>max_tokens</code></td><td><code>sampling.max_output_tokens_alias</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>stop</code></td><td><code>sampling.stop_sequences</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>response_format</code></td><td><code>output.format</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>reasoning</code></td><td><code>reasoning.request_fields</code></td><td><span class="badge registered_chat_fields">registered_chat_fields</span></td><td><span class="badge partial">partial</span></td></tr><tr><td><code>text</code></td><td><code>text.output_config</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge partial">partial</span></td></tr><tr><td><code>truncation</code></td><td><code>context.truncation_policy</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge semantic_declared">semantic_declared</span></td></tr><tr><td><code>include</code></td><td><code>response.include_fields</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge semantic_declared">semantic_declared</span></td></tr><tr><td><code>user</code></td><td><code>end_user.id</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>seed</code></td><td><code>sampling.seed</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>logit_bias</code></td><td><code>sampling.logit_bias</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr></tbody>
         </table></div>
       </details>
 <details>
@@ -9165,7 +9337,7 @@
         <summary>request_top_level_fields (13)</summary>
         <div class="table-wrap"><table>
           <thead><tr><th>field</th><th>semantic</th><th>chat_extension</th><th>current_impl</th></tr></thead>
-          <tbody><tr><td><code>model</code></td><td><code>model.identity</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>messages</code></td><td><code>turn.messages</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>system</code></td><td><code>system.instructions</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>max_tokens</code></td><td><code>sampling.max_output_tokens</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>stop_sequences</code></td><td><code>sampling.stop_sequences</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>stream</code></td><td><code>transport.intent</code></td><td><span class="badge edge_only">edge_only</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>temperature</code></td><td><code>sampling.temperature</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>top_p</code></td><td><code>sampling.top_p</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>top_k</code></td><td><code>sampling.top_k</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tools</code></td><td><code>tool.declarations</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tool_choice</code></td><td><code>tool.choice</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>metadata</code></td><td><code>client.data_plane_metadata</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>thinking</code></td><td><code>reasoning.request_config</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr></tbody>
+          <tbody><tr><td><code>model</code></td><td><code>model.identity</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>messages</code></td><td><code>turn.messages</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>system</code></td><td><code>system.instructions</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>max_tokens</code></td><td><code>sampling.max_output_tokens</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>stop_sequences</code></td><td><code>sampling.stop_sequences</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>stream</code></td><td><code>transport.intent</code></td><td><span class="badge edge_only">edge_only</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>temperature</code></td><td><code>sampling.temperature</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>top_p</code></td><td><code>sampling.top_p</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>top_k</code></td><td><code>sampling.top_k</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tools</code></td><td><code>tool.declarations</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>tool_choice</code></td><td><code>tool.choice</code></td><td><span class="badge canonical_chat">canonical_chat</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>metadata</code></td><td><code>client.data_plane_metadata</code></td><td><span class="badge protocol_specific_chat_extension">protocol_specific_chat_extension</span></td><td><span class="badge covered">covered</span></td></tr><tr><td><code>thinking</code></td><td><code>reasoning.request_thinking_mode_and_budget</code></td><td><span class="badge registered_chat_fields">registered_chat_fields</span></td><td><span class="badge covered">covered</span></td></tr></tbody>
         </table></div>
       </details>
 <details>
@@ -9213,9 +9385,9 @@
     <thead><tr><th>id</th><th>severity</th><th>evidence</th><th>required_owner / closeout</th></tr></thead>
     <tbody><tr>
     <td><code>gap.client_metadata.target_dependent</code></td>
-    <td><span class="badge fixed_doc_gate">fixed_doc_gate</span></td>
-    <td>request_outbound_format rejects client_metadata before OpenAI Chat wire and renames it to metadata for OpenAI Responses wire.</td>
-    <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge gated_no_runtime_gap">gated_no_runtime_gap</span><br><code>npm run verify:v3-protocol-conversion-field-parity</code></td>
+    <td><span class="badge runtime_closeout">runtime_closeout</span></td>
+    <td>Design requires exact target validation: OpenAI bounded metadata; Anthropic exactly user_id; Gemini unmapped. Runtime and live conformance remain pending.</td>
+    <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><code>npm run verify:v3-protocol-conversion-field-parity</code></td>
   </tr>
 <tr>
     <td><code>gap.gemini.field_coverage</code></td>

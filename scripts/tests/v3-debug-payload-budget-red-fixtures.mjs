@@ -60,8 +60,8 @@ const cases = [
       );
       const tail = source.slice(start);
       const changed = tail.replace(
-        ".body(v3_client_sse_body(stream, false))",
-        ".body(v3_client_sse_body(stream, true))",
+        ".body(v3_client_sse_body(stream, None))",
+        ".body(v3_client_sse_body(stream, Some(Duration::from_millis(1))))",
       );
       return source.slice(0, start) + changed;
     },

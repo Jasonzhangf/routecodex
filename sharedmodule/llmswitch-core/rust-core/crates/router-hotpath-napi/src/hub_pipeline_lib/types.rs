@@ -93,8 +93,6 @@ pub struct HubPipelineExecutionOutput {
     pub metadata: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub standardized_request: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entry_origin_request: Option<Value>,
     pub effect_plan: HubPipelineEffectPlan,
     #[serde(default)]
     pub diagnostics: Vec<HubPipelineDiagnostic>,

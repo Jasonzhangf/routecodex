@@ -35,10 +35,22 @@ const copied = [
   "docs/architecture/v3-mainline-call-map.yml",
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-verification-map.yml",
+  "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
+  "package.json",
 ];
 
 const cases = [
 
+  {
+    name: "Validated HTTP input drops typed session control-header reader",
+    path: "docs/architecture/v3-resource-operation-map.yml",
+    mutate: (source) =>
+      source.replace(
+        ", build_v3_provider_failure_session_scope_for_request",
+        "",
+      ),
+    diagnostic: /Validated HTTP input must allow only the Server scope builder/u,
+  },
 
   {
     name: "Resource map removes typed failure session scope resource",
@@ -205,14 +217,44 @@ const cases = [
     diagnostic: /Server\/ReqInbound must construct/u,
   },
   {
-    name: "Server drops missing-session provider-send cutpoint behavior test",
+    name: "Server drops typed RouteCodex session-header behavior test",
     path: copied[13],
     mutate: (source) =>
       source.replace(
-        "async fn missing_failure_session_fails_before_any_provider_send()",
-        "async fn missing_failure_session_is_not_locked_before_provider_send()",
+        "fn provider_failure_scope_uses_existing_session_header()",
+        "fn provider_failure_scope_uses_generic_client_header()",
       ),
-    diagnostic: /Server must lock missing-session failure before the provider-send cutpoint/u,
+    diagnostic: /Server must lock the existing request session header/u,
+  },
+  {
+    name: "Server drops missing typed session-header rejection test",
+    path: copied[13],
+    mutate: (source) =>
+      source.replace(
+        "fn provider_failure_scope_rejects_missing_existing_session_header()",
+        "fn provider_failure_scope_accepts_missing_existing_session_header()",
+      ),
+    diagnostic: /Server must fail closed when the existing request session header is missing/u,
+  },
+  {
+    name: "Server drops missing-session no-send blackbox",
+    path: copied[18],
+    mutate: (source) =>
+      source.replace(
+        "async fn responses_direct_missing_failure_session_fails_before_any_provider_send()",
+        "async fn responses_direct_missing_failure_session_can_send_provider()",
+      ),
+    diagnostic: /Server blackbox must prove missing existing session fails before provider send/u,
+  },
+  {
+    name: "Session cooldown gate restores broad provider integration binary execution",
+    path: copied[19],
+    mutate: (source) =>
+      source.replace(
+        "-p routecodex-v3-provider-responses --lib health::tests",
+        "-p routecodex-v3-provider-responses health::tests",
+      ),
+    diagnostic: /Provider session cooldown gate must avoid unrelated integration binaries/u,
   },
   {
     name: "Runtime drops session-bound availability",
@@ -226,10 +268,10 @@ const cases = [
     path: copied[12],
     mutate: (source) =>
       source.replace(
-        "    .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS))\n    .ok_or_else(|| {",
-        "    .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS))\n    .or_else(|| Some(request_id.to_string()))\n    .ok_or_else(|| {",
+        "first_header_text(\n        headers,\n        &[\n            \"session-id\",\n            \"session_id\",\n            \"x-session-id\",\n            \"x-rcc-session-id\",\n        ],\n    )?\n    .ok_or_else(|| {",
+        "first_header_text(\n        headers,\n        &[\n            \"session-id\",\n            \"session_id\",\n            \"x-session-id\",\n            \"x-rcc-session-id\",\n        ],\n    )?\n        .or_else(|| Some(request_id.to_string()))\n    .ok_or_else(|| {",
       ),
-    diagnostic: /must not derive session identity/u,
+    diagnostic: /must not derive control identity from request identity/u,
   },
   {
     name: "Direct SSE drops original typed session scope",

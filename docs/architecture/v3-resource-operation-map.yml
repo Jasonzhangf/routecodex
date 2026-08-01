@@ -151,7 +151,7 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-server
     owner_node: V3Server03HttpRequestRaw
-    identity: [requestId, serverId, endpoint, method, streamIntent]
+    identity: [requestId, serverId, endpoint, method, streamIntent, previousResponseId]
     allowed_writers: [V3Server03HttpRequestRaw]
     allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-provider-responses]
@@ -234,10 +234,11 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-target
     owner_node: V3Target10ConcreteProviderSelected
-    identity: [requestId, targetId, providerId, providerType, authAlias, modelId]
+    identity: [requestId, targetId, providerId, providerType, responsesProcess, authAlias, modelId]
     semantic_contract:
       availability_scope: [serverId, routingGroup, sessionId, providerRuntimeIdentity]
       tier_progression: a higher numeric priority tier is selectable only when every lower-priority candidate is unavailable in the current session
+      protocol_decision_inputs: providerType and provider.responses.process from the selected Target10 truth; process=chat is a Relay execution requirement, not a provider id special case.
     allowed_writers: [V3Target10ConcreteProviderSelected]
     allowed_readers: [V3Execution11ProtocolDecision, V3ResponsesDirect11Policy, V3Provider12ResponsesWirePayload]
     forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, V3Resp15ClientPayload]
@@ -249,7 +250,7 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-runtime
     owner_node: V3Execution11ProtocolDecision
-    identity: [requestId, targetId, providerId, modelId, entryProtocol, selectedProviderProtocol, executionMode]
+    identity: [requestId, targetId, providerId, modelId, entryProtocol, selectedProviderProtocol, responsesProcess, executionMode]
     allowed_writers: [V3Execution11ProtocolDecision]
     allowed_readers: [V3ResponsesDirect11Policy]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3Resp15ClientPayload]
@@ -261,7 +262,10 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-runtime
     owner_node: V3ResponsesDirect11Policy
-    identity: [requestId, targetId, providerId, modelId]
+    identity: [requestId, targetId, providerId, modelId, previousResponseId]
+    semantic_contract:
+      continuation_locator_source: previousResponseId is extracted once at Req04 from the standard Responses field, removed from the normal payload, and projected to Direct provider wire only through this typed policy
+      same_protocol_payload: Responses Direct preserves client input/include/tool history and binds only the selected provider wire model; it does not synthesize Chat messages
     allowed_writers: [V3ResponsesDirect11Policy]
     allowed_readers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
     forbidden_writers: [V3ProviderResp14Raw, V3Server16HttpFrame]
@@ -526,9 +530,9 @@ resources:
     lifecycle: v3.server.http_boundary
     owner_crate: routecodex-v3-server
     owner_node: V3Server03HttpRequestRaw
-    identity: [serverId, method, path, contentType, bodySize]
+    identity: [serverId, method, path, contentType, bodySize, requestSessionIdHeader]
     allowed_writers: [read_json_payload]
-    allowed_readers: [build_v3_server_03_http_request_raw, project_v3_http_boundary_error]
+    allowed_readers: [build_v3_server_03_http_request_raw, build_v3_provider_failure_session_scope_for_request, project_v3_http_boundary_error]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -640,9 +644,11 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubRespContinuation04Committed
     identity: [contextId, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, ownerKind]
+    payload_contract: chat_canonical_messages_only
+    control_identity_transport: explicit_commit_parameters_only
     allowed_writers: [V3HubRespContinuation04Committed, commit_or_release_local_continuation, V3LocalContinuationStore::commit_at_resp04, V3LocalContinuationStore::release]
     allowed_readers: [V3HubReqContinuation03Classified, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3ResponsesRelayLocalContinuationState::contains_for_req03, V3HubReqChatProcess04Governed, execute_v3_anthropic_relay_runtime_with_local_continuation, V3HubContinuationLookup::with_local_context_from_req04_store, V3LocalContinuationStore::restore_at_req04]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, continuation_store_transport, response_projector, sse_framer]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, continuation_store_transport, response_projector, sse_framer, req04_responses_to_chat_rebuilder, metadata_center]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -945,10 +951,10 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ProtocolConversionFieldParityContract
     identity: [entryProtocol, providerProtocol, clientProjectionProtocol, fieldFamily]
-    allowed_writers: [docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
-    allowed_readers: [docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
+    allowed_writers: [docs/design/v3-protocol-request-field-projection.md, docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/architecture/manifests/v3.protocol_request_field_projection.yml, docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
+    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
-    data_plane_fields: [metadata, stop, thinking, tool_choice, usage, model, created, response_format]
+    data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1216,11 +1222,59 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [serverId, httpSseKeepaliveMs]
     allowed_writers: [compile_v3_http_sse_keepalive_ms_from_environment, compile_servers]
-    allowed_readers: [V3ServerManifest, responses_relay_output_response, responses_direct_output_response_with_console, v3_io_sse_body]
+    allowed_readers: [V3ServerManifest, responses_relay_output_response, v3_io_sse_body]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+
+  - resource_id: v3.debug.codex_sample_authorization
+    resource_kind: diagnostic_control
+    lifecycle: v3.codex_sample_retention_snap_scope
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_crate: routecodex-v3-config
+    owner_node: V3CodexSample02ManifestAuthorizationPublished
+    identity: [managedInstanceId, codexSamplesEnabled, directSnapshotsEnabled, snapshotStages]
+    allowed_readers: [V3DebugRuntime::should_capture_snapshot_stage, v3_codex_sample_scope_allows]
+    allowed_writers: [configure_v3_snapshot_flags, apply_snapshot_authorization_to_manifest]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-debug-payload-budget, npm run verify:v3-resource-map]
+
+  - resource_id: v3.debug.payload_budget
+    resource_kind: diagnostic_side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_crate: routecodex-v3-debug
+    owner_node: V3DebugPayloadBudgetApplied
+    identity: [serverId, requestId, executionId, artifactKind]
+    allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
+    allowed_writers: [V3DebugRuntime::redact_payload_for_side_channel, redact_debug_value_at_key, V3DebugBoundedTextCapture::append]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-debug-payload-budget, npm run test:v3-debug-payload-budget-red-fixtures, npm run verify:v3-resource-map]
+
+  - resource_id: v3.debug.codex_sample_filesystem
+    resource_kind: bounded_diagnostic_artifact
+    lifecycle: v3.codex_sample_retention_snap_scope
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_crate: routecodex-v3-server
+    owner_node: V3CodexSample06RetentionEnforced
+    identity: [entryProtocol, endpoint, port, requestId, artifactName]
+    allowed_readers: [developer_diagnostics, replay-codex-sample]
+    allowed_writers: [persist_v3_codex_sample_payload, enforce_v3_codex_sample_listener_retention, enforce_v3_codex_sample_request_retention]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-debug-payload-budget, npm run verify:v3-resource-map]
 
   - resource_id: v3.server.responses_session_admission
     resource_kind: listener_scoped_concurrency_gate

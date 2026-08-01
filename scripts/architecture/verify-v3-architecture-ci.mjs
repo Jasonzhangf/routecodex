@@ -14,6 +14,8 @@
 import { spawnSync } from 'node:child_process';
 
 const STEPS = [
+  ['verify:agent-p0-payload-control-guard', 'Agent and RouteCodex skill entry surfaces expose the P0 payload/control isolation guard before routing'],
+  ['test:agent-p0-payload-control-guard-red-fixtures', 'P0 payload/control entry guard mutations are rejected'],
   ['verify:v3-rust-only', 'V3 crates must be Rust-only (no JS/TS in v3/)'],
   ['verify:v3-file-size', 'V3 file-size ratchet (<=1500 or approved whitelist)'],
   ['verify:v3-resource-map', 'V3 resource-operation-map parseable + bound'],

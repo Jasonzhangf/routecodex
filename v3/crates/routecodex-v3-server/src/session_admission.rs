@@ -1,3 +1,6 @@
+use axum::body::Body;
+use axum::http::Response;
+use futures_util::{stream, StreamExt};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -23,6 +26,19 @@ pub(crate) struct V3ResponsesSessionAdmissionGate {
 pub(crate) struct V3ResponsesSessionAdmissionPermit {
     state: Arc<Mutex<V3ResponsesSessionAdmissionState>>,
     token: Option<u64>,
+}
+
+pub(crate) fn hold_response_body_admission_permit(
+    response: Response<Body>,
+    permit: V3ResponsesSessionAdmissionPermit,
+) -> Response<Body> {
+    let (parts, body) = response.into_parts();
+    let stream = Box::pin(body.into_data_stream());
+    let body = Body::from_stream(stream::unfold(
+        (stream, permit),
+        |(mut stream, permit)| async move { stream.next().await.map(|item| (item, (stream, permit))) },
+    ));
+    Response::from_parts(parts, body)
 }
 
 impl V3ResponsesSessionAdmissionGate {

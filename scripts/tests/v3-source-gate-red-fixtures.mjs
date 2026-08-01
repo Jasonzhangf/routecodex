@@ -50,6 +50,68 @@ const fixtures = [
     diagnostic: /Target production source cannot re-enter Virtual Router/,
   },
   {
+    name: 'target drops responses process',
+    file: 'v3/crates/routecodex-v3-target/src/lib.rs',
+    transform: (source) => source
+      .replace('    pub responses_process: Option<String>,\n', '')
+      .replace(/                responses_process: provider[\s\S]*?                responses_transport:/, '                responses_transport:'),
+    diagnostic: /Target candidate must carry provider\.responses\.process/,
+  },
+  {
+    name: 'execution decision ignores responses process chat',
+    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
+    transform: (source) => source.replace(/\.responses_process/g, '.provider_type'),
+    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
+  },
+  {
+    name: 'execution decision forces responses process chat to direct',
+    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
+    transform: (source) => source.replace(
+      '        V3Execution11ProtocolDecisionMode::HubRelay\n    } else if entry_protocol == selected_provider_protocol {',
+      '        V3Execution11ProtocolDecisionMode::SameProtocolDirect\n    } else if entry_protocol == selected_provider_protocol {',
+    ),
+    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
+  },
+  {
+    name: 'runtime reconstructs control from client payload metadata',
+    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
+    mutation: '\nfn forbidden_payload_control(body: &serde_json::Value) { let _ = body.pointer("/metadata/runtime_control"); }\n',
+    diagnostic: /cannot derive routing or MetadataCenter control from client payload metadata/,
+  },
+  {
+    name: 'route classifier payload metadata carrier returns',
+    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
+    mutation: '\nstruct V3RouteClassifierMetadata;\n',
+    diagnostic: /cannot derive routing or MetadataCenter control from client payload metadata/,
+  },
+  {
+    name: 'server reconstructs continuation control from client payload metadata',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    mutation: '\nfn extract_responses_client_scope(payload: &serde_json::Value) { let _ = payload.get("client_metadata"); }\n',
+    diagnostic: /Server cannot rebuild continuation or admission control scope from client payload metadata/,
+  },
+  {
+    name: 'server reconstructs provider health control from client payload metadata',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    transform: (source) => source.replace(
+      '    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)',
+      '    let _ = serde_json::Value::Null.get("metadata");\n    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)',
+    ),
+    diagnostic: /Server cannot rebuild provider-health control scope from client payload metadata/,
+  },
+  {
+    name: 'req04 reconstructs chat from stored responses input',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
+    mutation: '\nfn forbidden_req04_rebuild(restored: &serde_json::Value) { let _ = restored.get("input"); }\n',
+    diagnostic: /Req04 cannot rebuild Chat semantics from a stored non-Chat continuation payload/,
+  },
+  {
+    name: 'continuation response control enters chat payload',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+    mutation: '\nconst FORBIDDEN_CONTROL_PAYLOAD_KEY: &str = "continuation_response_id";\n',
+    diagnostic: /continuation control identity cannot be embedded in Chat canonical payload/,
+  },
+  {
     name: 'provider identity special case',
     file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
     mutation: '\nfn forbidden_provider_case(provider_id: &str) -> bool { provider_id == "cc" }\n',

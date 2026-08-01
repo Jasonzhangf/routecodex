@@ -5,7 +5,7 @@ Status: contract locked; red evidence and implementation pending.
 ## Lifecycle Under Test
 
 ```text
-Server/ReqInbound validates session_id
+Server/ReqInbound validates x-routecodex-session-id control header
   -> typed failure session scope
   -> Runtime binds Provider availability to session
   -> Target reads current-session availability
@@ -92,8 +92,9 @@ ActionGate session state. Client disconnect remains health-neutral.
 
 ## Project Black-Box Matrix
 
-1. Missing session ID at each supported HTTP entry returns an explicit client-input Error01-06
-   response before route/provider send. `request_id` and conversation ID do not substitute.
+1. Missing existing request session ID at each supported HTTP entry returns an explicit client-input
+   Error01-06 response before route/provider send. Body metadata, `request_id` and
+   conversation ID do not substitute.
 2. Same listener, same provider, two explicit sessions: A reaches three failures and cools; B still
    reaches provider and succeeds.
 3. B success does not change A health/action diagnostics.
@@ -112,7 +113,8 @@ Red fixtures must fail when any of these is reintroduced:
 - Health failure/cooldown key without server, routing group or session.
 - ActionGate provider scope/key or Error05 witness without session.
 - Runtime entry/call site invoking health/action/recovery without typed session scope.
-- Session extracted from continuation, console, MetadataCenter, request ID or conversation ID.
+- Session extracted from generic client headers, body metadata, continuation, console,
+  MetadataCenter, request ID or conversation ID.
 - Virtual Router health import, Target health mutation, second VR hit or selection-plan rebuild.
 - Revive provider absent from current captured plan.
 - Missing sibling record treated as healthy.

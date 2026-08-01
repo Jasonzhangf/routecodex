@@ -28,7 +28,10 @@ function fail(message) {
 const all = files('v3');
 const read = (path) => readFileSync(path, 'utf8');
 const isRustTestSource = (path) =>
-  path.includes('/tests/') || path.endsWith('/tests.rs') || path.includes('/src/tests/') || path.includes('/src/') && path.endsWith('/tests.rs');
+  path.includes('/tests/')
+  || path.endsWith('/tests.rs')
+  || path.endsWith('_tests.rs')
+  || path.includes('/src/tests/');
 
 for (const path of all) {
   const text = read(path);
@@ -119,11 +122,24 @@ const serverSource = files('v3/crates/routecodex-v3-server/src')
   .filter((path) => !isRustTestSource(path))
   .map((path) => read(path).replace(/#\[cfg\(test\)\][\s\S]*/, ''))
   .join('\n');
+const serverLibSource = read('v3/crates/routecodex-v3-server/src/lib.rs')
+  .replace(/#\[cfg\(test\)\][\s\S]*/, '');
 if (/build_v3_error_0[1-6]|V3ErrorSourceKind|V3ErrorActionScope/.test(serverSource)) {
   fail('Server must project Runtime output and cannot build or classify Error nodes');
 }
 if (/route_groups|resolve_default_pool|resolve_selection_plan|hit_opaque_target_once|hit_opaque_target_plan_once|expand_candidates|select_available/.test(serverSource)) {
   fail('Server cannot select routes or interpret targets');
+}
+for (const [symbol, diagnostic] of [
+  ['extract_responses_client_scope', 'Server cannot rebuild continuation or admission control scope from client payload metadata'],
+  ['build_v3_provider_failure_session_scope_for_request', 'Server cannot rebuild provider-health control scope from client payload metadata'],
+]) {
+  const start = serverLibSource.indexOf(`fn ${symbol}(`);
+  const end = start < 0 ? -1 : serverLibSource.indexOf('\nfn ', start + 4);
+  const body = start >= 0 ? serverLibSource.slice(start, end > start ? end : undefined) : '';
+  if (/parse_codex_turn_metadata|TURN_METADATA_(?:SESSION|CONVERSATION)_PATHS|BODY_(?:SESSION|CONVERSATION)_PATHS|client_metadata|metadata/.test(body)) {
+    fail(diagnostic);
+  }
 }
 if (!/build_v3_server_16_http_frame_from_v3_resp_15/.test(serverSource)
     || /fn\s+\w*responses_direct_output_response\w*\([^)]*V3Resp15ClientPayload/.test(serverSource)) {
@@ -196,6 +212,17 @@ if (!/pub responses_process: Option<String>/.test(targetSource)
 }
 
 const runtimeNodesSource = read('v3/crates/routecodex-v3-runtime/src/nodes.rs');
+if (/V3RouteClassifierMetadata|route_classifier_metadata|\/metadata\/runtime_control|\/metadata\/hasImageAttachment/.test(runtimeNodesSource)) {
+  fail('V3 Runtime cannot derive routing or MetadataCenter control from client payload metadata');
+}
+const reqChatProcessSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs');
+if (/responses_like_item_to_chat_message_at_req04|restored_context_messages_at_req04|\.get\("input"\)|\.get\("output"\)/.test(reqChatProcessSource)) {
+  fail('Req04 cannot rebuild Chat semantics from a stored non-Chat continuation payload');
+}
+const respContinuationSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs');
+if (/continuation_response_id/.test(respContinuationSource)) {
+  fail('Resp04 continuation control identity cannot be embedded in Chat canonical payload');
+}
 if (!/responses_process_requires_relay/.test(runtimeNodesSource)
     || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(runtimeNodesSource)
     || !/responses provider process=chat requires relay mode but relay is not allowed/.test(runtimeNodesSource)

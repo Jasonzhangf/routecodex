@@ -18,7 +18,6 @@ use crate::hub_bridge_actions::utils::{
     can_servertool_own_tool_call_id, is_synthetic_routecodex_control_text,
     is_synthetic_routecodex_tool_call_id,
 };
-use crate::hub_pipeline_blocks::responses_resume::synthesize_continuation_from_responses_resume;
 use crate::servertool_core_blocks::inspect_stop_gateway_signal;
 use crate::shared_json_utils::read_trimmed_string as read_optional_trimmed_string;
 use crate::shared_tool_mapping::normalize_routecodex_tool_name;
@@ -424,77 +423,13 @@ fn read_provider_response_input(value: Option<&Value>) -> Option<Vec<Value>> {
         })
 }
 
-fn read_provider_response_metadata_input(
-    metadata: Option<&Map<String, Value>>,
-) -> Option<Vec<Value>> {
-    let row = metadata?;
-    row.get("responsesContext")
-        .and_then(Value::as_object)
-        .and_then(|context| context.get("input"))
-        .and_then(Value::as_array)
-        .filter(|items| !items.is_empty())
-        .cloned()
-        .or_else(|| {
-            row.get("contextSnapshot")
-                .and_then(Value::as_object)
-                .and_then(|context| context.get("input"))
-                .and_then(Value::as_array)
-                .filter(|items| !items.is_empty())
-                .cloned()
-        })
-}
-
-fn read_provider_response_request_semantics<'a>(
-    processed_metadata: Option<&'a Map<String, Value>>,
-    standardized_metadata: Option<&'a Map<String, Value>>,
-    request_metadata: Option<&'a Map<String, Value>>,
-) -> Option<&'a Value> {
-    processed_metadata
-        .and_then(|row| row.get("requestSemantics"))
-        .filter(|value| value.is_object())
-        .or_else(|| {
-            standardized_metadata
-                .and_then(|row| row.get("requestSemantics"))
-                .filter(|value| value.is_object())
-        })
-        .or_else(|| {
-            request_metadata
-                .and_then(|row| row.get("requestSemantics"))
-                .filter(|value| value.is_object())
-        })
-}
-
-fn read_provider_response_metadata_center_responses_resume(
-    request_metadata: Option<&Map<String, Value>>,
-) -> Option<Value> {
-    let metadata = request_metadata?;
-    metadata
-        .get("responsesResume")
-        .filter(|value| value.is_object())
-        .cloned()
-        .or_else(|| {
-            metadata
-                .get("metadataCenterSnapshot")
-                .and_then(Value::as_object)
-                .and_then(|snapshot| snapshot.get("continuationContext"))
-                .and_then(Value::as_object)
-                .and_then(|continuation_context| continuation_context.get("responsesResume"))
-                .filter(|value| value.is_object())
-                .cloned()
-        })
-}
-
 fn read_provider_response_base_semantics<'a>(
     processed: Option<&'a Value>,
     standardized: Option<&'a Value>,
-    metadata_semantics: Option<&'a Value>,
 ) -> Option<&'a Value> {
-    metadata_semantics
-        .or_else(|| {
-            as_json_object(processed)
-                .and_then(|row| row.get("semantics"))
-                .filter(|value| value.is_object())
-        })
+    as_json_object(processed)
+        .and_then(|row| row.get("semantics"))
+        .filter(|value| value.is_object())
         .or_else(|| {
             as_json_object(standardized)
                 .and_then(|row| row.get("semantics"))
@@ -651,20 +586,11 @@ fn resolve_provider_response_request_semantics_value(
     let processed_metadata = read_provider_response_metadata(processed_ref);
     let standardized_metadata = read_provider_response_metadata(standardized_ref);
     let request_metadata_record = request_metadata_ref.and_then(Value::as_object);
-    let metadata_semantics = read_provider_response_request_semantics(
-        processed_metadata,
-        standardized_metadata,
-        request_metadata_record,
-    );
-    let metadata_center_responses_resume =
-        read_provider_response_metadata_center_responses_resume(request_metadata_record);
     let fallback_tools = read_provider_response_root_tools(processed_ref)
         .or_else(|| read_provider_response_root_tools(standardized_ref));
     let fallback_input = read_provider_response_input(processed_ref)
-        .or_else(|| read_provider_response_input(standardized_ref))
-        .or_else(|| read_provider_response_metadata_input(request_metadata_record));
-    let base_value =
-        read_provider_response_base_semantics(processed_ref, standardized_ref, metadata_semantics);
+        .or_else(|| read_provider_response_input(standardized_ref));
+    let base_value = read_provider_response_base_semantics(processed_ref, standardized_ref);
     if base_value.is_none()
         && fallback_tools.as_ref().is_none_or(Vec::is_empty)
         && fallback_input.as_ref().is_none_or(Vec::is_empty)
@@ -698,53 +624,6 @@ fn resolve_provider_response_request_semantics_value(
             Value::Array(fallback_tools.clone().unwrap_or_default()),
         );
         normalized_base.insert("tools".to_string(), Value::Object(tools));
-    }
-    if !normalized_base.contains_key("continuation") {
-        if let Some(continuation) =
-            synthesize_continuation_from_responses_resume(metadata_center_responses_resume.as_ref())
-        {
-            normalized_base.insert("continuation".to_string(), continuation);
-        }
-    } else if let Some(synthesized) =
-        synthesize_continuation_from_responses_resume(metadata_center_responses_resume.as_ref())
-    {
-        if let (Some(existing), Some(synthesized_obj)) = (
-            normalized_base
-                .get_mut("continuation")
-                .and_then(Value::as_object_mut),
-            synthesized.as_object(),
-        ) {
-            for key in [
-                "continuationOwner",
-                "responseId",
-                "previousResponseId",
-                "mode",
-                "resumeFrom",
-            ] {
-                if !existing.contains_key(key) {
-                    if let Some(value) = synthesized_obj.get(key) {
-                        existing.insert(key.to_string(), value.clone());
-                    }
-                }
-            }
-        }
-    }
-    if metadata_center_responses_resume.is_some() {
-        let responses = normalized_base
-            .entry("responses".to_string())
-            .or_insert_with(|| Value::Object(Map::new()));
-        if !responses.is_object() {
-            *responses = Value::Object(Map::new());
-        }
-        if let Some(responses_obj) = responses.as_object_mut() {
-            responses_obj
-                .entry("resume".to_string())
-                .or_insert_with(|| {
-                    metadata_center_responses_resume
-                        .clone()
-                        .unwrap_or(Value::Null)
-                });
-        }
     }
     if !normalized_base.contains_key("messages") {
         if let Some(messages) = read_provider_response_messages(processed_ref)

@@ -1254,19 +1254,6 @@ mod tests {
 
     #[test]
     fn shared_read_trimmed_string_deletion_gate_removed_hub_pipeline_block_local_clones() {
-        let resume_path = crate_src_path("hub_pipeline_blocks/responses_resume.rs");
-        let resume_source = fs::read_to_string(&resume_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", resume_path.display(), error));
-        assert!(
-            !resume_source.contains("fn read_trimmed_optional_string(value: Option<&Value>) -> Option<String> {"),
-            "hub_pipeline_blocks/responses_resume.rs still owns local read_trimmed_optional_string clone"
-        );
-        assert!(
-            resume_source.contains("read_trimmed_string(resume_obj.get(\"previousRequestId\"))")
-                || resume_source.contains("read_trimmed_string(next_metadata.get(\"routeHint\"))"),
-            "hub_pipeline_blocks/responses_resume.rs must route optional string trimming through shared read_trimmed_string truth"
-        );
-
         let metadata_path = crate_src_path("hub_pipeline_blocks/metadata.rs");
         let metadata_source = fs::read_to_string(&metadata_path).unwrap_or_else(|error| {
             panic!("failed to read {}: {}", metadata_path.display(), error)
@@ -1446,23 +1433,6 @@ mod tests {
                 || source.contains("read_trimmed_string(row.get(\"type\"))")
                 || source.contains("read_trimmed_string(function.get(\"name\"))"),
             "universal_shape_filter.rs must use shared read_trimmed_string truth directly"
-        );
-    }
-
-    #[test]
-    fn shared_value_as_object_or_empty_deletion_gate_removed_responses_resume_local_wrapper() {
-        let path = crate_src_path("hub_pipeline_blocks/responses_resume.rs");
-        let source = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {}", path.display(), error));
-        assert!(
-            !source.contains("fn value_as_object_or_empty(value: &Value) -> Map<String, Value> {"),
-            "hub_pipeline_blocks/responses_resume.rs still owns local value_as_object_or_empty wrapper"
-        );
-        assert!(
-            source.contains("use crate::shared_json_utils::{read_trimmed_string, value_as_object_or_empty};")
-                || source.contains("use crate::shared_json_utils::value_as_object_or_empty;")
-                || source.contains("shared_json_utils::value_as_object_or_empty"),
-            "hub_pipeline_blocks/responses_resume.rs must use shared value_as_object_or_empty truth directly"
         );
     }
 

@@ -5,23 +5,18 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     now_epoch_ms: u64,
 ) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
-    let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
+    let standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
+        Ok(standardized) => standardized,
+        Err(error) => {
+            trace.push("V3Req04StandardizedResponses");
+            return Err(protocol_plan_failure(
+                runtime_source("V3Req04StandardizedResponses", error),
+                trace,
+            ))
+        }
+    };
     trace.push("V3Req04StandardizedResponses");
-    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&standardized.body) {
-        return Err(protocol_plan_failure(
-            runtime_source(
-                "V3Req04StandardizedResponses",
-                format!("RouteCodex side-channel field {key} cannot enter request payload"),
-            ),
-            trace,
-        ));
-    }
-    if standardized
-        .body
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .is_some()
-    {
+    if standardized.protocol_context.previous_response_id.is_some() {
         return Err(protocol_plan_failure(
             runtime_source(
                 "V3HubReqContinuation03Classified",
@@ -280,7 +275,8 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
     let core_state = match initial_plan {
         Some(plan) => V3ResponsesDirectRuntimeCoreState::no_continuation().with_initial_plan(plan),
         None => V3ResponsesDirectRuntimeCoreState::no_continuation(),
-    };
+    }
+    .with_provider_health_neutral();
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         core_state,
         manifest,
@@ -352,11 +348,16 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
     if let Err(error) = debug.release_snapshot_session(&scope, &session_id) {
         return crate::project_v3_debug_failure("V3SnapshotSessionReleased", error);
     }
-    let response_payload = match output.client_payload.body {
-        V3ClientBody::Json(value) => value,
-        V3ClientBody::Bytes(bytes) => json!({"body_kind": "bytes", "byte_len": bytes.len()}),
-        V3ClientBody::Sse(_) => json!({"body_kind": "sse_stream"}),
-    };
+    let response_payload = json!({
+        "object": "routecodex.provider_request_dry_run_terminal",
+        "terminal_effect": "no_network_send",
+        "provider_network_send": false,
+        "continuation": {
+            "owner": "none",
+            "continuable": false
+        },
+        "message": "routecodex provider-request dry-run stopped before provider send"
+    });
     let provider_request = captured_provider_request
         .lock()
         .ok()

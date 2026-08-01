@@ -7,7 +7,6 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error06ClientProjected, V3ErrorActionScope,
     V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
 };
-use serde_json::Value;
 
 const V3_RESPONSES_CONTINUATION_OWNER_NODE: &str = "V3HubReqContinuation03Classified";
 
@@ -55,7 +54,7 @@ struct V3ResponsesPreviousResponseOwnerEvidence {
 }
 
 pub fn resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-    payload: &Value,
+    previous_response_id: Option<&str>,
     configured: V3EntryProtocolExecutionMode,
     direct_state: &V3ResponsesDirectContinuationState,
     relay_state: &V3ResponsesRelayLocalContinuationState,
@@ -63,7 +62,11 @@ pub fn resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
     relay_scope: Option<&V3ResponsesRelayLocalContinuationScope>,
     now_epoch_ms: u64,
 ) -> Result<V3EntryProtocolExecutionMode, V3ResponsesPreviousResponseOwnerResolutionError> {
-    let Some(response_id) = read_previous_response_id(payload) else {
+    let Some(response_id) = previous_response_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
         return Ok(configured);
     };
     let direct_owned = match direct_scope {
@@ -112,15 +115,6 @@ pub fn project_v3_responses_previous_response_owner_resolution_error(
     })
 }
 
-fn read_previous_response_id(payload: &Value) -> Option<String> {
-    payload
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
 fn resolve_v3_responses_previous_response_owner_evidence_at_req03(
     configured: V3EntryProtocolExecutionMode,
     evidence: Option<V3ResponsesPreviousResponseOwnerEvidence>,
@@ -145,7 +139,6 @@ mod tests {
     use super::*;
     use crate::hub_v1::V3ResponsesRelayLocalContinuationScope;
     use crate::kernel::V3ResponsesDirectContinuationScope;
-    use serde_json::json;
 
     #[test]
     fn no_previous_response_id_keeps_configured_execution_mode() {
@@ -244,7 +237,7 @@ mod tests {
             .unwrap();
 
         let resolved = resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-            &json!({"previous_response_id":"resp_direct_owner"}),
+            Some("resp_direct_owner"),
             V3EntryProtocolExecutionMode::Relay,
             &direct,
             &relay,
@@ -280,7 +273,7 @@ mod tests {
             .unwrap();
 
         let resolved = resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-            &json!({"previous_response_id":"resp_relay_owner"}),
+            Some("resp_relay_owner"),
             V3EntryProtocolExecutionMode::Direct,
             &direct,
             &relay,
@@ -323,7 +316,7 @@ mod tests {
             .unwrap();
 
         let error = resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-            &json!({"previous_response_id":"resp_cross_scope"}),
+            Some("resp_cross_scope"),
             V3EntryProtocolExecutionMode::Direct,
             &direct,
             &relay,

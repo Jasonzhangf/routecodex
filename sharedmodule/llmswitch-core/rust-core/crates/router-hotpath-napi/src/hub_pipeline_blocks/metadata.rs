@@ -105,12 +105,6 @@ pub(crate) fn build_hub_pipeline_result_metadata(input: &Value) -> Result<Value,
         .cloned()
         .unwrap_or_default();
 
-    let captured_chat_request = row
-        .get("capturedChatRequest")
-        .cloned()
-        .unwrap_or_else(|| Value::Object(Map::new()));
-    out.insert("capturedChatRequest".to_string(), captured_chat_request);
-
     let entry_endpoint = normalized
         .get("entryEndpoint")
         .and_then(|v| v.as_str())

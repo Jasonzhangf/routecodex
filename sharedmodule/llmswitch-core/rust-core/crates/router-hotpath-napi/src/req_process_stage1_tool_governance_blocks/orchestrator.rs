@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 
-use crate::hub_pipeline_blocks::responses_resume::lift_responses_resume_into_semantics;
 use crate::metadata_center::{
     build_metadata_center_from_snapshot, MetadataCenter, MetadataCenterReader,
 };
@@ -1037,20 +1036,9 @@ pub fn apply_req_process_tool_governance(
     let start_time_ms = now_millis();
 
     let ctx = resolve_governance_context(&input.metadata, &input.entry_endpoint);
-    let lifted = lift_responses_resume_into_semantics(&input.request, &input.metadata);
-    let lifted_obj = lifted.as_object();
-    let lifted_request = lifted_obj
-        .and_then(|row| row.get("request"))
-        .cloned()
-        .unwrap_or(input.request);
-    let lifted_metadata = lifted_obj
-        .and_then(|row| row.get("metadata"))
-        .cloned()
-        .unwrap_or(input.metadata);
-
-    let mut metadata = normalize_record(lifted_metadata.clone());
+    let mut metadata = normalize_record(input.metadata);
     let metadata_center = build_metadata_center_from_snapshot(&input.metadata_center_snapshot);
-    let mut request = normalize_record(lifted_request);
+    let mut request = normalize_record(input.request);
     apply_chat_process_request_sanitizer(&mut request);
     let mut terminal_stopless_turn = false;
     run_servertool_request_hooks(|hook_id| {

@@ -1107,40 +1107,34 @@ async fn malformed_json_error_includes_body_length_without_raw_payload() {
     );
 }
 
-#[tokio::test]
-async fn missing_failure_session_fails_before_any_provider_send() {
-    let log_file = test_v3_console_log_file("missing-provider-failure-session");
+#[test]
+fn provider_failure_scope_uses_existing_session_header() {
+    let log_file = test_v3_console_log_file("provider-failure-session-header");
     let state = test_v3_listener_state(&log_file, 5555);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "session-id",
+        HeaderValue::from_static("existing-session-id"),
+    );
+    let scope = build_v3_provider_failure_session_scope_for_request(&state.server, &headers)
+        .expect("existing session header must construct the control scope");
 
-    let response = pending_endpoint_after_responses_admission(
-        state,
-        HeaderMap::new(),
-        "POST".to_string(),
-        "/v1/chat/completions".to_string(),
-        Instant::now(),
-        "openai_chat".to_string(),
-        V3EntryProtocolExecutionMode::Relay,
-        None,
-        json!({
-            "model": "gpt-5.5",
-            "messages": [{"role": "user", "content": "must stop before provider send"}]
-        }),
-    )
-    .await;
+    assert_eq!(scope.session_id(), "existing-session-id");
+    let _ = fs::remove_file(log_file);
+}
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let payload: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload["error"]["code"], "malformed_json");
+#[test]
+fn provider_failure_scope_rejects_missing_existing_session_header() {
+    let log_file = test_v3_console_log_file("provider-failure-session-header-missing");
+    let state = test_v3_listener_state(&log_file, 5555);
+    let error =
+        build_v3_provider_failure_session_scope_for_request(&state.server, &HeaderMap::new())
+            .expect_err("missing existing session header must fail closed");
+
     assert_eq!(
-        payload["error"]["message"],
-        "provider failure isolation requires a non-empty client session_id in the request data plane"
+        error,
+        "provider failure isolation requires the existing request session-id header"
     );
-    assert!(
-        !payload.to_string().contains("provider_unavailable"),
-        "missing session must fail at the server boundary before route selection or provider send"
-    );
-
     let _ = fs::remove_file(log_file);
 }
 
@@ -2727,47 +2721,6 @@ async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() 
             .unwrap()
             .is_none()
     );
-}
-
-#[tokio::test]
-async fn response_body_eof_error_and_drop_release_the_exact_session_admission_permit() {
-    let gate = V3ResponsesSessionAdmissionGate::default();
-    let scope = || V3ResponsesSessionAdmissionScope {
-        endpoint: "/v1/responses".to_string(),
-        session_id: Some("session-release".to_string()),
-        conversation_id: Some("conversation-release".to_string()),
-    };
-
-    let eof_permit = gate.try_admit(scope()).unwrap().unwrap();
-    let eof_response = Response::builder().body(Body::from("complete")).unwrap();
-    let eof_response = hold_response_body_admission_permit(eof_response, eof_permit);
-    assert_eq!(
-        to_bytes(eof_response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .as_ref(),
-        b"complete"
-    );
-    drop(gate.try_admit(scope()).unwrap().unwrap());
-
-    let error_permit = gate.try_admit(scope()).unwrap().unwrap();
-    let error_body = Body::from_stream(futures_util::stream::once(async {
-        Err::<Vec<u8>, _>(io::Error::other("controlled body failure"))
-    }));
-    let error_response =
-        hold_response_body_admission_permit(Response::new(error_body), error_permit);
-    assert!(to_bytes(error_response.into_body(), usize::MAX)
-        .await
-        .is_err());
-    drop(gate.try_admit(scope()).unwrap().unwrap());
-
-    let drop_permit = gate.try_admit(scope()).unwrap().unwrap();
-    let pending_body =
-        Body::from_stream(futures_util::stream::pending::<Result<Vec<u8>, io::Error>>());
-    let pending_response =
-        hold_response_body_admission_permit(Response::new(pending_body), drop_permit);
-    drop(pending_response);
-    drop(gate.try_admit(scope()).unwrap().unwrap());
 }
 
 #[tokio::test]

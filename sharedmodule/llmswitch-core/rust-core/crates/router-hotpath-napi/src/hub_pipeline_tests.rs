@@ -7,7 +7,6 @@ use crate::hub_pipeline_blocks::policy::*;
 use crate::hub_pipeline_blocks::process_mode::*;
 use crate::hub_pipeline_blocks::protocol::*;
 use crate::hub_pipeline_blocks::responses_context::*;
-use crate::hub_pipeline_blocks::responses_resume::*;
 use crate::hub_pipeline_blocks::router_metadata_input::*;
 use crate::hub_pipeline_blocks::runtime_metadata::*;
 use crate::hub_pipeline_blocks::standardized_request::*;
@@ -1210,47 +1209,6 @@ fn test_resolve_stop_message_router_metadata_ignores_legacy_flat_scope_fields() 
     let row = output.as_object().expect("object output");
     assert!(row.get("stopMessageClientInjectSessionScope").is_none());
     assert!(row.get("stopMessageClientInjectScope").is_none());
-}
-
-#[test]
-fn test_lift_responses_resume_into_semantics_emits_null_tombstone_for_metadata_merge() {
-    let request = json!({
-        "messages": [{"role": "user", "content": "hi"}]
-    });
-    let metadata = json!({
-        "responsesResume": {
-            "tool_call_id": "call_demo_exec",
-            "output": "ok"
-        },
-        "routeHint": "tools"
-    });
-
-    let output = lift_responses_resume_into_semantics(&request, &metadata);
-    let row = output.as_object().expect("output object");
-    let next_metadata = row
-        .get("metadata")
-        .and_then(|v| v.as_object())
-        .expect("metadata object");
-
-    assert!(
-        next_metadata.contains_key("responsesResume"),
-        "native metadata patch must include explicit tombstone so TS Object.assign clears stale key"
-    );
-    assert!(
-        next_metadata
-            .get("responsesResume")
-            .is_some_and(|v| v.is_null()),
-        "responsesResume tombstone must be null for shape-preserving merge semantics"
-    );
-    assert_eq!(
-        row.get("request")
-            .and_then(|v| v.get("semantics"))
-            .and_then(|v| v.get("responses"))
-            .and_then(|v| v.get("resume"))
-            .and_then(|v| v.get("tool_call_id"))
-            .and_then(|v| v.as_str()),
-        Some("call_demo_exec")
-    );
 }
 
 #[test]
@@ -3006,122 +2964,6 @@ fn test_apply_direct_builtin_web_search_tool_preserves_tools_for_non_search_rout
 }
 
 #[test]
-fn test_lift_responses_resume_into_semantics_injects_when_missing_and_clears_metadata() {
-    let request = json!({
-        "messages": [],
-        "semantics": {}
-    });
-    let metadata = json!({
-        "responsesResume": {
-            "response_id": "resp_1"
-        },
-        "other": true
-    });
-    let output = lift_responses_resume_into_semantics(&request, &metadata);
-    assert_eq!(
-        output
-            .get("request")
-            .and_then(|v| v.get("semantics"))
-            .and_then(|v| v.get("responses"))
-            .and_then(|v| v.get("resume"))
-            .and_then(|v| v.get("response_id"))
-            .and_then(|v| v.as_str()),
-        Some("resp_1")
-    );
-    assert_eq!(
-        output
-            .get("metadata")
-            .and_then(|v| v.get("responsesResume"))
-            .and_then(|v| v.as_null()),
-        Some(())
-    );
-    assert_eq!(
-        output
-            .get("metadata")
-            .and_then(|v| v.get("other"))
-            .and_then(|v| v.as_bool()),
-        Some(true)
-    );
-}
-
-#[test]
-fn test_lift_responses_resume_into_semantics_preserves_resume_scope_fields_from_metadata() {
-    let request = json!({
-        "messages": [],
-        "semantics": {}
-    });
-    let metadata = json!({
-        "routeHint": "search",
-        "responsesResume": {
-            "response_id": "resp_1",
-            "providerKey": " minimonth.key1.MiniMax-M2.7 ",
-            "sessionId": " stopless-live-123 ",
-            "conversationId": " stopless-live-123 "
-        }
-    });
-    let output = lift_responses_resume_into_semantics(&request, &metadata);
-    let resume = output
-        .get("request")
-        .and_then(|v| v.get("semantics"))
-        .and_then(|v| v.get("responses"))
-        .and_then(|v| v.get("resume"))
-        .expect("responses resume");
-    assert_eq!(
-        resume.get("providerKey").and_then(|v| v.as_str()),
-        Some(" minimonth.key1.MiniMax-M2.7 ")
-    );
-    assert_eq!(
-        resume.get("routeHint").and_then(|v| v.as_str()),
-        Some("search")
-    );
-    assert_eq!(
-        resume.get("sessionId").and_then(|v| v.as_str()),
-        Some(" stopless-live-123 ")
-    );
-    assert_eq!(
-        resume.get("conversationId").and_then(|v| v.as_str()),
-        Some(" stopless-live-123 ")
-    );
-}
-
-#[test]
-fn test_lift_responses_resume_into_semantics_preserves_existing_resume() {
-    let request = json!({
-        "messages": [],
-        "semantics": {
-            "responses": {
-                "resume": {
-                    "response_id": "existing"
-                }
-            }
-        }
-    });
-    let metadata = json!({
-        "responsesResume": {
-            "response_id": "new"
-        }
-    });
-    let output = lift_responses_resume_into_semantics(&request, &metadata);
-    assert_eq!(
-        output
-            .get("request")
-            .and_then(|v| v.get("semantics"))
-            .and_then(|v| v.get("responses"))
-            .and_then(|v| v.get("resume"))
-            .and_then(|v| v.get("response_id"))
-            .and_then(|v| v.as_str()),
-        Some("existing")
-    );
-    assert_eq!(
-        output
-            .get("metadata")
-            .and_then(|v| v.get("responsesResume"))
-            .and_then(|v| v.as_null()),
-        Some(())
-    );
-}
-
-#[test]
 fn test_sync_responses_context_from_canonical_messages_updates_context_fields() {
     let request = json!({
         "messages": [
@@ -3357,63 +3199,6 @@ fn test_sync_responses_context_from_canonical_messages_strips_historical_goal_tu
     assert!(!serialized.contains("get_goal"));
     assert!(!serialized.contains("call_goal_old"));
     assert!(serialized.contains("继续执行"));
-}
-
-#[test]
-fn test_read_responses_resume_from_metadata_returns_object() {
-    let metadata = json!({
-        "responsesResume": {
-            "response_id": "resp_123",
-            "tool_outputs": [{"tool_call_id": "call_1", "output": "ok"}]
-        }
-    });
-    let output = read_responses_resume_from_metadata(&metadata).expect("resume object");
-    assert_eq!(
-        output.get("response_id").and_then(|v| v.as_str()),
-        Some("resp_123")
-    );
-}
-
-#[test]
-fn test_read_responses_resume_from_metadata_ignores_non_object() {
-    let metadata = json!({
-        "responsesResume": "resp_123"
-    });
-    let output = read_responses_resume_from_metadata(&metadata);
-    assert!(output.is_none());
-}
-
-#[test]
-fn test_read_responses_resume_from_request_semantics_returns_object() {
-    let request = json!({
-        "messages": [],
-        "semantics": {
-            "responses": {
-                "resume": {
-                    "response_id": "resp_456"
-                }
-            }
-        }
-    });
-    let output = read_responses_resume_from_request_semantics(&request).expect("resume object");
-    assert_eq!(
-        output.get("response_id").and_then(|v| v.as_str()),
-        Some("resp_456")
-    );
-}
-
-#[test]
-fn test_read_responses_resume_from_request_semantics_missing_returns_none() {
-    let request = json!({
-        "messages": [],
-        "semantics": {
-            "responses": {
-                "resume": null
-            }
-        }
-    });
-    let output = read_responses_resume_from_request_semantics(&request);
-    assert!(output.is_none());
 }
 
 #[test]

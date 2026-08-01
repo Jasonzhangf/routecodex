@@ -255,6 +255,7 @@ struct V3ResponsesDirectRuntimeCoreState<'a> {
     stopless_scope: Option<V3ResponsesDirectStoplessControlScope>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
+    provider_health_neutral: bool,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     // Candidate set from the Server-side protocol plan; always set together
     // with initial_selected_target so in-Target reselection keeps working
@@ -276,6 +277,7 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             stopless_scope: None,
             now_epoch_ms: 0,
             provider_health: None,
+            provider_health_neutral: false,
             initial_selected_target: None,
             initial_expanded: None,
             initial_plan_trace: None,
@@ -296,6 +298,7 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             stopless_scope: None,
             now_epoch_ms,
             provider_health: None,
+            provider_health_neutral: false,
             initial_selected_target: None,
             initial_expanded: None,
             initial_plan_trace: None,
@@ -316,6 +319,11 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
 
     fn with_provider_health(mut self, provider_health: V3ProviderFailureRuntimeHealth) -> Self {
         self.provider_health = Some(provider_health);
+        self
+    }
+
+    fn with_provider_health_neutral(mut self) -> Self {
+        self.provider_health_neutral = true;
         self
     }
 

@@ -1,9 +1,9 @@
 {
   "debug_id": "v3-5520-openai-chat-malformed-function-arguments",
-  "state": "edit_allowed",
+  "state": "source_projection_verified_live_replay_pending",
   "symptom": {
     "observed": "The 5520 Responses request reached minimax_openai with two concatenated JSON objects in function_call.arguments; MiniMax rejected the provider request with HTTP 400 code 2013.",
-    "expected": "A target-incompatible historical tool call must fail explicitly before that target's provider transport, enter the typed provider-failure decision chain, and reselect a lossless provider path without deleting, replacing, or otherwise changing the original arguments.",
+    "expected": "The adjacent Responses-to-OpenAI-Chat codec must preserve the exact function.arguments string value, preserve paired tool output, send once to the selected OpenAI Chat target, and avoid provider failure or reselect.",
     "entry": "POST /v1/responses on port 5520",
     "ids": {
       "request_id": "openai-responses-router-gpt-5.5-20260729T201108232-673745-11382",
@@ -29,8 +29,6 @@
     "lifecycle_nodes": [
       "V3HubReqOutbound07ProviderSemantic",
       "ProviderReqCompat06ProviderCompat",
-      "V3Error05ExecutionDecision",
-      "V3ExecutionRetryOrReselect",
       "V3ProviderReqOutbound08WirePayload",
       "V3ProviderReqOutbound09TransportRequest"
     ],
@@ -46,29 +44,28 @@
     "owner_graph": {
       "feature_id": "v3.protocol_conversion_field_parity",
       "resource_id": "v3.protocol_conversion.field_parity_contract",
-      "mainline_step": "v3-protocol-field-parity-responses-chat-req-negative-01",
-      "error_decision_step": "v3-provider-action-gate-01"
+      "mainline_step": "v3-protocol-field-parity-responses-chat-malformed-arguments-project-01"
     }
   },
   "hypotheses": [
     {
       "id": "H1",
-      "cause": "The Responses-to-OpenAI-Chat codec copies a malformed arguments string into provider wire without target-valid JSON validation.",
+      "cause": "The Responses-to-OpenAI-Chat path incorrectly treated function.arguments parseability as a ProviderReqCompat requirement even though OpenAI Chat defines function.arguments as a string field whose outer JSON escaping is owned by transport serialization.",
       "modules": [
         "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs"
       ],
       "supporting_evidence": "The raw Responses request contains concatenated JSON; the captured OpenAI Chat provider request contains the identical invalid string; MiniMax rejects that exact call_id.",
-      "counter_evidence_or_gap": "Refuted if ProviderReqCompat06 rejects the sample but bypasses typed Error05/reselection, or if the incompatible OpenAI Chat target reaches V3ProviderReqOutbound09TransportRequest.",
-      "verification_action": "Replay the exact malformed item through a controlled Responses Relay path with an OpenAI Chat first target and a lossless Responses second target; assert Error05 reselect, zero sends to the incompatible target, exactly one send to the reselected target, and byte-equivalent original arguments.",
+      "counter_evidence_or_gap": "Refuted if the selected OpenAI Chat provider receives raw malformed JSON, if the projected field parses to anything other than the original string, if paired tool output changes, or if ProviderReqCompat/Error05/provider switch is triggered.",
+      "verification_action": "Replay paired and unpaired malformed items through a controlled Responses Relay path with one OpenAI Chat target; assert exactly one provider send, exact string equality in function.arguments, unchanged paired tool output, and no provider failure or reselect.",
       "confidence": 100
     }
   ],
   "active_hypothesis": "H1",
   "confirmed_hypothesis": "H1",
   "confidence": 100,
-  "first_divergence_node": "ProviderReqCompat06ProviderCompat",
+  "first_divergence_node": "ProviderReqCompat06ProviderCompat_to_V3ProviderReqOutbound08WirePayload",
   "root_cause_module": "responses_openai_codec",
-  "unique_owner": "build_v3_chat_canonical_request_from_responses_payload",
+  "unique_owner": "project_v3_responses_arguments_to_openai_chat_wire",
   "allowed_paths": [
     "docs/goals/v3-5520-openai-chat-malformed-function-arguments-debug-contract.json",
     "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs",
@@ -94,13 +91,14 @@
     "~/.rcc/**"
   ],
   "required_verification": [
-    "controlled malformed-with-feedback incompatible-target transport capture count equals zero and reselected-target transport capture count equals one",
-    "controlled malformed-without-feedback incompatible-target transport capture count equals zero and reselected-target transport capture count equals one",
-    "both malformed cases record provider_request_compat_error and V3TargetLocalReselected",
+    "controlled malformed-with-feedback OpenAI Chat transport capture count equals one and the paired tool output is unchanged",
+    "controlled malformed-without-feedback OpenAI Chat transport capture count equals one",
+    "both malformed cases preserve the exact original function.arguments string value",
+    "both malformed cases record no provider_request_compat_error and no V3TargetLocalReselected",
     "valid OpenAI Chat field parity still sends exactly once",
     "protocol conversion verifier and red fixtures pass",
     "function-map and mainline caller-flow gates pass",
-    "installed 5520 exact old-sample replay does not send invalid arguments to minimax_openai and shows standard provider-failure/reselection or terminal Responses error projection"
+    "installed 5520 exact old-sample replay preserves the original arguments string and does not trigger local provider compatibility failure or reselect because of malformed history"
   ],
   "exact_replay": "~/.rcc/codex-samples/openai-responses/ports/5520/openai-responses-router-gpt-5.5-20260729T201108232-673745-11382/request.json"
 }

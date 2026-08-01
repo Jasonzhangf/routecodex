@@ -14,16 +14,12 @@ use crate::hub_pipeline_types::{
     run_vr_route_04_selected_target_entrypoint, ResponseAdjacentTransitionError,
 };
 use crate::hub_req_chatprocess_03_governance_boundary::apply_hub_req_chatprocess_03_tool_governance;
-use crate::hub_req_inbound_context_capture::{
-    capture_req_inbound_responses_context_snapshot, ResponsesContextCaptureInput,
-};
 use crate::hub_req_inbound_format_parse::{
     parse_format_envelope, FormatEnvelope, FormatParseInput,
 };
 use crate::hub_req_inbound_semantic_lift::{
     apply_req_inbound_semantic_lift, ReqInboundSemanticLiftApplyInput,
 };
-use crate::hub_req_outbound_context_merge::apply_req_outbound_context_snapshot_from_refs;
 use crate::hub_req_outbound_format_build::{build_format_request, FormatBuildInput};
 use crate::hub_resp_chatprocess_03_governance_boundary::govern_hub_resp_chatprocess_03_response;
 use crate::hub_resp_inbound_format_parse::{parse_resp_format_envelope, RespFormatParseInput};
@@ -569,37 +565,17 @@ impl HubPipelineEngine {
             standardized_raw_payload,
         )
         .map_err(|message| HubPipelineError::new("hub_pipeline_req_inbound_02_failed", message))?;
-        diagnostics.push(diagnostic(
-            HubPipelineStageId::ReqInboundContextCapture,
-            HubPipelineDiagnosticStatus::Started,
-            Some(serde_json::json!({ "protocol": entry_provider_protocol })),
-        ));
         let had_inline_payload_metadata = inline_payload_metadata.is_some();
         if let Some(inline_payload_metadata) = inline_payload_metadata {
             if let Some(payload) = normal_request_payload.as_object_mut() {
                 payload.insert("metadata".to_string(), inline_payload_metadata);
             }
         }
-        let inbound_context_snapshot_result = capture_context_snapshot(
-            &entry_provider_protocol,
-            &normal_request_payload,
-            &normalized_metadata,
-            &request_id,
-        );
         if had_inline_payload_metadata {
             if let Some(payload) = normal_request_payload.as_object_mut() {
                 payload.remove("metadata");
             }
         }
-        let inbound_context_snapshot = inbound_context_snapshot_result?;
-        let entry_origin_request = normal_request_payload;
-        diagnostics.push(diagnostic(
-            HubPipelineStageId::ReqInboundContextCapture,
-            HubPipelineDiagnosticStatus::Completed,
-            Some(serde_json::json!({
-                "hasContextSnapshot": inbound_context_snapshot.is_some(),
-            })),
-        ));
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqProcessToolGovernance,
             HubPipelineDiagnosticStatus::Started,
@@ -689,16 +665,6 @@ impl HubPipelineEngine {
                     "Rust HubPipeline request route selection must provide target.outboundProfile",
                 )
             })?;
-        let outbound_context_snapshot = capture_context_snapshot(
-            &entry_provider_protocol,
-            &routed.request,
-            &routed.normalized_metadata,
-            &request_id,
-        )?;
-        attach_context_snapshot_to_metadata(
-            &mut routed.normalized_metadata,
-            outbound_context_snapshot.or(inbound_context_snapshot),
-        )?;
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqProcessRouteSelect,
             HubPipelineDiagnosticStatus::Completed,
@@ -721,24 +687,6 @@ impl HubPipelineEngine {
         if let Some(envelope) = format_envelope.as_object_mut() {
             envelope.insert("payload".to_string(), req_outbound_05.into_payload());
         }
-        diagnostics.push(diagnostic(
-            HubPipelineStageId::ReqOutboundContextMerge,
-            HubPipelineDiagnosticStatus::Started,
-            Some(serde_json::json!({
-                "hasContextSnapshot": resolve_context_snapshot(&routed.normalized_metadata).is_some(),
-            })),
-        ));
-        apply_context_snapshot_to_format_envelope(
-            &mut format_envelope,
-            &routed.normalized_metadata,
-        )?;
-        diagnostics.push(diagnostic(
-            HubPipelineStageId::ReqOutboundContextMerge,
-            HubPipelineDiagnosticStatus::Completed,
-            Some(serde_json::json!({
-                "payloadObject": format_envelope.get("payload").is_some_and(Value::is_object),
-            })),
-        ));
         diagnostics.push(diagnostic(
             HubPipelineStageId::ReqOutboundFormatBuild,
             HubPipelineDiagnosticStatus::Started,
@@ -795,7 +743,6 @@ impl HubPipelineEngine {
             payload: Some(compat.payload),
             metadata: Some(routed.normalized_metadata),
             standardized_request: Some(standardized_payload),
-            entry_origin_request: Some(entry_origin_request),
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
@@ -1050,7 +997,6 @@ impl HubPipelineEngine {
             payload: Some(stream_decision.payload),
             metadata: Some(normalized_metadata),
             standardized_request: None,
-            entry_origin_request: None,
             effect_plan,
             diagnostics,
             error: output.error.map(|error| HubPipelineError {
@@ -1140,137 +1086,6 @@ fn read_trimmed_metadata_string_with_target_fallback(
     key: &str,
 ) -> Option<String> {
     read_trimmed_string(read_metadata_value(metadata, key).as_ref())
-}
-
-fn resolve_context_snapshot(metadata: &Value) -> Option<&Value> {
-    let metadata_obj = metadata.as_object()?;
-    let key = metadata_obj
-        .get("contextMetadataKey")
-        .and_then(|value| read_trimmed_string(Some(value)))
-        .unwrap_or_else(|| "responsesContext".to_string());
-    metadata_obj
-        .get(&key)
-        .or_else(|| metadata_obj.get("responsesContext"))
-        .or_else(|| metadata_obj.get("contextSnapshot"))
-        .filter(|value| value.is_object())
-}
-
-fn capture_context_snapshot(
-    provider_protocol: &str,
-    normalized_payload: &Value,
-    normalized_metadata: &Value,
-    request_id: &str,
-) -> HubPipelineResult<Option<Value>> {
-    if provider_protocol != "openai-responses" {
-        return Ok(None);
-    }
-    let tool_call_id_style = normalized_metadata
-        .get("toolCallIdStyle")
-        .or_else(|| {
-            normalized_metadata
-                .get("metadata")
-                .and_then(|metadata| metadata.get("toolCallIdStyle"))
-        })
-        .cloned();
-    let snapshot = capture_req_inbound_responses_context_snapshot(ResponsesContextCaptureInput {
-        raw_request: normalized_payload.clone(),
-        request_id: Some(request_id.to_string()),
-        tool_call_id_style,
-    })
-    .map_err(|message| HubPipelineError::new("hub_pipeline_context_capture_failed", message))?;
-    let mut snapshot = snapshot;
-    let governed_instructions = normalized_payload
-        .get("instructions")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    if let Some(instructions) = governed_instructions {
-        if let Some(snapshot_obj) = snapshot.as_object_mut() {
-            snapshot_obj.insert("systemInstruction".to_string(), Value::String(instructions));
-        }
-    }
-    Ok(Some(snapshot))
-}
-
-fn attach_context_snapshot_to_metadata(
-    metadata: &mut Value,
-    context_snapshot: Option<Value>,
-) -> HubPipelineResult<()> {
-    let Some(snapshot) = context_snapshot else {
-        return Ok(());
-    };
-    let metadata_obj = metadata.as_object_mut().ok_or_else(|| {
-        HubPipelineError::new(
-            "hub_pipeline_invalid_route_metadata",
-            "Rust HubPipeline context capture requires route metadata object",
-        )
-    })?;
-    metadata_obj.insert(
-        "contextMetadataKey".to_string(),
-        Value::String("responsesContext".to_string()),
-    );
-    metadata_obj.insert("responsesContext".to_string(), snapshot.clone());
-    metadata_obj.insert("contextSnapshot".to_string(), snapshot);
-    Ok(())
-}
-
-fn apply_context_snapshot_to_format_envelope(
-    format_envelope: &mut Value,
-    metadata: &Value,
-) -> HubPipelineResult<()> {
-    let Some(snapshot) = resolve_context_snapshot(metadata) else {
-        return Ok(());
-    };
-    let payload = format_envelope.get_mut("payload").ok_or_else(|| {
-        HubPipelineError::new(
-            "hub_pipeline_missing_format_payload",
-            "Rust HubPipeline req outbound context merge requires format envelope payload",
-        )
-    })?;
-    let patch = apply_req_outbound_context_snapshot_from_refs(payload, snapshot);
-    let payload_obj = payload.as_object_mut().ok_or_else(|| {
-        HubPipelineError::new(
-            "hub_pipeline_invalid_format_payload",
-            "Rust HubPipeline req outbound context merge requires object payload",
-        )
-    })?;
-    let metadata_value = payload_obj
-        .entry("metadata".to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    if !metadata_value.is_object() {
-        *metadata_value = Value::Object(serde_json::Map::new());
-    }
-    if let Some(metadata_obj) = metadata_value.as_object_mut() {
-        metadata_obj.insert(
-            "contextMetadataKey".to_string(),
-            Value::String("responsesContext".to_string()),
-        );
-        metadata_obj.insert("responsesContext".to_string(), snapshot.clone());
-        metadata_obj.insert("contextSnapshot".to_string(), snapshot.clone());
-        metadata_obj.insert("context".to_string(), snapshot.clone());
-    }
-    let payload_has_responses_input = payload_obj.get("input").is_some();
-    if !payload_has_responses_input {
-        if let Some(tool_outputs) = patch.tool_outputs {
-            payload_obj.insert(
-                "toolOutputs".to_string(),
-                serde_json::to_value(tool_outputs)?,
-            );
-        }
-    }
-    let has_existing_tools = payload_obj
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| !tools.is_empty());
-    if !has_existing_tools {
-        if let Some(tools) = patch.tools {
-            if !tools.is_empty() {
-                payload_obj.insert("tools".to_string(), Value::Array(tools));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn move_provider_response_metadata_to_carrier(payload: Value, metadata: &mut Value) -> Value {
@@ -1542,7 +1357,6 @@ pub fn execute_hub_pipeline_json(input_json: String) -> HubPipelineResult<String
             payload: None,
             metadata: None,
             standardized_request: None,
-            entry_origin_request: None,
             effect_plan: HubPipelineEffectPlan::empty(),
             diagnostics: Vec::new(),
             error: Some(error),

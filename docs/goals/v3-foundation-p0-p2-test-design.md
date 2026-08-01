@@ -14,7 +14,7 @@ This design covers only P0 architecture contracts, P1 Config, and P2 multi-liste
 | Health | every listener returns its own server ID/address/port and Manifest version | listener absent after explicit shutdown |
 | Pending endpoint | request registers Debug node, traverses all Error nodes, emits Server frame | handler-local direct response and provider call are forbidden by source gates |
 | CLI | `rccv3` config check, server status, and server start consume `V3ConfigStore`/Server APIs; omitted `--config` resolves `$HOME/.rcc/config.v3.toml` | missing explicit config plus missing `HOME`, CLI direct file IO, listener bind, provider dependency, or second lifecycle fail explicitly |
-| Distribution | build and package emit one executable surface, `rccv3` -> `dist/bin/rccv3` | stale `routecodex-v3` artifact, npm bin, shim, or install verification fails the distribution gate |
+| Distribution | build and package emit one executable surface; generated `routecodex`, `rcc`, and explicit `rccv3` all resolve to the same Rust artifact at `dist/bin/rccv3` | any default command resolves to `dist/cli.js`, stale `routecodex-v3` artifact/npm bin/shim survives, or install verification misses the V3 artifact |
 
 ## White-box tests
 

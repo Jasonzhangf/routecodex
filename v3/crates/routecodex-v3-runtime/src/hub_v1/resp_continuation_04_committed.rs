@@ -126,14 +126,18 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
         .ok_or_else(|| V3LocalContinuationError::Codec {
             message: "Resp04 local finalized response output must be an array".to_string(),
         })?;
-    input.extend(response_output.clone());
+    input.extend(
+        response_output
+            .iter()
+            .map(project_v3_resp04_output_item_to_chat_input_item)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
 
-    let mut context = Map::new();
-    context.insert("input".to_string(), Value::Array(input));
-    context.insert("output".to_string(), Value::Array(response_output));
+    let mut responses_context = Map::new();
+    responses_context.insert("input".to_string(), Value::Array(input));
     if let Some(id) = finalized_response.get("id").and_then(Value::as_str) {
         if !id.trim().is_empty() {
-            context.insert("id".to_string(), Value::String(id.to_string()));
+            responses_context.insert("id".to_string(), Value::String(id.to_string()));
         }
     }
     for field in [
@@ -143,10 +147,34 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
         "instructions",
     ] {
         if let Some(value) = canonical_request.get(field) {
-            context.insert(field.to_string(), value.clone());
+            responses_context.insert(field.to_string(), value.clone());
         }
     }
-    Ok(Value::Object(context))
+    let chat_context =
+        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &Value::Object(responses_context),
+        )
+        .map_err(|message| V3LocalContinuationError::Codec { message })?;
+    Ok(chat_context)
+}
+
+fn project_v3_resp04_output_item_to_chat_input_item(
+    item: &Value,
+) -> Result<Value, V3LocalContinuationError> {
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    if item_type != "output_text" {
+        return Ok(item.clone());
+    }
+    let text = item.get("text").and_then(Value::as_str).ok_or_else(|| {
+        V3LocalContinuationError::Codec {
+            message: "Resp04 output_text continuation item must contain text".to_string(),
+        }
+    })?;
+    Ok(json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}]
+    }))
 }
 
 fn canonical_request_input_items_at_resp04(
@@ -188,19 +216,19 @@ fn restored_context_call_ids(
     canonical_context: &Value,
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     canonical_context
-        .get("output")
+        .get("messages")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|item| {
-            matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call")
-            )
+        .flat_map(|message| {
+            message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
         })
-        .map(|item| {
-            item.get("call_id")
-                .or_else(|| item.get("id"))
+        .map(|call| {
+            call.get("id")
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
@@ -225,6 +253,7 @@ pub(crate) fn assert_v3_relay_local_continuation_context_has_call_ids(
 
 fn local_continuation_context_ids(
     canonical_context: &Value,
+    response_id: Option<&str>,
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
     let mut non_internal_ids = Vec::new();
@@ -240,11 +269,7 @@ fn local_continuation_context_ids(
         .iter()
         .any(|id| is_v3_stopless_internal_call_id(id))
     {
-        if let Some(response_id) = canonical_context
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-        {
+        if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
             return Ok(vec![response_id.to_string()]);
         }
     }
@@ -258,6 +283,7 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
     ttl_ms: u64,
     restored_context_ids: &[String],
     canonical_response: &Value,
+    response_id: Option<&str>,
     action: V3HubContinuationCommit,
 ) -> Result<(), V3LocalContinuationError> {
     for context_id in restored_context_ids {
@@ -266,7 +292,7 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
     if action != V3HubContinuationCommit::LocalContext {
         return Ok(());
     }
-    let context_ids = local_continuation_context_ids(canonical_response)?;
+    let context_ids = local_continuation_context_ids(canonical_response, response_id)?;
     if let Some(duplicate) = context_ids
         .iter()
         .find(|id| store.contains_in_scope(&scope, id))
@@ -310,14 +336,21 @@ mod tests {
 
     fn stopless_context() -> Value {
         json!({
-            "id":"resp_stopless_context",
-            "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}],
-            "output": [{
-                "type":"function_call",
-                "call_id":"call_stopless_reasoning",
-                "name":"exec_command",
-                "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
-            }]
+            "messages": [
+                {"role":"user","content":"continue"},
+                {
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_stopless_reasoning",
+                        "type":"function",
+                        "function":{
+                            "name":"exec_command",
+                            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                        }
+                    }]
+                }
+            ]
         })
     }
 
@@ -334,6 +367,7 @@ mod tests {
             60_000,
             &[],
             &first,
+            Some("resp_stopless_context"),
             V3HubContinuationCommit::LocalContext,
         )
         .expect("stopless projection context must be restorable by response id");
@@ -354,6 +388,7 @@ mod tests {
             60_000,
             &["resp_stopless_context".to_string()],
             &stopless_context(),
+            Some("resp_stopless_context"),
             V3HubContinuationCommit::LocalContext,
         )
         .expect("consumed stopless response-id context must release before recommit");
@@ -366,13 +401,21 @@ mod tests {
         let mut store = V3LocalContinuationStore::default();
         let scope = responses_scope();
         let context = json!({
-            "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"use tool"}]}],
-            "output": [{
-                "type":"function_call",
-                "call_id":"call_exec_regular",
-                "name":"exec_command",
-                "arguments":"{\"cmd\":\"pwd\"}"
-            }]
+            "messages": [
+                {"role":"user","content":"use tool"},
+                {
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_exec_regular",
+                        "type":"function",
+                        "function":{
+                            "name":"exec_command",
+                            "arguments":"{\"cmd\":\"pwd\"}"
+                        }
+                    }]
+                }
+            ]
         });
 
         commit_or_release_v3_relay_local_continuation_at_resp04(
@@ -382,6 +425,7 @@ mod tests {
             60_000,
             &[],
             &context,
+            None,
             V3HubContinuationCommit::LocalContext,
         )
         .expect("regular tool call must remain local-continuation owned");

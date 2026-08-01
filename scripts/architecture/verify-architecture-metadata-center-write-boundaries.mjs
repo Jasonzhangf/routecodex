@@ -11,6 +11,12 @@ const files = {
   verificationMap: 'docs/architecture/verification-map.yml',
   mainlineCallMap: 'docs/architecture/mainline-call-map.yml',
   packageJson: 'package.json',
+  tsTypes: 'src/server/runtime/http-server/metadata-center/metadata-center-types.ts',
+  tsCenter: 'src/server/runtime/http-server/metadata-center/metadata-center.ts',
+  rustTypes: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/metadata_center/types.rs',
+  rustHubBlocks: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks.rs',
+  rustMetadata: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/metadata.rs',
+  rustAdapterContext: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_blocks/adapter_context.rs',
 };
 
 function read(relPath) {
@@ -29,6 +35,33 @@ const verificationMapSource = read(files.verificationMap);
 const mainlineCallMapSource = read(files.mainlineCallMap);
 const packageJson = JSON.parse(read(files.packageJson));
 const manifest = YAML.parse(manifestSource);
+
+const forbiddenPayloadCarrierSlots = [
+  'responsesResume',
+  'responsesRequestContext',
+  'toolOutputs',
+  'resumeFrom',
+];
+for (const slot of forbiddenPayloadCarrierSlots) {
+  if (manifest?.families?.continuation_context?.slots?.includes(slot)) {
+    fail(`${files.manifest}: continuation_context must not carry payload slot ${slot}`, failures);
+  }
+}
+for (const [relPath, patterns] of Object.entries({
+  [files.tsTypes]: [/responsesResume\?\s*:/u, /toolOutputs\?\s*:/u, /resumeFrom\?\s*:/u],
+  [files.tsCenter]: [/continuationContext\.responsesResume/u, /continuationContext\.toolOutputs/u, /continuationContext\.resumeFrom/u],
+  [files.rustTypes]: [/responses_request_context\s*:/u, /responses_resume\s*:/u, /tool_outputs\s*:/u, /resume_from\s*:/u],
+  [files.rustHubBlocks]: [/mod\s+responses_resume\s*;/u],
+  [files.rustMetadata]: [/capturedChatRequest/u],
+  [files.rustAdapterContext]: [/capturedChatRequest/u],
+})) {
+  const source = read(relPath);
+  for (const pattern of patterns) {
+    if (pattern.test(source)) {
+      fail(`${relPath}: MetadataCenter/control path carries or rebuilds payload via ${pattern}`, failures);
+    }
+  }
+}
 
 const requiredFamilies = [
   'request_truth',

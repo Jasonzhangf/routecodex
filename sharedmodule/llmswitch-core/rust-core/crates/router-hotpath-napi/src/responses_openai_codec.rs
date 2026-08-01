@@ -47,15 +47,6 @@ fn extract_tool_call_id_style(payload: &Map<String, Value>) -> Option<Value> {
     })
 }
 
-fn resolve_embedded_responses_context(payload: &Map<String, Value>) -> Option<Value> {
-    let metadata = payload.get("metadata")?.as_object()?;
-    metadata
-        .get("responsesContext")
-        .or_else(|| metadata.get("contextSnapshot"))
-        .filter(|value| value.is_object())
-        .cloned()
-}
-
 fn append_local_images(messages: Vec<Value>) -> NapiResult<Vec<Value>> {
     let raw = crate::hub_bridge_actions::append_local_image_block_on_latest_user_input_json(
         serde_json::json!({ "messages": messages }).to_string(),
@@ -202,19 +193,15 @@ pub fn run_responses_openai_request_codec_json(
         napi::Error::from_reason("responses-openai request payload must be an object".to_string())
     })?;
 
-    let context = if let Some(existing) = resolve_embedded_responses_context(&payload_row) {
-        existing
-    } else {
-        let capture_input = serde_json::json!({
-            "rawRequest": Value::Object(payload_row.clone()),
-            "requestId": options.request_id,
-            "toolCallIdStyle": extract_tool_call_id_style(&payload_row),
-        });
-        let context_raw = crate::hub_req_inbound_context_capture::capture_req_inbound_responses_context_snapshot_json(
-            capture_input.to_string(),
-        )?;
-        parse_value(&context_raw)?
-    };
+    let capture_input = serde_json::json!({
+        "rawRequest": Value::Object(payload_row.clone()),
+        "requestId": options.request_id,
+        "toolCallIdStyle": extract_tool_call_id_style(&payload_row),
+    });
+    let context_raw = crate::hub_req_inbound_context_capture::capture_req_inbound_responses_context_snapshot_json(
+        capture_input.to_string(),
+    )?;
+    let context = parse_value(&context_raw)?;
     let request = build_request_from_responses_payload(&payload_row, &context)
         .map_err(napi::Error::from_reason)?;
 

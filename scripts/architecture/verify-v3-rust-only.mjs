@@ -3,6 +3,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = 'v3';
+const ignoredDirs = new Set(['target']);
 const offenders = [];
 
 function walk(dir) {
@@ -10,6 +11,9 @@ function walk(dir) {
     const path = join(dir, entry);
     const stat = statSync(path);
     if (stat.isDirectory()) {
+      if (ignoredDirs.has(entry)) {
+        continue;
+      }
       walk(path);
     } else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(path)) {
       offenders.push(path);

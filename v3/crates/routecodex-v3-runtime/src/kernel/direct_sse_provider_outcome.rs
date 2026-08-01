@@ -8,6 +8,7 @@ pub(super) struct V3DirectSseProviderOutcome {
     pub(super) terminal: bool,
     pub(super) seen_done: bool,
     pub(super) recorded: bool,
+    pub(super) provider_health_neutral: bool,
     pub(super) _provider_action_permit: Option<V3ProviderActionPermit>,
 }
 
@@ -164,6 +165,10 @@ impl V3DirectSseProviderOutcome {
         if self.recorded || !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
             return Ok(());
         }
+        if self.provider_health_neutral {
+            self.recorded = true;
+            return Ok(());
+        }
         drop(self._provider_action_permit.take());
         self.provider_health
             .record_post_commit_provider_stream_failure(
@@ -180,6 +185,10 @@ impl V3DirectSseProviderOutcome {
 
     pub(super) fn record_success(&mut self) -> Result<(), String> {
         if self.recorded {
+            return Ok(());
+        }
+        if self.provider_health_neutral {
+            self.recorded = true;
             return Ok(());
         }
         self.provider_health

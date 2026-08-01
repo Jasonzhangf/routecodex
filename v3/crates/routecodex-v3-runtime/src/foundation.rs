@@ -88,7 +88,16 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
     ) {
         return project_v3_debug_failure("V3Server03HttpRequestRaw", error);
     }
-    let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
+    let standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
+        Ok(standardized) => standardized,
+        Err(error) => {
+            return project_p5_failure(
+                "V3Req04StandardizedResponses",
+                "responses_inbound_canonicalization_failed",
+                error,
+            )
+        }
+    };
     if let Err(error) = debug.record_node_event(
         &scope,
         "V3Req04StandardizedResponses",

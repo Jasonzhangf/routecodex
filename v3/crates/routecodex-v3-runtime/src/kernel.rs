@@ -1,7 +1,7 @@
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
-    apply_v3_responses_direct_stopless_request_hook, apply_v3_stop_servertool_hook_at_resp03,
-    apply_v3_stopless_request_hook_at_req04, apply_v3_tool_call_servertool_hook_at_resp03,
+    apply_v3_stop_servertool_hook_at_resp03, apply_v3_stopless_request_hook_at_req04,
+    apply_v3_tool_call_servertool_hook_at_resp03,
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
     build_v3_provider_resp_inbound_01_raw_with_compat_profile,
@@ -242,11 +242,22 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         initial_selected_target,
         initial_expanded,
         initial_plan_trace,
+        provider_health_neutral,
         provider_failure_event_sink,
         route_selection_event_sink,
     } = state;
 
-    let mut standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw);
+    let mut standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
+        Ok(standardized) => standardized,
+        Err(error) => {
+            trace.push("V3Req04StandardizedResponses");
+            return error_output(
+                runtime_source("V3Req04StandardizedResponses", error),
+                trace,
+                &hook_registry,
+            );
+        }
+    };
     trace.push("V3Req04StandardizedResponses");
     if let Some(plan_trace) = initial_plan_trace {
         // Router05..Target09 already ran in the Server-side protocol plan;
@@ -254,30 +265,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         // the unplanned path without re-entering the Router.
         trace.extend(plan_trace);
     }
-    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&standardized.body) {
-        return error_output(
-            runtime_source(
-                "V3Req04StandardizedResponses",
-                format!("RouteCodex side-channel field {key} cannot enter request payload"),
-            ),
-            trace,
-            &hook_registry,
-        );
-    }
-    if let Err(error) = apply_v3_responses_direct_stopless_request_hook(&mut standardized.body) {
-        return error_output(
-            runtime_source("V3HubReqChatProcess04Governed", error),
-            trace,
-            &hook_registry,
-        );
-    }
     let mut direct_stopless_control_prepared = false;
     let mut direct_stopless_request_state: Option<V3StoplessCenterState> = None;
-    let previous_response_id = standardized
-        .body
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
+    let previous_response_id = standardized.protocol_context.previous_response_id.clone();
     let pinned = match (
         &previous_response_id,
         continuation_state,
@@ -695,6 +685,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             pre_send_cross_session_revive_candidate.take().as_deref()
                 == Some(selected_candidate_key.as_str());
         if !selected_available && !selected_has_cross_session_revive {
+            let mut failed_with_selected = failed_candidates.clone();
+            failed_with_selected.insert(selected_candidate_key.clone());
+            let remaining_after_selected = expanded.as_ref().map_or(0, |expanded| {
+                remaining_available_candidates(
+                    &expanded.candidates,
+                    &availability,
+                    &failed_with_selected,
+                )
+            });
             let globally_available = provider_health
                 .availability(
                     &selected.candidate.provider_id,
@@ -703,7 +702,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     now_epoch_ms,
                 )
                 .available;
-            if globally_available {
+            if globally_available && remaining_after_selected == 0 {
                 selected_has_cross_session_revive =
                     match provider_health.store().try_acquire_cross_session_revive(
                         &direct_failure_session_scope,
@@ -1319,6 +1318,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             terminal: false,
                             seen_done: false,
                             recorded: false,
+                            provider_health_neutral,
                             _provider_action_permit: provider_action_permit.take(),
                         },
                         runtime_timing.clone(),
@@ -1418,13 +1418,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 trace.push("V3HubRespContinuation04Committed");
             }
         }
-        if let Err(source) = record_v3_direct_provider_success(
-            &provider_health,
-            &direct_failure_session_scope,
-            &policy.target,
-            now_epoch_ms,
-        ) {
-            return error_output(source, trace, &hook_registry);
+        if !provider_health_neutral {
+            if let Err(source) = record_v3_direct_provider_success(
+                &provider_health,
+                &direct_failure_session_scope,
+                &policy.target,
+                now_epoch_ms,
+            ) {
+                return error_output(source, trace, &hook_registry);
+            }
         }
         trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");

@@ -2734,7 +2734,7 @@ type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "m"
 auth = {{ type = "api_key", entries = [{{ alias = "a", env = "TEST_KEY" }}] }}
-responses = {{ process = "chat", streaming = "always", transport = "http" }}
+responses = {{ process = "direct", streaming = "always", transport = "http" }}
 [providers.p.models.m]
 wire_name = "wire-m"
 capabilities = ["text", "tools"]
@@ -2841,7 +2841,7 @@ type = "responses"
 base_url = "http://controlled.invalid/v1"
 	default_model = "gpt-5.5"
 auth = {{ type = "api_key", entries = [{{ alias = "{auth_alias}", env = "TEST_KEY" }}] }}
-responses = {{ process = "chat", streaming = "always", transport = "websocket_v2", websocket_v2_url = "wss://controlled.invalid/v1/responses" }}
+responses = {{ process = "direct", streaming = "always", transport = "websocket_v2", websocket_v2_url = "wss://controlled.invalid/v1/responses" }}
 	[providers.p.models."gpt-5.5"]
 	wire_name = "gpt-5.5"
 	capabilities = [{capabilities}]

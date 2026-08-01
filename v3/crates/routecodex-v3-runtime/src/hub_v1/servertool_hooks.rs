@@ -332,16 +332,6 @@ pub fn apply_v3_stopless_request_hook_at_req04(
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
 }
 
-pub fn apply_v3_responses_direct_stopless_request_hook(
-    payload: &mut Value,
-) -> Result<bool, V3HubRelayRequestError> {
-    let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
-        return Ok(false);
-    };
-    strip_stopless_generated_system_guidance_items(input);
-    Ok(false)
-}
-
 fn apply_v3_stopless_chat_request_hook_at_req04(
     payload: &mut Value,
     events: &mut Vec<V3HubRelayRequestHookEvent>,

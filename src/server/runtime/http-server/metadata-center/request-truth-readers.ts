@@ -119,15 +119,6 @@ export function bindSingleRuntimeCarrierFromSources(args: {
   return readRuntimeCarrierRequestTruth(center);
 }
 
-export function readRuntimeContinuationResponsesResume(
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  return asFlatRecord(MetadataCenter.read(metadata)?.readContinuationContext().responsesResume);
-}
-
 export function writeRuntimeControlSlot(args: {
   target: Record<string, unknown>;
   key: string;

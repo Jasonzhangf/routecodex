@@ -145,6 +145,7 @@ fn test_direct_sse_provider_outcome(routing_group: &str) -> V3DirectSseProviderO
         terminal: false,
         seen_done: false,
         recorded: false,
+        provider_health_neutral: false,
         _provider_action_permit: None,
     }
 }
@@ -952,6 +953,112 @@ async fn direct_cross_session_revive_failure_sends_once_and_preserves_cooldown_b
     assert!(!second
         .node_trace
         .contains(&"V3Transport13ResponsesHttpRequest"));
+}
+
+#[test]
+fn responses_provider_process_chat_forces_hub_relay() {
+    let routing_group = "responses_process_chat";
+    let manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope(routing_group),
+            request_id: "req-process-chat".to_string(),
+            execution_id: "exec-process-chat".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            body: json!({"model":"client-model","input":"hello"}),
+        },
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("process=chat responses provider should plan");
+
+    assert_eq!(
+        plan.decision.mode,
+        V3Execution11ProtocolDecisionMode::HubRelay,
+        "provider.responses.process=chat is the explicit force-Relay override"
+    );
+    assert_eq!(plan.decision.target.candidate.provider_id, "grok");
+    assert_eq!(plan.decision.target.candidate.provider_type, "responses");
+    assert_eq!(
+        plan.decision.target.candidate.responses_process.as_deref(),
+        Some("chat")
+    );
+    assert!(!plan.node_trace.contains(&"V3ResponsesDirect11Policy"));
+}
+
+#[test]
+fn responses_provider_process_direct_keeps_same_protocol_direct() {
+    let routing_group = "responses_process_direct";
+    let mut manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
+    manifest
+        .providers
+        .get_mut("grok")
+        .expect("grok provider")
+        .responses
+        .as_mut()
+        .expect("responses config")
+        .process = "direct".to_string();
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope(routing_group),
+            request_id: "req-process-direct".to_string(),
+            execution_id: "exec-process-direct".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            body: json!({"model":"client-model","input":"hello"}),
+        },
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("process=direct responses provider should plan");
+
+    assert_eq!(
+        plan.decision.mode,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect
+    );
+    assert_eq!(
+        plan.decision.target.candidate.responses_process.as_deref(),
+        Some("direct")
+    );
+}
+
+#[test]
+fn responses_provider_process_chat_without_relay_fails_fast() {
+    let routing_group = "responses_process_chat_direct_only";
+    let mut manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
+    manifest
+        .servers
+        .get_mut("test")
+        .expect("test server")
+        .execution
+        .as_mut()
+        .expect("test server execution")
+        .allowed_modes = vec!["direct".to_string()];
+    let error = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            server_id: "test".to_string(),
+            failure_session_scope: test_failure_session_scope(routing_group),
+            request_id: "req-process-chat-direct-only".to_string(),
+            execution_id: "exec-process-chat-direct-only".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            body: json!({"model":"client-model","input":"hello"}),
+        },
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect_err("process=chat is an explicit Relay override and must fail if Relay is disabled");
+
+    assert_eq!(
+        error.source.code,
+        "responses_process_chat_relay_not_allowed"
+    );
 }
 
 #[tokio::test]

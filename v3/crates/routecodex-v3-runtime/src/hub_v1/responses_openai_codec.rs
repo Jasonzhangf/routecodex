@@ -31,9 +31,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     {
         messages.push(json!({"role":"system","content":instructions}));
     }
-    if let Some(marker) = responses_reasoning_policy_as_target_valid_system_marker(root) {
-        messages.push(json!({"role":"system","content":marker}));
-    }
     let original_tools = root.get("tools").cloned();
     let mut tools = original_tools
         .as_ref()
@@ -111,13 +108,42 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 )?;
             }
             "tool_search_call" => {
-                append_v3_openai_chat_hosted_tool_call_history_pair(
+                ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
+                    item,
+                    V3OpenAiChatHostedToolHistoryKind::ToolSearch,
+                )?;
+                let assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
+                    item,
+                    read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
+                        "Responses tool_search_call is missing call_id before Chat canonicalization"
+                            .to_string()
+                    })?,
+                    V3OpenAiChatHostedToolHistoryKind::ToolSearch,
+                )?;
+                append_v3_openai_chat_tool_call_message(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
-                    item,
-                    input_index,
-                    V3OpenAiChatHostedToolHistoryKind::ToolSearch,
+                    assistant,
+                )?;
+            }
+            "tool_search_output" => {
+                ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(item)?;
+                let call_id = read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
+                    "Responses tool_search_output is missing call_id before Chat canonicalization"
+                        .to_string()
+                })?;
+                if !pending_tool_call_ids.iter().any(|entry| entry == call_id) {
+                    return Err(format!(
+                        "OpenAI Chat provider encoding tool_search_output has no preceding assistant tool_call: {call_id}"
+                    ));
+                }
+                let tool_result = build_v3_openai_chat_tool_search_output_message(item)?;
+                append_v3_openai_chat_tool_result_message(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &mut pending_tool_call_ids,
+                    tool_result,
                 )?;
             }
             other => {
@@ -152,25 +178,46 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         "stream",
         "response_format",
         "max_tokens",
-        "reasoning",
-        "metadata",
-        "client_metadata",
         "stop",
         "service_tier",
-        "prompt_cache_key",
         "prompt_cache_retention",
-        "store",
         "background",
         "conversation",
         "max_tool_calls",
         "prompt",
-        "text",
         "truncation",
         "web_search_options",
     ] {
         if let Some(value) = root.get(key) {
             request.insert(key.to_string(), value.clone());
         }
+    }
+    let mut responses_request_extension = Map::new();
+    let client_metadata = match (root.get("metadata"), root.get("client_metadata")) {
+        (Some(metadata), Some(client_metadata)) if metadata != client_metadata => {
+            return Err(
+                "Conflicting Responses metadata and client_metadata payload fields".to_string(),
+            );
+        }
+        (Some(metadata), _) | (_, Some(metadata)) => Some(metadata.clone()),
+        (None, None) => None,
+    };
+    if let Some(client_metadata) = client_metadata {
+        if !client_metadata.is_object() {
+            return Err("Responses metadata/client_metadata must be an object".to_string());
+        }
+        responses_request_extension.insert("client_metadata".to_string(), client_metadata);
+    }
+    for key in ["prompt_cache_key", "store", "text"] {
+        if let Some(value) = root.get(key) {
+            responses_request_extension.insert(key.to_string(), value.clone());
+        }
+    }
+    if !responses_request_extension.is_empty() {
+        request.insert(
+            "routecodex_chat_extension".to_string(),
+            json!({"responses_request": Value::Object(responses_request_extension)}),
+        );
     }
     if let Some(value) = root.get("max_output_tokens") {
         request
@@ -181,83 +228,83 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         request.insert("logprobs".to_string(), Value::Bool(true));
         request.insert("top_logprobs".to_string(), value.clone());
     }
-    if let Some(reasoning_effort) =
-        responses_reasoning_request_config_as_openai_chat_reasoning_effort(root)
-    {
-        request.insert("reasoning_effort".to_string(), reasoning_effort);
-    }
+    project_responses_reasoning_to_chat_fields(root, &mut request)?;
     Ok(Value::Object(request))
 }
 
-fn responses_reasoning_request_config_as_openai_chat_reasoning_effort(
+fn project_responses_reasoning_to_chat_fields(
     root: &Map<String, Value>,
-) -> Option<Value> {
-    if let Some(reasoning_effort) = root.get("reasoning_effort") {
-        return Some(reasoning_effort.clone());
+    request: &mut Map<String, Value>,
+) -> Result<(), String> {
+    if root.contains_key("reasoning_effort") {
+        return Err(
+            "Responses reasoning_effort is not a declared top-level Responses field".to_string(),
+        );
     }
-    let reasoning = root.get("reasoning");
-    let effort = reasoning
-        .and_then(|reasoning| reasoning.get("effort").and_then(Value::as_str))
-        .or_else(|| reasoning.and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .map(|effort| effort.to_ascii_lowercase());
-    if matches!(
-        effort.as_deref(),
-        Some("none" | "off" | "disabled" | "disable" | "false")
-    ) {
-        return None;
-    }
-    effort.map(Value::String)
-}
-
-fn responses_reasoning_policy_as_target_valid_system_marker(
-    root: &Map<String, Value>,
-) -> Option<String> {
-    let reasoning = root.get("reasoning")?.as_object()?;
-    let mut policies = Vec::new();
-    if let Some(summary) = reasoning.get("summary") {
-        if let Some(value) = reasoning_policy_value(summary) {
-            policies.push(format!("summary_policy={value}"));
+    let Some(reasoning) = root.get("reasoning") else {
+        return Ok(());
+    };
+    let reasoning = reasoning
+        .as_object()
+        .ok_or_else(|| "Responses reasoning must be an object".to_string())?;
+    for key in reasoning.keys() {
+        if !matches!(
+            key.as_str(),
+            "effort" | "summary" | "generate_summary" | "context" | "mode"
+        ) {
+            return Err(format!("Unsupported Responses reasoning field: {key}"));
         }
     }
-    if let Some(context) = reasoning.get("context") {
-        if let Some(value) = reasoning_policy_value(context) {
-            policies.push(format!("context_policy={value}"));
+    if let Some(effort) = reasoning.get("effort").filter(|value| !value.is_null()) {
+        let effort = effort
+            .as_str()
+            .map(str::trim)
+            .filter(|value| {
+                matches!(
+                    *value,
+                    "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+                )
+            })
+            .ok_or_else(|| "Responses reasoning.effort has an invalid value".to_string())?;
+        request.insert(
+            "reasoning_effort".to_string(),
+            Value::String(effort.to_string()),
+        );
+    }
+    let summary = match (reasoning.get("summary"), reasoning.get("generate_summary")) {
+        (Some(summary), Some(generate_summary)) if summary != generate_summary => {
+            return Err(
+                "Responses reasoning.summary conflicts with reasoning.generate_summary".to_string(),
+            );
         }
-    }
-    if let Some(mode) = reasoning.get("mode") {
-        if let Some(value) = reasoning_policy_value(mode) {
-            policies.push(format!("mode_policy={value}"));
+        (Some(summary), _) | (_, Some(summary)) => Some(summary),
+        (None, None) => None,
+    };
+    if let Some(summary) = summary.filter(|value| !value.is_null()) {
+        if !summary
+            .as_str()
+            .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed"))
+        {
+            return Err("Responses reasoning summary policy has an invalid value".to_string());
         }
+        request.insert("reasoning_summary_policy".to_string(), summary.clone());
     }
-    if policies.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "<routecodex_reasoning_request {}></routecodex_reasoning_request>",
-            policies.join(" ")
-        ))
-    }
-}
-
-fn reasoning_policy_value(value: &Value) -> Option<String> {
-    match value {
-        Value::Bool(false) | Value::Null => None,
-        Value::Bool(true) => Some("true".to_string()),
-        Value::String(text) => {
-            let text = text.trim();
-            (!text.is_empty()
-                && !matches!(
-                    text.to_ascii_lowercase().as_str(),
-                    "none" | "off" | "disabled" | "disable" | "false"
-                ))
-            .then(|| text.to_string())
+    if let Some(context) = reasoning.get("context").filter(|value| !value.is_null()) {
+        if !context
+            .as_str()
+            .is_some_and(|value| matches!(value, "auto" | "current_turn" | "all_turns"))
+        {
+            return Err("Responses reasoning.context has an invalid value".to_string());
         }
-        Value::Number(number) => Some(number.to_string()),
-        Value::Array(items) => (!items.is_empty()).then(|| "array".to_string()),
-        Value::Object(object) => (!object.is_empty()).then(|| "object".to_string()),
+        request.insert("reasoning_context_policy".to_string(), context.clone());
     }
+    if let Some(mode) = reasoning.get("mode").filter(|value| !value.is_null()) {
+        if !mode.as_str().is_some_and(|value| !value.trim().is_empty()) {
+            return Err("Responses reasoning.mode must be a non-empty string".to_string());
+        }
+        request.insert("reasoning_mode".to_string(), mode.clone());
+    }
+    Ok(())
 }
 
 fn append_v3_openai_chat_message_preserving_tool_adjacency(
@@ -698,6 +745,23 @@ impl V3OpenAiChatHostedToolHistoryKind {
     }
 }
 
+fn ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(
+    item: &Map<String, Value>,
+) -> Result<(), String> {
+    let event = Value::Object(item.clone());
+    if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
+        return Err(format!(
+            "Responses tool_search_output contains RouteCodex side-channel field before Chat canonicalization: {key}"
+        ));
+    }
+    if let Some(key) = find_v3_openai_chat_hosted_tool_private_payload_key(&event) {
+        return Err(format!(
+            "Responses tool_search_output contains private debug field before Chat canonicalization: {key}"
+        ));
+    }
+    Ok(())
+}
+
 fn append_v3_openai_chat_hosted_tool_call_history_pair(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
@@ -784,6 +848,12 @@ fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
     let arguments_value = build_v3_openai_chat_hosted_tool_arguments_value(item, kind);
     let arguments = serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?;
     let function_name = kind.openai_chat_function_name();
+    let mut extension = Map::new();
+    extension.insert(
+        "responses_tool_call_type".to_string(),
+        Value::String(kind.responses_item_type().to_string()),
+    );
+    copy_v3_responses_item_extension_fields(item, &mut extension);
     Ok(json!({
         "role": "assistant",
         "content": "",
@@ -793,9 +863,54 @@ fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
             "function": {
                 "name": function_name,
                 "arguments": arguments
-            }
+            },
+            "routecodex_chat_extension": Value::Object(extension)
         }]
     }))
+}
+
+fn build_v3_openai_chat_tool_search_output_message(
+    item: &Map<String, Value>,
+) -> Result<Value, String> {
+    let call_id = read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
+        "Responses tool_search_output is missing call_id before Chat canonicalization".to_string()
+    })?;
+    let tools = item.get("tools").and_then(Value::as_array).ok_or_else(|| {
+        "Responses tool_search_output is missing tools array before Chat canonicalization"
+            .to_string()
+    })?;
+    let content = serde_json::to_string(tools).map_err(|error| error.to_string())?;
+    let mut extension = Map::new();
+    extension.insert(
+        "responses_tool_output_type".to_string(),
+        Value::String("tool_search_output".to_string()),
+    );
+    extension.insert(
+        "responses_output_field".to_string(),
+        Value::String("tools".to_string()),
+    );
+    copy_v3_responses_item_extension_fields(item, &mut extension);
+    Ok(json!({
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": content,
+        "routecodex_chat_extension": Value::Object(extension)
+    }))
+}
+
+fn copy_v3_responses_item_extension_fields(
+    item: &Map<String, Value>,
+    extension: &mut Map<String, Value>,
+) {
+    for (source, target) in [
+        ("id", "responses_item_id"),
+        ("status", "responses_status"),
+        ("execution", "responses_execution"),
+    ] {
+        if let Some(value) = item.get(source) {
+            extension.insert(target.to_string(), value.clone());
+        }
+    }
 }
 
 fn build_v3_openai_chat_hosted_tool_arguments_value(
@@ -1101,7 +1216,17 @@ mod tests {
     }
 
     #[test]
-    fn responses_tool_search_call_projects_to_openai_chat_tool_pair() {
+    fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions() {
+        let discovered_tools = json!([{
+            "type": "namespace",
+            "name": "mcp__node_repl",
+            "tools": [{
+                "type": "function",
+                "name": "js",
+                "description": "Run JS",
+                "parameters": {"type": "object"}
+            }]
+        }]);
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
             "model": "gpt-5.5",
             "input": [
@@ -1116,13 +1241,21 @@ mod tests {
                     }
                 },
                 {
+                    "type": "tool_search_output",
+                    "id": "tso_123",
+                    "call_id": "call_FTUTqdbVH4EQwpp0DWcX5q6M",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": discovered_tools
+                },
+                {
                     "type": "message",
                     "role": "user",
                     "content": [{"type": "input_text", "text": "继续"}]
                 }
             ]
         }))
-        .expect("tool_search_call history must project to legal OpenAI Chat tool pair");
+        .expect("tool_search call/output must normalize to adjacent Chat tool history");
 
         let messages = request["messages"].as_array().expect("messages");
         assert_eq!(
@@ -1138,6 +1271,10 @@ mod tests {
         assert_eq!(
             messages[0]["tool_calls"][0]["function"]["name"],
             json!("tool_search")
+        );
+        assert_eq!(
+            messages[0]["tool_calls"][0]["routecodex_chat_extension"]["responses_tool_call_type"],
+            json!("tool_search_call")
         );
         let arguments: Value = serde_json::from_str(
             messages[0]["tool_calls"][0]["function"]["arguments"]
@@ -1162,17 +1299,44 @@ mod tests {
                 .as_str()
                 .expect("tool result content string"),
         )
-        .expect("tool result content must preserve tool_search event as JSON");
-        assert_eq!(result["type"], json!("tool_search_call"));
-        assert_eq!(result["execution"], json!("client"));
-        assert_eq!(result["status"], json!("completed"));
-        assert_eq!(result["arguments"], arguments);
+        .expect("tool result content must preserve discovered tools as JSON");
+        assert_eq!(result, discovered_tools);
+        assert_eq!(
+            messages[1]["routecodex_chat_extension"],
+            json!({
+                "responses_tool_output_type": "tool_search_output",
+                "responses_output_field": "tools",
+                "responses_item_id": "tso_123",
+                "responses_status": "completed",
+                "responses_execution": "client"
+            })
+        );
         assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
         assert!(
             messages.iter().all(|message| {
                 message.get("type").and_then(Value::as_str) != Some("tool_search_call")
             }),
             "OpenAI Chat messages must not embed native Responses tool_search_call items: {request}"
+        );
+    }
+
+    #[test]
+    fn responses_tool_search_output_without_matching_call_fails_in_inbound_owner() {
+        let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "tool_search_output",
+                "call_id": "call_missing",
+                "status": "completed",
+                "execution": "client",
+                "tools": []
+            }]
+        }))
+        .expect_err("orphan tool_search_output must not cross ReqInbound02");
+
+        assert!(
+            error.contains("no preceding assistant tool_call"),
+            "unexpected error: {error}"
         );
     }
 

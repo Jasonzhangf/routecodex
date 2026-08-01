@@ -338,6 +338,104 @@ mod tests {
     }
 
     #[test]
+    fn responses_request_chat_extension_projects_to_anthropic_wire_at_adjacent_codec() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "client_metadata": {
+                    "session_id": "session-1",
+                    "thread_id": "thread-1",
+                    "turn_id": "turn-1"
+                },
+                "prompt_cache_key": "session-1",
+                "store": false,
+                "text": {"verbosity": "high"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("Responses Chat extension fields must project into Anthropic wire");
+        let payload = req_compat.provider_semantic_payload();
+
+        assert_eq!(payload["metadata"]["user_id"], "session-1");
+        assert_eq!(
+            payload["cache_control"],
+            serde_json::json!({"type":"ephemeral"})
+        );
+        assert_eq!(payload["output_config"]["effort"], "high");
+        for source_field in [
+            "routecodex_chat_extension",
+            "client_metadata",
+            "prompt_cache_key",
+            "store",
+            "text",
+        ] {
+            assert!(
+                payload.get(source_field).is_none(),
+                "source Chat/Responses field {source_field} leaked into Anthropic wire: {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn responses_exact_client_user_id_and_json_schema_project_to_anthropic_wire() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "client_metadata": {"user_id": "opaque-user-1"},
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "answer",
+                        "strict": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {"answer": {"type": "string"}},
+                            "required": ["answer"],
+                            "additionalProperties": false
+                        }
+                    }
+                }
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("exact Responses fields must project into Anthropic wire");
+        let payload = req_compat.provider_semantic_payload();
+
+        assert_eq!(payload["metadata"]["user_id"], "opaque-user-1");
+        assert_eq!(payload["output_config"]["format"]["type"], "json_schema");
+        assert_eq!(
+            payload["output_config"]["format"]["schema"]["required"],
+            serde_json::json!(["answer"])
+        );
+    }
+
+    #[test]
+    fn responses_store_true_fails_when_anthropic_cannot_preserve_remote_storage_semantics() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "store": true
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("Anthropic wire must not silently strip store=true");
+        assert!(error.reason.contains("store"), "{error:?}");
+    }
+
+    #[test]
     fn relay_protocols_bind_selected_wire_model_before_provider_compat() {
         for protocol in [
             V3HubProviderWireProtocol::Responses,

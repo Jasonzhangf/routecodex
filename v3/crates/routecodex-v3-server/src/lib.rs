@@ -82,8 +82,8 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
-    V3ResponsesSessionAdmissionScope,
+    hold_response_body_admission_permit, V3ResponsesSessionAdmissionGate,
+    V3ResponsesSessionAdmissionPermit, V3ResponsesSessionAdmissionScope,
 };
 use std::collections::BTreeSet;
 use std::env;
@@ -741,27 +741,26 @@ fn admit_v3_responses_session_after_json_parse(
     request_headers: &HeaderMap,
     payload: &Value,
 ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, Response<Body>> {
-    let (session_id, conversation_id) =
-        match extract_responses_client_scope(&request_headers, &payload) {
-            Ok(scope) => scope,
-            Err(message) => {
-                let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                    Ok(request_id) => request_id,
-                    Err(response) => return Err(*response),
-                };
-                return Err(
-                    error_output_response_for_responses_request_with_project_path(
-                        &state.server,
-                        path,
-                        &request_id,
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                        request_headers,
-                        Some(payload),
-                        resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                    ),
-                );
-            }
-        };
+    let (session_id, conversation_id) = match responses_control_scope_headers(request_headers) {
+        Ok(scope) => scope,
+        Err(message) => {
+            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
+                Ok(request_id) => request_id,
+                Err(response) => return Err(*response),
+            };
+            return Err(
+                error_output_response_for_responses_request_with_project_path(
+                    &state.server,
+                    path,
+                    &request_id,
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                    request_headers,
+                    Some(payload),
+                    resolve_v3_console_project_path(request_headers, payload).as_deref(),
+                ),
+            );
+        }
+    };
     let permit = match state.responses_session_admission.try_admit(
         V3ResponsesSessionAdmissionScope {
             endpoint: "/v1/responses".to_string(),
@@ -790,19 +789,6 @@ fn admit_v3_responses_session_after_json_parse(
         }
     };
     Ok(permit)
-}
-
-fn hold_response_body_admission_permit(
-    response: Response<Body>,
-    permit: V3ResponsesSessionAdmissionPermit,
-) -> Response<Body> {
-    let (parts, body) = response.into_parts();
-    let stream = Box::pin(body.into_data_stream());
-    let body = Body::from_stream(stream::unfold(
-        (stream, permit),
-        |(mut stream, permit)| async move { stream.next().await.map(|item| (item, (stream, permit))) },
-    ));
-    Response::from_parts(parts, body)
 }
 
 async fn pending_endpoint(
@@ -954,6 +940,8 @@ async fn pending_endpoint_after_responses_admission(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    let responses_entry_facts = (entry_protocol == "responses")
+        .then(|| V3ResponsesContinuationEntryFacts::project(&payload));
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let responses_previous_response_id = if entry_protocol == "responses" {
         payload
@@ -1001,7 +989,9 @@ async fn pending_endpoint_after_responses_admission(
                 &request_id,
                 &state.server,
                 &path,
-                &payload,
+                responses_entry_facts
+                    .as_ref()
+                    .expect("Responses entry facts are projected for Responses requests"),
             ) {
                 Ok(context) => context,
                 Err(message) => {
@@ -1041,7 +1031,9 @@ async fn pending_endpoint_after_responses_admission(
                 }
             };
         match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-            &payload,
+            responses_entry_facts
+                .as_ref()
+                .and_then(|facts| facts.previous_response_id.as_deref()),
             execution_mode,
             &state.responses_direct_continuation,
             &state.responses_relay_local_continuation,
@@ -1092,9 +1084,8 @@ async fn pending_endpoint_after_responses_admission(
         }
     }
     let provider_failure_session_scope = match build_v3_provider_failure_session_scope_for_request(
-        &request_headers,
         &state.server,
-        &payload,
+        &request_headers,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -1219,10 +1210,10 @@ async fn pending_endpoint_after_responses_admission(
             path: path.clone(),
             request_payload: payload.clone(),
             response_payload: json!({
-                "id": format!("dry_run_{request_id}"),
                 "object": "response",
                 "status": "completed",
-                "output_text": "routecodex provider-request dry-run stopped before provider send"
+                "output_text": "routecodex provider-request dry-run stopped before provider send",
+                "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
             }),
         };
         let output = match responses_protocol_plan.as_ref() {
@@ -1272,7 +1263,9 @@ async fn pending_endpoint_after_responses_admission(
             &request_id,
             &state.server,
             &path,
-            &payload,
+            responses_entry_facts
+                .as_ref()
+                .expect("Responses entry facts are projected for Responses requests"),
         ) {
             Ok(scope) => scope,
             Err(message) => {
@@ -1533,7 +1526,9 @@ async fn pending_endpoint_after_responses_admission(
             &request_id,
             &state.server,
             &path,
-            &payload,
+            responses_entry_facts
+                .as_ref()
+                .expect("Responses entry facts are projected for Responses requests"),
         ) {
             Ok(scope) => scope,
             Err(message) => {
@@ -2288,12 +2283,13 @@ async fn execute_responses_relay_websocket_output(
     request_id: String,
     payload: Value,
 ) -> V3ResponsesRelayRuntimeOutput {
+    let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let continuation_scope = match build_responses_relay_local_continuation_scope(
         headers,
         &request_id,
         &state.server,
         "/v1/responses",
-        &payload,
+        &entry_facts,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -2303,8 +2299,7 @@ async fn execute_responses_relay_websocket_output(
         }
     };
     let provider_failure_session_scope =
-        match build_v3_provider_failure_session_scope_for_request(headers, &state.server, &payload)
-        {
+        match build_v3_provider_failure_session_scope_for_request(&state.server, headers) {
             Ok(scope) => scope,
             Err(message) => {
                 return project_v3_responses_relay_runtime_failure(
@@ -2685,12 +2680,13 @@ async fn execute_responses_direct_server_outcome(
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_responses_request_wants_sse(request_headers, &payload);
+    let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let continuation_scope = match build_responses_direct_continuation_scope(
         request_headers,
         &request_id,
         &state.server,
         &path,
-        &payload,
+        &entry_facts,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -2724,25 +2720,21 @@ async fn execute_responses_direct_server_outcome(
             );
         }
     };
-    let provider_failure_session_scope = match build_v3_provider_failure_session_scope_for_request(
-        request_headers,
-        &state.server,
-        &payload,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
-                V3HttpBoundaryErrorKind::MalformedJson,
-                message,
-            ));
-            return V3ResponsesDirectServerOutcome::DirectFrame(
-                project_v3_responses_direct_stream_error_frame_if_requested(
-                    frame,
-                    requested_stream,
-                ),
-            );
-        }
-    };
+    let provider_failure_session_scope =
+        match build_v3_provider_failure_session_scope_for_request(&state.server, request_headers) {
+            Ok(scope) => scope,
+            Err(message) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                );
+                return V3ResponsesDirectServerOutcome::DirectFrame(
+                    project_v3_responses_direct_stream_error_frame_if_requested(
+                        frame,
+                        requested_stream,
+                    ),
+                );
+            }
+        };
     let raw = build_v3_server_03_http_request_raw(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
@@ -2875,12 +2867,13 @@ async fn execute_responses_relay_handoff_after_direct(
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_responses_request_wants_sse(request_headers, &payload);
+    let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let continuation_scope = match build_responses_relay_local_continuation_scope(
         request_headers,
         request_id,
         &state.server,
         path,
-        &payload,
+        &entry_facts,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -2896,25 +2889,21 @@ async fn execute_responses_relay_handoff_after_direct(
             );
         }
     };
-    let provider_failure_session_scope = match build_v3_provider_failure_session_scope_for_request(
-        request_headers,
-        &state.server,
-        &payload,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            let frame = build_v3_server_16_http_frame_from_v3_error_06(project_http_input_error(
-                V3HttpBoundaryErrorKind::MalformedJson,
-                message,
-            ));
-            return V3ResponsesDirectServerOutcome::DirectFrame(
-                project_v3_responses_direct_stream_error_frame_if_requested(
-                    frame,
-                    requested_stream,
-                ),
-            );
-        }
-    };
+    let provider_failure_session_scope =
+        match build_v3_provider_failure_session_scope_for_request(&state.server, request_headers) {
+            Ok(scope) => scope,
+            Err(message) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                );
+                return V3ResponsesDirectServerOutcome::DirectFrame(
+                    project_v3_responses_direct_stream_error_frame_if_requested(
+                        frame,
+                        requested_stream,
+                    ),
+                );
+            }
+        };
 
     let runtime_input = V3ResponsesRelayRuntimeInput {
         server_id: state.server.id.clone(),
@@ -6298,28 +6287,46 @@ fn v3_responses_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool 
 }
 
 fn build_v3_provider_failure_session_scope_for_request(
-    headers: &HeaderMap,
     server: &V3ServerManifest,
-    payload: &Value,
+    headers: &HeaderMap,
 ) -> Result<V3ProviderFailureSessionScope, String> {
-    let turn_metadata = parse_codex_turn_metadata(headers)?;
     let session_id = first_header_text(
         headers,
         &[
             "session-id",
             "session_id",
             "x-session-id",
-            "x-routecodex-session-id",
             "x-rcc-session-id",
         ],
     )?
-    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
-    .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS))
     .ok_or_else(|| {
-        "provider failure isolation requires a non-empty client session_id in the request data plane"
-            .to_string()
+        "provider failure isolation requires the existing request session-id header".to_string()
     })?;
-    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, session_id)
+    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct V3ResponsesContinuationEntryFacts {
+    previous_response_id: Option<String>,
+    has_function_call_output: bool,
+    has_unpaired_function_call_output: bool,
+}
+
+impl V3ResponsesContinuationEntryFacts {
+    fn project(payload: &Value) -> Self {
+        Self {
+            previous_response_id: payload
+                .get("previous_response_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            has_function_call_output: payload_input_has_function_call_output(payload.get("input")),
+            has_unpaired_function_call_output: payload_input_has_unpaired_function_call_output(
+                payload.get("input"),
+            ),
+        }
+    }
 }
 
 fn build_responses_direct_continuation_scope(
@@ -6327,13 +6334,11 @@ fn build_responses_direct_continuation_scope(
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
-    payload: &Value,
+    entry_facts: &V3ResponsesContinuationEntryFacts,
 ) -> Result<V3ResponsesDirectContinuationScope, String> {
-    let (session_id, conversation_id) = extract_responses_client_scope(headers, payload)?;
-    let (session_id, conversation_id) = resolve_transparent_continuation_scope(
-        session_id,
-        conversation_id,
-        payload_needs_direct_continuation_scope(payload),
+    let (session_id, conversation_id) = request_local_continuation_scope(
+        headers,
+        entry_facts.previous_response_id.is_some() || entry_facts.has_function_call_output,
         request_id,
     )?;
     Ok(V3ResponsesDirectContinuationScope::responses(
@@ -6350,13 +6355,11 @@ fn build_responses_relay_local_continuation_scope(
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
-    payload: &Value,
+    entry_facts: &V3ResponsesContinuationEntryFacts,
 ) -> Result<V3ResponsesRelayLocalContinuationScope, String> {
-    let (session_id, conversation_id) = extract_responses_client_scope(headers, payload)?;
-    let (session_id, conversation_id) = resolve_transparent_continuation_scope(
-        session_id,
-        conversation_id,
-        payload_needs_relay_local_continuation_scope(payload),
+    let (session_id, conversation_id) = request_local_continuation_scope(
+        headers,
+        entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
         request_id,
     )?;
     Ok(V3ResponsesRelayLocalContinuationScope::responses(
@@ -6368,49 +6371,29 @@ fn build_responses_relay_local_continuation_scope(
     ))
 }
 
-fn extract_responses_client_scope(
-    headers: &HeaderMap,
-    payload: &Value,
-) -> Result<(Option<String>, Option<String>), String> {
-    let turn_metadata = parse_codex_turn_metadata(headers)?;
-    let session_id = first_header_text(headers, &["session-id", "session_id", "x-session-id"])?
-        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
-        .or_else(|| read_first_scope_value(Some(payload), BODY_SESSION_PATHS));
-    let conversation_id = first_header_text(
-        headers,
-        &[
-            "thread-id",
-            "thread_id",
-            "conversation-id",
-            "conversation_id",
-            "x-conversation-id",
-        ],
-    )?
-    .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
-    .or_else(|| read_first_scope_value(Some(payload), BODY_CONVERSATION_PATHS));
-    Ok((session_id, conversation_id))
-}
-
 fn build_responses_previous_response_owner_resolution_context(
     headers: &HeaderMap,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
-    payload: &Value,
+    entry_facts: &V3ResponsesContinuationEntryFacts,
 ) -> Result<Option<V3ResponsesPreviousResponseOwnerResolutionContext>, String> {
-    if payload
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_none()
-    {
+    if entry_facts.previous_response_id.is_none() {
         return Ok(None);
     }
-    let direct_scope =
-        build_responses_direct_continuation_scope(headers, request_id, server, endpoint, payload)?;
+    let direct_scope = build_responses_direct_continuation_scope(
+        headers,
+        request_id,
+        server,
+        endpoint,
+        entry_facts,
+    )?;
     let relay_scope = build_responses_relay_local_continuation_scope(
-        headers, request_id, server, endpoint, payload,
+        headers,
+        request_id,
+        server,
+        endpoint,
+        entry_facts,
     )?;
     let now_epoch_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -6423,12 +6406,12 @@ fn build_responses_previous_response_owner_resolution_context(
     }))
 }
 
-fn resolve_transparent_continuation_scope(
-    session_id: Option<String>,
-    conversation_id: Option<String>,
+fn request_local_continuation_scope(
+    headers: &HeaderMap,
     requires_client_scope: bool,
     request_id: &str,
 ) -> Result<(String, String), String> {
+    let (session_id, conversation_id) = responses_control_scope_headers(headers)?;
     match (session_id, conversation_id) {
         (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
         (None, None) if !requires_client_scope => {
@@ -6436,20 +6419,35 @@ fn resolve_transparent_continuation_scope(
             Ok((request_scope.clone(), request_scope))
         }
         _ => Err(
-            "Responses continuation requires client-provided session_id and thread_id via transparent headers, x-codex-turn-metadata, or body client_metadata"
+            "Responses continuation requires typed session and conversation control headers; request payload and client metadata cannot construct continuation control identity"
                 .to_string(),
         ),
     }
 }
 
-fn payload_needs_direct_continuation_scope(payload: &Value) -> bool {
-    payload.get("previous_response_id").is_some()
-        || payload_input_has_function_call_output(payload.get("input"))
-}
-
-fn payload_needs_relay_local_continuation_scope(payload: &Value) -> bool {
-    payload.get("previous_response_id").is_some()
-        || payload_input_has_unpaired_function_call_output(payload.get("input"))
+fn responses_control_scope_headers(
+    headers: &HeaderMap,
+) -> Result<(Option<String>, Option<String>), String> {
+    let session_id = first_header_text(
+        headers,
+        &[
+            "session-id",
+            "session_id",
+            "x-session-id",
+            "x-rcc-session-id",
+        ],
+    )?;
+    let conversation_id = first_header_text(
+        headers,
+        &[
+            "thread-id",
+            "thread_id",
+            "conversation-id",
+            "conversation_id",
+            "x-conversation-id",
+        ],
+    )?;
+    Ok((session_id, conversation_id))
 }
 
 fn payload_input_has_function_call_output(input: Option<&Value>) -> bool {
@@ -7280,8 +7278,8 @@ fn responses_direct_output_response_with_console(
         }
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
-            let keepalive_interval = frame.error_chain.is_empty().then_some(keepalive_interval);
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
+            let keepalive_interval = frame.error_chain.is_empty().then_some(keepalive_interval);
             return builder
                 .body(v3_client_sse_body(stream, keepalive_interval))
                 .expect("typed response");

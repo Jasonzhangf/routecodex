@@ -25,7 +25,7 @@ The V3-local crate must own:
 5. Strict current-user `web_search` intent.
 6. Active-turn web-search continuation classification.
 7. `web_search` as a target capability, never a route.
-8. `multimodal` from the typed `hasImageAttachment` carrier only.
+8. `multimodal` from actual image items in normalized protocol data only; never client metadata.
 9. `longcontext` from the selected route-group threshold only.
 10. Mandatory final `default` route tier.
 
@@ -45,7 +45,7 @@ The V3-local crate must own:
   sharedmodule classifier path.
 - Declared tools, tool schemas, descriptions, request reasoning, and historical text produce
   no route or `web_search` capability signal.
-- Payload image shapes do not select `multimodal`.
+- Client metadata image claims and non-protocol image-like text do not select `multimodal`.
 - Client-provided estimated-token metadata does not select `longcontext`.
 - The V2 classifier must not import or depend on the V3-local crate.
 - No compatibility fallback may call the V2 classifier when V3 classification fails.
