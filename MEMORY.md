@@ -5053,3 +5053,8 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Command truth: `routecodex` is the local dev/release entry and must default to snap + detailed debug. `rcc` and `rccv3` are the globally installed stable entries and must default with snap/debug off; only explicit `--snap` / `--debug` may enable those surfaces.
 - Owner boundary: this split belongs in generated CLI shims plus Rust V3 CLI/lifecycle controls. Do not implement it in Runtime, Virtual Router, provider compat, request/response payloads, or config fallback logic.
 - Restart-plan compatibility: false debug/console must be omitted from `restart.plan.json`; true console is carried only for explicit debug/dev-default restart.
+
+## 2026-08-01 - V3 CLI dev/stable split release verification
+- Verified live rule: stable `rcc` restart/start keeps `snap=false debug=false`; installed `routecodex` shim is the only command shim that exports `ROUTECODEX_V3_DEV_DEFAULT_SNAP=1` and `ROUTECODEX_V3_DEV_DEFAULT_DEBUG=1`.
+- Verified release baseline: after rerun `npm run install:release`, installed V3 binary sha256 `1a8fc6fdf2ad3dfa9cd7f0073e4f299a4880056d89b31625bcdbc05fb1a842dc`; `routecodex`/`rcc`/`rccv3 --version` all report `rccv3 0.90.4006`; 10000/5520/5555 health all report `build_version=0.90.4006`.
+- Review caveat: codex review for the two closeout commits was attempted twice with `codex -p cc review --base HEAD~2`; both failed before verdict due cc upstream 502, so review is blocked and must not be treated as PASS.
