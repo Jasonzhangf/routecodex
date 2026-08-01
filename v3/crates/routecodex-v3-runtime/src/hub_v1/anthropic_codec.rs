@@ -229,7 +229,7 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
         "model".to_string(),
         object.get("model").cloned().unwrap_or(Value::Null),
     );
-    if let Some(system) = object.get("system") {
+    if let Some(system) = object.get("system").filter(|value| !value.is_string()) {
         output.insert(
             ANTHROPIC_ENTRY_SYSTEM_EXTENSION.to_string(),
             system.to_owned(),
