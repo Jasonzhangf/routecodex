@@ -296,7 +296,7 @@
     <td><code>gap.client_metadata.target_dependent</code></td>
     <td><span class="badge fixed_doc_gate">fixed_doc_gate</span></td>
     <td><ul class="field-list"><li><code>covered_but_target_dependent</code></li></ul><div>count: <code>1</code></div></td>
-    <td>OpenAI Chat provider wire preserves standard metadata but strips non-standard client_metadata; old docs implied unconditional preservation.</td>
+    <td>OpenAI Chat provider wire preserves standard metadata but rejects non-standard client_metadata; OpenAI Responses provider wire explicitly renames client_metadata to metadata.</td>
     <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge gated_no_runtime_gap">gated_no_runtime_gap</span><br><span class="muted">Keep target-dependent provider-wire behavior explicit; do not use MetadataCenter or fallback to preserve unsupported client_metadata.</span></td>
   </tr>
 <tr>
@@ -9214,7 +9214,7 @@
     <tbody><tr>
     <td><code>gap.client_metadata.target_dependent</code></td>
     <td><span class="badge fixed_doc_gate">fixed_doc_gate</span></td>
-    <td>request_outbound_format removes client_metadata before OpenAI Chat wire; old doc implied preserve.</td>
+    <td>request_outbound_format rejects client_metadata before OpenAI Chat wire and renames it to metadata for OpenAI Responses wire.</td>
     <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge gated_no_runtime_gap">gated_no_runtime_gap</span><br><code>npm run verify:v3-protocol-conversion-field-parity</code></td>
   </tr>
 <tr>

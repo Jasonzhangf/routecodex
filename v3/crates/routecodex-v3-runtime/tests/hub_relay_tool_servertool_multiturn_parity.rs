@@ -296,7 +296,11 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
                     .with_remote_binding("remote_tool_parity", matrix_scope);
             let remote_outcome = request_hooks
                 .run(
-                    raw_request_for(json!({"input":[]}), entry, transport),
+                    raw_request_for(
+                        json!({"input":[{"role":"user","content":"continue"}]}),
+                        entry,
+                        transport,
+                    ),
                     &remote_lookup,
                     &V3HubServertoolRequestProfile::disabled(),
                 )
@@ -425,13 +429,7 @@ fn apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output
     )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
-    let output = outcome.payload()["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["call_id"] == "call_apply_patch_freeform" && item.get("output").is_some())
-        .and_then(|item| item["output"].as_str())
-        .unwrap();
+    let output = chat_tool_output_content(outcome.payload(), "call_apply_patch_freeform").unwrap();
     assert!(output.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
     assert!(output.contains("Retry with apply_patch only"));
     assert!(output.contains("workspace-relative"));
@@ -470,14 +468,11 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
-    assert!(outcome.payload()["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["call_id"] == "call_apply_patch_legacy" && item.get("output").is_some())
-        .and_then(|item| item["output"].as_str())
-        .unwrap()
-        .starts_with("APPLY_PATCH_ERROR:"));
+    assert!(
+        chat_tool_output_content(outcome.payload(), "call_apply_patch_legacy")
+            .unwrap()
+            .starts_with("APPLY_PATCH_ERROR:")
+    );
 }
 
 fn stopless_noop_context(input: Value, output: Value) -> Value {
@@ -485,6 +480,18 @@ fn stopless_noop_context(input: Value, output: Value) -> Value {
         "input": input,
         "output": output
     })
+}
+
+fn chat_tool_output_content<'a>(payload: &'a Value, call_id: &str) -> Option<&'a str> {
+    payload["messages"]
+        .as_array()?
+        .iter()
+        .find(|message| {
+            message.get("role").and_then(Value::as_str) == Some("tool")
+                && message.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
+        })
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
 }
 
 #[test]
@@ -565,14 +572,20 @@ fn stopless_hook_blackbox_projects_noop_cli_then_consumes_runtime_control_state(
             ),
         )
         .unwrap();
-    let input = governed.payload()["input"]
+    let messages = governed.payload()["messages"]
         .as_array()
-        .expect("provider input");
-    assert_eq!(input.len(), 2);
-    assert_eq!(input[0], json!({"role":"user","content":"original task"}));
-    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+        .expect("provider messages");
+    assert_eq!(messages.len(), 3);
+    assert_eq!(
+        messages[0],
+        json!({"role":"user","content":"original task"})
+    );
+    assert_eq!(
+        messages[2].get("role").and_then(Value::as_str),
+        Some("user")
+    );
     assert_full_stopless_continuation_prompt(
-        input[1]
+        messages[2]
             .get("content")
             .and_then(Value::as_str)
             .expect("stopless continuation prompt"),
@@ -658,18 +671,13 @@ fn stopless_hook_blackbox_preserves_additional_tools_surface() {
         .unwrap();
 
     assert!(
-        governed.payload().get("tools").is_none(),
-        "stopless Req04 must not rebuild embedded additional_tools into top-level tools"
+        governed.payload().get("input").is_none(),
+        "ReqInbound must normalize additional_tools into the Chat tool surface"
     );
-    let embedded_tools = governed.payload()["input"]
+    let tools = governed.payload()["tools"]
         .as_array()
-        .expect("provider input")
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
-        .and_then(|item| item.get("tools"))
-        .and_then(Value::as_array)
-        .expect("embedded additional_tools.tools");
-    let tool_names = embedded_tools
+        .expect("provider tools");
+    let tool_names = tools
         .iter()
         .map(|tool| tool.get("name").and_then(Value::as_str).unwrap_or_default())
         .collect::<Vec<_>>();
@@ -972,7 +980,7 @@ fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         ),
-        Err(V3HubRelayRequestError::MalformedToolOutput { .. })
+        Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
     ));
 }
 
@@ -1124,7 +1132,10 @@ fn provider_and_client_payloads_reject_routecodex_control_leakage() {
 
     assert!(matches!(
         compile_v3_hub_relay_request_hooks().run(
-            raw_request(json!({"input":[],"routecodex_internal":{"debug":true}})),
+            raw_request(json!({
+                "input":[{"role":"user","content":"continue"}],
+                "routecodex_internal":{"debug":true}
+            })),
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         ),

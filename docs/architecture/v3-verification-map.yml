@@ -792,12 +792,13 @@ features:
       - Server and CLI cannot import or call Provider transport
       - no relay continuation servertool other protocol V2 compatibility fallback repair sanitize or raw replay
       - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
+      - V3Target10ConcreteProviderSelected carries provider.responses.process; selected Responses providers with process=chat must choose Hub Relay before SameProtocolDirect
       - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport with a no-network effect
-      - Direct provider errors enter the shared Error01-06/provider-health policy; success remains passthrough but error policy cannot passthrough
+      - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
       - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
       - Direct target-local reselection that selects a Relay-only provider protocol must return a Relay handoff before Error06 projection; protocol_mismatch_relay_not_allowed is valid only when Relay is not allowed
       - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
-      - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; it does not mutate the JSON client body, parse SSE transport as semantic truth, or switch client protocol
+      - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider JSON as client SSE without treating provider inbound transport as client protocol truth
       - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
     required_gates:
       - npm run render:v3-mainline-caller-flow
@@ -812,6 +813,7 @@ features:
       - npm run verify:v3-resource-map
       - npm run test:v3-compile-fail
       - npm run test:v3-provider-responses
+      - npm run test:v3-direct-protocol-plan-session-cooldown
       - npm run test:v3-responses-direct-unit
       - npm run test:v3-responses-direct-blackbox
       - npm run test:v3-direct-response-observability
@@ -952,7 +954,6 @@ features:
       - v3/crates/routecodex-v3-virtual-router
       - v3/crates/routecodex-v3-target
       - v3/crates/routecodex-v3-runtime
-      - scripts/architecture/verify-v3-architecture-ci.mjs
       - v3/crates/routecodex-v3-server
     test_design:
       - docs/goals/v3-virtual-router-target-interpreter-plan.md
@@ -994,6 +995,7 @@ features:
       - v3/crates/routecodex-v3-virtual-router
       - v3/crates/routecodex-v3-target
       - v3/crates/routecodex-v3-runtime
+      - scripts/architecture/verify-v3-architecture-ci.mjs
     design:
       - docs/goals/v3-virtual-router-full-function-plan.md
       - docs/design/v3-system-definition.md
@@ -1361,13 +1363,15 @@ features:
     status: source_field_parity_focused_gates_only
     change_risk: high
     owner_kind: rust_v3_protocol_codec_field_parity
-    owner_scope: "Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths without server/SSE/provider-transport/MetadataCenter repair owners."
+    owner_scope: "Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths and same-protocol Responses Direct provider wire preservation without server/SSE/MetadataCenter repair owners."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_stopless_anthropic_provider_wire_integration.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
     design:
       - docs/goals/v3-protocol-conversion-field-parity-test-design.md
       - docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md
@@ -1386,13 +1390,16 @@ features:
       - Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker for both `input[]` and string `input`, and never leaks as Responses reasoning or synthetic Anthropic thinking.
       - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
-      - Responses history with paired malformed function arguments projects OpenAI Chat function.arguments as {} while preserving parse-failure tool feedback.
-      - Responses history with unpaired malformed function arguments fails explicitly at ProviderReqCompat06 before the incompatible OpenAI Chat target can send.
+      - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
+      - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
       - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
+      - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat messages.
+      - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production nodes.
     required_blackbox:
       - Source-level controlled runtime tests capture provider wire and client projection for the three supported paths.
-      - responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args
-      - responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send
+      - responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect
+      - responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
+      - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
       - No live 5555/provider replay is claimed by this feature until global install and managed restart gates run separately.
     required_gates:
       - npm run render:v3-protocol-semantic-field-matrix
@@ -1852,6 +1859,7 @@ features:
     design:
       - .agents/skills/rcc-dev-skills/references/22-servertool-hook-skeleton-workflow.md
       - docs/design/v3-stopless-schema-guidance-activation-contract.md
+      - docs/goals/v3-responses-direct-relay-stopless-artifact-cleanup-test-design.md
       - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
       - docs/architecture/wiki/stopless-session-mainline-source.md
       - docs/architecture/wiki/html/stopless-session-mainline-source.html
@@ -1881,6 +1889,7 @@ features:
       - stop/end_turn with canonical reasoning summary and unfinished `stop_schema.nextStep` projects no-op, stores the nextStep only as scoped StoplessCenter `next_step_prompt`, and Req04 carries it into the next provider-facing continuation prompt
       - stop/end_turn with canonical reasoning summary and `stop_schema.blocked=true` plus blocked reason appends the blocked reason to canonical summary and passes through without no-op or counter increment
       - provider request preserves original tool declaration surface and appends exactly one internal reasoningStop
+      - Direct-to-Relay Req04 cleanup removes every historical stopless CLI call/output and generated guidance from Chat canonical payload data before Anthropic wire projection, while preserving unrelated real tool calls/results byte-for-byte
       - Responses protocol direct stays zero Relay StoplessCenter write; Direct may write only Direct-scoped StoplessCenter via V3ResponsesDirectStoplessControlState after SameProtocolDirect. With inactive/missing scope or stopless_center=false, completed no-summary responses pass through unchanged; with active Direct state, summary/schema decides pass-through vs no-op projection while Direct owner remains Direct
       - "`[features].stopless_center = false` disables relay stopless injection and projection"
       - architecture resource-control gate rejects StoplessCenter state modeled as CLI args/stdout, local continuation context/store, provider/client normal payload, debug/snapshot truth, generic Hub closeout, or server-entry aggregate ownership
@@ -1899,6 +1908,7 @@ features:
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_stopless_live_shapes -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_stopless_anthropic_provider_wire_integration -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration -- --nocapture
       - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts

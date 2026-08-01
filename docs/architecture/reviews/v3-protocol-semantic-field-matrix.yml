@@ -43,12 +43,10 @@ audit_truth_contract:
       affected_statuses:
         - covered_but_target_dependent
       affected_count: 1
-      evidence: OpenAI Chat provider wire preserves standard metadata but strips non-standard client_metadata; old docs
-        implied unconditional preservation.
+      evidence: OpenAI Chat provider wire preserves standard metadata but rejects non-standard client_metadata; OpenAI Responses provider wire explicitly renames client_metadata to metadata.
       required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
       closeout_status: gated_no_runtime_gap
-      closeout_rule: Keep target-dependent provider-wire behavior explicit; do not use MetadataCenter or fallback to preserve
-        unsupported client_metadata.
+      closeout_rule: Keep target-dependent provider-wire behavior explicit; do not use MetadataCenter or fallback to preserve unsupported client_metadata.
     - gap_id: gap.runtime_extension_declared
       category: runtime_closeout
       affected_statuses:
@@ -8827,7 +8825,7 @@ extended_openai_chat_semantic_superset:
 implementation_gaps:
   - id: gap.client_metadata.target_dependent
     severity: fixed_doc_gate
-    evidence: request_outbound_format removes client_metadata before OpenAI Chat wire; old doc implied preserve.
+    evidence: request_outbound_format rejects client_metadata before OpenAI Chat wire and renames it to metadata for OpenAI Responses wire.
     required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
     closeout_status: gated_no_runtime_gap
     required_gate: npm run verify:v3-protocol-conversion-field-parity
@@ -10254,3 +10252,79 @@ canonical_extension_registry:
     current_impl: partial
     source_fields: *a175
     projection_rule: Gemini topK source codec extracts request.top_k; target-valid outbound/live closeout pending
+
+outbound_projection_contract:
+  owner_feature_id: v3.protocol_conversion_field_parity
+  projector: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs::project_outbound_payload_for_target_protocol
+  statuses:
+    mapped: Source field is emitted under an equivalent target field.
+    transformed: Source field is emitted through an adjacent codec shape conversion.
+    consumed_by_transform: Source field is read only to produce another emitted target field and must not be forwarded raw.
+    target_unsupported: Source field has no equivalent in the target protocol and must raise UnmappedOutboundFields before provider send.
+    control_forbidden: RouteCodex-owned internal control fields must raise ControlFieldLeak with exact JSON paths before provider send; payload-owned underscore fields such as `_id` remain data-plane.
+  fail_fast_errors:
+    unmapped: UnmappedOutboundFields
+    control: ControlFieldLeak
+  forbidden_behaviors:
+    - recursive automatic strip
+    - private `_` key deletion
+    - unknown source field ignore
+    - raw forwarding of unmapped fields
+  initial_rows:
+    - source_protocol: responses
+      target_protocol: openai_chat
+      status: target_unsupported
+      fields:
+        - request.include
+        - request.background
+        - request.context_management
+        - request.conversation
+        - request.prompt_cache_key
+        - request.prompt_cache_options.*
+        - request.prompt_cache_retention
+        - request.service_tier
+        - request.truncation
+        - request.text.*
+    - source_protocol: openai_chat
+      target_protocol: responses
+      status: target_unsupported
+      fields:
+        - request.audio
+        - request.modalities
+        - request.web_search_options
+        - request.prediction
+        - request.store
+        - request.prompt_cache_key
+        - request.prompt_cache_options.*
+        - request.prompt_cache_retention
+    - source_protocol: openai_chat
+      target_protocol: responses
+      status: transformed
+      fields:
+        - request.client_metadata -> request.metadata
+        - request.reasoning_effort -> request.reasoning.effort
+    - source_protocol: anthropic
+      target_protocol: any_cross_protocol_outbound
+      status: target_unsupported
+      fields:
+        - request.container
+        - request.output_config
+        - request.cache_control
+        - request.user_profile_id
+    - source_protocol: gemini
+      target_protocol: any_cross_protocol_outbound
+      status: target_unsupported
+      fields:
+        - request.safetySettings
+        - request.contents[].parts[].thoughtSignature
+        - response.candidates[].groundingMetadata
+        - response.candidates[].citationMetadata
+        - request.generationConfig.*
+        - response.usageMetadata.*
+    - source_protocol: routecodex_internal
+      target_protocol: all_provider_outbound
+      status: control_forbidden
+      fields:
+        - metadata_center
+        - __rt
+        - _debug

@@ -50,7 +50,7 @@ fn response04(
 }
 
 #[test]
-fn anthropic_entry_req_inbound_hook_encodes_to_responses_chat_semantic_before_req04() {
+fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() {
     let hooks = compile_v3_anthropic_relay_protocol_hooks();
     let payload = anthropic_request();
     let raw = build_v3_hub_req_inbound_01_client_raw(
@@ -69,13 +69,30 @@ fn anthropic_entry_req_inbound_hook_encodes_to_responses_chat_semantic_before_re
         .expect("Anthropic Relay req_inbound hook");
 
     assert_eq!(normalized.payload()["model"], payload["model"]);
-    assert!(normalized.payload().get("input").is_some());
-    assert!(normalized.payload().get("messages").is_none());
-    assert_eq!(normalized.payload()["input"][0]["role"], "user");
-    assert_eq!(normalized.payload()["input"][1]["type"], "function_call");
+    assert!(
+        normalized.payload().get("input").is_none(),
+        "ReqInbound must not carry the adjacent Anthropic->Responses bridge payload past the Chat normalization node"
+    );
+    assert!(normalized.payload().get("messages").is_some());
+    assert_eq!(normalized.payload()["messages"][0]["role"], "system");
+    assert_eq!(normalized.payload()["messages"][0]["content"], "be exact");
+    assert_eq!(normalized.payload()["messages"][1]["role"], "user");
+    assert_eq!(normalized.payload()["messages"][1]["content"], "hello");
+    assert_eq!(normalized.payload()["messages"][2]["role"], "assistant");
     assert_eq!(
-        normalized.payload()["input"][2]["type"],
-        "function_call_output"
+        normalized.payload()["messages"][2]["tool_calls"][0]["id"],
+        "toolu_1"
+    );
+    assert_eq!(
+        normalized.payload()["messages"][2]["tool_calls"][0]["function"],
+        json!({"name":"lookup","arguments":"{\"q\":\"x\"}"})
+    );
+    assert_eq!(normalized.payload()["messages"][3]["role"], "tool");
+    assert_eq!(normalized.payload()["messages"][3]["tool_call_id"], "toolu_1");
+    assert_eq!(normalized.payload()["messages"][3]["content"], "ok");
+    assert_eq!(
+        normalized.payload()["messages"][3]["routecodex_chat_extension"],
+        json!({"responses_tool_output_type":"function_call_output"})
     );
     assert_eq!(
         normalized.payload()["reasoning"],

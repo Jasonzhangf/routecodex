@@ -1,44 +1,34 @@
 use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::collections::BTreeSet;
 
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
-    if payload.get("messages").and_then(Value::as_array).is_none() && payload.get("input").is_some()
-    {
-        let chat =
-            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
-                payload,
-            )?;
-        return Ok(normalize_openai_chat_messages_payload(&chat));
-    }
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
     }
-    Ok(normalize_openai_chat_messages_payload(payload))
+    normalize_openai_chat_messages_payload(payload)
 }
 
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
-    if payload.get("messages").and_then(Value::as_array).is_none()
-        && payload.get("input").and_then(Value::as_array).is_some()
-    {
-        return Ok(normalize_responses_payload_for_provider_standard(payload));
-    }
-    let messages = payload
+    let projected_source = project_outbound_payload_for_target_protocol(
+        payload,
+        V3OutboundTargetProtocol::OpenAiResponses,
+    )?;
+    let messages = projected_source
         .get("messages")
         .and_then(Value::as_array)
         .ok_or_else(|| "Responses provider wire requires Chat canonical messages".to_string())?;
     let mut responses_payload = Map::new();
-    if let Some(model) = payload.get("model") {
+    if let Some(model) = projected_source.get("model") {
         responses_payload.insert("model".to_string(), model.clone());
     }
     responses_payload.insert(
         "input".to_string(),
-        build_responses_input_from_chat_messages(messages),
+        build_responses_input_from_chat_messages(messages)?,
     );
     for key in [
         "tools",
@@ -46,6 +36,7 @@ pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
         "instructions",
         "temperature",
         "top_p",
+        "top_k",
         "max_output_tokens",
         "max_completion_tokens",
         "max_tokens",
@@ -58,21 +49,25 @@ pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
         "seed",
         "response_format",
         "include",
+        "reasoning",
         "metadata",
-        "client_metadata",
+        "safety_identifier",
+        "moderation",
+        "stream_options",
         "stop",
     ] {
-        if let Some(value) = payload.get(key) {
+        if let Some(value) = projected_source.get(key) {
             responses_payload.insert(key.to_string(), value.clone());
         }
     }
-    Ok(normalize_responses_payload_for_provider_standard(
-        &Value::Object(responses_payload),
-    ))
+    normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))
 }
 
-fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Value {
-    let mut normalized = strip_private_fields(payload);
+fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
+    let mut normalized = project_outbound_payload_for_target_protocol(
+        payload,
+        V3OutboundTargetProtocol::OpenAiResponses,
+    )?;
     let instructions = normalized
         .as_object_mut()
         .and_then(|row| row.remove("instructions"))
@@ -87,7 +82,7 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Value {
         }
     }
     normalize_responses_target_token_and_logprob_fields(&mut normalized);
-    normalized
+    Ok(normalized)
 }
 
 fn responses_input_accepts_system_instruction_prefix(payload: &Value) -> bool {
@@ -202,35 +197,26 @@ fn normalize_responses_target_token_and_logprob_fields(payload: &mut Value) {
 
 pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
     payload: &Value,
-    original_responses_payload: Option<&Value>,
     entry_protocol: V3HubEntryProtocol,
 ) -> Result<Value, String> {
     match entry_protocol {
         V3HubEntryProtocol::Responses => {
-            if let Some(original_surface) =
-                build_v3_responses_original_input_surface_from_chat_canonical(
-                    payload,
-                    original_responses_payload,
-                )
-            {
-                return Ok(original_surface);
-            }
-            if payload.get("input").and_then(Value::as_array).is_some() {
-                return Ok(normalize_responses_payload_for_provider_standard(payload));
-            }
             if payload.get("messages").and_then(Value::as_array).is_some() {
-                return Ok(strip_private_fields(payload));
+                return project_outbound_payload_for_target_protocol(
+                    payload,
+                    V3OutboundTargetProtocol::Anthropic,
+                );
             }
-            Err("Responses entry to Anthropic provider wire requires governed messages or Responses input".to_string())
+            Err("Responses entry to Anthropic provider wire requires governed Chat extension messages".to_string())
         }
         V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat => {
             if payload.get("messages").and_then(Value::as_array).is_some() {
-                return Ok(strip_private_fields(payload));
+                return project_outbound_payload_for_target_protocol(
+                    payload,
+                    V3OutboundTargetProtocol::Anthropic,
+                );
             }
-            if payload.get("input").and_then(Value::as_array).is_some() {
-                return Ok(normalize_responses_payload_for_provider_standard(payload));
-            }
-            Err("Anthropic provider wire requires governed Chat/Anthropic messages or Responses input".to_string())
+            Err("Anthropic provider wire requires governed Chat/Anthropic messages".to_string())
         }
         V3HubEntryProtocol::Gemini => Err(
             "Gemini entry to Anthropic provider wire requires an explicit protocol codec"
@@ -239,105 +225,146 @@ pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical(
     }
 }
 
-pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical(
-    payload: &Value,
-    original_responses_payload: Option<&Value>,
-) -> Option<Value> {
-    let original = original_responses_payload?;
-    original.get("input")?;
-    let mut projected = strip_private_fields(original);
-    merge_chat_governance_into_original_responses_surface(&mut projected, payload);
-    Some(normalize_responses_payload_for_provider_standard(
-        &projected,
-    ))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3OutboundTargetProtocol {
+    OpenAiChat,
+    OpenAiResponses,
+    Anthropic,
+    Gemini,
 }
 
-fn merge_chat_governance_into_original_responses_surface(projected: &mut Value, payload: &Value) {
-    let Some(projected_object) = projected.as_object_mut() else {
-        return;
-    };
-    let Some(payload_object) = payload.as_object() else {
-        return;
-    };
-    for key in [
-        "instructions",
-        "tool_choice",
-        "parallel_tool_calls",
-        "temperature",
-        "top_p",
-        "max_output_tokens",
-        "max_completion_tokens",
-        "max_tokens",
-        "top_logprobs",
-        "logprobs",
-        "stream",
-        "user",
-        "logit_bias",
-        "seed",
-        "response_format",
-        "metadata",
-        "client_metadata",
-        "stop",
-    ] {
-        if let Some(value) = payload_object.get(key) {
-            projected_object.insert(key.to_string(), value.clone());
+impl V3OutboundTargetProtocol {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAiChat => "openai_chat",
+            Self::OpenAiResponses => "responses",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
         }
     }
-    let Some(tools) = payload_object
-        .get("tools")
-        .and_then(Value::as_array)
-        .filter(|tools| !tools.is_empty())
-        .cloned()
-    else {
-        return;
-    };
-    if projected_object.get("tools").is_some() {
-        projected_object.insert("tools".to_string(), Value::Array(tools));
-        return;
-    }
-    if replace_first_additional_tools_surface(projected_object, tools.as_slice()) {
-        projected_object.remove("tools");
-        return;
-    }
-    projected_object.insert("tools".to_string(), Value::Array(tools));
 }
 
-fn replace_first_additional_tools_surface(
-    projected_object: &mut Map<String, Value>,
-    tools: &[Value],
-) -> bool {
-    let Some(input) = projected_object
-        .get_mut("input")
-        .and_then(Value::as_array_mut)
-    else {
-        return false;
-    };
-    let Some(additional_tools) = input.iter_mut().find(|item| {
-        item.get("type").and_then(Value::as_str) == Some("additional_tools")
-            && item.as_object().is_some()
-    }) else {
-        return false;
-    };
-    if let Some(row) = additional_tools.as_object_mut() {
-        row.insert("tools".to_string(), Value::Array(tools.to_vec()));
-        return true;
+pub(crate) fn project_outbound_payload_for_target_protocol(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+) -> Result<Value, String> {
+    let control_paths = collect_outbound_control_field_paths(source);
+    if !control_paths.is_empty() {
+        return Err(format!(
+            "ControlFieldLeak target_protocol={} paths={}",
+            target_protocol.as_str(),
+            control_paths.join(",")
+        ));
     }
-    false
+    let unmapped = collect_unmapped_outbound_field_paths(source, target_protocol);
+    if !unmapped.is_empty() {
+        return Err(format!(
+            "UnmappedOutboundFields target_protocol={} paths={}",
+            target_protocol.as_str(),
+            unmapped.join(",")
+        ));
+    }
+    let mut projected = source.clone();
+    apply_outbound_projection_transforms(&mut projected, target_protocol)?;
+    Ok(projected)
 }
 
-fn strip_private_fields(value: &Value) -> Value {
+fn apply_outbound_projection_transforms(
+    projected: &mut Value,
+    target_protocol: V3OutboundTargetProtocol,
+) -> Result<(), String> {
+    match target_protocol {
+        V3OutboundTargetProtocol::OpenAiResponses => {
+            project_openai_responses_client_metadata_to_metadata(projected)?;
+            project_openai_responses_reasoning_effort_to_reasoning(projected);
+        }
+        V3OutboundTargetProtocol::OpenAiChat
+        | V3OutboundTargetProtocol::Anthropic
+        | V3OutboundTargetProtocol::Gemini => {}
+    }
+    Ok(())
+}
+
+fn project_openai_responses_client_metadata_to_metadata(
+    projected: &mut Value,
+) -> Result<(), String> {
+    let Some(row) = projected.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(client_metadata) = row.remove("client_metadata") else {
+        return Ok(());
+    };
+    if !row.contains_key("metadata") {
+        row.insert("metadata".to_string(), client_metadata);
+        return Ok(());
+    }
+    Err(
+        "ConflictingOutboundFields target_protocol=responses paths=$.metadata,$.client_metadata"
+            .to_string(),
+    )
+}
+
+fn project_openai_responses_reasoning_effort_to_reasoning(projected: &mut Value) {
+    let Some(row) = projected.as_object_mut() else {
+        return;
+    };
+    let Some(reasoning_effort) = row.remove("reasoning_effort") else {
+        return;
+    };
+    match row.get_mut("reasoning") {
+        Some(Value::Object(reasoning)) => {
+            reasoning
+                .entry("effort".to_string())
+                .or_insert(reasoning_effort);
+        }
+        Some(_) => {}
+        None => {
+            row.insert("reasoning".to_string(), json!({"effort": reasoning_effort}));
+        }
+    }
+}
+
+fn collect_outbound_control_field_paths(value: &Value) -> Vec<String> {
+    let mut paths = Vec::new();
+    collect_outbound_control_field_paths_inner(value, "$", &mut paths);
+    paths
+}
+
+fn collect_outbound_control_field_paths_inner(value: &Value, path: &str, paths: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
-            let mut new_map = Map::new();
-            for (key, val) in map {
-                if !is_provider_outbound_control_key(key) && !key.starts_with('_') {
-                    new_map.insert(key.clone(), strip_private_fields(val));
+            for (key, child) in map {
+                let child_path = json_path_child(path, key);
+                if is_provider_outbound_control_key(key) {
+                    paths.push(child_path.clone());
                 }
+                collect_outbound_control_field_paths_inner(child, &child_path, paths);
             }
-            Value::Object(new_map)
         }
-        Value::Array(arr) => Value::Array(arr.iter().map(strip_private_fields).collect()),
-        _ => value.clone(),
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                collect_outbound_control_field_paths_inner(
+                    child,
+                    &format!("{path}[{index}]"),
+                    paths,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn json_path_child(parent: &str, key: &str) -> String {
+    if key
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        format!("{parent}.{key}")
+    } else {
+        format!(
+            "{parent}[{}]",
+            serde_json::to_string(key).unwrap_or_else(|_| "\"?\"".to_string())
+        )
     }
 }
 
@@ -346,9 +373,20 @@ fn is_provider_outbound_control_key(key: &str) -> bool {
         key,
         "routecodex_internal"
             | "routecodexInternal"
+            | "route_hint"
+            | "routeHint"
             | "metadata_center"
             | "metadataCenter"
             | "__metadataCenter"
+            | "debug_snapshot"
+            | "debugSnapshot"
+            | "_debug"
+            | "provider_protocol"
+            | "providerProtocol"
+            | "provider_runtime"
+            | "providerRuntime"
+            | "resource_handle"
+            | "resourceHandle"
             | "continuation_owner"
             | "continuationOwner"
             | "runtime_control"
@@ -361,6 +399,8 @@ fn is_provider_outbound_control_key(key: &str) -> bool {
             | "retryExclusionSet"
             | "selected_target"
             | "selectedTarget"
+            | "opaque_target"
+            | "opaqueTarget"
             | "resume_meta"
             | "resumeMeta"
             | "servertool_state"
@@ -381,11 +421,173 @@ fn is_provider_outbound_control_key(key: &str) -> bool {
             | "__raw_request_body"
             | "__rt"
             | "__rccDryRunSerialized"
+            | "request_capabilities"
+            | "requestCapabilities"
+            | "required_capabilities"
+            | "requiredCapabilities"
+            | "model_capabilities"
+            | "modelCapabilities"
+            | "selection_plan"
+            | "selectionPlan"
     )
 }
 
-fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Value {
-    let mut normalized = strip_private_fields(part);
+fn project_outbound_nested_payload_for_target_protocol(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+) -> Result<Value, String> {
+    let control_paths = collect_outbound_control_field_paths(source);
+    if !control_paths.is_empty() {
+        return Err(format!(
+            "ControlFieldLeak target_protocol={} paths={}",
+            target_protocol.as_str(),
+            control_paths.join(",")
+        ));
+    }
+    Ok(source.clone())
+}
+
+fn collect_unmapped_outbound_field_paths(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+) -> Vec<String> {
+    let Some(map) = source.as_object() else {
+        return Vec::new();
+    };
+    let allowed = allowed_top_level_outbound_fields(target_protocol);
+    map.keys()
+        .filter(|key| !allowed.contains(key.as_str()))
+        .map(|key| json_path_child("$", key))
+        .collect()
+}
+
+fn allowed_top_level_outbound_fields(
+    target_protocol: V3OutboundTargetProtocol,
+) -> BTreeSet<&'static str> {
+    let fields: &[&str] = match target_protocol {
+        V3OutboundTargetProtocol::OpenAiChat => &[
+            "model",
+            "messages",
+            "tools",
+            "tool_choice",
+            "instructions",
+            "temperature",
+            "top_p",
+            "top_k",
+            "max_completion_tokens",
+            "max_tokens",
+            "max_output_tokens",
+            "logprobs",
+            "top_logprobs",
+            "stream",
+            "stream_options",
+            "parallel_tool_calls",
+            "user",
+            "logit_bias",
+            "seed",
+            "response_format",
+            "metadata",
+            "stop",
+            "n",
+            "frequency_penalty",
+            "presence_penalty",
+            "reasoning",
+            "reasoning_effort",
+            "audio",
+            "modalities",
+            "moderation",
+            "prediction",
+            "prompt_cache_key",
+            "prompt_cache_options",
+            "prompt_cache_retention",
+            "safety_identifier",
+            "service_tier",
+            "store",
+            "verbosity",
+            "web_search_options",
+            "function_call",
+            "functions",
+        ],
+        V3OutboundTargetProtocol::OpenAiResponses => &[
+            "model",
+            "input",
+            "messages",
+            "tools",
+            "tool_choice",
+            "instructions",
+            "temperature",
+            "top_p",
+            "top_k",
+            "max_output_tokens",
+            "max_completion_tokens",
+            "max_tokens",
+            "top_logprobs",
+            "logprobs",
+            "stream",
+            "stream_options",
+            "parallel_tool_calls",
+            "user",
+            "logit_bias",
+            "seed",
+            "response_format",
+            "include",
+            "reasoning",
+            "metadata",
+            "stop",
+            "safety_identifier",
+            "moderation",
+            "client_metadata",
+            "reasoning_effort",
+        ],
+        V3OutboundTargetProtocol::Anthropic => &[
+            "model",
+            "messages",
+            "input",
+            "system",
+            "instructions",
+            "user",
+            "tools",
+            "tool_choice",
+            "temperature",
+            "top_p",
+            "top_k",
+            "max_tokens",
+            "max_completion_tokens",
+            "max_output_tokens",
+            "stream",
+            "stop",
+            "stop_sequences",
+            "metadata",
+            "user",
+            "thinking",
+            "reasoning",
+            "reasoning_effort",
+            "reasoning_effort",
+            "parallel_tool_calls",
+            "response_format",
+        ],
+        V3OutboundTargetProtocol::Gemini => &[
+            "model",
+            "messages",
+            "input",
+            "contents",
+            "systemInstruction",
+            "tools",
+            "toolConfig",
+            "generationConfig",
+            "safetySettings",
+            "cachedContent",
+            "labels",
+        ],
+    };
+    fields.iter().copied().collect()
+}
+
+fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Result<Value, String> {
+    let mut normalized = project_outbound_nested_payload_for_target_protocol(
+        part,
+        V3OutboundTargetProtocol::OpenAiResponses,
+    )?;
     let is_assistant = role.eq_ignore_ascii_case("assistant");
     if let Some(row) = normalized.as_object_mut() {
         let part_type = row.get("type").and_then(Value::as_str).unwrap_or("").trim();
@@ -408,31 +610,38 @@ fn normalize_responses_content_part_for_role(part: &Value, role: &str) -> Value 
             }
         }
     }
-    normalized
+    Ok(normalized)
 }
 
-fn chat_content_to_responses_content(content: &Value, role: &str) -> Value {
+fn chat_content_to_responses_content(content: &Value, role: &str) -> Result<Value, String> {
     let text_type = if role.eq_ignore_ascii_case("assistant") {
         "output_text"
     } else {
         "input_text"
     };
     match content {
-        Value::String(text) => Value::Array(vec![json!({"type": text_type, "text": text})]),
-        Value::Array(items) => Value::Array(
+        Value::String(text) => Ok(Value::Array(vec![json!({"type": text_type, "text": text})])),
+        Value::Array(items) => Ok(Value::Array(
             items
                 .iter()
                 .map(|part| normalize_responses_content_part_for_role(part, role))
-                .collect::<Vec<Value>>(),
-        ),
-        Value::Null => Value::Array(Vec::new()),
-        other => Value::Array(vec![normalize_responses_content_part_for_role(other, role)]),
+                .collect::<Result<Vec<Value>, String>>()?,
+        )),
+        Value::Null => Ok(Value::Array(Vec::new())),
+        other => Ok(Value::Array(vec![
+            normalize_responses_content_part_for_role(other, role)?,
+        ])),
     }
 }
 
 fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
     let row = call.as_object()?;
     let function = row.get("function").and_then(Value::as_object);
+    let responses_tool_call_type = row
+        .get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("responses_tool_call_type"))
+        .and_then(Value::as_str)
+        .unwrap_or("function_call");
     let call_id = row
         .get("call_id")
         .or_else(|| row.get("tool_call_id"))
@@ -455,7 +664,25 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
         .as_str()
         .map(str::to_string)
         .unwrap_or_else(|| serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string()));
-    let item_id = compact_tool_id("fc_", call_id);
+    let item_id = responses_item_id_from_chat_extension(row)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| compact_tool_id("fc_", call_id));
+    if responses_tool_call_type == "custom_tool_call" {
+        let input = serde_json::from_str::<Value>(&arguments_text)
+            .ok()
+            .and_then(|value| value.get("input").cloned())
+            .unwrap_or_else(|| Value::String(arguments_text.clone()));
+        return Some(Value::Object(Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("custom_tool_call".to_string()),
+            ),
+            ("id".to_string(), Value::String(item_id)),
+            ("call_id".to_string(), Value::String(call_id.to_string())),
+            ("name".to_string(), Value::String(name.to_string())),
+            ("input".to_string(), input),
+        ])));
+    }
 
     Some(Value::Object(Map::from_iter([
         (
@@ -469,7 +696,20 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Option<Value> {
     ])))
 }
 
+fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&str> {
+    row.get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("responses_item_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<Value> {
+    let responses_tool_output_type = row
+        .get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("responses_tool_output_type"))
+        .and_then(Value::as_str)
+        .unwrap_or("function_call_output");
     let call_id = row
         .get("tool_call_id")
         .or_else(|| row.get("call_id"))
@@ -485,12 +725,14 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
             other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
         })
         .unwrap_or_default();
-    let item_id = compact_tool_id("fc_", call_id);
+    let item_id = responses_item_id_from_chat_extension(row)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| compact_tool_id("fc_", call_id));
 
     Some(Value::Object(Map::from_iter([
         (
             "type".to_string(),
-            Value::String("function_call_output".to_string()),
+            Value::String(responses_tool_output_type.to_string()),
         ),
         ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
@@ -498,56 +740,61 @@ fn chat_tool_result_to_responses_input_item(row: &Map<String, Value>) -> Option<
     ])))
 }
 
-pub(crate) fn build_responses_input_from_chat_messages(messages: &[Value]) -> Value {
-    Value::Array(
-        messages
-            .iter()
-            .flat_map(|message| {
-                let Some(row) = message.as_object() else {
-                    return Vec::new();
-                };
-                let role = row
-                    .get("role")
-                    .and_then(Value::as_str)
-                    .unwrap_or("user")
-                    .trim();
-                if role.eq_ignore_ascii_case("tool") {
-                    return chat_tool_result_to_responses_input_item(row)
-                        .into_iter()
-                        .collect::<Vec<_>>();
+pub(crate) fn build_responses_input_from_chat_messages(
+    messages: &[Value],
+) -> Result<Value, String> {
+    let mut output = Vec::new();
+    for message in messages {
+        let Some(row) = message.as_object() else {
+            continue;
+        };
+        let role = row
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user")
+            .trim();
+        if role.eq_ignore_ascii_case("tool") {
+            if let Some(item) = chat_tool_result_to_responses_input_item(row) {
+                output.push(item);
+            }
+            continue;
+        }
+        if role.eq_ignore_ascii_case("assistant") {
+            if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
+                let items = tool_calls
+                    .iter()
+                    .filter_map(chat_tool_call_to_responses_input_item)
+                    .collect::<Vec<Value>>();
+                if !items.is_empty() {
+                    output.extend(items);
+                    continue;
                 }
-                if role.eq_ignore_ascii_case("assistant") {
-                    if let Some(tool_calls) = row.get("tool_calls").and_then(Value::as_array) {
-                        let items = tool_calls
-                            .iter()
-                            .filter_map(chat_tool_call_to_responses_input_item)
-                            .collect::<Vec<Value>>();
-                        if !items.is_empty() {
-                            return items;
-                        }
-                    }
-                }
-                let content = row
-                    .get("content")
-                    .map(|content| chat_content_to_responses_content(content, role))
-                    .unwrap_or_else(|| Value::Array(Vec::new()));
-                vec![Value::Object(Map::from_iter([
-                    ("type".to_string(), Value::String("message".to_string())),
-                    (
-                        "role".to_string(),
-                        Value::String(if role.is_empty() { "user" } else { role }.to_string()),
-                    ),
-                    ("content".to_string(), content),
-                ]))]
-            })
-            .collect::<Vec<Value>>(),
-    )
+            }
+        }
+        let content = row
+            .get("content")
+            .map(|content| chat_content_to_responses_content(content, role))
+            .transpose()?
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        output.push(Value::Object(Map::from_iter([
+            ("type".to_string(), Value::String("message".to_string())),
+            (
+                "role".to_string(),
+                Value::String(if role.is_empty() { "user" } else { role }.to_string()),
+            ),
+            ("content".to_string(), content),
+        ])));
+    }
+    Ok(Value::Array(output))
 }
 
-fn normalize_openai_chat_message_content_part(part: &Value) -> Value {
-    let mut normalized = strip_private_fields(part);
+fn normalize_openai_chat_message_content_part(part: &Value) -> Result<Value, String> {
+    let mut normalized = project_outbound_nested_payload_for_target_protocol(
+        part,
+        V3OutboundTargetProtocol::OpenAiChat,
+    )?;
     let Some(row) = normalized.as_object_mut() else {
-        return normalized;
+        return Ok(normalized);
     };
     let part_type = row
         .get("type")
@@ -575,17 +822,22 @@ fn normalize_openai_chat_message_content_part(part: &Value) -> Value {
         }
         _ => {}
     }
-    normalized
+    Ok(normalized)
 }
 
-fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
-    let mut normalized = strip_private_fields(payload);
+fn normalize_openai_chat_messages_payload(payload: &Value) -> Result<Value, String> {
+    let mut normalized = project_outbound_payload_for_target_protocol(
+        payload,
+        V3OutboundTargetProtocol::OpenAiChat,
+    )?;
     if let Some(row) = normalized.as_object_mut() {
-        row.remove("client_metadata");
-        row.remove("include");
         if let Some(max_output_tokens) = row.remove("max_output_tokens") {
             row.entry("max_completion_tokens".to_string())
                 .or_insert(max_output_tokens);
+        }
+        if let Some(reasoning_effort) = project_openai_chat_reasoning_effort_from_reasoning(row) {
+            row.entry("reasoning_effort".to_string())
+                .or_insert(reasoning_effort);
         }
     }
     let instructions = normalized
@@ -595,7 +847,7 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
     let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
-        return normalized;
+        return Ok(normalized);
     };
     if let Some(instructions) = instructions {
         let already_visible = messages.iter().any(|message| {
@@ -639,6 +891,7 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
         let Some(message_row) = message.as_object_mut() else {
             continue;
         };
+        consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
         let Some(content) = message_row.get_mut("content") else {
             continue;
         };
@@ -646,7 +899,7 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
             let normalized_parts = parts
                 .iter()
                 .map(normalize_openai_chat_message_content_part)
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, String>>()?;
             *content = Value::Array(normalized_parts);
         }
     }
@@ -658,7 +911,46 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Value {
         *tools = normalized_tools;
     }
     ensure_openai_chat_stream_usage_option(&mut normalized);
-    normalized
+    Ok(normalized)
+}
+
+fn consume_routecodex_chat_extension_for_openai_chat_provider(
+    message_row: &mut Map<String, Value>,
+) {
+    remove_object_field(message_row, "routecodex_chat_extension");
+    let Some(tool_calls) = message_row
+        .get_mut("tool_calls")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for tool_call in tool_calls {
+        if let Some(tool_call_row) = tool_call.as_object_mut() {
+            remove_object_field(tool_call_row, "routecodex_chat_extension");
+        }
+    }
+}
+
+fn project_openai_chat_reasoning_effort_from_reasoning(
+    row: &mut Map<String, Value>,
+) -> Option<Value> {
+    let reasoning = remove_object_field(row, "reasoning")?;
+    let effort = reasoning
+        .get("effort")
+        .and_then(Value::as_str)
+        .or_else(|| reasoning.as_str())
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())?
+        .to_ascii_lowercase();
+    (!matches!(
+        effort.as_str(),
+        "none" | "off" | "disabled" | "disable" | "false"
+    ))
+    .then(|| Value::String(effort))
+}
+
+fn remove_object_field(row: &mut Map<String, Value>, key: &str) -> Option<Value> {
+    row.remove(key)
 }
 
 fn ensure_openai_chat_stream_usage_option(payload: &mut Value) {
@@ -896,31 +1188,47 @@ fn normalize_openai_chat_builtin_web_search_tool(row: &Map<String, Value>) -> Va
 
 #[allow(dead_code)]
 fn compact_tool_id(prefix: &str, raw: &str) -> String {
+    const MAX_ID_LEN: usize = 64;
     let trimmed = raw.trim();
-    let stripped = trimmed
-        .strip_prefix("functions.")
-        .unwrap_or(trimmed)
-        .strip_prefix("call_")
-        .unwrap_or_else(|| trimmed.strip_prefix("fc_").unwrap_or(trimmed));
-    let safe: String = stripped
+    let (stripped, stripped_source_prefix) = if let Some(value) = trimmed.strip_prefix("functions.")
+    {
+        (value, true)
+    } else if let Some(value) = trimmed.strip_prefix("call_") {
+        (value, true)
+    } else if let Some(value) = trimmed.strip_prefix("fc_") {
+        (value, true)
+    } else {
+        (trimmed, false)
+    };
+    let safe_full: String = stripped
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
-        .take(48)
         .collect();
-    let mut id = if safe.is_empty() {
-        prefix.to_string()
-    } else {
-        format!("{prefix}{safe}")
-    };
-    if id.len() > 64 {
-        let mut hasher = DefaultHasher::new();
-        raw.hash(&mut hasher);
-        let hash = format!("{:x}", hasher.finish());
-        let keep = 64usize.saturating_sub(prefix.len() + 1 + hash.len());
-        let body: String = safe.chars().take(keep).collect();
-        id = format!("{prefix}{body}_{hash}");
+    let lossless = !stripped_source_prefix
+        && !safe_full.is_empty()
+        && safe_full == stripped
+        && prefix.len() + safe_full.len() <= MAX_ID_LEN;
+    if lossless {
+        return format!("{prefix}{safe_full}");
     }
-    id
+
+    let hash = compact_tool_id_hash(raw);
+    let keep = MAX_ID_LEN.saturating_sub(prefix.len() + 1 + hash.len());
+    let body: String = safe_full.chars().take(keep).collect();
+    if body.is_empty() {
+        format!("{prefix}{hash}")
+    } else {
+        format!("{prefix}{body}_{hash}")
+    }
+}
+
+fn compact_tool_id_hash(raw: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in raw.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[cfg(test)]
@@ -959,9 +1267,106 @@ mod tests {
             .expect("Responses wire input must be an array");
 
         assert_eq!(input[0]["call_id"], "call_6b0251fee24f41b2b045b04e");
-        assert_eq!(input[0]["id"], "fc_6b0251fee24f41b2b045b04e");
+        let item_id = input[0]["id"].as_str().expect("function_call id");
+        assert!(item_id.starts_with("fc_6b0251fee24f41b2b045b04e_"));
+        assert!(item_id.len() <= 64);
         assert_eq!(input[1]["call_id"], input[0]["call_id"]);
         assert_eq!(input[1]["id"], input[0]["id"]);
+    }
+
+    #[test]
+    fn responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids() {
+        let repeated_prefix = "call_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
+        let first_call_id = format!("{repeated_prefix}_left");
+        let second_call_id = format!("{repeated_prefix}_right");
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": first_call_id,
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    },
+                    {
+                        "id": second_call_id,
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    }
+                ]
+            }]
+        });
+
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("Responses wire projection must succeed");
+        let input = request["input"]
+            .as_array()
+            .expect("Responses wire input must be an array");
+
+        assert_ne!(input[0]["id"], input[1]["id"]);
+        assert!(input[0]["id"].as_str().unwrap().starts_with("fc_"));
+        assert!(input[1]["id"].as_str().unwrap().starts_with("fc_"));
+        assert!(input[0]["id"].as_str().unwrap().len() <= 64);
+        assert!(input[1]["id"].as_str().unwrap().len() <= 64);
+    }
+
+    #[test]
+    fn responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call_same/value",
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    },
+                    {
+                        "id": "call_same:value",
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    },
+                    {
+                        "id": "call_same",
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    },
+                    {
+                        "id": "fc_same",
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    },
+                    {
+                        "id": "functions.same",
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{}"}
+                    }
+                ]
+            }]
+        });
+
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("Responses wire projection must succeed");
+        let input = request["input"]
+            .as_array()
+            .expect("Responses wire input must be an array");
+
+        let ids = input
+            .iter()
+            .map(|item| item["id"].as_str().expect("Responses item id"))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            ids.len(),
+            input.len(),
+            "Responses fc_* item ids collided: {input:?}"
+        );
+        for item in input {
+            assert!(item["id"].as_str().unwrap().starts_with("fc_same"));
+        }
     }
 
     #[test]
@@ -979,16 +1384,94 @@ mod tests {
     }
 
     #[test]
-    fn responses_openai_chat_field_parity_include_is_elided_from_chat_wire() {
+    fn openai_responses_wire_renames_client_metadata_and_reasoning_effort() {
         let payload = json!({
             "model": "gpt-test",
             "messages": [{"role": "user", "content": "hello"}],
-            "include": ["reasoning.encrypted_content"]
+            "client_metadata": {"session_id":"codex-review"},
+            "reasoning_effort": "medium"
+        });
+
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("Responses wire projection must rename supported client protocol fields");
+
+        assert!(request.get("client_metadata").is_none(), "{request}");
+        assert!(request.get("reasoning_effort").is_none(), "{request}");
+        assert_eq!(request["metadata"], json!({"session_id":"codex-review"}));
+        assert_eq!(request["reasoning"], json!({"effort":"medium"}));
+    }
+
+    #[test]
+    fn openai_chat_wire_preserves_same_protocol_request_fields() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}],
+            "audio": {"format":"wav", "voice":"alloy"},
+            "modalities": ["text", "audio"],
+            "prediction": {"type":"content", "content":"expected"},
+            "prompt_cache_key": "cache-key",
+            "prompt_cache_options": {"ttl":"24h"},
+            "prompt_cache_retention": "24h",
+            "service_tier": "priority",
+            "store": false,
+            "web_search_options": {"search_context_size":"low"}
         });
 
         let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-            .expect("OpenAI Chat wire projection must succeed");
+            .expect("same-protocol Chat fields must reach provider wire unchanged");
 
-        assert!(request.get("include").is_none());
+        for key in [
+            "audio",
+            "modalities",
+            "prediction",
+            "prompt_cache_key",
+            "prompt_cache_options",
+            "prompt_cache_retention",
+            "service_tier",
+            "store",
+            "web_search_options",
+        ] {
+            assert_eq!(request[key], payload[key], "field {key} drifted");
+        }
+    }
+
+    #[test]
+    fn relay_responses_wire_rejects_unconsumed_previous_response_id() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}],
+            "previous_response_id": "resp_must_be_resolved_at_req03"
+        });
+
+        let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect_err("continuation owner state must not cross into Relay outbound");
+
+        assert!(error.contains("UnmappedOutboundFields"), "{error}");
+        assert!(error.contains("$.previous_response_id"), "{error}");
+    }
+
+    #[test]
+    fn relay_responses_wire_preserves_non_continuation_provider_fields() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}],
+            "safety_identifier": "safety-client",
+            "moderation": {"mode":"auto"},
+            "stream_options": {"include_obfuscation":false}
+        });
+
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("ordinary Responses provider fields must survive Relay projection");
+
+        assert_eq!(request["safety_identifier"], "safety-client");
+        assert_eq!(request["moderation"], json!({"mode":"auto"}));
+        assert_eq!(
+            request["stream_options"],
+            json!({"include_obfuscation":false})
+        );
     }
 }
+
+#[cfg(test)]
+#[path = "request_outbound_format_extra_tests.rs"]
+mod request_outbound_format_extra_tests;

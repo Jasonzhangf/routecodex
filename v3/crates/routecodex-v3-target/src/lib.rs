@@ -27,6 +27,7 @@ pub struct V3TargetCandidate {
     pub model_capabilities: Vec<String>,
     pub max_context_tokens: Option<u64>,
     pub base_url: String,
+    pub responses_process: Option<String>,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
@@ -480,6 +481,10 @@ impl V3TargetInterpreter {
                 model_capabilities: model.capabilities.clone(),
                 max_context_tokens: model.max_context_tokens,
                 base_url: provider.base_url.clone(),
+                responses_process: provider
+                    .responses
+                    .as_ref()
+                    .map(|responses| responses.process.clone()),
                 responses_transport: provider
                     .responses
                     .as_ref()

@@ -193,37 +193,37 @@ fn req04_preserves_malformed_shell_like_function_call_and_parse_error_output() {
         .unwrap();
 
     assert_eq!(governed.tool_output_count(), 2);
-    let input = governed.payload()["input"].as_array().unwrap();
+    assert!(governed.payload().get("input").is_none());
+    let messages = governed.payload()["messages"].as_array().unwrap();
     assert!(
-        input
-            .iter()
-            .any(|item| item.get("call_id").and_then(Value::as_str) == Some("call_bad")),
-        "non-injected malformed shell-like call history must remain provider-visible so client/model feedback continuity is preserved: {input:?}"
+        messages.iter().any(|message| message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|call| call.get("id").and_then(Value::as_str) == Some("call_bad"))),
+        "non-injected malformed shell-like call history must remain provider-visible as Chat tool_calls: {messages:?}"
     );
     assert!(
-        input
-            .iter()
-            .any(
-                |item| item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                    && item.get("call_id").and_then(Value::as_str) == Some("call_bad")
-            ),
-        "non-injected parse-error output must remain paired with its call: {input:?}"
-    );
-    assert!(
-        input.iter().any(
-            |item| item.get("type").and_then(Value::as_str) == Some("function_call")
-                && item.get("call_id").and_then(Value::as_str) == Some("call_good")
+        messages.iter().any(
+            |message| message.get("role").and_then(Value::as_str) == Some("tool")
+                && message.get("tool_call_id").and_then(Value::as_str) == Some("call_bad")
         ),
-        "valid shell-like function_call must remain provider-visible: {input:?}"
+        "non-injected parse-error output must remain paired with its Chat tool call: {messages:?}"
     );
     assert!(
-        input
-            .iter()
-            .any(
-                |item| item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                    && item.get("call_id").and_then(Value::as_str) == Some("call_good")
-            ),
-        "valid shell-like function_call_output must remain provider-visible: {input:?}"
+        messages.iter().any(|message| message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|call| call.get("id").and_then(Value::as_str) == Some("call_good"))),
+        "valid shell-like function_call must remain provider-visible as Chat tool_calls: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message.get("role").and_then(Value::as_str) == Some("tool")
+            && message.get("tool_call_id").and_then(Value::as_str) == Some("call_good")),
+        "valid shell-like function_call_output must remain provider-visible as Chat tool result: {messages:?}"
     );
 }
 
@@ -399,7 +399,7 @@ fn remote_binding_is_classified_without_local_restore() {
         .with_remote_binding("resp_remote", scope());
     let governed = hooks
         .run(
-            raw(json!({"input":[]})),
+            raw(json!({"input":[{"role":"user","content":"continue"}]})),
             &lookup,
             &V3HubServertoolRequestProfile::disabled(),
         )
@@ -456,7 +456,7 @@ fn classification_is_fail_fast_for_missing_or_cross_scope_binding() {
     let missing = V3HubContinuationLookup::new(Some("missing"), scope());
     assert!(matches!(
         hooks.run(
-            raw(json!({})),
+            raw(json!({"input":[{"role":"user","content":"continue"}]})),
             &missing,
             &V3HubServertoolRequestProfile::disabled()
         ),
@@ -476,7 +476,7 @@ fn classification_is_fail_fast_for_missing_or_cross_scope_binding() {
     );
     assert!(matches!(
         hooks.run(
-            raw(json!({})),
+            raw(json!({"input":[{"role":"user","content":"continue"}]})),
             &mismatch,
             &V3HubServertoolRequestProfile::disabled()
         ),
@@ -492,7 +492,7 @@ fn classification_rejects_dual_local_and_remote_owners() {
         .with_remote_binding("duplicate", scope());
     assert!(matches!(
         hooks.run(
-            raw(json!({})),
+            raw(json!({"input":[{"role":"user","content":"continue"}]})),
             &lookup,
             &V3HubServertoolRequestProfile::disabled()
         ),
@@ -510,12 +510,12 @@ fn malformed_tool_output_and_required_hook_failure_are_explicit() {
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled()
         ),
-        Err(V3HubRelayRequestError::MalformedToolOutput { .. })
+        Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
     ));
 
     assert!(matches!(
         hooks.run(
-            raw(json!({})),
+            raw(json!({"input":[{"role":"user","content":"continue"}]})),
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::required_failure("req04.required")
         ),
@@ -573,17 +573,21 @@ fn stopless_request_hook_consumes_noop_cli_from_runtime_control_not_stdout() {
         )
         .unwrap();
 
-    let input = governed.payload()["input"].as_array().unwrap();
-    assert_eq!(input.len(), 2);
-    assert_eq!(input[0], json!({"role":"user","content":"完成当前目标"}));
-    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    assert!(governed.payload().get("input").is_none());
+    let messages = governed.payload()["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0], json!({"role":"user","content":"完成当前目标"}));
+    assert_eq!(
+        messages[2].get("role").and_then(Value::as_str),
+        Some("user")
+    );
     assert_full_stopless_continuation_prompt(
-        input[1]
+        messages[2]
             .get("content")
             .and_then(Value::as_str)
             .expect("stopless continuation prompt"),
     );
-    assert_no_structured_stopless_shell_artifacts(input);
+    assert_no_structured_stopless_shell_artifacts(messages);
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     for forbidden in [
         "--input-json",
@@ -714,9 +718,9 @@ fn run_stopless_noop_with_state(
 }
 
 fn last_user_content(payload: &Value) -> String {
-    payload["input"]
+    payload["messages"]
         .as_array()
-        .expect("input array")
+        .expect("messages array")
         .iter()
         .rev()
         .find(|item| item.get("role").and_then(Value::as_str) == Some("user"))
@@ -824,12 +828,16 @@ fn stopless_request_hook_consumes_noop_cli_without_continuation_state() {
         )
         .unwrap();
 
-    let input = governed.payload()["input"].as_array().unwrap();
-    assert_eq!(input.len(), 2);
-    assert_eq!(input[0], json!({"role":"user","content":"完成当前目标"}));
-    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
+    assert!(governed.payload().get("input").is_none());
+    let messages = governed.payload()["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0], json!({"role":"user","content":"完成当前目标"}));
+    assert_eq!(
+        messages[2].get("role").and_then(Value::as_str),
+        Some("user")
+    );
     assert_full_stopless_continuation_prompt(
-        input[1]
+        messages[2]
             .get("content")
             .and_then(Value::as_str)
             .expect("stopless continuation prompt without state"),

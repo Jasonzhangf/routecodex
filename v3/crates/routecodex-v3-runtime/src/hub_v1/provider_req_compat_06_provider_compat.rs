@@ -1,8 +1,10 @@
+use super::request_outbound_format::{
+    project_outbound_payload_for_target_protocol, V3OutboundTargetProtocol,
+};
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_from_chat_canonical,
     build_v3_openai_responses_standard_request_from_chat_canonical,
-    build_v3_responses_original_input_surface_from_chat_canonical,
     encode_v3_responses_semantic_as_anthropic_request, provider_protocol_compat_id,
     V3HubOpaquePayload, V3HubProviderWireProtocol, V3HubReqOutbound07ProviderSemantic,
     V3ProviderCompatError, V3ProviderCompatProfileId,
@@ -96,26 +98,22 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             )?
         }
         V3HubProviderWireProtocol::Responses => {
-            match build_v3_responses_original_input_surface_from_chat_canonical(
+            build_v3_openai_responses_standard_request_from_chat_canonical(
                 input.provider_semantic_payload(),
-                input.original_responses_payload(),
-            ) {
-                Some(original_surface) => original_surface,
-                None => build_v3_openai_responses_standard_request_from_chat_canonical(
-                    input.provider_semantic_payload(),
-                )?,
-            }
+            )?
         }
         V3HubProviderWireProtocol::Anthropic => {
             let source = build_v3_anthropic_provider_request_source_from_chat_canonical(
                 input.provider_semantic_payload(),
-                input.original_responses_payload(),
                 input.entry_protocol(),
             )?;
             encode_v3_responses_semantic_as_anthropic_request(source)
                 .map_err(|error| error.to_string())?
         }
-        V3HubProviderWireProtocol::Gemini => input.provider_semantic_payload().clone(),
+        V3HubProviderWireProtocol::Gemini => project_outbound_payload_for_target_protocol(
+            input.provider_semantic_payload(),
+            V3OutboundTargetProtocol::Gemini,
+        )?,
     };
     bind_v3_selected_provider_model(provider_protocol_payload, selected)
         .map(V3SelectedProviderModelBinding::into_payload)
@@ -156,6 +154,7 @@ mod tests {
             model_capabilities: vec!["text".to_string()],
             max_context_tokens: None,
             base_url: "https://provider.invalid/v1".to_string(),
+            responses_process: None,
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
@@ -233,124 +232,6 @@ mod tests {
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
     }
 
-    fn direct_req07_for_entry(
-        entry_protocol: V3HubEntryProtocol,
-        payload: serde_json::Value,
-        provider_protocol: V3HubProviderWireProtocol,
-    ) -> V3HubReqOutbound07ProviderSemantic {
-        let req01 = build_v3_hub_req_inbound_01_client_raw(
-            payload,
-            entry_protocol,
-            V3HubInvocationSource::Client,
-            V3HubTransportIntent::Json,
-        );
-        let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-        let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-            req02,
-            V3HubContinuationOwnership::New,
-        );
-        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
-        let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-            req04,
-            V3HubExecutionMode::Direct,
-        );
-        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-            req05,
-            V3HubTargetResolution::Routed,
-            selected_candidate(provider_protocol),
-        );
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
-    }
-
-    #[test]
-    fn responses_openai_chat_field_parity_direct_provider_payload_uses_selected_protocol_projection(
-    ) {
-        let payload = json!({
-            "model": "client-route-alias",
-            "input": [{
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": "hello"}]
-            }],
-            "include": ["reasoning.encrypted_content"]
-        });
-
-        let chat_req07 = direct_req07_for_entry(
-            V3HubEntryProtocol::Responses,
-            payload.clone(),
-            V3HubProviderWireProtocol::OpenAiChat,
-        );
-        let chat_payload = build_v3_provider_standard_protocol_payload_from_req07(&chat_req07)
-            .expect("direct OpenAI Chat projection must succeed");
-        assert!(chat_payload.get("messages").is_some());
-        assert!(chat_payload.get("include").is_none());
-
-        let responses_req07 = direct_req07_for_entry(
-            V3HubEntryProtocol::Responses,
-            payload,
-            V3HubProviderWireProtocol::Responses,
-        );
-        let responses_payload =
-            build_v3_provider_standard_protocol_payload_from_req07(&responses_req07)
-                .expect("direct Responses projection must succeed");
-        assert!(responses_payload.get("input").is_some());
-        assert_eq!(
-            responses_payload["include"],
-            json!(["reasoning.encrypted_content"])
-        );
-    }
-
-    #[test]
-    fn direct_responses_projection_preserves_valid_original_fc_id_and_argument_bytes() {
-        let malformed_arguments =
-            "{\"cmd\":\"cd /Volumes/extension/code/zterm && git status --short\"}{\"cmd\":\"pwd\"}";
-        let req07 = direct_req07_for_entry(
-            V3HubEntryProtocol::Responses,
-            json!({
-                "model": "client-route-alias",
-                "input": [
-                    {
-                        "type": "message",
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": "continue"}]
-                    },
-                    {
-                        "type": "function_call",
-                        "id": "fc_019fb564-9ef3-7423-bb90-30509ef6ae8c",
-                        "call_id": "call_6b0251fee24f41b2b045b04e",
-                        "name": "exec_command",
-                        "arguments": malformed_arguments
-                    },
-                    {
-                        "type": "function_call_output",
-                        "call_id": "call_6b0251fee24f41b2b045b04e",
-                        "output": "failed to parse function arguments: trailing characters at line 1 column 66"
-                    }
-                ],
-                "include": ["reasoning.encrypted_content"]
-            }),
-            V3HubProviderWireProtocol::Responses,
-        );
-
-        let projected = build_v3_provider_standard_protocol_payload_from_req07(&req07)
-            .expect("direct Responses projection must preserve the original Responses surface");
-
-        assert_eq!(
-            projected["input"][1]["id"],
-            "fc_019fb564-9ef3-7423-bb90-30509ef6ae8c"
-        );
-        assert_eq!(
-            projected["input"][1]["call_id"],
-            "call_6b0251fee24f41b2b045b04e"
-        );
-        assert_eq!(projected["input"][1]["arguments"], malformed_arguments);
-        assert_eq!(
-            projected["input"][2]["call_id"],
-            projected["input"][1]["call_id"]
-        );
-        assert_eq!(projected["include"], json!(["reasoning.encrypted_content"]));
-    }
-
     #[test]
     fn anthropic_entry_to_anthropic_provider_uses_governed_messages_without_responses_snapshot() {
         let req07 = relay_req07_for_entry(
@@ -362,8 +243,6 @@ mod tests {
             }),
             V3HubProviderWireProtocol::Anthropic,
         );
-        assert!(req07.original_responses_payload().is_none());
-
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
         assert_eq!(
             req_compat.provider_semantic_payload()["model"],
@@ -390,8 +269,6 @@ mod tests {
             }),
             V3HubProviderWireProtocol::Anthropic,
         );
-        assert!(req07.original_responses_payload().is_none());
-
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
         assert_eq!(
             req_compat.provider_semantic_payload()["model"],
@@ -408,7 +285,8 @@ mod tests {
     }
 
     #[test]
-    fn responses_entry_tool_history_surface_encodes_anthropic_with_original_surface_snapshot() {
+    fn responses_entry_tool_history_chat_extension_encodes_anthropic_without_raw_payload_snapshot()
+    {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -447,18 +325,14 @@ mod tests {
             }),
             V3HubProviderWireProtocol::Anthropic,
         );
-        assert!(
-            req07.original_responses_payload().is_some(),
-            "ReqInbound must retain original Responses input surface for target-compatible outbound projection"
-        );
-
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
         let payload = req_compat.provider_semantic_payload();
         assert_eq!(payload["model"], "provider-wire-model");
         assert!(payload.get("input").is_none());
         assert_eq!(payload["messages"][0]["role"], "user");
         assert_eq!(payload["messages"][1]["role"], "assistant");
-        assert_eq!(payload["messages"][1]["content"][0]["type"], "tool_use");
+        assert_eq!(payload["messages"][1]["content"][0]["type"], "text");
+        assert_eq!(payload["messages"][1]["content"][1]["type"], "tool_use");
         assert_eq!(payload["messages"][2]["role"], "user");
         assert_eq!(payload["messages"][2]["content"][0]["type"], "tool_result");
     }

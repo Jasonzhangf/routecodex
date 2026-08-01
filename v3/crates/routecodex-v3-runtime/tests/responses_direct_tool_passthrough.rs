@@ -112,7 +112,7 @@ type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "m"
 auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
-responses = { process = "chat", streaming = "always", transport = "http" }
+responses = { process = "direct", streaming = "always", transport = "http" }
 [providers.p.models.m]
 wire_name = "wire-m"
 capabilities = ["text", "tools", "reasoning"]
@@ -354,6 +354,73 @@ async fn direct_kernel_preserves_tool_choice_parallel_tool_calls_and_tools_in_wi
         "client metadata dropped: {wire}"
     );
     assert_eq!(wire["input"], "use tools", "input dropped: {wire}");
+    assert_control_truth_isolated(&wire);
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history(
+) {
+    let manifest = manifest();
+    let transport = PassthroughTransport::default();
+    let malformed_arguments =
+        "{\"cmd\":\"cd /Volumes/extension/code/zterm && git status --short\"}{\"cmd\":\"pwd\"}";
+
+    let body = json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            },
+            {
+                "type": "function_call",
+                "id": "fc_019fb564-9ef3-7423-bb90-30509ef6ae8c",
+                "call_id": "call_6b0251fee24f41b2b045b04e",
+                "name": "exec_command",
+                "arguments": malformed_arguments
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_6b0251fee24f41b2b045b04e",
+                "output": "failed to parse function arguments: trailing characters at line 1 column 66"
+            }
+        ],
+        "include": ["reasoning.encrypted_content"],
+        "stream": false
+    });
+
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
+        &V3ResponsesDirectContinuationState::default(),
+        &manifest,
+        request(body),
+        scope(),
+        register_responses_direct_hooks(),
+        &transport,
+        1_000,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{:#?}", output);
+
+    let wire = transport
+        .request
+        .lock()
+        .unwrap()
+        .take()
+        .expect("direct provider wire payload captured");
+    assert_eq!(wire["model"], "wire-m");
+    assert!(
+        wire.get("messages").is_none(),
+        "Direct must not synthesize Chat messages: {wire}"
+    );
+    assert_eq!(wire["include"][0], "reasoning.encrypted_content");
+    assert_eq!(
+        wire["input"][1]["id"],
+        "fc_019fb564-9ef3-7423-bb90-30509ef6ae8c"
+    );
+    assert_eq!(wire["input"][1]["call_id"], "call_6b0251fee24f41b2b045b04e");
+    assert_eq!(wire["input"][1]["arguments"], malformed_arguments);
+    assert_eq!(wire["input"][2]["call_id"], wire["input"][1]["call_id"]);
     assert_control_truth_isolated(&wire);
 }
 

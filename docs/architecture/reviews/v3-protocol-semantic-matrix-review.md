@@ -89,7 +89,7 @@ coarse buckets, including Responses `background` / `context_management` /
 | Semantic | Responses | OpenAI Chat | Anthropic | Gemini | Current implementation | Gap |
 | --- | --- | --- | --- | --- | --- | --- |
 | `metadata` / user id | inbound preserves source metadata; outbound maps only target-compatible fields | OpenAI Chat preserves `metadata` and `user` | Anthropic provider wire supports only `metadata.user_id`; Responses/OpenAI `user` maps compatibly to it | rejected if side-channel leak; not a native field focus | Present in provider-wire tests | Non-compatible arbitrary metadata is fail-fast and listed for Jason decision, not silently discarded |
-| `client_metadata` | preserved in response-side source matrix but stripped from OpenAI Chat provider wire in current implementation | rejected / not forwarded to OpenAI Chat provider wire | not native | not native | Current code removes it before OpenAI Chat wire | Doc gap: current matrix says preserved for OpenAI Chat request row, but implementation and test assert strip |
+| `client_metadata` | preserved in response-side source matrix; rejected from OpenAI Chat provider wire; renamed to `metadata` for OpenAI Responses provider wire | rejected / not forwarded to OpenAI Chat provider wire | mapped to `metadata` | not native | Current code rejects it before OpenAI Chat wire and renames it before OpenAI Responses wire | Matrix row is target-dependent and gated |
 | RouteCodex control fields | fail-closed before provider/client payload | fail-closed | fail-closed | fail-closed | Present | No gap |
 | side-channel fields | rejected | rejected | rejected | rejected | Present | No gap |
 
@@ -98,7 +98,7 @@ coarse buckets, including Responses `background` / `context_management` /
 | Semantic | Responses -> Chat | Anthropic -> Responses | OpenAI Chat same-protocol | Gemini same-protocol | Current implementation | Gap |
 | --- | --- | --- | --- | --- | --- | --- |
 | request canonicalization | `responses_openai_codec.rs` | `anthropic_codec.rs` | `openai_chat_codec.rs` | `gemini_codec.rs` | Present | No gap |
-| provider wire shaping | `request_outbound_format.rs` | `anthropic_codec.rs` + relay runtime codec | same protocol passthrough / normalization | same protocol passthrough / normalization | Present | Needs explicit matrix row for `client_metadata` strip on OpenAI Chat wire |
+| provider wire shaping | `request_outbound_format.rs` | `anthropic_codec.rs` + relay runtime codec | same protocol passthrough / normalization | same protocol passthrough / normalization | Present | Explicit matrix row covers `client_metadata` rejection on OpenAI Chat wire and rename on OpenAI Responses wire |
 | stream intent | preserved | preserved | preserved | preserved | Present | No gap |
 | tool search / web search / builtins | preserved into OpenAI Chat wire and model/tool selection | mapped to Anthropic-valid tools where needed | same protocol | same protocol | Present | Need more explicit row for tool_search/web_search builtins across protocol boundaries |
 
@@ -119,7 +119,7 @@ coarse buckets, including Responses `background` / `context_management` /
    - requests with malformed tool adjacency fail closed.
 2. `request_outbound_format.rs`
    - OpenAI Chat wire preserves messages/tools/stream and normalizes provider tool surface.
-   - OpenAI Chat wire strips `client_metadata` before provider send.
+   - OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.
    - provider-outbound control keys are removed, not repaired.
 3. `responses_relay_runtime.rs`
    - OpenAI Chat response projection writes `response.insert("model", model.clone())` and `created_at` from `created_at` or `created`.
@@ -138,7 +138,7 @@ coarse buckets, including Responses `background` / `context_management` /
 
 ## Current implementation vs source inventory gap
 
-- Responses -> OpenAI Chat request currently maps/copies only a supported subset into Chat wire: `tool_choice`, `parallel_tool_calls`, `user`, `temperature`, `top_p`, `logit_bias`, `seed`, `stream`, `response_format`, `max_tokens`, Responses `max_output_tokens` as OpenAI Chat `max_completion_tokens`, `metadata`, `client_metadata` before final strip, and `stop`; source-inventory fields such as `background`, `context_management`, `conversation`, `prompt_cache_*`, `service_tier`, `text.*`, `top_logprobs`, and `truncation` are not yet fully represented as Chat Process canonical/extension contracts.
+- Responses -> OpenAI Chat request currently maps/copies only a supported subset into Chat wire: `tool_choice`, `parallel_tool_calls`, `user`, `temperature`, `top_p`, `logit_bias`, `seed`, `stream`, `response_format`, `max_tokens`, Responses `max_output_tokens` as OpenAI Chat `max_completion_tokens`, `metadata`, while `client_metadata` fails before provider capture, and `stop`; OpenAI Chat -> Responses explicitly renames `client_metadata` to `metadata` and `reasoning_effort` to `reasoning.effort`; source-inventory fields such as `background`, `context_management`, `conversation`, `prompt_cache_*`, `service_tier`, `text.*`, `top_logprobs`, and `truncation` are not yet fully represented as Chat Process canonical/extension contracts.
 - OpenAI Chat same-protocol characterization preserves the main Chat payload, but the matrix now requires explicit extension ownership for `audio`, `modalities`, `reasoning_effort`, `web_search_options`, `prediction`, `store`, `prompt_cache_*`, and response `system_fingerprint/service_tier/moderation/logprobs` before those fields can be relied on in cross-protocol conversion.
 - Anthropic -> Responses currently maps `system`, `messages`, `tools`, `tool_choice`, `thinking`, `metadata`, `temperature`, `top_p`, `top_k`, `parallel_tool_calls`, `max_tokens/max_output_tokens`, `stop_sequences`, and `stream`; source-inventory fields such as `container`, `output_config`, `service_tier`, `cache_control`, server-tool result blocks, and `user_profile_id` need protocol-specific Chat Process extension ownership.
 - Gemini V3 codec now semantically extracts `toolConfig.functionCallingConfig.mode`, `allowedFunctionNames`, `generationConfig.thinkingConfig` (`includeThoughts`, `thinkingBudget`, `thinkingLevel`), and generation scalar fields (`temperature`, `topP`, `topK`, `maxOutputTokens`, `stopSequences`, `frequencyPenalty`, `presencePenalty`, `responseLogprobs`, `logprobs`, `seed`) into distinct Chat reasoning/tool/sampling/logprob/seed/stop semantics, while remaining `generationConfig` response-format/media/audio branches, `safetySettings`, `thoughtSignature`, candidate grounding/citation, and `usageMetadata` subtrees are still not fully expanded. These are locked as extension/gap rows rather than being treated as generic raw payload metadata.
@@ -289,7 +289,7 @@ runtime-closeout work.
 
 | Gap id | Category | Affected status/count | Evidence | Closeout owner/rule |
 | --- | --- | --- | --- | --- |
-| `gap.client_metadata.target_dependent` | fixed doc gate | `covered_but_target_dependent` / 1 | OpenAI Chat provider wire preserves standard `metadata` but strips non-standard `client_metadata`; old docs implied unconditional preservation. | Keep target-dependent provider-wire behavior explicit; no MetadataCenter/fallback preservation of unsupported `client_metadata`. |
+| `gap.client_metadata.target_dependent` | fixed doc gate | `covered_but_target_dependent` / 1 | OpenAI Chat provider wire preserves standard `metadata` but rejects non-standard `client_metadata`; OpenAI Responses provider wire renames `client_metadata` to `metadata`. | Keep target-dependent provider-wire behavior explicit; no MetadataCenter/fallback preservation of unsupported `client_metadata`. |
 | `gap.runtime_extension_declared` | runtime closeout | `extension_declared` / 213 | Protocol-neutral OpenAI Chat extension fields and owners exist, but runtime conversion completion is not claimed. | Pick the adjacent protocol codec owner per field family, add red fixture first, then implement and prove source/blackbox/live evidence before marking covered. |
 | `gap.semantic_declared_runtime_closeout` | runtime closeout | `semantic_declared` / 50 | These fields now have manual semantic owners and transform rules, but no runtime conversion completion evidence yet. | Add field-family red tests and implement adjacent Rust codec owner before changing `semantic_declared` to covered, partial, or unsupported_blocked. |
 | `gap.partial_cross_protocol_semantics` | runtime closeout | `partial` / 112 | Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini. | Close request and response directions together in `hub_v1` protocol codec owners; no server/SSE/provider-transport repair. |

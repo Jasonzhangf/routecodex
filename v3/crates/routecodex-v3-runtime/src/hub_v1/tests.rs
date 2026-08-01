@@ -53,7 +53,7 @@ fn openai_chat_function_tool_redacted_schema_placeholders_remain_valid_json_sche
 fn openai_chat_stream_relay_requests_include_usage_when_client_does_not_set_stream_options() {
     let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.2",
-        "input": "report usage",
+        "messages": [{"role": "user", "content": "report usage"}],
         "stream": true
     }))
     .unwrap();
@@ -80,26 +80,20 @@ fn openai_chat_stream_relay_requests_preserve_explicit_stream_options() {
 }
 
 #[test]
-fn openai_chat_provider_wire_does_not_forward_client_metadata() {
-    let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+fn openai_chat_provider_wire_rejects_client_metadata() {
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.2",
-        "input": [{
-            "type": "message",
-            "role": "user",
-            "content": [{"type": "input_text", "text": "continue"}]
-        }],
+        "messages": [{"role": "user", "content": "continue"}],
         "stream": true,
         "client_metadata": {
             "session_id": "client-session",
             "x-codex-turn-metadata": "{\"workspaces\":{\"/Volumes/extension/code\":{\"has_changes\":true}}}"
         }
     }))
-    .unwrap();
+    .expect_err("OpenAI Chat provider wire must reject unsupported client_metadata");
 
-    assert!(
-        provider.get("client_metadata").is_none(),
-        "OpenAI Chat provider wire must not forward Codex client_metadata: {provider}"
-    );
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(error.contains("$.client_metadata"), "{error}");
 }
 
 #[test]
@@ -181,6 +175,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
             model_capabilities: vec!["text".into(), "tools".into()],
             max_context_tokens: None,
             base_url: "http://127.0.0.1:1/v1".into(),
+            responses_process: None,
             responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
@@ -224,7 +219,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
 }
 
 #[test]
-fn direct_req_compat_keeps_selected_mode_passthrough() {
+fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         json!({"messages":[{"role":"user","content":"direct"}],"tools":[{"type":"tool_search","name":"tool_search"}]}),
         V3HubEntryProtocol::OpenAiChat,
@@ -254,6 +249,7 @@ fn direct_req_compat_keeps_selected_mode_passthrough() {
             model_capabilities: vec!["text".into(), "tools".into()],
             max_context_tokens: None,
             base_url: "http://127.0.0.1:1/v1".into(),
+            responses_process: None,
             responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
@@ -275,14 +271,14 @@ fn direct_req_compat_keeps_selected_mode_passthrough() {
     let payload = req_compat.provider_semantic_payload();
     assert!(
         payload
-            .get("messages")
+            .get("input")
             .and_then(serde_json::Value::as_array)
             .is_some(),
-        "direct selected mode must keep the selected payload passthrough: {payload}"
+        "direct selected mode must project adjacent Chat payload to selected Responses provider protocol: {payload}"
     );
     assert!(
-        payload.get("input").is_none(),
-        "direct selected mode must not run Relay Chat->Responses outbound conversion: {payload}"
+        payload.get("messages").is_none(),
+        "direct selected mode must not cross-node pass Chat payload into Responses provider wire: {payload}"
     );
     assert_eq!(payload["tools"][0]["type"], "tool_search");
 }
@@ -321,6 +317,7 @@ fn provider_req_compat_loads_selected_target_profile() {
             model_capabilities: vec!["text".into(), "tools".into()],
             max_context_tokens: None,
             base_url: "http://127.0.0.1:1/v1".into(),
+            responses_process: None,
             responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),

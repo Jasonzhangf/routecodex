@@ -131,14 +131,40 @@ pub(crate) fn responses_like_item_to_chat_message_at_req04(item: &Value) -> Valu
             let arguments = arguments.as_str().map(str::to_string).unwrap_or_else(|| {
                 serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string())
             });
+            let mut tool_call = json!({
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": arguments}
+            });
+            let responses_item_id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty());
+            if item_type == "custom_tool_call" || responses_item_id.is_some() {
+                let mut extension = Map::new();
+                if item_type == "custom_tool_call" {
+                    extension.insert(
+                        "responses_tool_call_type".to_string(),
+                        Value::String("custom_tool_call".to_string()),
+                    );
+                }
+                if let Some(item_id) = responses_item_id {
+                    extension.insert(
+                        "responses_item_id".to_string(),
+                        Value::String(item_id.to_string()),
+                    );
+                }
+                if let Some(object) = tool_call.as_object_mut() {
+                    object.insert(
+                        "routecodex_chat_extension".to_string(),
+                        Value::Object(extension),
+                    );
+                }
+            }
             json!({
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": arguments}
-                }]
+                "tool_calls": [tool_call]
             })
         }
         "function_call_output"
@@ -157,7 +183,27 @@ pub(crate) fn responses_like_item_to_chat_message_at_req04(item: &Value) -> Valu
                 .or_else(|| item.get("content"))
                 .map(chat_content_text_at_req04)
                 .unwrap_or_default();
-            json!({"role": "tool", "tool_call_id": call_id, "content": content})
+            let mut extension = Map::new();
+            extension.insert(
+                "responses_tool_output_type".to_string(),
+                Value::String(item_type.to_string()),
+            );
+            if let Some(item_id) = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+            {
+                extension.insert(
+                    "responses_item_id".to_string(),
+                    Value::String(item_id.to_string()),
+                );
+            }
+            json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": content,
+                "routecodex_chat_extension": Value::Object(extension)
+            })
         }
         _ => {
             let role = item

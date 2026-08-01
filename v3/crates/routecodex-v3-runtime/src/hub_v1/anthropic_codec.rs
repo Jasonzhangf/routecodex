@@ -380,6 +380,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     }
     if let Some(value) = object
         .get("max_output_tokens")
+        .or_else(|| object.get("max_completion_tokens"))
         .or_else(|| object.get("max_tokens"))
     {
         output.insert("max_tokens".to_string(), value.to_owned());

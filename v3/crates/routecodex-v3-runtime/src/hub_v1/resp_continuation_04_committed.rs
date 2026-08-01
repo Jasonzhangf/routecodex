@@ -170,11 +170,12 @@ fn canonical_request_input_items_at_resp04(
         Some(messages) => {
             match super::request_outbound_format::build_responses_input_from_chat_messages(messages)
             {
-                Value::Array(items) => Ok(items),
-                _ => Err(V3LocalContinuationError::Codec {
+                Ok(Value::Array(items)) => Ok(items),
+                Ok(_) => Err(V3LocalContinuationError::Codec {
                     message: "Resp04 local canonical request messages did not produce input items"
                         .to_string(),
                 }),
+                Err(reason) => Err(V3LocalContinuationError::Codec { message: reason }),
             }
         }
         None => Err(V3LocalContinuationError::Codec {

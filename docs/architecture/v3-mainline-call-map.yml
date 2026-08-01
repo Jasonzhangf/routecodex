@@ -614,6 +614,9 @@ chains:
     callee_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
     status: anchored
     owner_feature_id: v3.responses_direct_mvp_architecture
+    semantic_contract:
+      - reads selected provider_type and provider.responses.process from v3.target.concrete_provider
+      - responses provider with responses.process=chat chooses HubRelay before SameProtocolDirect
     resource_flow:
       consumes:
       - v3.target.concrete_provider
@@ -3740,7 +3743,7 @@ chains:
 - chain_id: v3.protocol_conversion_field_parity
   owner_feature_id: v3.protocol_conversion_field_parity
   binding_kind: protocol_field_parity_test_over_existing_relay_chain
-  summary: Field-parity contract overlay over existing V3 Relay chains. It binds adjacent codec/projector owner functions and focused tests; it does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.
+  summary: Field-parity contract overlay over existing V3 Relay chains. It binds adjacent codec/projector owner functions and focused tests; arguments and other payload fields stay in the data plane, routing/switch/continuation control stays in MetadataCenter, and neither side reconstructs the other. It does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.
   edges:
   - step_id: v3-protocol-field-parity-responses-chat-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
@@ -3762,45 +3765,25 @@ chains:
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
       side_channel_writes: []
-  - step_id: v3-protocol-field-parity-responses-chat-req-negative-01
-    from_node: V3HubReqOutbound07ProviderSemantic
-    to_node: ProviderReqCompat06ProviderCompat
-    caller_symbol: execute_v3_responses_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-    callee_symbol: build_provider_req_compat_06_from_v3_hub_req_outbound_07
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - step_id: v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
+    from_node: ProviderReqCompat06ProviderCompat
+    to_node: V3ProviderReqOutbound08WirePayload
+    caller_symbol: build_v3_openai_chat_assistant_tool_call_message
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+    callee_symbol: project_v3_responses_arguments_to_openai_chat_wire
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     status: anchored
     binding_kind: protocol_field_parity_test_over_existing_relay_chain
     owner_feature_id: v3.protocol_conversion_field_parity
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.hub.entry_protocol
       - v3.hub.provider_protocol
       produces:
       - v3.hub.provider_wire_payload
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
       side_channel_writes: []
-  - step_id: v3-protocol-field-parity-responses-chat-req-negative-02
-    from_node: ProviderReqCompat06ProviderCompat
-    to_node: V3Error05ExecutionDecision
-    caller_symbol: execute_v3_responses_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-    callee_symbol: handle_v3_responses_relay_provider_failure
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-    status: anchored
-    binding_kind: protocol_field_parity_test_over_existing_relay_chain
-    owner_feature_id: v3.protocol_conversion_field_parity
-    resource_flow:
-      consumes:
-      - v3.hub.provider_wire_payload
-      produces:
-      - v3.error.execution_decision
-      side_channel_reads:
-      - v3.protocol_conversion.field_parity_contract
-      side_channel_writes:
-      - v3.error.execution_decision
   - step_id: v3-protocol-field-parity-responses-chat-resp-01
     from_node: V3ProviderRespInbound01Raw
     to_node: V3HubRespInbound02Normalized

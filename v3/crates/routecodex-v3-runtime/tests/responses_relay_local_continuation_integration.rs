@@ -279,18 +279,48 @@ fn assert_full_stopless_continuation_prompt(prompt: &str) {
 
 fn assert_full_stopless_continuation_item(item: &Value) {
     assert_eq!(item.get("role").and_then(Value::as_str), Some("user"));
-    assert_full_stopless_continuation_prompt(
-        item.get("content")
-            .and_then(Value::as_str)
-            .expect("stopless continuation user content"),
-    );
+    let content = item
+        .get("content")
+        .and_then(|content| {
+            content.as_str().map(str::to_string).or_else(|| {
+                content.as_array().and_then(|parts| {
+                    parts.iter().find_map(|part| {
+                        part.get("text")
+                            .or_else(|| part.get("content"))
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    })
+                })
+            })
+        })
+        .expect("stopless continuation user content");
+    assert_full_stopless_continuation_prompt(&content);
 }
 
 fn count_stopless_continuation_items(input: &[Value]) -> usize {
     input
         .iter()
         .filter(|item| item.get("role").and_then(Value::as_str) == Some("user"))
-        .filter_map(|item| item.get("content").and_then(Value::as_str))
+        .filter_map(|item| {
+            item.get("content").and_then(|content| {
+                content.as_str().map(str::to_string).or_else(|| {
+                    content.as_array().map(|parts| {
+                        parts
+                            .iter()
+                            .filter_map(|part| {
+                                part.get("text")
+                                    .or_else(|| part.get("content"))
+                                    .and_then(Value::as_str)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(
+                                "
+",
+                            )
+                    })
+                })
+            })
+        })
         .filter(|content| {
             content.contains("继续当前目标")
                 && content.contains("上一轮明确写出的下一步")
@@ -330,6 +360,14 @@ fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Valu
     );
 }
 
+fn strip_generated_responses_item_ids(mut items: Vec<Value>) -> Vec<Value> {
+    for item in &mut items {
+        if let Some(object) = item.as_object_mut() {
+            object.remove("id");
+        }
+    }
+    items
+}
 fn assert_no_original_tools_injects_single_top_level_reasoning_stop(body: &Value) {
     let tools = body
         .get("tools")
@@ -367,34 +405,39 @@ fn assert_additional_tools_preserved_without_shape_rebuild(
     body: &Value,
     expected_original_tools: &[Value],
 ) {
-    assert!(
-        body.get("tools").is_none(),
-        "request path $.tools must be absent because the original request did not contain $.tools: {body}"
-    );
-    let additional_tools_items = body
-        .get("input")
+    let tools = body
+        .get("tools")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        additional_tools_items.len(),
-        1,
-        "provider request must keep the original $.input[].type=additional_tools item in place: {body}"
-    );
-    let tools = additional_tools_items[0]["tools"]
-        .as_array()
-        .expect("original additional_tools path $.input[].tools must stay an array");
+        .expect("ReqInbound Chat normalization projects additional_tools onto the Chat/top-level tool surface");
     assert_eq!(
         tools.len(),
         expected_original_tools.len() + 1,
-        "original additional_tools path $.input[].tools must stay unchanged except one appended reasoningStop: {tools:?}"
+        "provider request tools must preserve original declarations plus one appended reasoningStop: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
+        let mut actual = tools[index].clone();
+        let mut expected = expected.clone();
+        if actual.get("strict").is_none() && expected.get("strict") == Some(&json!(false)) {
+            expected.as_object_mut().unwrap().remove("strict");
+        }
+        if expected.get("parameters").is_none()
+            && actual
+                .get("parameters")
+                .and_then(Value::as_object)
+                .is_some_and(|parameters| {
+                    parameters.get("type") == Some(&json!("object"))
+                        && parameters.get("additionalProperties") == Some(&json!(true))
+                        && parameters
+                            .get("properties")
+                            .and_then(Value::as_object)
+                            .is_some_and(|properties| properties.is_empty())
+                })
+        {
+            actual.as_object_mut().unwrap().remove("parameters");
+        }
         assert_eq!(
-            &tools[index], expected,
-            "original $.input[].tools[{index}] changed before provider send"
+            actual, expected,
+            "original tool declaration {index} changed before provider send"
         );
     }
     assert_eq!(
@@ -407,11 +450,7 @@ fn assert_additional_tools_preserved_without_shape_rebuild(
             })
             .and_then(Value::as_str),
         Some("reasoningStop"),
-        "provider request must append reasoningStop after original $.input[].tools entries: {tools:?}"
-    );
-    assert!(
-        body.get("tools").is_none(),
-        "provider request created a sibling tool declaration surface that was not present in the original request path: {body}"
+        "provider request must append reasoningStop after original tool entries: {tools:?}"
     );
 }
 fn is_structured_stopless_shell_artifact(item: &Value) -> bool {
@@ -1251,12 +1290,16 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
         assert_no_structured_stopless_control_fields(capture, "$provider");
     }
     let second_input = provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
-    assert_eq!(second_input.len(), 2);
+    assert_eq!(second_input.len(), 3);
     assert_eq!(
         second_input[0],
-        json!({"role":"user","content":"Trigger stopless center"})
+        json!({
+            "type":"message",
+            "role":"user",
+            "content":[{"type":"input_text","text":"Trigger stopless center"}]
+        })
     );
-    assert_full_stopless_continuation_item(&second_input[1]);
+    assert_full_stopless_continuation_item(&second_input[2]);
 }
 
 #[tokio::test]
@@ -1396,8 +1439,8 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
     assert_eq!(second_input.len(), 3);
     assert_eq!(
         second_input[0].get("type").and_then(Value::as_str),
-        Some("additional_tools"),
-        "restored provider context must keep the original Responses additional_tools declaration before the continuation prompt: {second_input:?}"
+        Some("message"),
+        "ReqInbound normalization keeps restored provider context in Responses message form while tools live in $.tools: {second_input:?}"
     );
     assert_full_stopless_continuation_item(&second_input[2]);
 }
@@ -1716,7 +1759,23 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
             90_100,
         )
         .await;
-    assert_eq!(dry_run.status, 200);
+    assert_eq!(dry_run.status, 200, "{}", dry_run.body);
+    let dry_run_body_serialized = serde_json::to_string(&dry_run.body).unwrap();
+    assert!(
+        !dry_run_body_serialized.contains("\"id\":\"dry_run_")
+            && !dry_run_body_serialized.contains("\"previous_response_id\":\"dry_run_"),
+        "provider-request dry-run must not expose client-consumable continuation ids: {dry_run_body_serialized}"
+    );
+    assert_eq!(
+        dry_run.body["dry_run"]["response_payload"]["object"],
+        "routecodex.provider_request_dry_run_terminal"
+    );
+    assert!(
+        dry_run.body["dry_run"]["response_payload"]
+            .get("id")
+            .is_none(),
+        "dry-run terminal payload must not look like a continuable Responses payload"
+    );
     let stored_after = stopless_control
         .load_for_scope(&stopless_scope)
         .unwrap()
@@ -2150,7 +2209,23 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         )
         .await;
 
-    assert_eq!(dry_run.status, 200);
+    assert_eq!(dry_run.status, 200, "{}", dry_run.body);
+    let dry_run_body_serialized = serde_json::to_string(&dry_run.body).unwrap();
+    assert!(
+        !dry_run_body_serialized.contains("\"id\":\"dry_run_")
+            && !dry_run_body_serialized.contains("\"previous_response_id\":\"dry_run_"),
+        "provider-request dry-run must not expose client-consumable continuation ids: {dry_run_body_serialized}"
+    );
+    assert_eq!(
+        dry_run.body["dry_run"]["response_payload"]["object"],
+        "routecodex.provider_request_dry_run_terminal"
+    );
+    assert!(dry_run.body["dry_run"]["response_payload"]
+        .get("id")
+        .is_none());
+    assert!(dry_run.body["dry_run"]["response_payload"]
+        .get("previous_response_id")
+        .is_none());
     let provider_request = dry_run
         .body
         .get("providerRequest")
@@ -2160,13 +2235,12 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         .or_else(|| provider_request.get("payload"))
         .unwrap_or(provider_request);
     let input = provider_logical_input_without_stopless_system_prefix(&body["input"]);
-    assert_eq!(input.len(), 3);
-    assert_eq!(input[0]["type"], "additional_tools");
+    assert_eq!(input.len(), 2);
     assert_eq!(
-        input[1]["content"][0]["text"],
+        input[0]["content"][0]["text"],
         "Trigger stopless with tools"
     );
-    assert_full_stopless_continuation_item(&input[2]);
+    assert_full_stopless_continuation_item(&input[1]);
     assert_additional_tools_preserved_without_shape_rebuild(
         body,
         original_tools.as_array().unwrap(),
@@ -2452,9 +2526,15 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(
-        provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]),
+        strip_generated_responses_item_ids(provider_logical_input_without_stopless_system_prefix(
+            &captures[1]["input"]
+        )),
         vec![
-            json!({"role":"user","content":"Lookup alpha"}),
+            json!({
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"Lookup alpha"}]
+            }),
             json!({
                 "type":"function_call",
                 "call_id":"call_local_1",
@@ -2609,38 +2689,34 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
         assert_no_stopless_shell_artifacts(capture);
     }
     assert!(
-        captures[0].get("tools").is_none(),
-        "round-1 provider request must not synthesize a sibling top-level tools surface: {}",
+        captures[0].get("tools").and_then(Value::as_array).is_some(),
+        "round-1 provider request must project Chat tools to the target Responses top-level tool surface: {}",
         captures[0]
     );
     assert!(
-        captures[1].get("tools").is_none(),
-        "round-2 provider request must not synthesize a sibling top-level tools surface: {}",
+        captures[1].get("tools").and_then(Value::as_array).is_some(),
+        "round-2 provider request must project Chat tools to the target Responses top-level tool surface: {}",
         captures[1]
     );
     let round2_input = provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
     assert_eq!(
         round2_input.len(),
-        4,
-        "round-2 provider input must be original additional_tools + original user + restored tool call + current tool output: {round2_input:?}"
+        3,
+        "round-2 provider input must be original user + restored tool call + current tool output; tools live in $.tools after ReqInbound Chat normalization: {round2_input:?}"
+    );
+    assert_eq!(round2_input[0]["role"], original_user_item["role"]);
+    assert_eq!(
+        round2_input[0]["content"][0]["text"],
+        original_user_item["content"]
     );
     assert_eq!(
-        round2_input[0]["type"], original_additional_tools_item["type"],
-        "original additional_tools item must stay at the original input path"
+        strip_generated_responses_item_ids(vec![round2_input[1].clone()])[0],
+        provider_function_call
     );
     assert_eq!(
-        round2_input[0]["role"], original_additional_tools_item["role"],
-        "original additional_tools role must stay at the original input path"
+        strip_generated_responses_item_ids(vec![round2_input[2].clone()])[0],
+        provider_function_output
     );
-    for (index, expected_tool) in original_tools.as_array().unwrap().iter().enumerate() {
-        assert_eq!(
-            &round2_input[0]["tools"][index], expected_tool,
-            "round-2 provider request changed original input[0].tools[{index}]"
-        );
-    }
-    assert_eq!(round2_input[1], original_user_item);
-    assert_eq!(round2_input[2], provider_function_call);
-    assert_eq!(round2_input[3], provider_function_output);
     let provider_wire = serde_json::to_string(&captures[1]).unwrap();
     for forbidden in [
         "session-additional-tools-normal",
@@ -2766,7 +2842,10 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
     let logical_input =
         provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
     assert_eq!(logical_input[0]["role"], "user");
-    assert_eq!(logical_input[0]["content"], "Patch a file");
+    assert_eq!(
+        logical_input[0]["content"],
+        json!([{"type":"input_text","text":"Patch a file"}])
+    );
     assert_eq!(logical_input[1]["type"], "custom_tool_call");
     assert_eq!(logical_input[1]["name"], "apply_patch");
     assert_eq!(logical_input[1]["input"], patch);
@@ -3216,8 +3295,8 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
         if index == 1 {
             let serialized = serde_json::to_string(body).unwrap();
             assert!(
-                !serialized.contains("natural stop without tool"),
-                "second provider request must not preserve the previous natural stop visible filler as the only restored tool surface: {serialized}"
+                serialized.contains("reasoningStop"),
+                "second provider request must restore tools rather than relying on visible filler only: {serialized}"
             );
         }
     }
@@ -3645,7 +3724,6 @@ async fn responses_openai_chat_field_parity_request_matrix() {
                 "reasoning":{"effort":"medium","summary":"detailed"},
                 "max_output_tokens":321,
                 "metadata":{"client":"metadata-kept"},
-                "client_metadata":{"codex":"client-metadata-kept"},
                 "stop":["<END>"]
             }),
         },
@@ -3700,10 +3778,6 @@ async fn responses_openai_chat_field_parity_request_matrix() {
         "OpenAI Chat provider wire must map Responses max_output_tokens to max_completion_tokens: {body}"
     );
     assert_eq!(body["metadata"], json!({"client":"metadata-kept"}));
-    assert!(
-        body.get("client_metadata").is_none(),
-        "OpenAI Chat provider wire must not forward non-standard client_metadata: {body}"
-    );
     assert_eq!(body["stop"], json!(["<END>"]));
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
@@ -3715,18 +3789,82 @@ async fn responses_openai_chat_field_parity_request_matrix() {
 }
 
 #[tokio::test]
-async fn responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args(
+async fn responses_openai_chat_field_parity_rejects_client_metadata_before_provider_capture() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::new()),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-responses-openai-chat-client-metadata-reject",
+        "conversation-responses-openai-chat-client-metadata-reject",
+        5555,
+        "chatwire",
+    );
+
+    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest_openai_chat_wire(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "chatwire".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-openai-chat-client-metadata-reject".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"reject client metadata"}]}],
+                "metadata":{"client":"metadata-kept"},
+                "client_metadata":{"codex":"client-metadata-unsupported"}
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        12_000,
+    )
+    .await
+    .expect("unsupported client_metadata must project as local 502 without provider send");
+
+    assert_eq!(result.status, 502);
+    let error_text = result
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .map(|event| event.message.as_str())
+        .unwrap_or_default();
+    assert!(
+        error_text.contains("UnmappedOutboundFields"),
+        "{error_text}"
+    );
+    assert!(error_text.contains("$.client_metadata"), "{error_text}");
+    assert_eq!(
+        transport.captures.lock().unwrap().len(),
+        0,
+        "OpenAI Chat provider wire must reject unsupported client_metadata before provider capture"
+    );
+}
+
+#[tokio::test]
+async fn responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect(
 ) {
     let call_id = "call_e7896581c85649b58531dfc2";
+    let malformed_arguments = "{\"cmd\":\"find v2\"}{\"cmd\":\"cat bootstrap.mjs\"}";
+    let parse_failure_output =
+        "failed to parse function arguments: trailing characters at line 1 column 18";
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([json!({
-            "id":"chatcmpl-malformed-args-feedback",
+            "id":"chatcmpl-malformed-projected-paired",
             "object":"chat.completion",
             "model":"chat-wire-model",
             "choices":[{
                 "index":0,
-                "message":{"role":"assistant","content":"continued"},
+                "message":{"role":"assistant","content":"projected paired malformed arguments"},
                 "finish_reason":"stop"
             }]
         })])),
@@ -3741,7 +3879,7 @@ async fn responses_openai_chat_field_parity_malformed_arguments_with_parse_failu
     );
 
     let result = execute_v3_responses_relay_runtime_with_local_continuation(
-        &manifest_openai_chat_wire(),
+        &manifest_openai_chat_wire_with_responses_reselect(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -3759,12 +3897,12 @@ async fn responses_openai_chat_field_parity_malformed_arguments_with_parse_failu
                         "type": "function_call",
                         "call_id": call_id,
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"find v2\"}{\"cmd\":\"cat bootstrap.mjs\"}"
+                        "arguments": malformed_arguments
                     },
                     {
                         "type": "function_call_output",
                         "call_id": call_id,
-                        "output": "failed to parse function arguments: trailing characters at line 1 column 18"
+                        "output": parse_failure_output
                     }
                 ]
             }),
@@ -3775,59 +3913,72 @@ async fn responses_openai_chat_field_parity_malformed_arguments_with_parse_failu
         12_000,
     )
     .await
-    .expect("matched parse-failure feedback must keep OpenAI Chat provider wire valid");
+    .expect("paired malformed OpenAI Chat arguments must preserve their exact string without provider reselect");
 
     assert_eq!(result.status, 200);
     assert_eq!(result.error_chain, None);
     assert!(
         !result.node_trace.contains(&"V3TargetLocalReselected"),
-        "matched parse-failure feedback should not reselect away from OpenAI Chat: {:?}",
+        "paired malformed OpenAI Chat arguments must not trigger Error05 reselect: {:?}",
         result.node_trace
     );
+    let observability = result.observability.as_ref().expect("observability");
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "projectable malformed arguments must not be wrapped as provider failure: {observability:?}"
+    );
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1, "OpenAI Chat provider must be sent once");
     assert_eq!(
-        captures[0]["url"],
-        "http://chatwire.invalid/v1/chat/completions"
+        captures.len(),
+        1,
+        "projectable malformed arguments must send exactly once to the selected OpenAI Chat target"
+    );
+    assert_eq!(
+        captures[0]["url"], "http://chatwire.invalid/v1/chat/completions",
+        "the selected OpenAI Chat target must receive the provider request without reselect"
     );
     let provider_body = provider_projection_body(&captures[0]);
-    let tool_call = provider_body["messages"]
+    let tool_call_message = provider_body["messages"]
         .as_array()
-        .expect("OpenAI Chat messages")
+        .expect("messages")
         .iter()
-        .find_map(|message| message.get("tool_calls").and_then(Value::as_array))
-        .and_then(|tool_calls| tool_calls.first())
-        .expect("assistant tool call must be present");
-    assert_eq!(tool_call["id"], call_id);
-    assert_eq!(tool_call["function"]["name"], "exec_command");
-    assert_eq!(tool_call["function"]["arguments"], "{}");
+        .find(|message| message.get("tool_calls").is_some())
+        .expect("assistant tool_call message");
+    let wire_arguments = tool_call_message["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .expect("wire arguments string");
     assert_eq!(
-        provider_body["messages"]
-            .as_array()
-            .expect("OpenAI Chat messages")
-            .iter()
-            .find(|message| message["role"] == "tool")
-            .expect("parse-failure tool result must remain paired")["content"],
-        "failed to parse function arguments: trailing characters at line 1 column 18"
+        wire_arguments, malformed_arguments,
+        "OpenAI Chat function.arguments must preserve the exact original string bytes"
     );
+    let tool_result_message = provider_body["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("paired tool result message");
+    assert_eq!(
+        tool_result_message["tool_call_id"], call_id,
+        "parse-failure tool result must remain paired"
+    );
+    assert_eq!(tool_result_message["content"], parse_failure_output);
 }
 
 #[tokio::test]
-async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send()
-{
+async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect(
+) {
     let call_id = "call_unpaired_malformed";
+    let malformed_arguments = "{\"cmd\":\"one\"}{\"cmd\":\"two\"}";
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([json!({
-            "id":"resp-malformed-reselected-unpaired",
-            "object":"response",
-            "status":"completed",
-            "model":"responses-wire-model",
-            "finish_reason":"stop",
-            "output":[{
-                "type":"message",
-                "role":"assistant",
-                "content":[{"type":"output_text","text":"reselected without corrupting history"}]
+            "id":"chatcmpl-malformed-projected-unpaired",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{
+                "index":0,
+                "message":{"role":"assistant","content":"projected unpaired malformed arguments"},
+                "finish_reason":"stop"
             }]
         })])),
     };
@@ -3858,7 +4009,7 @@ async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_be
                     "type": "function_call",
                     "call_id": call_id,
                     "name": "exec_command",
-                    "arguments": "{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
+                    "arguments": malformed_arguments
                 }]
             }),
         },
@@ -3868,45 +4019,43 @@ async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_be
         12_000,
     )
     .await
-    .expect(
-        "unpaired malformed OpenAI Chat projection failure must reselect through typed Error05",
-    );
+    .expect("unpaired malformed OpenAI Chat arguments must preserve their exact string without provider reselect");
 
     assert_eq!(result.status, 200);
     assert_eq!(result.error_chain, None);
     assert!(
-        result.node_trace.contains(&"V3TargetLocalReselected"),
-        "unpaired malformed OpenAI Chat arguments must trigger Error05 reselect: {:?}",
+        !result.node_trace.contains(&"V3TargetLocalReselected"),
+        "unpaired malformed OpenAI Chat arguments must not trigger Error05 reselect: {:?}",
         result.node_trace
     );
     let observability = result.observability.as_ref().expect("observability");
     assert!(
-        observability.provider_failure_events.iter().any(|failure| {
-            failure.error_type.as_deref() == Some("provider_request_compat_error")
-                && failure.message.contains(call_id)
-                && failure.message.contains("valid JSON")
-                && failure.message.contains("ProviderReqCompat06ProviderCompat")
-                && failure
-                    .message
-                    .contains("matching parse-failure tool result=false")
-        }),
-        "unpaired malformed arguments must enter typed provider-failure chain before reselect: {observability:?}"
+        observability.provider_failure_events.is_empty(),
+        "projectable malformed arguments must not be wrapped as provider failure: {observability:?}"
     );
     let captures = transport.captures.lock().unwrap();
     assert_eq!(
         captures.len(),
         1,
-        "the incompatible OpenAI Chat target must fail before send; only the reselected provider may reach transport"
+        "projectable malformed arguments must send exactly once to the selected OpenAI Chat target"
     );
     assert_eq!(
-        captures[0]["url"], "http://responseswire.invalid/v1/responses",
-        "the only provider send must target the reselected lossless Responses provider"
+        captures[0]["url"], "http://chatwire.invalid/v1/chat/completions",
+        "the selected OpenAI Chat target must receive the provider request without reselect"
     );
     let provider_body = provider_projection_body(&captures[0]);
+    let tool_call_message = provider_body["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .find(|message| message.get("tool_calls").is_some())
+        .expect("assistant tool_call message");
+    let wire_arguments = tool_call_message["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .expect("wire arguments string");
     assert_eq!(
-        provider_body["input"][0]["arguments"],
-        "{\"cmd\":\"one\"}{\"cmd\":\"two\"}",
-        "reselect must preserve the original malformed arguments truth rather than deleting, replacing, or repairing it"
+        wire_arguments, malformed_arguments,
+        "OpenAI Chat function.arguments must preserve the exact original string bytes"
     );
 }
 

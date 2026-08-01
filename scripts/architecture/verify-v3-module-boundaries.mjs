@@ -190,6 +190,18 @@ const targetSource = files('v3/crates/routecodex-v3-target/src').map(read).join(
 if (/classify_request|resolve_default_pool|resolve_selection_plan|hit_opaque_target_once|hit_opaque_target_plan_once|V3VirtualRouter::/.test(targetSource.replace(/#\[cfg\(test\)\][\s\S]*/, ''))) {
   fail('Target production source cannot re-enter Virtual Router');
 }
+if (!/pub responses_process: Option<String>/.test(targetSource)
+    || !/responses_process:\s*provider[\s\S]{0,160}\.responses[\s\S]{0,160}\.map\(\|responses\| responses\.process\.clone\(\)\)/.test(targetSource)) {
+  fail('Target candidate must carry provider.responses.process from config manifest into selected provider truth');
+}
+
+const runtimeNodesSource = read('v3/crates/routecodex-v3-runtime/src/nodes.rs');
+if (!/responses_process_requires_relay/.test(runtimeNodesSource)
+    || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(runtimeNodesSource)
+    || !/responses provider process=chat requires relay mode but relay is not allowed/.test(runtimeNodesSource)
+    || !/let mode = if responses_process_requires_relay[\s\S]{0,400}V3Execution11ProtocolDecisionMode::HubRelay[\s\S]{0,120}else if entry_protocol == selected_provider_protocol/.test(runtimeNodesSource)) {
+  fail('V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay before SameProtocolDirect');
+}
 
 const foundationSource = read('v3/crates/routecodex-v3-runtime/src/foundation.rs');
 if (!/build_v3_req_04_standardized_responses_from_v3_server_03/.test(foundationSource)) {

@@ -415,8 +415,10 @@ features:
       - V3ResponsesDirectRuntimeSharedState
       - responses_direct_route_hook
       - responses_direct_response_projection_hook
+      - kernel::tests::direct_protocol_plan_uses_session_bound_cooldown_before_initial_target
       - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
       - kernel::tests::direct_reselect_to_cross_protocol_returns_relay_handoff_not_error06
+      - kernel::tests::responses_provider_process_chat_plans_hub_relay_not_direct
       - build_v3_server_16_http_frame_from_v3_resp_15
       - pending_endpoint
       - multi_listener_server::responses_direct_shared_provider_health_cools_first_provider_after_three_failures
@@ -425,6 +427,7 @@ features:
       - direct_frame_console_infers_stop_finish_reason_from_completed_json_status
       - direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish
       - direct_stream_request_error06_projects_sse_error_not_json
+      - kernel::tests::direct_stream_request_projects_provider_json_as_client_sse
     allowed_paths:
       - v3/crates/routecodex-v3-runtime
       - v3/crates/routecodex-v3-provider-responses
@@ -1891,7 +1894,7 @@ features:
 
   - feature_id: v3.protocol_conversion_field_parity
     owner_crates: [routecodex-v3-runtime]
-    owner_scope: "V2/V3 protocol conversion field parity contract for Responses -> OpenAI Chat -> Responses, Responses -> Anthropic Messages -> Responses, Anthropic Messages -> Responses -> Anthropic Messages, and OpenAI Chat -> OpenAI Chat Relay paths; fields remain data-plane payload semantics and never MetadataCenter control state."
+    owner_scope: "V2/V3 protocol conversion field parity contract for Responses -> OpenAI Chat -> Responses, Responses -> Anthropic Messages -> Responses, Anthropic Messages -> Responses -> Anthropic Messages, OpenAI Chat -> OpenAI Chat Relay paths, and same-protocol Responses Direct provider wire preservation; arguments and other protocol fields remain payload data-plane semantics projected only by adjacent codecs, while routing, switching, and continuation remain control semantics in MetadataCenter; neither side may mirror or reconstruct the other."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
@@ -1912,8 +1915,7 @@ features:
       - v3.protocol_conversion.field_parity_contract
     mainline_bindings:
       - v3-protocol-field-parity-responses-chat-req-01
-      - v3-protocol-field-parity-responses-chat-req-negative-01
-      - v3-protocol-field-parity-responses-chat-req-negative-02
+      - v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
       - v3-protocol-field-parity-responses-chat-resp-01
       - v3-protocol-field-parity-responses-anthropic-req-01
       - v3-protocol-field-parity-anthropic-responses-req-01
@@ -1921,6 +1923,7 @@ features:
       - v3-protocol-field-parity-openai-chat-same-protocol-01
     entry_symbols:
       - build_v3_chat_canonical_request_from_responses_payload
+      - project_v3_responses_arguments_to_openai_chat_wire
       - build_v3_openai_chat_standard_request_from_chat_canonical
       - build_provider_req_compat_06_from_v3_hub_req_outbound_07
       - execute_v3_responses_relay_runtime_inner
@@ -1937,6 +1940,7 @@ features:
       - anthropic_responses_field_parity_response_matrix
       - anthropic_responses_field_parity_rejects_malformed_function_arguments
       - openai_chat_same_protocol_field_parity_request_response_matrix
+      - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
@@ -1946,6 +1950,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
@@ -1992,7 +1997,7 @@ features:
     notes:
       - "Protocol body fields named metadata/client_metadata are data-plane fields only when the target entry/provider protocol supports them; OpenAI Chat provider wire preserves metadata but must not forward non-standard client_metadata."
       - "RouteCodex-created internal control fields fail-fast before provider/client payload projection."
-      - "Malformed function/custom-tool arguments fail-fast; no empty-object or text fallback is allowed."
+      - "OpenAI Chat function.arguments is a string-valued payload field and preserves the exact source string at the adjacent codec even when its contents are not parseable JSON; protocol targets that require structured argument values keep their own adjacent-codec fail-fast contract. No empty-object fallback, JSON-string rewrapping, MetadataCenter reconstruction, or provider reselect is allowed."
       - "Generated HTML review surface is docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html and must stay in sync with the YAML field matrix."
       - "Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md and must include audited status counts plus gap closeout categories."
     runtime_status: source_field_parity_focused_gates_only
@@ -2769,6 +2774,7 @@ features:
       - response_summary_stop_schema_decision
       - stopless_schema_guidance_activation_contract
       - apply_v3_stopless_request_hook_at_req04
+      - strip_v3_stopless_request_artifacts_at_req04
       - V3StoplessCenterState
       - V3StoplessCenterSteering
       - V3HubServertoolRequestProfile::stopless_reasoning_stop
@@ -2787,6 +2793,7 @@ features:
       - json_stopless_center_persists_without_local_continuation_store
       - json_stopless_center_missing_client_session_scope_passes_stop_without_control_write
       - feature_toggle_false_disables_relay_stopless_injection_and_projection
+      - responses_direct_to_relay_req04_strips_all_historical_stopless_pairs_before_anthropic_wire
       - verify-v3-stopless-resource-control
       - verify-v3-normalization-payload-logic-boundary
     allowed_paths:
@@ -2800,6 +2807,7 @@ features:
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_stopless_center_semantics.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/responses_relay_stopless_anthropic_provider_wire_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
       - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
       - docs/architecture/v3-resource-operation-map.yml
@@ -2809,6 +2817,7 @@ features:
       - docs/architecture/wiki/stopless-session-mainline-source.md
       - docs/architecture/wiki/html/stopless-session-mainline-source.html
       - docs/design/v3-stopless-schema-guidance-activation-contract.md
+      - docs/goals/v3-responses-direct-relay-stopless-artifact-cleanup-test-design.md
       - scripts/architecture/verify-v3-stopless-resource-control.mjs
       - scripts/tests/v3-stopless-resource-control-red-fixtures.mjs
       - scripts/architecture/render-v3-stopless-state-machine-docs.mjs
@@ -2837,6 +2846,7 @@ features:
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_stopless_live_shapes -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_stopless_anthropic_provider_wire_integration -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough -- --nocapture
       - npm run jest:run -- --runTestsByPath tests/cli/servertool-command.spec.ts
       - npm run verify:v3-relay-response-semantics

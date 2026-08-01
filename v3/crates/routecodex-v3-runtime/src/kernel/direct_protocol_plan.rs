@@ -100,7 +100,9 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     };
     trace.push("V3Target09CandidateSetExpanded");
     let provider_health = provider_health.into();
-    let selected = match target.select_available(expanded.clone(), &provider_health, now_epoch_ms) {
+    let availability = provider_health
+        .session_bound_availability(&standardized.protocol_context.failure_session_scope);
+    let selected = match target.select_available(expanded.clone(), &availability, now_epoch_ms) {
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(

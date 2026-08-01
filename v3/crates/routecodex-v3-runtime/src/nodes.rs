@@ -307,7 +307,25 @@ pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
     let relay_allowed = allowed_modes
         .iter()
         .any(|mode| mode.trim().eq_ignore_ascii_case("relay"));
-    let mode = if entry_protocol == selected_provider_protocol {
+    let responses_process_requires_relay = selected_provider_protocol
+        == crate::hub_v1::V3HubProviderWireProtocol::Responses
+        && selected
+            .candidate
+            .responses_process
+            .as_deref()
+            .map(|process| process.trim().eq_ignore_ascii_case("chat"))
+            .unwrap_or(false);
+    let mode = if responses_process_requires_relay {
+        if !relay_allowed {
+            return Err(build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3Execution11ProtocolDecision",
+                "responses_process_chat_relay_not_allowed",
+                "responses provider process=chat requires relay mode but relay is not allowed",
+            ));
+        }
+        V3Execution11ProtocolDecisionMode::HubRelay
+    } else if entry_protocol == selected_provider_protocol {
         if !direct_allowed {
             return Err(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,

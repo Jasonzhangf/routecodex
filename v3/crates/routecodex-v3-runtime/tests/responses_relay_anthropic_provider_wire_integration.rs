@@ -173,7 +173,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert_eq!(captured["model"], "MiniMax-M3");
-    assert_eq!(captured["max_tokens"], 64);
+    assert_eq!(captured["max_tokens"], 64, "{captured}");
     assert_eq!(captured["stream"], false);
     assert_eq!(
         captured["messages"],

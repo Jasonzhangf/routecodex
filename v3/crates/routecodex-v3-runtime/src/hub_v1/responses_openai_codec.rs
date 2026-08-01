@@ -1,5 +1,4 @@
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
 
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
@@ -65,7 +64,22 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 &pending_tool_call_ids,
                 build_v3_openai_chat_message_from_responses_message(item)?,
             )?,
-            "reasoning" => {}
+            "output_text" => append_v3_openai_chat_message_preserving_tool_adjacency(
+                &mut messages,
+                &mut pending_tool_message_index,
+                &pending_tool_call_ids,
+                build_v3_openai_chat_assistant_output_text_message(item),
+            )?,
+            "reasoning" => {
+                if let Some(message) = build_v3_openai_chat_assistant_reasoning_message(item) {
+                    append_v3_openai_chat_message_preserving_tool_adjacency(
+                        &mut messages,
+                        &mut pending_tool_message_index,
+                        &pending_tool_call_ids,
+                        message,
+                    )?;
+                }
+            }
             "function_call" | "tool_call" | "custom_tool_call" => {
                 append_v3_openai_chat_tool_call_message(
                     &mut messages,
@@ -113,39 +127,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             }
         }
     }
-    let parse_failure_tool_result_ids = parse_failure_tool_result_ids(&messages);
-    for tool_call in messages
-        .iter_mut()
-        .filter_map(|message| message.get_mut("tool_calls").and_then(Value::as_array_mut))
-        .flatten()
-    {
-        let call_id = tool_call
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("<missing>");
-        let arguments = tool_call
-            .get("function")
-            .and_then(|function| function.get("arguments"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                format!(
-                    "OpenAI Chat provider encoding cannot losslessly project tool call {call_id} at ProviderReqCompat06ProviderCompat: arguments must be a JSON string"
-                )
-            })?;
-        if let Err(error) = serde_json::from_str::<Value>(arguments) {
-            let matching_parse_feedback = parse_failure_tool_result_ids.contains(call_id);
-            if matching_parse_feedback {
-                if let Some(function) = tool_call.get_mut("function").and_then(Value::as_object_mut)
-                {
-                    function.insert("arguments".to_string(), Value::String("{}".to_string()));
-                }
-                continue;
-            }
-            return Err(format!(
-                "OpenAI Chat provider encoding cannot losslessly project tool call {call_id} at ProviderReqCompat06ProviderCompat: arguments must be valid JSON; matching parse-failure tool result={matching_parse_feedback}: {error}"
-            ));
-        }
-    }
     if messages.is_empty() {
         return Err("OpenAI Chat provider encoding produced no messages".to_string());
     }
@@ -165,14 +146,27 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         "user",
         "temperature",
         "top_p",
+        "top_k",
         "logit_bias",
         "seed",
         "stream",
         "response_format",
         "max_tokens",
+        "reasoning",
         "metadata",
         "client_metadata",
         "stop",
+        "service_tier",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "store",
+        "background",
+        "conversation",
+        "max_tool_calls",
+        "prompt",
+        "text",
+        "truncation",
+        "web_search_options",
     ] {
         if let Some(value) = root.get(key) {
             request.insert(key.to_string(), value.clone());
@@ -193,28 +187,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         request.insert("reasoning_effort".to_string(), reasoning_effort);
     }
     Ok(Value::Object(request))
-}
-
-fn parse_failure_tool_result_ids(messages: &[Value]) -> BTreeSet<String> {
-    messages
-        .iter()
-        .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
-        .filter(|message| {
-            message
-                .get("content")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .is_some_and(|content| content.starts_with("failed to parse function arguments:"))
-        })
-        .filter_map(|message| {
-            message
-                .get("tool_call_id")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|call_id| !call_id.is_empty())
-                .map(ToOwned::to_owned)
-        })
-        .collect()
 }
 
 fn responses_reasoning_request_config_as_openai_chat_reasoning_effort(
@@ -499,48 +471,7 @@ fn collect_v3_openai_chat_tool_call_ids(message: &Value) -> Vec<String> {
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
     payload: &Value,
 ) -> Result<Value, String> {
-    if responses_payload_needs_req04_original_surface(payload) {
-        return Err(
-            "Responses inbound payload contains request-side Chat Process original-surface items"
-                .to_string(),
-        );
-    }
     build_v3_chat_canonical_request_from_responses_payload(payload)
-}
-
-pub(crate) fn responses_payload_needs_req04_original_surface(payload: &Value) -> bool {
-    let Some(input) = payload.get("input").and_then(Value::as_array) else {
-        return false;
-    };
-    input
-        .iter()
-        .any(responses_input_item_needs_req04_original_surface)
-}
-
-fn responses_input_item_needs_req04_original_surface(item: &Value) -> bool {
-    match item.get("type").and_then(Value::as_str).unwrap_or_default() {
-        "function_call"
-        | "tool_call"
-        | "custom_tool_call"
-        | "function_call_output"
-        | "tool_call_output"
-        | "custom_tool_call_output"
-        | "tool_result"
-        | "tool_message"
-        | "web_search_call"
-        | "tool_search_call" => return true,
-        _ => {}
-    }
-    item.get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|part| {
-            matches!(
-                part.get("type").and_then(Value::as_str),
-                Some("input_image" | "image_url")
-            )
-        })
 }
 
 fn build_v3_openai_chat_message_from_responses_message(
@@ -570,6 +501,30 @@ fn build_v3_openai_chat_message_from_responses_message(
         );
     }
     Ok(Value::Object(message))
+}
+
+fn build_v3_openai_chat_assistant_output_text_message(item: &Map<String, Value>) -> Value {
+    let content = item
+        .get("text")
+        .or_else(|| item.get("content"))
+        .or_else(|| item.get("output"))
+        .map(|value| match value {
+            Value::String(text) => text.clone(),
+            other => serde_json::to_string(other).unwrap_or_else(|_| String::new()),
+        })
+        .unwrap_or_default();
+    json!({"role":"assistant", "content":content})
+}
+
+fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -> Option<Value> {
+    let reasoning_content = join_v3_openai_chat_reasoning_segments(
+        collect_v3_openai_chat_reasoning_segments(Some(&Value::Object(item.clone()))).as_slice(),
+    )?;
+    Some(json!({
+        "role":"assistant",
+        "content":"",
+        "reasoning_content":reasoning_content
+    }))
 }
 
 fn build_v3_openai_chat_assistant_tool_call_message(
@@ -603,30 +558,40 @@ fn build_v3_openai_chat_assistant_tool_call_message(
         };
         serde_json::to_string(&json!({ "input": input })).map_err(|error| error.to_string())?
     } else {
-        let arguments = item
-            .get("arguments")
-            .or_else(|| {
-                item.get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("arguments"))
-            })
-            .ok_or("Responses function_call is missing arguments before OpenAI Chat encoding")?;
-        match arguments {
-            Value::String(text) => text.clone(),
-            other => serde_json::to_string(other).map_err(|error| error.to_string())?,
-        }
+        let arguments = read_v3_responses_function_call_arguments_for_openai_chat(item)?;
+        project_v3_responses_arguments_to_openai_chat_wire(arguments.as_str())
     };
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));
     message.insert("content".to_string(), Value::String(String::new()));
-    message.insert(
-        "tool_calls".to_string(),
-        Value::Array(vec![json!({
-            "id":call_id,
-            "type":"function",
-            "function":{"name":name,"arguments":arguments}
-        })]),
-    );
+    let mut tool_call = json!({
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments}
+    });
+    let responses_item_id = read_v3_non_empty_str(item.get("id"));
+    if item_type == "custom_tool_call" || responses_item_id.is_some() {
+        let mut extension = Map::new();
+        if item_type == "custom_tool_call" {
+            extension.insert(
+                "responses_tool_call_type".to_string(),
+                Value::String("custom_tool_call".to_string()),
+            );
+        }
+        if let Some(item_id) = responses_item_id {
+            extension.insert(
+                "responses_item_id".to_string(),
+                Value::String(item_id.to_string()),
+            );
+        }
+        if let Some(object) = tool_call.as_object_mut() {
+            object.insert(
+                "routecodex_chat_extension".to_string(),
+                Value::Object(extension),
+            );
+        }
+    }
+    message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
     if let Some(reasoning_content) = join_v3_openai_chat_reasoning_segments(
         collect_v3_openai_chat_reasoning_segments(
             item.get("reasoning_content")
@@ -641,6 +606,27 @@ fn build_v3_openai_chat_assistant_tool_call_message(
         );
     }
     Ok(Value::Object(message))
+}
+
+fn read_v3_responses_function_call_arguments_for_openai_chat(
+    item: &Map<String, Value>,
+) -> Result<String, String> {
+    let arguments = item
+        .get("arguments")
+        .or_else(|| {
+            item.get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("arguments"))
+        })
+        .ok_or("Responses function_call is missing arguments before OpenAI Chat encoding")?;
+    match arguments {
+        Value::String(text) => Ok(text.clone()),
+        other => serde_json::to_string(other).map_err(|error| error.to_string()),
+    }
+}
+
+fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String {
+    arguments.to_string()
 }
 
 fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result<Value, String> {
@@ -660,7 +646,27 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         Value::String(text) => text.clone(),
         other => serde_json::to_string(other).map_err(|error| error.to_string())?,
     };
-    Ok(json!({"role":"tool","tool_call_id":call_id,"content":content}))
+    let item_type = item
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("function_call_output");
+    let mut extension = Map::new();
+    extension.insert(
+        "responses_tool_output_type".to_string(),
+        Value::String(item_type.to_string()),
+    );
+    if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
+        extension.insert(
+            "responses_item_id".to_string(),
+            Value::String(item_id.to_string()),
+        );
+    }
+    Ok(json!({
+        "role":"tool",
+        "tool_call_id":call_id,
+        "content":content,
+        "routecodex_chat_extension":Value::Object(extension)
+    }))
 }
 
 #[derive(Clone, Copy)]
@@ -1171,6 +1177,28 @@ mod tests {
     }
 
     #[test]
+    fn responses_function_call_item_id_enters_chat_extension() {
+        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "function_call",
+                "id": "fc_original",
+                "call_id": "call_original",
+                "name": "lookup",
+                "arguments": "{\"q\":\"x\"}"
+            }]
+        }))
+        .expect("Responses function_call must normalize to Chat canonical");
+
+        let tool_call = &request["messages"][0]["tool_calls"][0];
+        assert_eq!(tool_call["id"], "call_original");
+        assert_eq!(
+            tool_call["routecodex_chat_extension"]["responses_item_id"],
+            "fc_original"
+        );
+    }
+
+    #[test]
     fn responses_web_search_call_preserves_existing_id_for_tool_pair() {
         let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
             "model": "gpt-5.5",
@@ -1234,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_web_search_call_stays_original_surface_until_req_outbound_projection() {
+    fn responses_web_search_call_normalizes_to_chat_extension_at_req_inbound() {
         let payload = json!({
             "model": "gpt-5.5",
             "input": [{
@@ -1243,13 +1271,8 @@ mod tests {
                 "action": {"type": "search", "query": "RouteCodex"}
             }]
         });
-        assert!(
-            build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(&payload)
-                .is_err(),
-            "ReqInbound must not synthesize web_search tool history; projection belongs to the provider-wire codec"
-        );
-        let request = build_v3_chat_canonical_request_from_responses_payload(&payload)
-            .expect("ReqOutbound OpenAI Chat projection must support web_search_call history");
+        let request = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(&payload)
+            .expect("ReqInbound must normalize web_search_call into Chat extension history without raw payload carry");
         let messages = request["messages"].as_array().expect("messages");
         assert_eq!(messages.len(), 2, "{request}");
         assert_eq!(

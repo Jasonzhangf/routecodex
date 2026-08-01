@@ -13,9 +13,12 @@ const paths = {
   gapCloseoutPlan: 'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
+  reqInbound02: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   providerReqCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
@@ -44,12 +47,23 @@ const functionMap = YAML.parse(text.functionMap);
 const mainlineMap = YAML.parse(text.mainlineMap);
 const verificationMap = YAML.parse(text.verificationMap);
 
+const outboundContract = fieldMatrix?.outbound_projection_contract;
+for (const status of ['mapped', 'transformed', 'consumed_by_transform', 'target_unsupported', 'control_forbidden']) {
+  if (!outboundContract?.statuses?.[status]) failures.push(`${paths.fieldMatrix}: missing outbound projection status ${status}`);
+}
+for (const phrase of ['UnmappedOutboundFields', 'ControlFieldLeak', 'recursive automatic strip', 'unknown source field ignore']) {
+  if (!JSON.stringify(outboundContract ?? {}).includes(phrase)) failures.push(`${paths.fieldMatrix}: outbound projection contract missing ${phrase}`);
+}
+for (const field of ['request.include', 'request.client_metadata', 'request.container', 'request.safetySettings', 'metadata_center', '_debug']) {
+  if (!JSON.stringify(outboundContract ?? {}).includes(field)) failures.push(`${paths.fieldMatrix}: outbound projection contract missing field ${field}`);
+}
+
 for (const phrase of [
   'Responses entry -> OpenAI Chat provider wire -> Responses client projection',
   'Anthropic Messages entry -> Responses provider wire -> Anthropic Messages client projection',
   'OpenAI Chat entry -> OpenAI Chat provider wire -> OpenAI Chat client projection',
   'Responses entry -> Anthropic Messages provider wire -> Responses client projection',
-  'OpenAI Chat provider wire preserves `metadata` but strips non-standard `client_metadata`',
+  'OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.',
   'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md#canonical-textual-truth-for-the-field-matrix-audit',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   'Shape-branch contract that gates must preserve before runtime closeout',
@@ -93,18 +107,51 @@ for (const phrase of [
   'responses_reasoning_policy_as_target_valid_system_marker',
   '<routecodex_reasoning_request',
   '"reasoning_effort"',
-  'if let Err(error) = serde_json::from_str::<Value>(arguments) {',
-  'cannot losslessly project tool call',
-  'ProviderReqCompat06ProviderCompat',
-  'matching parse-failure tool result=',
 ]) requireText(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, phrase);
+for (const phrase of [
+  'fn read_v3_responses_function_call_arguments_for_openai_chat',
+  'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String',
+]) requireText(text.responsesOpenaiCodec, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, phrase);
+const reqInbound02 = functionSlice(
+  text.reqInbound02,
+  paths.reqInbound02,
+  'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
+  'pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01',
+);
+for (const phrase of [
+  'if input.entry_protocol == V3HubEntryProtocol::Responses',
+  'build_v3_chat_canonical_request_from_responses_payload_for_req_inbound',
+  'if input.entry_protocol == V3HubEntryProtocol::Anthropic',
+  'encode_v3_anthropic_request_as_responses_semantic',
+  'Anthropic inbound Chat canonicalization failed',
+  'semantic_protocol: V3HubRequestSemanticProtocol::Chat',
+]) requireText(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical`, phrase);
+forbid(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical_no_control_rebuild`, [
+  /MetadataCenter|metadata_center|runtime_control|selected_target|provider_protocol/i,
+  /original_responses_payload|responses_payload_needs_req04_original_surface/,
+]);
+const responsesArgumentProjector = functionSlice(
+  text.responsesOpenaiCodec,
+  paths.responsesOpenaiCodec,
+  'fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String',
+  'fn build_v3_openai_chat_tool_result_message',
+);
+requireText(responsesArgumentProjector, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, 'arguments.to_string()');
+forbid(responsesArgumentProjector, `${paths.responsesOpenaiCodec}::responses_arguments_payload_projection`, [
+  /serde_json::to_string|Value::String|Map::new|json!\(\{\}\)|"\{\}"\.to_string\(\)|matching_parse_feedback|function_call_output|tool_result/,
+]);
 requireOrder(responsesToChat, `${paths.responsesOpenaiCodec}::responses_to_chat_copy_list`, [
   '"metadata"',
   '"client_metadata"',
   '"stop"',
   '"max_completion_tokens"',
 ]);
-forbid(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i, /summary_requests_reasoning \|\| object\.get\("context"\)\.is_some\(\).*medium/s]);
+forbid(responsesToChat, `${paths.responsesOpenaiCodec}::build_v3_chat_canonical_request_from_responses_payload`, [
+  /fallback/i,
+  /MetadataCenter|metadata_center|runtime_control/i,
+  /summary_requests_reasoning \|\| object\.get\("context"\)\.is_some\(\).*medium/s,
+  /if\s+matching_parse_feedback\s*\{/,
+]);
 
 const requestOutbound = functionSlice(
   text.requestOutboundFormat,
@@ -123,10 +170,26 @@ for (const phrase of [
   'row.insert("max_output_tokens".to_string(), value)',
   '.remove("logprobs")',
   'row.insert("top_logprobs".to_string(), value)',
+  'project_outbound_payload_for_target_protocol',
+  'ControlFieldLeak target_protocol={}',
+  'UnmappedOutboundFields target_protocol={}',
   'fn is_provider_outbound_control_key',
   '"metadata_center"',
   '"runtime_control"',
 ]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'project_outbound_payload_for_target_protocol');
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'ControlFieldLeak target_protocol={}');
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'UnmappedOutboundFields target_protocol={}');
+forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_strip_projector`, [
+  /strip_private_fields/,
+  /!is_provider_outbound_control_key\(key\)\s*&&\s*!key\.starts_with\('_'\)/,
+  /row\.remove\("client_metadata"\);\s*if\s*let\s*Some\(max_output_tokens\)/,
+  /row\.remove\("include"\)/,
+  /row\.remove\("reasoning"\)/,
+]);
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_client_metadata_projection`, 'fn project_openai_responses_client_metadata_to_metadata');
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_client_metadata_projection_call`, 'project_openai_responses_client_metadata_to_metadata(projected)?;');
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_effort_projection`, 'fn project_openai_responses_reasoning_effort_to_reasoning');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
   'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
@@ -185,6 +248,8 @@ for (const phrase of [
   '<routecodex_reasoning_request',
   '"budget_tokens"',
   'output.insert("thinking".to_string(), thinking)',
+  '.or_else(|| object.get("max_completion_tokens"))',
+  'output.insert("max_tokens".to_string(), value.to_owned())',
   'responses_metadata_as_anthropic_metadata',
   '"metadata.unsupported"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
@@ -200,48 +265,58 @@ for (const phrase of [
   'V3HubProviderWireProtocol::Anthropic',
   'let source = build_v3_anthropic_provider_request_source_from_chat_canonical(',
   'encode_v3_responses_semantic_as_anthropic_request(source)',
-  'input.original_responses_payload()',
+  'input.provider_semantic_payload()',
   'input.entry_protocol()',
-]) requireText(providerReqCompat, `${paths.providerReqCompat}::anthropic_original_responses_surface`, phrase);
-forbid(providerReqCompat, `${paths.providerReqCompat}::anthropic_original_responses_surface`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
+]) requireText(providerReqCompat, `${paths.providerReqCompat}::anthropic_chat_extension_surface`, phrase);
+forbid(providerReqCompat, `${paths.providerReqCompat}::anthropic_chat_extension_surface`, [/fallback/i, /original_responses_payload|MetadataCenter|metadata_center|runtime_control/i]);
 
 const anthropicProviderRequestSource = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
   'pub(crate) fn build_v3_anthropic_provider_request_source_from_chat_canonical',
-  'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
+  '#[derive(Debug, Clone, Copy, PartialEq, Eq)]',
 );
 for (const phrase of [
   'V3HubEntryProtocol::Responses',
-  'build_v3_responses_original_input_surface_from_chat_canonical(',
-  'if payload.get("input").and_then(Value::as_array).is_some()',
   'if payload.get("messages").and_then(Value::as_array).is_some()',
-  'Responses entry to Anthropic provider wire requires governed messages or Responses input',
+  'Responses entry to Anthropic provider wire requires governed Chat extension messages',
   'V3HubEntryProtocol::Anthropic | V3HubEntryProtocol::OpenAiChat',
   'Anthropic provider wire requires governed Chat/Anthropic messages',
 ]) requireText(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, phrase);
-const governedCurrentResponsesInputBranch =
-  'if payload.get("input").and_then(Value::as_array).is_some()';
-if (anthropicProviderRequestSource.split(governedCurrentResponsesInputBranch).length - 1 !== 2) {
-  failures.push(`${paths.requestOutboundFormat}::anthropic_provider_request_source must preserve governed current Responses input in both Responses and Chat/Anthropic entry branches`);
-}
-forbid(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
-
-const responsesOriginalInputSurface = functionSlice(
+forbid(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source`, [/fallback/i, /original_responses_payload|build_v3_responses_original_input_surface|MetadataCenter|metadata_center|runtime_control/i]);
+forbid(anthropicProviderRequestSource, `${paths.requestOutboundFormat}::anthropic_provider_request_source_no_raw_input_branch`, [
+  /payload\.get\("input"\)\.and_then\(Value::as_array\)\.is_some\(\)/,
+  /normalize_responses_payload_for_provider_standard\(payload\)/,
+  /Responses input/,
+]);
+const openAiChatStandardRequest = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
-  'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
-  'fn merge_chat_governance_into_original_responses_surface',
+  'pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical',
+  'pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical',
 );
-for (const phrase of [
-  'pub(crate) fn build_v3_responses_original_input_surface_from_chat_canonical',
-  'original.get("input")?;',
-  'merge_chat_governance_into_original_responses_surface',
-  'normalize_responses_payload_for_provider_standard',
-]) requireText(responsesOriginalInputSurface, `${paths.requestOutboundFormat}::responses_original_input_surface`, phrase);
-forbid(responsesOriginalInputSurface, `${paths.requestOutboundFormat}::responses_original_input_surface`, [
-  /original\.get\("input"\)\.and_then\(Value::as_array\)\?/,
-  /MetadataCenter|metadata_center|runtime_control/i,
+forbid(openAiChatStandardRequest, `${paths.requestOutboundFormat}::openai_chat_outbound_no_raw_responses_rebuild`, [
+  /build_v3_chat_canonical_request_from_responses_payload/,
+  /payload\.get\("input"\)/,
+]);
+const openAiResponsesStandardRequest = functionSlice(
+  text.requestOutboundFormat,
+  paths.requestOutboundFormat,
+  'pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical',
+  'fn normalize_responses_payload_for_provider_standard',
+);
+forbid(openAiResponsesStandardRequest, `${paths.requestOutboundFormat}::responses_outbound_requires_chat_canonical`, [
+  /payload\.get\("input"\)\.and_then\(Value::as_array\)\.is_some\(\)/,
+  /return Ok\(normalize_responses_payload_for_provider_standard\(payload\)\)/,
+]);
+forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_original_responses_payload_rebuild`, [
+  /build_v3_responses_original_input_surface_from_chat_canonical/,
+  /merge_chat_governance_into_original_responses_surface/,
+  /original_responses_payload/,
+]);
+requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::chat_extension_payload_only`, 'routecodex_chat_extension');
+forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::chat_extension_payload_only_no_metadata_rebuild`, [
+  /MetadataCenter.*routecodex_chat_extension|routecodex_chat_extension.*MetadataCenter/s,
 ]);
 
 const responsesToAnthropic = functionSlice(
@@ -269,15 +344,14 @@ for (const [owner, body, phrases] of [
     '<routecodex_reasoning_request summary_policy=detailed>',
     'body["max_completion_tokens"]',
     'OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort',
-    'OpenAI Chat provider wire must not forward non-standard client_metadata',
-    'responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args',
-    'responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send',
-    'provider_request_compat_error',
-    'V3TargetLocalReselected',
-    'matched parse-failure feedback should not reselect away from OpenAI Chat',
+    'OpenAI Chat provider wire must reject unsupported client_metadata',
+    'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
+    'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
+    '!result.node_trace.contains(&"V3TargetLocalReselected")',
+    'observability.provider_failure_events.is_empty()',
+    'OpenAI Chat function.arguments must preserve the exact original string bytes',
     'parse-failure tool result must remain paired',
-    'unpaired malformed OpenAI Chat arguments must trigger Error05 reselect',
-    'reselect must preserve the original malformed arguments truth',
+    'http://chatwire.invalid/v1/chat/completions',
   ]],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
     'responses_relay_reasoning_request_config_projects_anthropic_system_marker',
@@ -302,34 +376,86 @@ for (const [owner, body, phrases] of [
 
 for (const phrase of [
   'responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids',
+  'responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids',
+  'responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions',
   'responses_openai_chat_field_parity_responses_wire_preserves_include_projection',
-  'responses_openai_chat_field_parity_include_is_elided_from_chat_wire',
-]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
+  'responses_openai_chat_field_parity_include_is_rejected_from_chat_wire',
+  'openai_chat_wire_preserves_same_protocol_request_fields',
+  'relay_responses_wire_rejects_unconsumed_previous_response_id',
+  'relay_responses_wire_preserves_non_continuation_provider_fields',
+]) requireText(
+  `${text.requestOutboundFormat}
+${text.requestOutboundFormatExtraTests}`,
+  `${paths.requestOutboundFormat}+${paths.requestOutboundFormatExtraTests}`,
+  phrase,
+);
+const outboundAllowedFields = functionSlice(
+  text.requestOutboundFormat,
+  paths.requestOutboundFormat,
+  'fn allowed_top_level_outbound_fields',
+  'fn normalize_responses_content_part_for_role',
+);
+const openAiChatAllowedFields = sectionSlice(
+  outboundAllowedFields,
+  'V3OutboundTargetProtocol::OpenAiChat => &[',
+  'V3OutboundTargetProtocol::OpenAiResponses => &[',
+);
+for (const field of [
+  '"audio"',
+  '"modalities"',
+  '"prediction"',
+  '"prompt_cache_key"',
+  '"prompt_cache_options"',
+  '"prompt_cache_retention"',
+  '"service_tier"',
+  '"store"',
+  '"web_search_options"',
+]) requireText(openAiChatAllowedFields, `${paths.requestOutboundFormat}::openai_chat_same_protocol_fields`, field);
+const responsesAllowedFields = sectionSlice(
+  outboundAllowedFields,
+  'V3OutboundTargetProtocol::OpenAiResponses => &[',
+  'V3OutboundTargetProtocol::Anthropic => &[',
+);
+forbid(
+  responsesAllowedFields,
+  `${paths.requestOutboundFormat}::relay_continuation_owner_consumed_before_outbound`,
+  [/"previous_response_id"/],
+);
 for (const phrase of [
-  'responses_openai_chat_field_parity_direct_provider_payload_uses_selected_protocol_projection',
-]) requireText(text.providerReqCompat, paths.providerReqCompat, phrase);
+  'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
+  'direct provider wire payload captured',
+  'Direct must not synthesize Chat messages',
+]) requireText(text.directPassthroughTests, paths.directPassthroughTests, phrase);
 for (const phrase of [
   '--lib responses_openai_chat_field_parity',
+  '--test responses_direct_tool_passthrough responses_openai_chat_field_parity',
   '--test responses_relay_local_continuation_integration responses_openai_chat_field_parity',
 ]) requireText(text.packageJson, 'package.json::test:v3-protocol-conversion-field-parity', phrase);
 
 const unpairedMalformedOpenAiChatTest = functionSlice(
   text.responsesTests,
   paths.responsesTests,
-  'async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send',
+  'async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
   'async fn responses_openai_chat_field_parity_web_search_call_history_projects_tool_pair',
 );
-requireText(
+for (const phrase of [
+  '!result.node_trace.contains(&"V3TargetLocalReselected")',
+  'observability.provider_failure_events.is_empty()',
+  'wire_arguments, malformed_arguments',
+]) requireText(
   unpairedMalformedOpenAiChatTest,
-  `${paths.responsesTests}::responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send`,
-  'result.node_trace.contains(&"V3TargetLocalReselected")',
+  `${paths.responsesTests}::responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect`,
+  phrase,
 );
+forbid(unpairedMalformedOpenAiChatTest, `${paths.responsesTests}::unpaired_malformed_arguments_projection`, [
+  /provider_request_compat_error|matching parse-failure/,
+]);
 
 for (const [owner, body, phrases] of [
   [paths.functionMap, text.functionMap, [
     'feature_id: v3.protocol_conversion_field_parity',
     'v3-protocol-field-parity-responses-chat-req-01',
-    'v3-protocol-field-parity-responses-chat-req-negative-01',
+    'v3-protocol-field-parity-responses-chat-malformed-arguments-project-01',
     'v3-protocol-field-parity-responses-chat-resp-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-anthropic-responses-req-01',
@@ -344,6 +470,8 @@ for (const [owner, body, phrases] of [
     'scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs',
     'Text truth for the audit lives in docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
     'build_v3_chat_canonical_request_from_responses_payload',
+    'project_v3_responses_arguments_to_openai_chat_wire',
+    'arguments and other protocol fields remain payload data-plane semantics projected only by adjacent codecs, while routing, switching, and continuation remain control semantics in MetadataCenter; neither side may mirror or reconstruct the other',
     'execute_v3_responses_relay_runtime_inner',
     'build_v3_openai_chat_standard_request_from_chat_canonical',
     'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
@@ -352,19 +480,20 @@ for (const [owner, body, phrases] of [
     'chain_id: v3.protocol_conversion_field_parity',
     'binding_kind: protocol_field_parity_test_over_existing_relay_chain',
     'v3-protocol-field-parity-responses-chat-req-01',
-    'v3-protocol-field-parity-responses-chat-req-negative-01',
+    'v3-protocol-field-parity-responses-chat-malformed-arguments-project-01',
     'v3-protocol-field-parity-responses-anthropic-req-01',
     'v3-protocol-field-parity-openai-chat-same-protocol-01',
+    'arguments and other payload fields stay in the data plane, routing/switch/continuation control stays in MetadataCenter, and neither side reconstructs the other',
   ]],
   [paths.verificationMap, text.verificationMap, [
     'feature_id: v3.protocol_conversion_field_parity',
     'Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop',
-    'Responses history with paired malformed function arguments projects OpenAI Chat function.arguments as {} while preserving parse-failure tool feedback',
-    'Responses history with unpaired malformed function arguments fails explicitly at ProviderReqCompat06 before the incompatible OpenAI Chat target can send',
+    'Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire',
+    'Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect',
     'Anthropic thinking is preserved under Responses reasoning.thinking',
     'Responses reasoning.effort/summary request config reaches Anthropic provider wire as a target-valid system marker',
-    'responses_openai_chat_field_parity_malformed_arguments_with_parse_failure_feedback_projects_empty_args',
-    'responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send',
+    'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
+    'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
     'npm run render:v3-protocol-semantic-field-matrix',
     'npm run test:v3-protocol-conversion-field-parity',
     'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
@@ -387,8 +516,11 @@ if (!parityFeature) {
   if (!(parityFeature.entry_symbols ?? []).includes('execute_v3_responses_relay_runtime_inner')) {
     failures.push(`${paths.functionMap}: protocol parity runtime entry must be execute_v3_responses_relay_runtime_inner`);
   }
-  if ((parityFeature.entry_symbols ?? []).includes('responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send')) {
-    failures.push(`${paths.functionMap}: malformed-arguments test belongs in verification map, not runtime entry_symbols`);
+  if (!(parityFeature.entry_symbols ?? []).includes('project_v3_responses_arguments_to_openai_chat_wire')) {
+    failures.push(`${paths.functionMap}: malformed-arguments projection helper must be registered as the adjacent codec owner`);
+  }
+  if ((parityFeature.mainline_bindings ?? []).some((entry) => String(entry).includes('responses-chat-req-negative'))) {
+    failures.push(`${paths.functionMap}: projectable malformed arguments must not retain a negative/error mainline binding`);
   }
 }
 
@@ -396,22 +528,25 @@ const parityChain = (mainlineMap?.chains ?? []).find(
   (chain) => chain?.chain_id === 'v3.protocol_conversion_field_parity',
 );
 const malformedArgumentsEdge = (parityChain?.edges ?? []).find(
-  (edge) => edge?.step_id === 'v3-protocol-field-parity-responses-chat-req-negative-01',
+  (edge) => edge?.step_id === 'v3-protocol-field-parity-responses-chat-malformed-arguments-project-01',
 );
 for (const [key, expected] of [
-  ['from_node', 'V3HubReqOutbound07ProviderSemantic'],
-  ['to_node', 'ProviderReqCompat06ProviderCompat'],
-  ['caller_symbol', 'execute_v3_responses_relay_runtime_inner'],
-  ['caller_file', paths.responsesRuntime],
-  ['callee_symbol', 'build_provider_req_compat_06_from_v3_hub_req_outbound_07'],
-  ['callee_file', paths.providerReqCompat],
+  ['from_node', 'ProviderReqCompat06ProviderCompat'],
+  ['to_node', 'V3ProviderReqOutbound08WirePayload'],
+  ['caller_symbol', 'build_v3_openai_chat_assistant_tool_call_message'],
+  ['caller_file', paths.responsesOpenaiCodec],
+  ['callee_symbol', 'project_v3_responses_arguments_to_openai_chat_wire'],
+  ['callee_file', paths.responsesOpenaiCodec],
 ]) {
   if (malformedArgumentsEdge?.[key] !== expected) {
     failures.push(`${paths.mainlineMap}: malformed-arguments runtime edge ${key} must be ${expected}`);
   }
 }
 if ((malformedArgumentsEdge?.resource_flow?.side_channel_writes ?? []).length !== 0) {
-  failures.push(`${paths.mainlineMap}: ProviderReqCompat06 builder edge must not claim direct error side-channel writes`);
+  failures.push(`${paths.mainlineMap}: malformed-arguments field projector must not claim error/control side-channel writes`);
+}
+if ((parityChain?.edges ?? []).some((edge) => String(edge?.step_id).includes('responses-chat-req-negative'))) {
+  failures.push(`${paths.mainlineMap}: projectable malformed arguments must not retain an Error05/negative parity edge`);
 }
 
 const providerActionGateChain = (mainlineMap?.chains ?? []).find(
@@ -419,8 +554,6 @@ const providerActionGateChain = (mainlineMap?.chains ?? []).find(
 );
 const providerCompatErrorEdge = (providerActionGateChain?.edges ?? []).find(
   (edge) => edge?.step_id === 'v3-provider-action-gate-01',
-) ?? (parityChain?.edges ?? []).find(
-  (edge) => edge?.step_id === 'v3-protocol-field-parity-responses-chat-req-negative-02',
 );
 for (const [key, expected] of [
   ['from_node', 'ProviderReqCompat06ProviderCompat'],
@@ -434,17 +567,91 @@ for (const [key, expected] of [
     failures.push(`${paths.mainlineMap}: ProviderReqCompat06 typed failure edge ${key} must be ${expected}`);
   }
 }
+for (const forbiddenStepId of [
+  'v3-protocol-field-parity-responses-direct-kernel-01',
+  'v3-protocol-field-parity-responses-direct-wire-01',
+]) {
+  if ((parityChain?.edges ?? []).some((edge) => edge?.step_id === forbiddenStepId)) {
+    failures.push(`${paths.mainlineMap}: ${forbiddenStepId} must not duplicate existing Direct production mainline edges`);
+  }
+}
+const directMainlineChain = (mainlineMap?.chains ?? []).find(
+  (chain) => chain?.chain_id === 'v3.responses_direct.required_mainline',
+);
+for (const [stepId, expectations] of Object.entries({
+  'v3-rd-09-direct-policy': {
+    from_node: 'V3Execution11ProtocolDecision',
+    to_node: 'V3ResponsesDirect11Policy',
+    caller_symbol: 'execute_v3_responses_direct_runtime_kernel',
+    caller_file: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    callee_symbol: 'responses_direct_route_hook',
+    callee_file: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
+    owner_feature_id: 'v3.responses_direct_mvp_architecture',
+  },
+  'v3-rd-10': {
+    from_node: 'V3ResponsesDirect11Policy',
+    to_node: 'V3Provider12ResponsesWirePayload',
+    caller_symbol: 'responses_direct_request_projection_hook',
+    caller_file: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
+    callee_symbol: 'build_v3_provider_12_responses_wire_payload',
+    callee_file: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+    owner_feature_id: 'v3.responses_provider_runtime',
+  },
+})) {
+  const edge = (directMainlineChain?.edges ?? []).find((candidate) => candidate?.step_id === stepId);
+  if (!edge) {
+    failures.push(`${paths.mainlineMap}: missing existing Direct mainline edge ${stepId}`);
+    continue;
+  }
+  for (const [key, expected] of Object.entries(expectations)) {
+    if (edge?.[key] !== expected) {
+      failures.push(`${paths.mainlineMap}: ${stepId} ${key} must be ${expected}`);
+    }
+  }
+}
 
 const parityVerification = (verificationMap?.features ?? []).find(
   (feature) => feature?.feature_id === 'v3.protocol_conversion_field_parity',
 );
 if (!(parityVerification?.required_blackbox ?? []).some(
-  (entry) => String(entry).includes('responses_openai_chat_field_parity_unpaired_malformed_arguments_fail_before_provider_send'),
+  (entry) => String(entry).includes('responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect'),
+)) {
+  failures.push(`${paths.verificationMap}: paired malformed-arguments runtime test must be registered under required_blackbox`);
+}
+if (!(parityVerification?.required_blackbox ?? []).some(
+  (entry) => String(entry).includes('responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect'),
 )) {
   failures.push(`${paths.verificationMap}: unpaired malformed-arguments runtime test must be registered under required_blackbox`);
 }
+if (!(parityVerification?.required_blackbox ?? []).some(
+  (entry) => String(entry).includes('responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history'),
+)) {
+  failures.push(`${paths.verificationMap}: production Direct kernel parity test must be registered under required_blackbox`);
+}
+for (const phrase of [
+  'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
+  'Responses Direct kernel preserves same-protocol Responses input/include/tool history',
+  'existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`',
+]) requireText(text.verificationMap, `${paths.verificationMap}::v3.protocol_conversion_field_parity`, phrase);
 
 const parityFeatureBlock = featureBlock(text.functionMap, 'feature_id: v3.protocol_conversion_field_parity');
+for (const phrase of [
+  'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
+  'responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history',
+]) requireText(parityFeatureBlock, `${paths.functionMap}::v3.protocol_conversion_field_parity`, phrase);
+for (const phrase of [
+  'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
+  'execute_v3_responses_direct_runtime_kernel_with_continuation',
+  'execute_v3_responses_direct_runtime_kernel_core',
+  'responses_direct_request_projection_hook',
+  'build_v3_provider_12_responses_wire_payload',
+  'v3-protocol-field-parity-responses-direct-kernel-01',
+  'v3-protocol-field-parity-responses-direct-wire-01',
+]) {
+  if (parityFeatureBlock.includes(phrase)) {
+    failures.push(`${paths.functionMap}::v3.protocol_conversion_field_parity must not claim Direct production owner phrase ${phrase}`);
+  }
+}
 const allowedBlock = sectionSlice(parityFeatureBlock, 'allowed_paths:', 'forbidden_paths:');
 forbid(allowedBlock, `${paths.functionMap}::v3.protocol_conversion_field_parity.allowed_paths`, [
   /(^|\n)\s*-\s*src(\/|\n|$)/,
@@ -457,7 +664,7 @@ forbid(allowedBlock, `${paths.functionMap}::v3.protocol_conversion_field_parity.
 
 for (const phrase of [
   'V3 protocol semantic normalization matrix review',
-  'OpenAI Chat wire strips `client_metadata` before provider send.',
+  'OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.',
   'Gemini still needs clearer semantic ownership',
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
@@ -474,6 +681,12 @@ for (const phrase of [
   'gap.partial_cross_protocol_semantics',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
 ]) requireText(text.matrixReview, paths.matrixReview, phrase);
+requireText(
+  text.gapCloseoutPlan,
+  paths.gapCloseoutPlan,
+  'OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.',
+);
+
 for (const [source, sha256] of [
   ['openai_openapi', '9f65dd3582af1404d00d22f56d32595524a88459a98310afbb3cc488eb3fa270'],
   ['openai_sdk_responses', '32002f8ff62b00864440b8903d08edf36da9ef08aa80778fbc8d459498282eed'],

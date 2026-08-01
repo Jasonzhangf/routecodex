@@ -78,7 +78,7 @@ requireAll(hub, 'fixed Hub v1 module registry', [
   'pub use anthropic_relay_hooks::*;',
 ]);
 requireAll(tests, 'focused Anthropic Relay hook tests', [
-  'anthropic_entry_req_inbound_hook_encodes_to_responses_chat_semantic_before_req04',
+  'anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04',
   'anthropic_client_projection_hook_preserves_responses_wire_axis',
   'wrong_entry_execution_and_provider_wire_combinations_fail_explicitly',
   'side_channel_fields_fail_at_both_protocol_hook_boundaries',

@@ -43,14 +43,4 @@ impl V3HubReqOutbound07ProviderSemantic {
             .payload
             .0
     }
-
-    pub(crate) fn original_responses_payload(&self) -> Option<&Value> {
-        self.previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .original_responses_payload
-            .as_ref()
-    }
 }

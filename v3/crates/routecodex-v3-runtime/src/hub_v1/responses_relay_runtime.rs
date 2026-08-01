@@ -1488,6 +1488,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqInbound01ClientRaw");
     let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
         .map_err(V3ResponsesRelayRuntimeError::InboundCanonical)?;
+    let route_facts_body = req02.previous.payload.0.clone();
     trace.push("V3HubReqInbound02Normalized");
     let base_hub_scope = V3HubContinuationScope::new(
         V3HubEntryProtocol::Responses,
@@ -1573,10 +1574,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         };
     }
     let provider_semantic_body = request_outcome.payload().clone();
-    let route_facts_body = request_outcome
-        .responses_original_input_surface_payload()
-        .unwrap_or_else(|| provider_semantic_body.clone());
-    let local_continuation_request_body = route_facts_body.clone();
+    let local_continuation_request_body = provider_semantic_body.clone();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -2670,6 +2668,7 @@ fn commit_or_release_responses_local_continuation(
         V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS,
         restored_context_ids,
         &canonical_context,
+        canonical_response.get("id").and_then(Value::as_str),
         action,
     )?;
     Ok(())
@@ -2777,14 +2776,14 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
         json!({
-            "id": format!("dry_run_{}", input.request_id),
-            "object": "response",
-            "status": "completed",
-            "output_text": "routecodex provider-request dry-run stopped before provider send",
-            "output": [{
-                "type": "output_text",
-                "text": "routecodex provider-request dry-run stopped before provider send"
-            }]
+            "object": "routecodex.provider_request_dry_run_terminal",
+            "terminal_effect": "no_network_send",
+            "provider_network_send": false,
+            "continuation": {
+                "owner": "none",
+                "continuable": false
+            },
+            "message": "routecodex provider-request dry-run stopped before provider send"
         }),
         Arc::clone(&captured_provider_request),
     );
@@ -2826,10 +2825,16 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
     } else {
         200
     };
-    let response_payload = match output.client_body {
-        V3ResponsesRelayClientBody::Json(value) => value,
-        V3ResponsesRelayClientBody::Sse(_) => json!({"body_kind": "sse_stream"}),
-    };
+    let response_payload = json!({
+        "object": "routecodex.provider_request_dry_run_terminal",
+        "terminal_effect": "no_network_send",
+        "provider_network_send": false,
+        "continuation": {
+            "owner": "none",
+            "continuable": false
+        },
+        "message": "routecodex provider-request dry-run stopped before provider send"
+    });
     crate::V3FoundationRuntimeOutput {
         status: dry_run_status,
         body: json!({
@@ -4251,7 +4256,7 @@ pub use provider_stream_materialization::{
     materialize_v3_responses_provider_sse_as_canonical_response,
 };
 use responses_provider_event_codec::*;
-fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
+pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
     response: Value,
 ) -> V3ResponsesRelayClientStream {
     use futures_util::stream;
@@ -4909,6 +4914,8 @@ targets = [{ kind = "provider_model", provider = "glmrelay_openai", model = "glm
 
     #[tokio::test]
     async fn responses_relay_routes_current_user_thinking_after_chat_canonicalization() {
+        std::env::set_var("GLM_TEST_KEY", "secret-key");
+        std::env::set_var("MINIMAX_TEST_KEY", "secret-key");
         let authoring = parse_v3_config_02_authoring(
             r#"
 version = 3
@@ -4959,7 +4966,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
                 request_id: "req_reasoning_original_surface_route".to_string(),
                 payload: json!({
                     "model": "gpt-5.5",
-                    "input": [{"type":"message","role":"user","content":"think deeply"}],
+                    "input": [{"type":"message","role":"user","content":"please explain the reasoning step by step"}],
                     "reasoning": {"effort": "high"},
                     "stream": true
                 }),
@@ -4971,6 +4978,8 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert_eq!(output.body["evidence"]["providerNetworkSend"], false);
         assert_eq!(output.body["providerRequest"]["providerId"], "glm");
         assert_eq!(output.body["providerRequest"]["body"]["model"], "glm-5.2");
+        std::env::remove_var("GLM_TEST_KEY");
+        std::env::remove_var("MINIMAX_TEST_KEY");
     }
 
     #[test]

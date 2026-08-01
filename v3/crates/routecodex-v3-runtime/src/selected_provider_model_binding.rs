@@ -58,6 +58,7 @@ mod tests {
             model_capabilities: vec!["text".to_string()],
             max_context_tokens: None,
             base_url: "https://provider.invalid/v1".to_string(),
+            responses_process: None,
             responses_transport: V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),

@@ -2,7 +2,7 @@ use super::{
     apply_v3_stopless_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
-    build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
+    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
     V3HubReqChatProcess04Governed, V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized,
     V3HubRequestSemanticProtocol, V3StoplessCenterState,
@@ -288,6 +288,8 @@ pub enum V3HubRelayRequestError {
     ContinuationScopeMismatch { continuation_id: String },
     #[error("continuation has both local and remote owners: {continuation_id}")]
     AmbiguousContinuationOwnership { continuation_id: String },
+    #[error("ReqInbound02 normalization failed: {reason}")]
+    ReqInboundInvalid { reason: String },
     #[error("malformed tool output at input index {index}: call_id is required")]
     MalformedToolOutput { index: usize },
     #[error("orphan tool output at input index {index}: call_id {call_id}")]
@@ -334,16 +336,6 @@ pub struct V3HubRelayRequestOutcome {
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
         &self.governed.previous.previous.previous.payload.0
-    }
-    pub(crate) fn responses_original_input_surface_payload(&self) -> Option<Value> {
-        super::build_v3_responses_original_input_surface_from_chat_canonical(
-            self.payload(),
-            self.governed
-                .previous
-                .previous
-                .original_responses_payload
-                .as_ref(),
-        )
     }
     pub fn continuation(&self) -> V3HubContinuationOwnership {
         self.governed.previous.continuation
@@ -401,12 +393,16 @@ impl V3HubRelayRequestHooks {
         profile: &V3HubServertoolRequestProfile,
         attachment_history_policy: V3HubAttachmentHistoryPolicy,
     ) -> Result<V3HubRelayRequestOutcome, V3HubRelayRequestError> {
+        if let Some(key) = find_v3_hub_side_channel_key(&raw.payload.0) {
+            return Err(V3HubRelayRequestError::SideChannelLeaked { key });
+        }
         let mut events = vec![
             V3HubRelayRequestHookEvent::Req01Entry,
             V3HubRelayRequestHookEvent::Req01Exit,
             V3HubRelayRequestHookEvent::Req02Entry,
         ];
-        let normalized = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(raw);
+        let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .map_err(|reason| V3HubRelayRequestError::ReqInboundInvalid { reason })?;
         events.extend([
             V3HubRelayRequestHookEvent::Req02Exit,
             V3HubRelayRequestHookEvent::Req03Entry,
@@ -474,13 +470,14 @@ impl V3HubRelayRequestHooks {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
         let stopless_state = if profile.stopless_reasoning_stop_enabled() {
-            apply_v3_stopless_request_hook_at_req04(
+            let stopless_state = apply_v3_stopless_request_hook_at_req04(
                 &mut classified.previous.previous.payload.0,
                 &mut events,
                 profile.stopless_center_state(),
                 profile.stopless_transition_request_id(),
                 profile.stopless_transition_updated_at(),
-            )?
+            )?;
+            stopless_state
         } else {
             None
         };
@@ -896,10 +893,10 @@ fn govern_chat_tool_outputs_at_req04(
     local_context: Option<&Value>,
 ) -> Result<usize, V3HubRelayRequestError> {
     let mut expected_outputs = local_context.map(expected_tool_outputs).unwrap_or_default();
-    let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+    let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
-    for message in messages {
+    for message in messages.iter() {
         if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
             for call in calls {
                 if let Some((call_id, expected_kind)) =
@@ -911,7 +908,7 @@ fn govern_chat_tool_outputs_at_req04(
         }
     }
     let mut output_count = 0usize;
-    for (index, message) in messages.iter().enumerate() {
+    for (index, message) in messages.iter_mut().enumerate() {
         if message.get("role").and_then(Value::as_str) != Some("tool") {
             continue;
         }
@@ -923,16 +920,35 @@ fn govern_chat_tool_outputs_at_req04(
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or(V3HubRelayRequestError::MalformedToolOutput { index })?;
-        if !expected_outputs.contains_key(call_id) {
-            return Err(V3HubRelayRequestError::OrphanToolOutput {
+        let expected_kind = expected_outputs.get(call_id).copied().ok_or_else(|| {
+            V3HubRelayRequestError::OrphanToolOutput {
+                index,
+                call_id: call_id.to_owned(),
+            }
+        })?;
+        let actual_kind = actual_chat_tool_output_kind(message);
+        if !expected_kind.matches_actual(actual_kind) {
+            return Err(V3HubRelayRequestError::ToolOutputKindMismatch {
                 index,
                 call_id: call_id.to_owned(),
             });
+        }
+        if expected_kind == V3HubRelayExpectedToolOutputKind::ApplyPatch {
+            normalize_apply_patch_tool_output_item_at_req04(message);
         }
     }
     Ok(output_count)
 }
 
+fn actual_chat_tool_output_kind(message: &Value) -> V3HubRelayActualToolOutputKind {
+    match message
+        .pointer("/routecodex_chat_extension/responses_tool_output_type")
+        .and_then(Value::as_str)
+    {
+        Some("custom_tool_call_output") => V3HubRelayActualToolOutputKind::Custom,
+        _ => V3HubRelayActualToolOutputKind::Function,
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum V3HubRelayExpectedToolOutputKind {
     Function,
@@ -1006,6 +1022,12 @@ fn expected_tool_call_output_from_chat_call(
         .unwrap_or_default();
     let expected_kind = if name.eq_ignore_ascii_case("apply_patch") {
         V3HubRelayExpectedToolOutputKind::ApplyPatch
+    } else if call
+        .pointer("/routecodex_chat_extension/responses_tool_call_type")
+        .and_then(Value::as_str)
+        == Some("custom_tool_call")
+    {
+        V3HubRelayExpectedToolOutputKind::Custom
     } else {
         V3HubRelayExpectedToolOutputKind::Function
     };
@@ -1124,12 +1146,18 @@ fn govern_attachment_history_at_req04(
     let V3HubAttachmentHistoryPolicy::Placeholder { placeholder } = policy else {
         return Ok(());
     };
-    let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
+    if let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) {
+        let historical_len = input.len().saturating_sub(1);
+        for (index, item) in input.iter_mut().take(historical_len).enumerate() {
+            replace_historical_media_with_placeholder(item, placeholder, index)?;
+        }
         return Ok(());
-    };
-    let historical_len = input.len().saturating_sub(1);
-    for (index, item) in input.iter_mut().take(historical_len).enumerate() {
-        replace_historical_media_with_placeholder(item, placeholder, index)?;
+    }
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        let historical_len = messages.len().saturating_sub(1);
+        for (index, message) in messages.iter_mut().take(historical_len).enumerate() {
+            replace_historical_media_with_placeholder(message, placeholder, index)?;
+        }
     }
     Ok(())
 }
@@ -1145,6 +1173,15 @@ fn replace_historical_media_with_placeholder(
                 && !object.contains_key("image_url")
             {
                 return Err(V3HubRelayRequestError::AttachmentResourceMissing { index });
+            }
+            if object.get("type").and_then(Value::as_str) == Some("image_url") {
+                let missing_url = object
+                    .get("image_url")
+                    .and_then(|image_url| image_url.get("url"))
+                    .is_none_or(Value::is_null);
+                if missing_url {
+                    return Err(V3HubRelayRequestError::AttachmentResourceMissing { index });
+                }
             }
             for child in object.values_mut() {
                 replace_historical_media_with_placeholder(child, placeholder, index)?;

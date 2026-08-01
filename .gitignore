@@ -110,6 +110,7 @@ vendor/llmswitch-core/
 # Agent collaboration local pointer files. Truth lives under ignored runs/claims;
 # these per-worktree cursors must not dirty git status.
 .agent-collab/current*run_id
+.agent-collab/current*.tmp
 .agent-collab/current*.run_dir
 .agent-collab/.last-*
 

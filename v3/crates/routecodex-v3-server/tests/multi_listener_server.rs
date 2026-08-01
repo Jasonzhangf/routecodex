@@ -3332,11 +3332,16 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_thre
     .await
     .unwrap();
     let client = reqwest::Client::new();
+    let session_id = "shared-provider-health-session";
 
     for index in 0..3 {
         let response = client
             .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-            .json(&json!({"model":"client-test","input":format!("hello {index}")}))
+            .json(&json!({
+                "model":"client-test",
+                "input":format!("hello {index}"),
+                "client_metadata":{"session_id":session_id,"thread_id":"shared-provider-health-thread"}
+            }))
             .send()
             .await
             .unwrap();
@@ -3351,7 +3356,11 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_thre
 
     let cooled_response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"client-test","input":"cooled provider should be skipped"}))
+        .json(&json!({
+            "model":"client-test",
+            "input":"cooled provider should be skipped",
+            "client_metadata":{"session_id":session_id,"thread_id":"shared-provider-health-thread"}
+        }))
         .send()
         .await
         .unwrap();

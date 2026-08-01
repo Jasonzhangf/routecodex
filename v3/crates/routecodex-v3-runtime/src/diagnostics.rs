@@ -128,6 +128,7 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
                 "selectedModelId": selected.candidate.model_id,
                 "selectedWireModel": selected.candidate.wire_model,
                 "selectedProviderType": selected.candidate.provider_type,
+                "selectedResponsesProcess": selected.candidate.responses_process,
                 "selectedTransport": format!("{:?}", selected.candidate.responses_transport),
                 "selectedTargetPath": selected.candidate.path,
                 "candidateProviderKeys": candidate_keys,
@@ -143,6 +144,7 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
                     "modelId": selected.candidate.model_id,
                     "wireModel": selected.candidate.wire_model,
                     "providerType": selected.candidate.provider_type,
+                    "responsesProcess": selected.candidate.responses_process,
                     "transport": format!("{:?}", selected.candidate.responses_transport),
                     "path": selected.candidate.path
                 },

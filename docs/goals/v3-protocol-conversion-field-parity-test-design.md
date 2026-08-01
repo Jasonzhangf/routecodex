@@ -59,7 +59,8 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 
 ## Data-plane / control-plane rule
 
-- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. They must remain normal payload fields only when the target protocol can represent them; OpenAI Chat provider wire preserves `metadata` but strips non-standard `client_metadata`.
+- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. They must remain normal payload fields only when the target protocol can represent them; OpenAI Chat provider wire preserves `metadata` but rejects non-standard `client_metadata` before provider send, while OpenAI Responses provider wire explicitly renames `client_metadata` to `metadata`.
+- OpenAI Chat wire rejects `client_metadata` before provider send; Responses wire explicitly renames `client_metadata` to `metadata`.
 - RouteCodex-created control fields (`metadata_center`, `routeHint`, `stoplessCenter`, `requestCapabilities`, etc.) must fail before provider/client normal payload.
 - Unsupported target-protocol fields must not be silently dropped. This slice either maps them, preserves them under the target protocol when legal, or fail-fast tests them when malformed.
 
@@ -83,7 +84,7 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `stream` | preserved | request matrix |
 | `response_format` | preserved | request matrix |
 | `max_output_tokens` / `max_tokens` | preserve target-compatible token limit; do not drop the explicit client field | request matrix |
-| `metadata` / `client_metadata` | `metadata` preserved when target supports it; `client_metadata` stripped before OpenAI Chat provider wire because it is not a standard Chat provider field | request matrix |
+| `metadata` / `client_metadata` | `metadata` preserved when target supports it; `client_metadata` rejected before OpenAI Chat provider wire and explicitly renamed to `metadata` before OpenAI Responses provider wire | request matrix |
 | `stop` | preserved | request matrix |
 | RouteCodex control fields | rejected before wire | negative gate already existing; keep covered |
 
@@ -124,15 +125,22 @@ tests exist and pass.
 | --- | --- | --- |
 | assistant `tool_calls[].id` | `function_call.call_id` keeps the stable `call_*` pairing key; `function_call.id` is the corresponding `fc_*` item id | `responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids` |
 | tool result `tool_call_id` | `function_call_output.call_id` keeps the same `call_*` pairing key; `function_call_output.id` equals the paired `function_call.id` | `responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids` |
+| long / lossy tool call id normalization | distinct Chat tool-call IDs must produce distinct `fc_*` item ids, even when truncated or sanitized | `responses_openai_chat_field_parity_responses_wire_generates_collision_resistant_fc_ids`; `responses_openai_chat_field_parity_responses_wire_hashes_sanitized_collisions` |
 | `include` | preserved only on Responses provider wire | `responses_openai_chat_field_parity_responses_wire_preserves_include_projection` |
+
+### Direct passthrough guard
+
+| Direct surface | Required behavior | Required test |
+| --- | --- | --- |
+| `V3HubExecutionMode::Direct` | production Direct kernel must keep same-protocol Responses provider wire as the client Responses surface with selected provider model binding; it must preserve `input`/`include`/tool history and must not synthesize Chat `messages` | `responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history` |
 
 ### Responses request -> OpenAI Chat provider wire
 
 | Responses field | OpenAI Chat provider wire | Required test |
 | --- | --- | --- |
 | `reasoning.effort` / `reasoning.summary` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
-| `include` | omitted from OpenAI Chat provider wire; preserved on Responses wire only | `responses_openai_chat_field_parity_include_is_elided_from_chat_wire` |
-| Historical malformed `function_call.arguments`, with or without matching `function_call_output` parse-failure truth | explicit `ProviderReqCompat06ProviderCompat` projection error naming the call id and parse-feedback presence before the incompatible OpenAI Chat target can send; enter typed Error05, reselect the lossless Responses target, and preserve the original arguments exactly; forbid deletion, replacement, empty-object repair, Error05 bypass, or send to the incompatible target | `responses_openai_chat_field_parity_malformed_arguments_fail_before_provider_send` |
+| `include` | rejected from OpenAI Chat provider wire; preserved on Responses wire only | `responses_openai_chat_field_parity_include_is_elided_from_chat_wire` |
+| Historical malformed `function_call.arguments`, with or without matching `function_call_output` parse-failure truth | adjacent OpenAI Chat argument projector preserves the exact string value, keeps parse-failure tool output paired, sends the selected OpenAI Chat target exactly once, and records no provider failure or Error05 reselect; forbid deletion, empty-object repair, JSON-string rewrapping, provider switch, MetadataCenter reconstruction, or continuation mutation | `responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect` / `responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect` |
 
 ### OpenAI Chat provider response -> Responses projection
 
@@ -190,7 +198,7 @@ tests exist and pass.
 | `output[].custom_tool_call` | `tool_use` block preserving raw input | response matrix |
 | `usage.input_tokens/output_tokens` | Anthropic `usage.input_tokens/output_tokens` | response matrix |
 | `finish_reason` / `status` | `stop_reason` (`tool_use`, `end_turn`, `max_tokens`, `stop_sequence`) | response matrix |
-| malformed JSON function arguments | explicit error, not empty-object fallback | negative test |
+| malformed JSON function arguments | exact string preservation at the adjacent codec, not JSON-string rewrapping, empty-object fallback, MetadataCenter reconstruction, or provider switch | negative/positive paired tests |
 
 ### OpenAI Chat -> OpenAI Chat same-protocol
 

@@ -634,6 +634,78 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
     }
 }
 
+#[test]
+fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
+    let routing_group = "protocol_plan_session_cooldown";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session_a = test_failure_session_scope_for(routing_group, "session-a");
+    let session_b = test_failure_session_scope_for(routing_group, "session-b");
+    let now = 1_000_000;
+
+    for offset in 0..3 {
+        provider_health
+            .record_provider_failure_record(
+                &session_a,
+                "first",
+                Some("key"),
+                Some("test"),
+                Some("controlled protocol plan cooldown"),
+                now + offset,
+            )
+            .expect("session A failure should be recorded");
+    }
+
+    let plan_a = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            server_id: "test".to_string(),
+            failure_session_scope: session_a,
+            request_id: "req-plan-session-a".to_string(),
+            execution_id: "exec-plan-session-a".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            body: json!({"model":"client-model","input":"hello"}),
+        },
+        provider_health.clone(),
+        now + 10,
+    )
+    .expect("session A protocol plan should reselect available candidate");
+    assert_eq!(plan_a.decision.target.candidate.provider_id, "second");
+    assert_eq!(plan_a.decision.target.candidate.auth_alias, "key");
+    assert_eq!(plan_a.decision.target.candidate.model_id, "test");
+    assert_eq!(plan_a.decision.target.unavailable_candidates.len(), 1);
+    assert!(
+        plan_a.decision.target.unavailable_candidates[0]
+            .starts_with("first:key:test:availability("),
+        "{:?}",
+        plan_a.decision.target.unavailable_candidates
+    );
+    assert!(
+        plan_a.decision.target.unavailable_candidates[0].contains("session-a"),
+        "{:?}",
+        plan_a.decision.target.unavailable_candidates
+    );
+
+    let plan_b = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        V3Server03HttpRequestRaw {
+            server_id: "test".to_string(),
+            failure_session_scope: session_b,
+            request_id: "req-plan-session-b".to_string(),
+            execution_id: "exec-plan-session-b".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            body: json!({"model":"client-model","input":"hello"}),
+        },
+        provider_health,
+        now + 10,
+    )
+    .expect("session B protocol plan should not inherit session A cooldown");
+    assert_eq!(plan_b.decision.target.candidate.provider_id, "first");
+    assert!(plan_b.decision.target.unavailable_candidates.is_empty());
+}
+
 #[tokio::test]
 async fn provider_failure_reselects_without_router_reentry() {
     use std::sync::atomic::{AtomicUsize, Ordering};
