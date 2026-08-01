@@ -118,6 +118,24 @@ chains:
       - v3.lifecycle.control_channel
       side_channel_writes:
       - v3.lifecycle.restart_plan
+  - step_id: v3-life-cli-debug-01
+    from_node: V3Cli01ResolvedDebugIntent
+    to_node: V3Lifecycle06LiveControlled
+    caller_symbol: run_cli
+    caller_file: v3/crates/routecodex-v3-cli/src/main.rs
+    callee_symbol: V3ManagedLifecycle::with_console_enabled
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.managed_server_lifecycle
+    semantic_contract:
+    - routecodex shim dev env or explicit --debug may enable lifecycle console before start/restart/run-managed-child.
+    - rcc and rccv3 stable shims do not set dev env; v1 restart.plan.json must not carry console/debug.
+    resource_flow:
+      consumes:
+      - v3.config.published_manifest
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
   - step_id: v3-life-06
     from_node: V3Lifecycle06LiveControlled
     to_node: V3Lifecycle07GracefullyStopped

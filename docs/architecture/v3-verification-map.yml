@@ -29,6 +29,7 @@ features:
       - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
       - top-level start without -c resolves ~/.rcc/config.v3.toml and --snap forces snapshots
       - foreground start forces startup and common HTTP request console even when config log_console is false
+      - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
     required_integration:
       - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
       - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output; human server logs persist the same ANSI-colored monitor lines; scoped prefix is `[port:entry:sessionID:<data>][project][provider.model][route]`; started/route/terminal/error lines after target selection use Runtime observability provider.model/route, not request payload model, pre-route pending scope, or SSE transport bytes; terminal failed lines are ANSI red; route hit uses `[virtual-router-hit] req=... route=... target=provider[key].wire_model reason=...`; usage uses `usage_in/usage_out/usage_cache/usage_total` or `usage=unreported`, `time_i/time_e/time_t`, and `finish_reason=...`; all data values are highlighted as whole values, not digit-by-digit.

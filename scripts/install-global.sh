@@ -397,14 +397,14 @@ cleanup_old_install() {
 run_default_v3_install() {
     check_node
     check_tmux
-    node scripts/cleanup-stale-server-pids.mjs --quiet || true
+    node scripts/cleanup-stale-server-pids.mjs --quiet
     echo "🔁 install:global 默认入口走 V3-only: node scripts/install-v3-cli.mjs"
     node scripts/install-v3-cli.mjs
     ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node scripts/ensure-cli-command-shim.mjs
     node scripts/ensure-cli-executable.mjs
     verify_install
     restart_managed_dev_server_if_requested
-    node scripts/cleanup-stale-server-pids.mjs --quiet || true
+    node scripts/cleanup-stale-server-pids.mjs --quiet
     echo "🎉 V3-only 全局安装完成: rcc -> rccv3"
 }
 

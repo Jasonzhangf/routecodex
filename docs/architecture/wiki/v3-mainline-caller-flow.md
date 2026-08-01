@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 47 functional paths, 343 caller edges.
+Generated view: 47 functional paths, 344 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -20,6 +20,7 @@ flowchart TD
   module_pending["pending"]
   module_routecodex_v3_sse["routecodex-v3-sse"]
   module_scripts["scripts"]
+  module_v3_cli["v3-cli"]
   module_v3_config["v3-config"]
   module_v3_debug["v3-debug"]
   module_v3_error["v3-error"]
@@ -34,6 +35,7 @@ flowchart TD
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_scripts -->|2 edges / 1 paths| module_docs
   module_scripts -->|1 edges / 1 paths| module_docs__manifest
+  module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|12 edges / 4 paths| module_v3_config
   module_v3_error -->|5 edges / 1 paths| module_v3_error
@@ -68,6 +70,7 @@ flowchart TD
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | scripts | docs | 2 | `v3.live_provider_compat.parity` |
 | scripts | docs::manifest | 1 | `v3.live_provider_compat.parity` |
+| v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 12 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline` |
 | v3-error | v3-error | 5 | `v3.debug_error_foundation.mainline` |
@@ -136,6 +139,9 @@ Manifest: `docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml`
 
 ```mermaid
 flowchart TD
+  subgraph c_0_v3_server_managed_lifecycle_m_v3_cli["v3-cli"]
+    c_0_v3_server_managed_lifecycle_10["v3-cli<br/>run_cli<br/><small>routecodex-v3-cli/src/main.rs</small>"]
+  end
   subgraph c_0_v3_server_managed_lifecycle_m_v3_lifecycle["v3-lifecycle"]
     c_0_v3_server_managed_lifecycle_0["v3-lifecycle<br/>V3ManagedLifecycle::start<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
     c_0_v3_server_managed_lifecycle_1["v3-lifecycle<br/>V3ManagedLifecycle::declaration<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
@@ -147,10 +153,11 @@ flowchart TD
     c_0_v3_server_managed_lifecycle_7["v3-lifecycle<br/>send_control<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
     c_0_v3_server_managed_lifecycle_8["v3-lifecycle<br/>V3ManagedLifecycle::restart<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
     c_0_v3_server_managed_lifecycle_9["v3-lifecycle<br/>send_restart_control<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
-    c_0_v3_server_managed_lifecycle_10["v3-lifecycle<br/>V3ManagedLifecycle::stop<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_0_v3_server_managed_lifecycle_11["v3-lifecycle<br/>V3ManagedLifecycle::with_console_enabled<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
+    c_0_v3_server_managed_lifecycle_12["v3-lifecycle<br/>V3ManagedLifecycle::stop<br/><small>routecodex-v3-lifecycle/src/lib.rs</small>"]
   end
   subgraph c_0_v3_server_managed_lifecycle_m_v3_server["v3-server"]
-    c_0_v3_server_managed_lifecycle_11["v3-server<br/>V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_0_v3_server_managed_lifecycle_13["v3-server<br/>V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_0_v3_server_managed_lifecycle_0 -->|v3-life-01<br/>V3Lifecycle01ValidatedConfig → V3Lifecycle02InstanceDeclared| c_0_v3_server_managed_lifecycle_1
   c_0_v3_server_managed_lifecycle_0 -->|v3-life-02<br/>V3Lifecycle02InstanceDeclared → V3Lifecycle03OperationLocked| c_0_v3_server_managed_lifecycle_2
@@ -158,7 +165,8 @@ flowchart TD
   c_0_v3_server_managed_lifecycle_4 -->|v3-life-04<br/>V3Lifecycle04ChildSpawned → V3Lifecycle05IdentityPublished| c_0_v3_server_managed_lifecycle_5
   c_0_v3_server_managed_lifecycle_6 -->|v3-life-05<br/>V3Lifecycle05IdentityPublished → V3Lifecycle06LiveControlled| c_0_v3_server_managed_lifecycle_7
   c_0_v3_server_managed_lifecycle_8 -->|v3-life-05r<br/>V3Lifecycle06LiveControlled → V3Lifecycle05IdentityPublished| c_0_v3_server_managed_lifecycle_9
-  c_0_v3_server_managed_lifecycle_10 -->|v3-life-06<br/>V3Lifecycle06LiveControlled → V3Lifecycle07GracefullyStopped| c_0_v3_server_managed_lifecycle_11
+  c_0_v3_server_managed_lifecycle_10 -->|v3-life-cli-debug-01<br/>V3Cli01ResolvedDebugIntent → V3Lifecycle06LiveControlled| c_0_v3_server_managed_lifecycle_11
+  c_0_v3_server_managed_lifecycle_12 -->|v3-life-06<br/>V3Lifecycle06LiveControlled → V3Lifecycle07GracefullyStopped| c_0_v3_server_managed_lifecycle_13
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -169,6 +177,7 @@ flowchart TD
 | `v3-life-04` | `V3Lifecycle04ChildSpawned` → `V3Lifecycle05IdentityPublished` | anchored | V3ManagedLifecycle::run_managed_child<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | write_json_atomic<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-life-05` | `V3Lifecycle05IdentityPublished` → `V3Lifecycle06LiveControlled` | anchored | V3ManagedLifecycle::status<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | send_control<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-life-05r` | `V3Lifecycle06LiveControlled` → `V3Lifecycle05IdentityPublished` | anchored | V3ManagedLifecycle::restart<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | send_restart_control<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | `v3.managed_server_lifecycle` |
+| `v3-life-cli-debug-01` | `V3Cli01ResolvedDebugIntent` → `V3Lifecycle06LiveControlled` | anchored | run_cli<br/><small>routecodex-v3-cli/src/main.rs</small> | V3ManagedLifecycle::with_console_enabled<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | `v3.managed_server_lifecycle` |
 | `v3-life-06` | `V3Lifecycle06LiveControlled` → `V3Lifecycle07GracefullyStopped` | anchored | V3ManagedLifecycle::stop<br/><small>routecodex-v3-lifecycle/src/lib.rs</small> | V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.managed_server_lifecycle` |
 
 ## v3.config.compile

@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>47 functional paths</span>
-        <span>343 caller edges</span>
+        <span>344 caller edges</span>
       </div>
     </header>
 
@@ -473,7 +473,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>11</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>17</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>261</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>262</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -551,7 +551,7 @@ flowchart TD
       <table>
 <thead><tr><th>Audit item</th><th>State</th><th>Edges</th><th>Resources</th><th>Owner</th><th>Current fingerprint</th></tr></thead>
 <tbody>
-<tr><td><a href="#chain-v3_server_managed_lifecycle"><code>v3.server.managed_lifecycle</code></a><br/>v 3.server.managed_lifecycle</td><td><span class="status pending_review">pending review</span></td><td>7</td><td>9</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:bb2b29cea5c2…</code></td></tr>
+<tr><td><a href="#chain-v3_server_managed_lifecycle"><code>v3.server.managed_lifecycle</code></a><br/>v 3.server.managed_lifecycle</td><td><span class="status pending_review">pending review</span></td><td>8</td><td>9</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:f5a1642209f2…</code></td></tr>
 <tr><td><a href="#chain-v3_config_compile"><code>v3.config.compile</code></a><br/>01 配置编译</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>10</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:1390aa1d0f1b…</code></td></tr>
 <tr><td><a href="#chain-v3_config_compact_hub_v1_defaults"><code>v3.config.compact_hub_v1_defaults</code></a><br/>v 3.config.compact_hub_v 1_defaults</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>5</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:2bb01d432d2a…</code></td></tr>
 <tr><td><a href="#chain-v3_models_capability_catalog"><code>v3.models.capability_catalog</code></a><br/>v 3.models.capability_catalog</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>4</td><td><code>v3.models_capability_catalog</code></td><td><code>sha256:a85311f4de0e…</code></td></tr>
@@ -611,7 +611,7 @@ flowchart TD
             <span class="chain-id">v 3.server.managed_lifecycle</span>
             <span>V3Lifecycle01ValidatedConfig → V3Lifecycle07GracefullyStopped</span>
             <span><code>v3.server.managed_lifecycle</code></span>
-            <span>7 edges · 9 resources · v3-lifecycle, v3-server</span>
+            <span>8 edges · 9 resources · v3-cli, v3-lifecycle, v3-server</span>
             <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_config_compile">
@@ -984,14 +984,14 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.server.managed_lifecycle</span>
         <span class="summary-sub">V3Lifecycle01ValidatedConfig → V3Lifecycle07GracefullyStopped</span>
-        <span class="summary-sub">7 edges · <code>v3.server.managed_lifecycle</code> · V3Lifecycle01ValidatedConfig → V3Lifecycle07GracefullyStopped</span>
+        <span class="summary-sub">8 edges · <code>v3.server.managed_lifecycle</code> · V3Lifecycle01ValidatedConfig → V3Lifecycle07GracefullyStopped</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.managed_server_lifecycle</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
-          <span>modules: <code>v3-lifecycle · v3-server</code></span>
+          <span>modules: <code>v3-cli · v3-lifecycle · v3-server</code></span>
           <span>resources: <code>9</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml</code></span>
 
@@ -1005,17 +1005,19 @@ flowchart TD
   n_v3_server_managed_lifecycle_3[&quot;&lt;b&gt;Lifecycle 04 Child Spawned&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle04ChildSpawned&lt;/small&gt;&quot;]
   n_v3_server_managed_lifecycle_4[&quot;&lt;b&gt;Lifecycle 05 Identity Published&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle05IdentityPublished&lt;/small&gt;&quot;]
   n_v3_server_managed_lifecycle_5[&quot;&lt;b&gt;Lifecycle 06 Live Controlled&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle06LiveControlled&lt;/small&gt;&quot;]
-  n_v3_server_managed_lifecycle_6[&quot;&lt;b&gt;Lifecycle 07 Gracefully Stopped&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle07GracefullyStopped&lt;/small&gt;&quot;]
+  n_v3_server_managed_lifecycle_6[&quot;&lt;b&gt;Cli 01 Resolved Debug Intent&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Cli01ResolvedDebugIntent&lt;/small&gt;&quot;]
+  n_v3_server_managed_lifecycle_7[&quot;&lt;b&gt;Lifecycle 07 Gracefully Stopped&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle07GracefullyStopped&lt;/small&gt;&quot;]
   n_v3_server_managed_lifecycle_0 --&gt;|v3-life-01&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_server_managed_lifecycle_1
   n_v3_server_managed_lifecycle_1 --&gt;|v3-life-02&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_server_managed_lifecycle_2
   n_v3_server_managed_lifecycle_2 --&gt;|v3-life-03&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_server_managed_lifecycle_3
   n_v3_server_managed_lifecycle_3 --&gt;|v3-life-04&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_server_managed_lifecycle_4
   n_v3_server_managed_lifecycle_4 --&gt;|v3-life-05&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_server_managed_lifecycle_5
   n_v3_server_managed_lifecycle_5 --&gt;|v3-life-05r&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_server_managed_lifecycle_4
-  n_v3_server_managed_lifecycle_5 --&gt;|v3-life-06&lt;br/&gt;v3-lifecycle → v3-server| n_v3_server_managed_lifecycle_6
+  n_v3_server_managed_lifecycle_6 --&gt;|v3-life-cli-debug-01&lt;br/&gt;v3-cli → v3-lifecycle| n_v3_server_managed_lifecycle_5
+  n_v3_server_managed_lifecycle_5 --&gt;|v3-life-06&lt;br/&gt;v3-lifecycle → v3-server| n_v3_server_managed_lifecycle_7
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_server_managed_lifecycle_0,n_v3_server_managed_lifecycle_1,n_v3_server_managed_lifecycle_2,n_v3_server_managed_lifecycle_3,n_v3_server_managed_lifecycle_4,n_v3_server_managed_lifecycle_5,n_v3_server_managed_lifecycle_6 node;</pre>
+  class n_v3_server_managed_lifecycle_0,n_v3_server_managed_lifecycle_1,n_v3_server_managed_lifecycle_2,n_v3_server_managed_lifecycle_3,n_v3_server_managed_lifecycle_4,n_v3_server_managed_lifecycle_5,n_v3_server_managed_lifecycle_6,n_v3_server_managed_lifecycle_7 node;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
@@ -1026,6 +1028,7 @@ flowchart TD
 <tr><td><code>v3-life-04</code></td><td><code>V3Lifecycle04ChildSpawned</code><br/>→ <code>V3Lifecycle05IdentityPublished</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.server.listener_set</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div></td><td><code>V3ManagedLifecycle::run_managed_child</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>write_json_atomic</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td></tr>
 <tr><td><code>v3-life-05</code></td><td><code>V3Lifecycle05IdentityPublished</code><br/>→ <code>V3Lifecycle06LiveControlled</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div></td><td><code>V3ManagedLifecycle::status</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>send_control</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td></tr>
 <tr><td><code>v3-life-05r</code></td><td><code>V3Lifecycle06LiveControlled</code><br/>→ <code>V3Lifecycle05IdentityPublished</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.lifecycle.restart_plan</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.lifecycle.restart_plan</code></div></td><td><code>V3ManagedLifecycle::restart</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>send_restart_control</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td></tr>
+<tr><td><code>v3-life-cli-debug-01</code></td><td><code>V3Cli01ResolvedDebugIntent</code><br/>→ <code>V3Lifecycle06LiveControlled</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code></div></td><td><code>run_cli</code><br/><small>routecodex-v3-cli/src/main.rs</small></td><td><code>V3ManagedLifecycle::with_console_enabled</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td></tr>
 <tr><td><code>v3-life-06</code></td><td><code>V3Lifecycle06LiveControlled</code><br/>→ <code>V3Lifecycle07GracefullyStopped</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.control_channel</code> <code>v3.server.listener_set</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.control_channel</code></div></td><td><code>V3ManagedLifecycle::stop</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>V3ServerAggregateHandle::shutdown</code><br/><small>routecodex-v3-server/src/lib.rs</small></td></tr>
 </tbody>
 </table>

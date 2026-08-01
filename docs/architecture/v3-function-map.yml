@@ -19,6 +19,10 @@ features:
       - V3ManagedLifecycle::start_foreground
       - V3ManagedLifecycle::with_snapshots_enabled
       - V3ManagedLifecycle::with_console_enabled
+      - run_cli
+      - resolve_v3_cli_snapshot_flags
+      - resolve_v3_cli_debug_flag
+      - configure_v3_snapshot_flags
       - V3ManagedLifecycle::status
       - V3ManagedLifecycle::restart
       - V3ManagedLifecycle::stop

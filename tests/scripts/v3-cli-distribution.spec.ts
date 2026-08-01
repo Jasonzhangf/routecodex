@@ -66,6 +66,12 @@ describe('V3 CLI distribution surface', () => {
     expect(globalInstall).toContain('$NPM_PREFIX/bin/rcc');
     expect(globalInstall).toContain('run_default_v3_install');
     expect(globalInstall).toContain('node scripts/install-v3-cli.mjs');
+    const defaultV3InstallBody = globalInstall.slice(
+      globalInstall.indexOf('run_default_v3_install()'),
+      globalInstall.indexOf('# 主函数'),
+    );
+    expect(defaultV3InstallBody).toContain('node scripts/cleanup-stale-server-pids.mjs --quiet');
+    expect(defaultV3InstallBody).not.toContain('cleanup-stale-server-pids.mjs --quiet || true');
     expect(globalInstall).not.toContain('V3 install target missing current rccv3');
     expect(releaseInstall).not.toContain('V3 install target missing current rccv3');
     const installV3Cli = read('scripts/install-v3-cli.mjs');
