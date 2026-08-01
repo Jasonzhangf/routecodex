@@ -1109,9 +1109,6 @@ fn resolve_routing_state_key(metadata: &Value) -> String {
     let provider_protocol = read_trimmed_string(metadata.get("providerProtocol"))
         .or_else(|| read_metadata_center_runtime_control_string(metadata, "providerProtocol"));
     if provider_protocol.as_deref() == Some("openai-responses") {
-        if let Some(previous_request_id) = resolve_legacy_responses_request_chain_key(metadata) {
-            return previous_request_id;
-        }
         if let Some(request_id) = read_trimmed_string(metadata.get("requestId"))
             .or_else(|| read_metadata_center_request_truth_string(metadata, "requestId"))
         {
@@ -1155,12 +1152,6 @@ fn resolve_continuation_request_chain_key(metadata: &Value) -> Option<String> {
             .and_then(Value::as_object)
             .and_then(|resume_from| read_trimmed_string(resume_from.get("requestId")))
     })
-}
-
-fn resolve_legacy_responses_request_chain_key(metadata: &Value) -> Option<String> {
-    metadata
-        .get("responsesResume")
-        .and_then(|resume| read_trimmed_string(resume.get("previousRequestId")))
 }
 
 fn push_unique_scope_key(out: &mut Vec<String>, value: Option<String>) {

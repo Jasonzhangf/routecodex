@@ -76,13 +76,6 @@ fn first_normalized_parameters(candidates: Vec<Option<Value>>) -> Option<Value> 
         .find_map(|value| normalize_followup_parameters(&value))
 }
 
-fn extract_standard_followup_captured_request(adapter_context: &Value) -> Option<&Value> {
-    let row = adapter_context.as_object()?;
-    row.get("capturedEntryRequest")
-        .or_else(|| row.get("capturedChatRequest"))
-        .filter(|value| value.as_object().is_some())
-}
-
 fn seed_has_conversation(seed: &Map<String, Value>) -> bool {
     seed.get("messages")
         .and_then(Value::as_array)
@@ -217,6 +210,27 @@ fn messages_to_responses_input(messages: &[Value]) -> Value {
     Value::Array(input)
 }
 
+#[cfg(test)]
+fn extract_captured_chat_seed(captured: &Value) -> Option<Value> {
+    let row = captured.as_object()?;
+    if !seed_has_conversation(row) {
+        return None;
+    }
+    let mut out = row.clone();
+    if let Some(model) = out
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+    {
+        out.insert("model".to_string(), Value::String(model));
+    } else {
+        out.remove("model");
+    }
+    Some(Value::Object(out))
+}
+
 pub(crate) fn resolve_followup_model(seed_model: &Value, adapter_context: &Value) -> String {
     let seed = seed_model.as_str().map(str::trim).filter(|s| !s.is_empty());
     let Some(record) = adapter_context.as_object() else {
@@ -300,61 +314,15 @@ fn extract_chat_messages_from_responses_input(input: &[Value]) -> Vec<Value> {
     messages
 }
 
-pub(crate) fn extract_captured_chat_seed(captured: &Value) -> Option<Value> {
-    let row = captured.as_object()?;
-    if !seed_has_conversation(row) {
-        return None;
-    }
-    let mut out = row.clone();
-    if let Some(model) = out
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-    {
-        out.insert("model".to_string(), Value::String(model));
-    } else {
-        out.remove("model");
-    }
-    Some(Value::Object(out))
+pub(crate) fn build_servertool_req04_followup_payload(_adapter_context: &Value) -> Option<Value> {
+    None
 }
 
-pub(crate) fn build_servertool_req04_followup_seed(adapter_context: &Value) -> Option<Value> {
-    let captured = extract_standard_followup_captured_request(adapter_context)?;
-    extract_captured_chat_seed(captured)
+pub(crate) fn build_servertool_req04_followup_seed(_adapter_context: &Value) -> Option<Value> {
+    None
 }
 
-pub(crate) fn build_servertool_req04_followup_payload(adapter_context: &Value) -> Option<Value> {
-    let seed = build_servertool_req04_followup_seed(adapter_context)?;
-    if !seed.as_object().is_some_and(seed_has_conversation) {
-        return None;
-    }
-    Some(seed)
-}
-
-pub(crate) fn resolve_followup_origin_seed(input: &Value) -> Option<Value> {
-    let row = input.as_object()?;
-    let adapter_context = row.get("adapterContext").unwrap_or(&Value::Null);
-    let adapter_row = adapter_context.as_object();
-    for candidate in [
-        adapter_row.and_then(|entry| entry.get("capturedEntryRequest")),
-        adapter_row.and_then(|entry| entry.get("capturedChatRequest")),
-        row.get("snapshot")
-            .and_then(Value::as_object)
-            .and_then(|snapshot| snapshot.get("capturedEntryRequest")),
-        row.get("snapshot")
-            .and_then(Value::as_object)
-            .and_then(|snapshot| snapshot.get("capturedChatRequest")),
-        row.get("snapshot"),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Some(seed) = extract_captured_chat_seed(candidate) {
-            return Some(seed);
-        }
-    }
+pub(crate) fn resolve_followup_origin_seed(_input: &Value) -> Option<Value> {
     None
 }
 
@@ -557,21 +525,8 @@ fn append_tool_messages_from_tool_outputs(
     final_chat_response: &Value,
     required: bool,
 ) -> bool {
-    let responses_context = adapter_context
-        .as_object()
-        .and_then(|row| row.get("responsesContext"))
-        .and_then(Value::as_object);
-    let outputs_from_responses = extract_captured_tool_outputs(responses_context);
-    let chat_outputs = if outputs_from_responses.is_empty() {
-        extract_chat_tool_outputs(final_chat_response)
-    } else {
-        Vec::new()
-    };
-    let outputs = if outputs_from_responses.is_empty() {
-        chat_outputs
-    } else {
-        outputs_from_responses
-    };
+    let _ = adapter_context;
+    let outputs = extract_chat_tool_outputs(final_chat_response);
     if outputs.is_empty() {
         return !required;
     }
@@ -893,14 +848,6 @@ pub(crate) fn apply_followup_delta_plan(input: &Value) -> Option<Value> {
 }
 
 #[napi]
-pub fn extract_captured_chat_seed_json(captured_json: String) -> NapiResult<String> {
-    let captured: Value = serde_json::from_str(&captured_json)
-        .map_err(|error| napi::Error::from_reason(error.to_string()))?;
-    serde_json::to_string(&extract_captured_chat_seed(&captured).unwrap_or(Value::Null))
-        .map_err(|error| napi::Error::from_reason(error.to_string()))
-}
-
-#[napi]
 pub fn build_servertool_req04_followup_payload_json(
     adapter_context_json: String,
 ) -> NapiResult<String> {
@@ -1040,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_followup_origin_seed_prefers_adapter_then_snapshot_sources() {
+    fn resolve_followup_origin_seed_rejects_adapter_and_snapshot_payloads() {
         let input = json!({
             "adapterContext": {
                 "capturedEntryRequest": {
@@ -1064,15 +1011,7 @@ mod tests {
                 "messages": [{ "role": "user", "content": "snapshot root" }]
             }
         });
-        let seed = resolve_followup_origin_seed(&input).expect("seed");
-        assert_eq!(
-            seed.get("model").and_then(Value::as_str),
-            Some("direct-entry")
-        );
-        assert_eq!(
-            seed.pointer("/messages/0/content").and_then(Value::as_str),
-            Some("direct entry")
-        );
+        assert!(resolve_followup_origin_seed(&input).is_none());
 
         let input = json!({
             "adapterContext": {},
@@ -1087,12 +1026,7 @@ mod tests {
                 }
             }
         });
-        let seed = resolve_followup_origin_seed(&input).expect("seed");
-        assert!(seed.get("model").is_none());
-        assert_eq!(
-            seed.pointer("/messages/0/content").and_then(Value::as_str),
-            Some("snapshot entry")
-        );
+        assert!(resolve_followup_origin_seed(&input).is_none());
 
         let input = json!({
             "adapterContext": {},
@@ -1101,15 +1035,7 @@ mod tests {
                 "messages": [{ "role": "user", "content": "snapshot root" }]
             }
         });
-        let seed = resolve_followup_origin_seed(&input).expect("seed");
-        assert_eq!(
-            seed.get("model").and_then(Value::as_str),
-            Some("snapshot-root")
-        );
-        assert_eq!(
-            seed.pointer("/messages/0/content").and_then(Value::as_str),
-            Some("snapshot root")
-        );
+        assert!(resolve_followup_origin_seed(&input).is_none());
     }
 
     #[test]
@@ -1186,7 +1112,7 @@ mod tests {
     }
 
     #[test]
-    fn servertool_req04_followup_seed_uses_standard_adapter_context_origin() {
+    fn servertool_req04_followup_seed_rejects_adapter_context_origin() {
         let adapter_context = json!({
             "capturedChatRequest": {
                 "model": "gpt-test",
@@ -1197,15 +1123,11 @@ mod tests {
                 "temperature": 0.1
             }
         });
-        let seed = build_servertool_req04_followup_seed(&adapter_context).expect("seed");
-        assert_eq!(seed["messages"][0]["content"], "fix it");
-        assert_eq!(seed["tools"][0]["function"]["name"], "exec_command");
-        assert_eq!(seed["tool_choice"], "auto");
-        assert_eq!(seed["stream"], true);
+        assert!(build_servertool_req04_followup_seed(&adapter_context).is_none());
     }
 
     #[test]
-    fn servertool_req04_followup_built_payload_preserves_tools_from_standard_origin() {
+    fn servertool_req04_followup_built_payload_rejects_standard_origin() {
         let adapter_context = json!({
             "capturedChatRequest": {
                 "model": "gpt-test",
@@ -1216,13 +1138,7 @@ mod tests {
                 "temperature": 0.1
             }
         });
-        let payload = build_servertool_req04_followup_payload(&adapter_context).expect("payload");
-        assert_eq!(payload["messages"][0]["content"], "fix it");
-        assert_eq!(payload["model"], "gpt-test");
-        assert_eq!(payload["tools"][0]["function"]["name"], "exec_command");
-        assert_eq!(payload["temperature"], 0.1);
-        assert_eq!(payload["tool_choice"], "auto");
-        assert_eq!(payload["stream"], true);
+        assert!(build_servertool_req04_followup_payload(&adapter_context).is_none());
     }
 
     #[test]

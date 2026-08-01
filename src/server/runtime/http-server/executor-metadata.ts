@@ -2,7 +2,6 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 // feature_id: hub.metadata_center_request_capture
 import { asRecord } from './provider-utils.js';
 import {
-  extractServertoolCliResultRouteHintFromRequestNative,
   extractSessionIdentifiersFromMetadataNative
 } from '../../../modules/llmswitch/bridge/executor-metadata-host.js';
 import { MetadataCenter } from './metadata-center/metadata-center.js';
@@ -802,9 +801,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     processMode,
     direction: 'request',
     stage: 'inbound',
-    __raw_request_body: Object.prototype.hasOwnProperty.call(userMeta, '__raw_request_body')
-      ? userMeta.__raw_request_body
-      : input.body,
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
@@ -843,12 +839,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   };
   propagatePipelineDryRunControl(input.metadata, metadata);
   delete metadata.routeHint;
-  delete metadata.responsesRequestContext;
-  if (metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)) {
-    const rt = { ...(metadata.__rt as Record<string, unknown>) };
-    delete rt.responsesRequestContext;
-    metadata.__rt = rt;
-  }
 
   if (normalizedClientHeaders) {
     metadata.clientHeaders = normalizedClientHeaders;
@@ -931,12 +921,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   if (requestHeaderConversationId) {
     requestTruthSource.conversationId = requestHeaderConversationId;
   }
-  delete requestTruthSource.responsesRequestContext;
-  if (requestTruthSource.__rt && typeof requestTruthSource.__rt === 'object' && !Array.isArray(requestTruthSource.__rt)) {
-    const rt = { ...(requestTruthSource.__rt as Record<string, unknown>) };
-    delete rt.responsesRequestContext;
-    requestTruthSource.__rt = rt;
-  }
   const extractedSessionIdentifiers = extractSessionIdentifiersFromMetadataNative(requestTruthSource);
   const existingSessionId = typeof extractedSessionIdentifiers.sessionId === 'string' && extractedSessionIdentifiers.sessionId.trim()
     ? extractedSessionIdentifiers.sessionId.trim()
@@ -974,68 +958,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   }
   if (sessionIdentifiers.conversationId) {
     metadata.conversationId = sessionIdentifiers.conversationId;
-  }
-  const responsesResumeSource =
-    (bodyMeta.responsesResume && typeof bodyMeta.responsesResume === 'object' && !Array.isArray(bodyMeta.responsesResume)
-      ? bodyMeta.responsesResume as Record<string, unknown>
-      : undefined)
-    ?? (userMeta.responsesResume && typeof userMeta.responsesResume === 'object' && !Array.isArray(userMeta.responsesResume)
-      ? userMeta.responsesResume as Record<string, unknown>
-      : undefined)
-    ?? (metadata.responsesResume && typeof metadata.responsesResume === 'object' && !Array.isArray(metadata.responsesResume)
-      ? metadata.responsesResume as Record<string, unknown>
-      : undefined)
-    ?? (center.readContinuationContext().responsesResume && typeof center.readContinuationContext().responsesResume === 'object' && !Array.isArray(center.readContinuationContext().responsesResume)
-      ? center.readContinuationContext().responsesResume as Record<string, unknown>
-      : undefined);
-  if (responsesResumeSource) {
-    writeMetadataCenterSlot({
-      target: metadata,
-      family: 'continuation_context',
-      key: 'responsesResume',
-      value: responsesResumeSource,
-      writer: BUILD_REQUEST_METADATA_INBOUND_WRITER,
-      reason: 'responses resume request truth'
-    });
-    metadata.responsesResume = responsesResumeSource;
-    const runtimeControl = center.readRuntimeControl();
-    const responsesResumeContinuationOwner =
-      typeof responsesResumeSource.continuationOwner === 'string' && responsesResumeSource.continuationOwner.trim()
-        ? responsesResumeSource.continuationOwner.trim()
-        : undefined;
-    const projectedRouteHint =
-      typeof runtimeControl.routeHint === 'string' && runtimeControl.routeHint.trim()
-        ? runtimeControl.routeHint.trim()
-        : typeof responsesResumeSource.routeHint === 'string' && responsesResumeSource.routeHint.trim()
-          ? responsesResumeSource.routeHint.trim()
-          : undefined;
-    if (projectedRouteHint && !runtimeControl.routeHint) {
-      writeMetadataCenterSlot({
-        target: metadata,
-        family: 'runtime_control',
-        key: 'routeHint',
-        value: projectedRouteHint,
-        writer: BUILD_REQUEST_METADATA_INBOUND_WRITER,
-        reason: 'responses resume route hint'
-      });
-    }
-    const projectedRetryProviderKey =
-      typeof runtimeControl.retryProviderKey === 'string' && runtimeControl.retryProviderKey.trim()
-        ? runtimeControl.retryProviderKey.trim()
-        : responsesResumeContinuationOwner !== 'relay'
-          && typeof responsesResumeSource.providerKey === 'string' && responsesResumeSource.providerKey.trim()
-          ? responsesResumeSource.providerKey.trim()
-          : undefined;
-    if (projectedRetryProviderKey && !runtimeControl.retryProviderKey) {
-      writeMetadataCenterSlot({
-        target: metadata,
-        family: 'runtime_control',
-        key: 'retryProviderKey',
-        value: projectedRetryProviderKey,
-        writer: BUILD_REQUEST_METADATA_INBOUND_WRITER,
-        reason: 'responses resume retry provider pin'
-      });
-    }
   }
   if (hasStoplessDirectiveInRequestPayload(input.body)) {
     writeMetadataCenterSlot({
@@ -1191,61 +1113,7 @@ function extractHeaderValue(
 }
 
 function extractRouteHint(input: PipelineExecutionInput): string | undefined {
-  const header = (input.headers as Record<string, unknown>)?.['x-route-hint'];
-  if (typeof header === 'string' && header.trim()) {
-    return header.trim();
-  }
-  if (Array.isArray(header) && header[0]) {
-    return String(header[0]);
-  }
-  const metadataRouteHint = readRuntimeControlProjection(asRecord(input.metadata)).routeHint;
-  if (metadataRouteHint) {
-    return metadataRouteHint;
-  }
-  const bodyMetadata = asRecord(asRecord(input.body).metadata);
-  const bodyHasResponsesResume =
-    isRecord(bodyMetadata?.responsesResume)
-    || isRecord(bodyMetadata?.responsesResumeContext)
-    || typeof bodyMetadata?.previous_response_id === 'string'
-    || typeof bodyMetadata?.response_id === 'string';
-  const servertoolCliRouteHint = extractServertoolCliResultRouteHint(input);
-  if (servertoolCliRouteHint) {
-    return servertoolCliRouteHint;
-  }
-  if (bodyHasResponsesResume) {
-    return undefined;
-  }
-  const bodyRouteHint = normalizeToken(bodyMetadata?.routeHint);
-  if (bodyRouteHint) {
-    return bodyRouteHint;
-  }
-  return undefined;
-}
-
-function extractServertoolCliResultRouteHint(input: PipelineExecutionInput): string | undefined {
-  if (!requestMayContainToolOutput(input.body)) {
-    return undefined;
-  }
-  return extractServertoolCliResultRouteHintFromRequestNative({
-    adapterContext: {
-      __raw_request_body: input.body
-    },
-    runtimeMetadata: input.metadata
-  });
-}
-
-function requestMayContainToolOutput(value: unknown): boolean {
-  try {
-    const text = JSON.stringify(value);
-    return typeof text === 'string' && (
-      text.includes('"tool_outputs"')
-      || text.includes('"function_call_output"')
-      || text.includes('"tool_result"')
-      || text.includes('"tool_message"')
-    );
-  } catch {
-    return false;
-  }
+  return readRuntimeControlProjection(asRecord(input.metadata)).routeHint;
 }
 
 function cloneMetadata(source: Record<string, unknown>): Record<string, unknown> {
