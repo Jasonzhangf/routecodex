@@ -35,9 +35,6 @@ function buildV3CargoEnv() {
   if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
     env.CARGO_NET_OFFLINE = 'true';
   }
-  if (!Object.prototype.hasOwnProperty.call(env, 'ROUTECODEX_SKIP_AUTO_BUMP')) {
-    env.ROUTECODEX_SKIP_AUTO_BUMP = '1';
-  }
   const cargoTargetDir = env.CARGO_TARGET_DIR
     ? path.resolve(env.CARGO_TARGET_DIR)
     : fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'));

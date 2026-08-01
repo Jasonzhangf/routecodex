@@ -116,7 +116,7 @@ describe('V3 CLI distribution surface', () => {
     expect(installV3Script).toContain('function buildV3CargoEnv()');
     expect(installV3Script).toContain("fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'))");
     expect(installV3Script).toContain('env.CARGO_TARGET_DIR = cargoTargetDir');
-    expect(installV3Script).toContain("env.ROUTECODEX_SKIP_AUTO_BUMP = '1'");
+    expect(installV3Script).not.toContain("env.ROUTECODEX_SKIP_AUTO_BUMP = '1'");
     const envStart = installV3Script.indexOf('const { env, cargoTargetDir } = buildV3CargoEnv();');
     const architectureGate = installV3Script.indexOf('V3 architecture CI gate');
     const semanticGate = installV3Script.indexOf('route classifier semantic gate');

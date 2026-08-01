@@ -158,8 +158,6 @@ struct V3ManagedRestartPlanRecord {
     snapshots: bool,
     #[serde(default, skip_serializing_if = "bool_is_false")]
     snapshot_direct: bool,
-    #[serde(default, skip_serializing_if = "bool_is_false")]
-    console: bool,
     snapshot_stages: Option<String>,
 }
 
@@ -173,7 +171,6 @@ struct ControlRestartPlan {
     executable_path: PathBuf,
     snapshots: bool,
     snapshot_direct: bool,
-    console: bool,
     snapshot_stages: Option<String>,
 }
 
@@ -626,7 +623,6 @@ impl V3ManagedLifecycle {
             self.force_snapshots,
             self.force_snapshot_direct,
             self.force_snapshot_stages.clone(),
-            self.force_console,
         )
         .await
         {
@@ -1097,7 +1093,7 @@ async fn restart_managed_runtime_in_place(
     if let Some(stages) = restart_plan.snapshot_stages.as_deref() {
         command.arg("--snap-stages").arg(stages);
     }
-    if console || restart_plan.console {
+    if console {
         command.arg("--console");
     }
     let error = command.exec();
@@ -1154,13 +1150,11 @@ async fn send_restart_control(
     snapshots: bool,
     snapshot_direct: bool,
     snapshot_stages: Option<String>,
-    console: bool,
 ) -> Result<ControlResponse, V3LifecycleError> {
     let published: V3ManagedInstanceDeclaration = read_json(&instance_dir.join("instance.json"))?;
     let needs_restart_plan = published.executable_path != declaration.executable_path
         || snapshots
         || snapshot_direct
-        || console
         || snapshot_stages
             .as_ref()
             .is_some_and(|value| !value.trim().is_empty());
@@ -1175,7 +1169,6 @@ async fn send_restart_control(
                 executable_path: declaration.executable_path.clone(),
                 snapshots,
                 snapshot_direct,
-                console,
                 snapshot_stages,
             },
         )?;
@@ -1559,13 +1552,11 @@ fn control_restart_plan(
         .filter(|value| !value.is_empty());
     let snapshots = record.as_ref().is_some_and(|record| record.snapshots);
     let snapshot_direct = record.as_ref().is_some_and(|record| record.snapshot_direct);
-    let console = record.as_ref().is_some_and(|record| record.console);
     Ok(Some(ControlRestartPlan {
         declaration,
         executable_path,
         snapshots: snapshots || snapshot_stages.is_some(),
         snapshot_direct,
-        console,
         snapshot_stages,
     }))
 }
