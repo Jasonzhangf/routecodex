@@ -430,7 +430,10 @@ mod tests {
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("store=false is semantically equivalent to Anthropic non-storage");
         assert!(
-            req_compat.provider_semantic_payload().get("store").is_none(),
+            req_compat
+                .provider_semantic_payload()
+                .get("store")
+                .is_none(),
             "Anthropic wire must not invent a store field"
         );
     }
