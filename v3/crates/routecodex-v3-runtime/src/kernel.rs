@@ -15,6 +15,7 @@ use crate::hub_v1::{
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
+    select_v3_target_with_session_then_global,
     try_reselect_cross_session_revive_from_captured_candidates,
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
     V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
@@ -499,14 +500,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, &standardized.protocol_context.server_id);
     loop {
-        let attempt_availability = V3RuntimeAttemptAvailability {
-            base: &availability,
-            failed_candidates: &failed_candidates,
-        };
         let selected = match pinned_selected.take() {
             Some(selected) => selected,
             None => match initial_selected_target.take() {
-                Some(selected) => selected,
+                Some(_preplanned_selected) => match select_v3_preplanned_direct_target(
+                    &target,
+                    expanded.as_ref(),
+                    &availability,
+                    &provider_health,
+                    &failed_candidates,
+                    now_epoch_ms,
+                ) {
+                    Ok(selected) => selected,
+                    Err(source) => return error_output(source, trace, &hook_registry),
+                },
                 None => match retry_selected.take() {
                     Some(selected) => selected,
                     None => {
@@ -523,9 +530,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 )
                             }
                         };
-                        match target.select_available(
+                        match select_v3_target_with_session_then_global(
+                            &target,
                             captured_expanded.clone(),
-                            &attempt_availability,
+                            &availability,
+                            &provider_health,
+                            &failed_candidates,
                             now_epoch_ms,
                         ) {
                             Ok(value) => value,
@@ -673,14 +683,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             }
         }
         let selected_candidate_key = candidate_key(&selected.candidate);
-        let selected_available = availability
-            .availability(
-                &selected.candidate.provider_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                now_epoch_ms,
-            )
-            .available;
+        let selected_available = v3_direct_selected_available_for_send(
+            &selected,
+            expanded.as_ref(),
+            &availability,
+            &provider_health,
+            &failed_candidates,
+            now_epoch_ms,
+        );
         let mut selected_has_cross_session_revive =
             pre_send_cross_session_revive_candidate.take().as_deref()
                 == Some(selected_candidate_key.as_str());

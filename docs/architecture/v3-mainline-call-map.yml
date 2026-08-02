@@ -2,6 +2,77 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.target.session_global_selection
+  owner_feature_id: v3.virtual_router_target_interpreter
+  summary: Target09 candidate sets become Target10 concrete providers through one session-first selection owner shared by Direct planning, Direct pre-send revalidation, initial Relay resolution, and Relay failure reselection.
+  edges:
+  - step_id: v3-rd-target-select-direct-plan
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: plan_v3_responses_protocol_execution_with_provider_health
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+    callee_symbol: select_v3_target_with_session_then_global
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_target_interpreter
+    semantic_contract:
+      - Initial Direct planning selects from the captured Target09 set using session availability before global availability.
+      - Request-local exclusions are empty before the first provider attempt.
+    resource_flow:
+      consumes: [v3.target.candidate_set, v3.provider.availability_projection]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection]
+      side_channel_writes: [v3.target.concrete_provider]
+  - step_id: v3-rd-target-select-direct-kernel
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: select_v3_target_with_session_then_global
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_target_interpreter
+    semantic_contract:
+      - Direct kernel revalidates a preplanned target and every request-local reselection against current session availability before provider transport.
+      - Global availability is selectable only when no nonfailed session alternative remains; failed candidate identities come from the request-local Error03 action state.
+    resource_flow:
+      consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider]
+  - step_id: v3-rd-target-select-relay-initial
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: resolve_v3_relay_target_outcome
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: select_v3_target_with_session_then_global
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_target_interpreter
+    semantic_contract:
+      - Initial Relay resolution selects from Target09 with session availability and the request-local exclusion set supplied by the owning runtime.
+    resource_flow:
+      consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider]
+  - step_id: v3-rd-target-select-relay-reselection
+    from_node: V3Target09CandidateSetExpanded
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: reselect_from_captured_target_plan
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: select_v3_target_with_session_then_global
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    status: anchored
+    owner_feature_id: v3.virtual_router_target_interpreter
+    semantic_contract:
+      - Relay failure handling expands only the captured route plan and reselects from Target09 without Router reentry.
+      - Error03 request-local exclusions prevent reuse of a failed provider candidate.
+    resource_flow:
+      consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider]
 - chain_id: v3.codex_sample_retention_snap_scope
   owner_feature_id: v3.codex_sample_retention_snap_scope
   summary: Debug-bounded request and response copies move from explicit manifest authorization to Server-owned filesystem persistence without entering MetadataCenter or normal payload truth.

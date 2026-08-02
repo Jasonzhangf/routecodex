@@ -11,7 +11,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 use routecodex_v3_target::{
-    V3Target10ConcreteProviderSelected, V3TargetCandidate, V3TargetInterpreter,
+    V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
+    V3TargetExhaustion, V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::Value;
@@ -141,6 +142,54 @@ struct V3RelayExcludedAvailability<
 > {
     base: &'availability R,
     excluded: &'excluded BTreeSet<String>,
+}
+
+pub(crate) fn select_v3_target_with_session_then_global(
+    target: &V3TargetInterpreter,
+    expanded: V3Target09CandidateSetExpanded,
+    session_availability: &V3ProviderSessionAvailabilityReader,
+    global_availability: &V3ProviderFailureRuntimeHealth,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    now_ms: u64,
+) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    let session_selected = target.select_available(
+        expanded.clone(),
+        &V3RelayExcludedAvailability {
+            base: session_availability,
+            excluded: request_local_excluded_candidates,
+        },
+        now_ms,
+    );
+    let has_global_alternative = expanded.candidates.len() > 1
+        && expanded.candidates.iter().any(|candidate| {
+            let key = v3_relay_provider_candidate_key(candidate);
+            !request_local_excluded_candidates.contains(&key)
+                && global_availability
+                    .availability(
+                        &candidate.provider_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_ms,
+                    )
+                    .available
+        });
+    if !has_global_alternative {
+        return session_selected;
+    }
+    if session_selected
+        .as_ref()
+        .is_ok_and(|selected| !selected.default_floor_protected)
+    {
+        return session_selected;
+    }
+    target.select_available(
+        expanded,
+        &V3RelayExcludedAvailability {
+            base: global_availability,
+            excluded: request_local_excluded_candidates,
+        },
+        now_ms,
+    )
 }
 
 struct V3RevivedCandidateAvailability<'availability> {
@@ -479,12 +528,12 @@ fn reselect_from_captured_target_plan(
     let session_bound_availability = context
         .provider_health
         .session_bound_availability(&context.failure_session_scope);
-    match target.select_available(
+    match select_v3_target_with_session_then_global(
+        &target,
         expanded,
-        &V3RelayExcludedAvailability {
-            base: &session_bound_availability,
-            excluded: request_local_excluded_candidates,
-        },
+        &session_bound_availability,
+        context.provider_health,
+        request_local_excluded_candidates,
         now_ms,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
@@ -1036,12 +1085,12 @@ pub(crate) fn resolve_v3_relay_target_outcome(
     let session_availability = input
         .provider_health
         .session_bound_availability(input.failure_session_scope);
-    match target.select_available(
+    match select_v3_target_with_session_then_global(
+        &target,
         expanded.clone(),
-        &V3RelayExcludedAvailability {
-            base: &session_availability,
-            excluded: input.request_local_excluded_candidates,
-        },
+        &session_availability,
+        input.provider_health,
+        input.request_local_excluded_candidates,
         input.now_ms,
     ) {
         Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),

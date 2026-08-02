@@ -1,3 +1,81 @@
+fn select_v3_preplanned_direct_target(
+    target: &V3TargetInterpreter,
+    expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    session_availability: &routecodex_v3_provider_responses::V3ProviderSessionAvailabilityReader,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failed_candidates: &BTreeSet<String>,
+    now_epoch_ms: u64,
+) -> Result<routecodex_v3_target::V3Target10ConcreteProviderSelected, V3Error01SourceRaised> {
+    let expanded = expanded.ok_or_else(|| {
+        runtime_source(
+            "V3Target09CandidateSetExpanded",
+            "preplanned candidate set missing",
+        )
+    })?;
+    select_v3_target_with_session_then_global(
+        target,
+        expanded.clone(),
+        session_availability,
+        provider_health,
+        failed_candidates,
+        now_epoch_ms,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::TargetPoolExhausted,
+            "V3Target10ConcreteProviderSelected",
+            "preplanned_target_exhausted",
+            format!("{} candidates unavailable", error.attempted_candidates.len()),
+        )
+    })
+}
+
+fn v3_direct_selected_available_for_send(
+    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    session_availability: &impl V3ProviderAvailabilityReader,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    failed_candidates: &BTreeSet<String>,
+    now_epoch_ms: u64,
+) -> bool {
+    let selected_key = candidate_key(&selected.candidate);
+    let selected_available_in_session = session_availability
+        .availability(
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.auth_alias),
+            Some(&selected.candidate.model_id),
+            now_epoch_ms,
+        )
+        .available;
+    let session_alternative_available = expanded.is_some_and(|expanded| {
+        expanded.candidates.iter().any(|candidate| {
+            let key = candidate_key(candidate);
+            key != selected_key
+                && !failed_candidates.contains(&key)
+                && session_availability
+                    .availability(
+                        &candidate.provider_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_epoch_ms,
+                    )
+                    .available
+        })
+    });
+    selected_available_in_session
+        || (expanded.is_some_and(|expanded| expanded.candidates.len() > 1)
+            && !session_alternative_available
+            && !failed_candidates.contains(&selected_key)
+            && provider_health
+                .availability(
+                    &selected.candidate.provider_id,
+                    Some(&selected.candidate.auth_alias),
+                    Some(&selected.candidate.model_id),
+                    now_epoch_ms,
+                )
+                .available)
+}
+
 struct V3DirectProviderFailurePolicyResult {
     decision: V3Error05ExecutionDecision,
     retry_selected: Option<Box<routecodex_v3_target::V3Target10ConcreteProviderSelected>>,
@@ -101,20 +179,58 @@ async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     };
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
-    let remaining = expanded_candidates.map_or(0, |expanded_candidates| {
+    let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
             context.availability,
             &failed_with_current,
         )
     });
-    let next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
+    let mut next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
         first_remaining_available_candidate_key(
             expanded_candidates,
             context.availability,
             &failed_with_current,
         )
     });
+    if remaining == 0 {
+        if let Some(candidates) = expanded_candidates {
+            if candidates.len() > 1 {
+                remaining = candidates
+                    .iter()
+                    .filter(|candidate| {
+                        let key = candidate_key(candidate);
+                        !failed_with_current.contains(&key)
+                            && context
+                                .provider_health
+                                .availability(
+                                    &candidate.provider_id,
+                                    Some(&candidate.auth_alias),
+                                    Some(&candidate.model_id),
+                                    context.now_epoch_ms,
+                                )
+                                .available
+                    })
+                    .count();
+                if next_provider_key.is_none() {
+                    next_provider_key = candidates.iter().find_map(|candidate| {
+                        let key = candidate_key(candidate);
+                        (!failed_with_current.contains(&key)
+                            && context
+                                .provider_health
+                                .availability(
+                                    &candidate.provider_id,
+                                    Some(&candidate.auth_alias),
+                                    Some(&candidate.model_id),
+                                    context.now_epoch_ms,
+                                )
+                                .available)
+                            .then(|| key)
+                    });
+                }
+            }
+        }
+    }
     let provider_scope = V3ErrorActionScope::ProviderInstance {
         provider_id: selected.candidate.provider_id.clone(),
     };

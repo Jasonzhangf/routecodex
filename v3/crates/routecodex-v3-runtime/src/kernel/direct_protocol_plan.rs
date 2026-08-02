@@ -97,7 +97,14 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     let provider_health = provider_health.into();
     let availability = provider_health
         .session_bound_availability(&standardized.protocol_context.failure_session_scope);
-    let selected = match target.select_available(expanded.clone(), &availability, now_epoch_ms) {
+    let selected = match select_v3_target_with_session_then_global(
+        &target,
+        expanded.clone(),
+        &availability,
+        &provider_health,
+        &BTreeSet::new(),
+        now_epoch_ms,
+    ) {
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(

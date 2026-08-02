@@ -12,6 +12,7 @@ use crate::V3_PROVIDER_ACTION_ISOLATED_DELAY_MS;
 
 mod exact_pin;
 mod fixtures;
+mod preplanned_target_revalidation;
 use fixtures::*;
 
 fn test_failure_session_scope(routing_group: &str) -> V3ProviderFailureSessionScope {

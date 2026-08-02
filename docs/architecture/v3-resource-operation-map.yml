@@ -791,7 +791,7 @@ resources:
     owner_node: V3Error03TargetLocalAction
     identity: [scope, reason, retryEligible, healthAffecting]
     allowed_writers: [build_v3_error_03_target_local_action_from_v3_error_02]
-    allowed_readers: [V3Error04TargetExhaustionDecision, V3ProviderHealthStateMutated]
+    allowed_readers: [V3Error04TargetExhaustionDecision, V3ProviderHealthStateMutated, select_v3_target_with_session_then_global]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -863,7 +863,7 @@ resources:
     owner_node: V3ProviderAvailabilityProjected
     identity: [providerId, authAlias, modelId, available, blockedScopes]
     allowed_writers: [V3ProviderHealthStore::availability_for_session, V3ProviderSessionAvailabilityReader::availability]
-    allowed_readers: [routecodex-v3-target]
+    allowed_readers: [routecodex-v3-target, select_v3_target_with_session_then_global]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router]
     may_enter_provider_body: false
     may_enter_client_body: false

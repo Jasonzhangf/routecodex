@@ -47,6 +47,51 @@ targets = [
     .expect("target-resolution manifest")
 }
 
+fn global_pool_alive_manifest(scope: &str) -> V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
+[providers.first.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text", "tools", "reasoning"]
+[providers.second]
+type = "responses"
+base_url = "http://second.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "SECOND_KEY" }] }
+[providers.second.models.gpt-test]
+wire_name = "gpt-test"
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.__SCOPE__.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
+]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
+]
+"#
+    .replace("__SCOPE__", scope);
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source).expect("global-pool-alive authoring"),
+    )
+    .expect("global-pool-alive manifest")
+}
+
 fn resolve_target(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
@@ -86,6 +131,44 @@ fn resolve_target_for_scope(
         now_ms,
         deterministic_sample: 0,
     })
+}
+
+#[test]
+fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_alive() {
+    let scope = "global_pool_alive";
+    let manifest = global_pool_alive_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(scope, scope, "session-all-cooldown")
+        .expect("failure session scope");
+    let now = 2_000_000;
+    for provider_id in ["first", "second"] {
+        for offset in 0..3 {
+            health
+                .record_provider_failure_record(
+                    &session,
+                    provider_id,
+                    Some("key1"),
+                    Some("gpt-test"),
+                    Some("controlled session-only failure"),
+                    now + offset,
+                )
+                .expect("session failure should be recorded");
+        }
+    }
+
+    let resolution = resolve_target_for_scope(
+        &manifest,
+        scope,
+        &BTreeSet::new(),
+        &health,
+        &session,
+        now + 10,
+    );
+    let V3RelayProviderTargetResolution::Selected(selected) = resolution else {
+        panic!("globally alive route pool must remain selectable");
+    };
+    assert_eq!(selected.candidate.provider_id, "first");
+    assert!(!selected.default_floor_protected);
 }
 
 #[test]

@@ -547,7 +547,12 @@ features:
     owner_files:
       - v3/crates/routecodex-v3-target/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/foundation.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/tests/preplanned_target_revalidation.rs
       - v3/crates/routecodex-v3-runtime/src/nodes.rs
+      - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       - v3/crates/routecodex-v3-server/src/lib.rs
     resource_bindings:
       - v3.config.published_manifest
@@ -556,12 +561,18 @@ features:
       - v3.route.opaque_target
       - v3.target.candidate_set
       - v3.target.concrete_provider
+      - v3.provider.availability_projection
+      - v3.error.action_plan
     mainline_bindings:
       - v3-rd-01
       - v3-rd-02
       - v3-rd-06
       - v3-rd-07
       - v3-rd-08
+      - v3-rd-target-select-direct-plan
+      - v3-rd-target-select-direct-kernel
+      - v3-rd-target-select-relay-initial
+      - v3-rd-target-select-relay-reselection
     entry_symbols:
       - pending_endpoint
       - execute_v3_p5_routing_runtime
@@ -571,6 +582,13 @@ features:
       - V3TargetInterpreter::classify_kind
       - V3TargetInterpreter::expand_candidates
       - V3TargetInterpreter::select_available
+      - select_v3_target_with_session_then_global
+      - select_v3_preplanned_direct_target
+      - v3_direct_selected_available_for_send
+      - plan_v3_responses_protocol_execution_with_provider_health
+      - execute_v3_responses_direct_runtime_kernel_core
+      - resolve_v3_relay_target_outcome
+      - reselect_from_captured_target_plan
     allowed_paths:
       - v3/crates/routecodex-v3-target
       - v3/crates/routecodex-v3-runtime
@@ -617,6 +635,8 @@ features:
       - "Continuation is resolved by previous_response_id owner: direct remote records exact-pin to the same GPT-family provider/model/auth, while relay/local records restore through the local continuation store. It is not a model capability."
       - "OpenAI Responses request.reasoning is also exposed as the thinking route fact so configs using either vocabulary route the same request."
       - "Target candidate dedupe preserves pool provenance, required capabilities, and default-pool membership; default's final compatible provider remains selectable under health cooldown."
+      - "Target09-to-Target10 selection first reads the session-scoped availability projection and request-local Error03 candidate exclusions; global availability may revive a multi-candidate plan only after no nonfailed session alternative remains."
+      - "A Server-preplanned Target10 is revalidated from its captured Target09 candidate set at Direct kernel entry, so a provider cooled between planning and transport cannot bypass a currently available same-session alternative."
       - "For non-built-in requested model ids, explicit `match.models` pools declare inbound-model to target mapping and the provider-wire hook rewrites outbound `body.model` to the selected target wire model; only default/no-explicit-model paths are filtered by configured target model ids to prevent wrong-model default success, and provider aliases do not authorize runtime matching."
     runtime_status: owner_queryability_bound_to_existing_p5_source
 
