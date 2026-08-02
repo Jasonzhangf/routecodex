@@ -21,10 +21,14 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
@@ -45,6 +49,13 @@ const cases = [
 
 
 
+  {
+    name: 'Responses outbound drops its protocol client_metadata field',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: '        "reasoning",\n        "metadata",\n        "client_metadata",\n        "safety_identifier",',
+    to: '        "reasoning",\n        "metadata",\n        "safety_identifier",',
+    diagnostic: /responses_client_metadata_preserved/u,
+  },
   {
     name: 'Responses target token/logprob normalizer stops mapping Chat max_completion_tokens',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
@@ -81,6 +92,13 @@ const cases = [
     from: '    - extended_openai_chat_field: request.reasoning_summary_policy\n      semantic_id: request.reasoning_summary_policy\n',
     to: '    - extended_openai_chat_field: request.reasoning.summary_policy\n      semantic_id: request.reasoning.summary_policy\n',
     diagnostic: /provider-shaped invented canonical extension hierarchy|request\.reasoning\.summary_policy/u,
+  },
+  {
+    name: 'OpenAI Chat reasoning summary unmapped owner removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
+    from: 'pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy(',
+    to: 'pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy_removed(',
+    diagnostic: /openai_chat_reasoning_summary_unmapped/u,
   },
 
   {
@@ -517,10 +535,53 @@ const cases = [
   {
     name: 'Responses string input to Anthropic provider-wire reasoning runtime test removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
-    from: 'responses_relay_reasoning_summary_fails_without_anthropic_equivalent',
+    from: 'responses_relay_reasoning_summary_fails_before_anthropic_wire',
     to: 'responses_relay_string_input_reasoning_request_config_removed',
     all: true,
-    diagnostic: /responses_relay_reasoning_summary_fails_without_anthropic_equivalent/u,
+    diagnostic: /responses_relay_reasoning_summary_fails_before_anthropic_wire/u,
+  },
+  {
+    name: 'Anthropic outbound drops explicit Responses reasoning summary rejection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    from: '    reject_responses_reasoning_summary_for_anthropic(object)?;\n',
+    to: '',
+    diagnostic: /responses_reasoning_summary_unmapped|reject_responses_reasoning_summary_for_anthropic/u,
+  },
+  {
+    name: 'Anthropic request projection drops registered cache and store validation',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
+    from: 'pub(super) fn validate_responses_cache_and_store_for_anthropic(',
+    to: 'pub(super) fn validate_responses_cache_and_store_for_anthropic_removed(',
+    diagnostic: /validate_responses_cache_and_store_for_anthropic/u,
+  },
+  {
+    name: 'Responses Codex client metadata rejection integration test removed',
+    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
+    from: 'responses_relay_rejects_codex_client_metadata_at_anthropic_codec_boundary',
+    to: 'responses_relay_codex_client_metadata_rejection_removed',
+    all: true,
+    diagnostic: /codex_client_metadata_unmapped|responses_relay_rejects_codex/u,
+  },
+  {
+    name: 'Anthropic outbound silently accepts Responses store field',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
+    from: 'if let Some(store) = extension.get("store") {',
+    to: 'if false {',
+    diagnostic: /extension\.get\("store"\)|store_true_unmapped/u,
+  },
+  {
+    name: 'Anthropic outbound drops Responses verbosity rejection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
+    from: '    if text.contains_key("verbosity") {\n        return Err(V3AnthropicCodecError::UnmappedOutboundFields {\n            paths: "$.request.text.output_config.verbosity".to_string(),\n        });\n    }\n',
+    to: '',
+    diagnostic: /text[.]output_config[.]verbosity|anthropic_request_field_projection/u,
+  },
+  {
+    name: 'Anthropic outbound maps Responses verbosity to effort',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
+    from: '    if text.contains_key("verbosity") {\n        return Err(V3AnthropicCodecError::UnmappedOutboundFields {\n            paths: "$.request.text.output_config.verbosity".to_string(),\n        });\n    }\n    if !output_config.is_empty() {',
+    to: '    if let Some(verbosity) = text.get("verbosity") {\n        insert_matching_anthropic_output_config_field(\n            &mut output_config,\n            "effort",\n            verbosity.clone(),\n        )?;\n    }\n    if !output_config.is_empty() {',
+    diagnostic: /"effort",\s*verbosity\.clone\(\)|responses_request_to_anthropic|compatible_fields_only/u,
   },
   {
     name: 'Malformed function arguments fail-fast parser removed',
@@ -617,6 +678,17 @@ const cases = [
     diagnostic: /responses_arguments_payload_projection|forbidden|Map::new|json/u,
   },
   {
+    name: 'Anthropic adjacent codec replaces malformed Chat arguments with an empty object',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+    from: `Some(Value::String(raw)) => {
+            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
+                field: "tool_call.arguments",
+            })?
+        }`,
+    to: 'Some(Value::String(raw)) => serde_json::from_str(raw).unwrap_or_else(|_| json!({})),',
+    diagnostic: /malformed_chat_tool_arguments|tool_call[.]arguments/u,
+  },
+  {
     name: 'Malformed OpenAI Chat arguments incorrectly assert Error05 reselect',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
     from: `assert!(
@@ -660,6 +732,20 @@ const cases = [
     diagnostic: /strip_private_fields|no_silent_strip_projector/u,
   },
   {
+    name: 'Responses function schema forwards debug redaction placeholder to provider',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: '    normalize_responses_function_tool_schema_redaction_placeholders(&mut normalized)?;\n',
+    to: '',
+    diagnostic: /normalize_responses_function_tool_schema_redaction_placeholders|openai_responses_function_tool_redacted_schema_placeholders_fail_fast/u,
+  },
+  {
+    name: 'Responses function history forwards non-fc item id to provider',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: '        Some(item_id) => compact_tool_id("fc_", item_id),',
+    to: '        Some(item_id) => item_id.to_string(),',
+    diagnostic: /responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids|responses_function_item_id/u,
+  },
+  {
     name: 'OpenAI Chat outbound drops same-protocol web search field',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
     from: '            "web_search_options",\n',
@@ -683,10 +769,24 @@ const cases = [
   {
     name: 'Provider outbound drops Responses client metadata transform helper',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
-    from: 'project_openai_responses_client_metadata_to_metadata',
-    to: 'project_openai_responses_client_meta_to_meta_removed',
+    from: 'project_openai_client_metadata_to_metadata',
+    to: 'project_openai_client_meta_to_meta_removed',
     all: true,
-    diagnostic: /responses_client_metadata_projection|project_openai_responses_client_metadata_to_metadata/u,
+    diagnostic: /responses_client_metadata_projection|project_openai_client_metadata_to_metadata/u,
+  },
+  {
+    name: 'OpenAI Chat outbound validates source metadata before target projection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: '            project_openai_client_metadata_to_metadata(projected, "openai_chat")?;\n            validate_openai_metadata(projected, "openai_chat")?;',
+    to: '            validate_openai_metadata(projected, "openai_chat")?;\n            project_openai_client_metadata_to_metadata(projected, "openai_chat")?;',
+    diagnostic: /openai_chat_target_validation_after_projection/u,
+  },
+  {
+    name: 'Provider outbound drops Responses client_metadata preservation regression lock',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
+    from: 'codex_client_metadata_remains_client_metadata_on_responses_wire',
+    to: 'codex_client_metadata_target_validation_lock_removed',
+    diagnostic: /responses_client_metadata_target_validation_lock|codex_client_metadata_remains_client_metadata_on_responses_wire/u,
   },
   {
     name: 'Outbound projection contract drops control forbidden status',
@@ -701,6 +801,27 @@ const cases = [
     from: 'fn is_provider_outbound_control_key(key: &str) -> bool {',
     to: 'fn is_provider_outbound_control_key(key: &str) -> bool {\n    if key.to_ascii_lowercase().contains("metadata") { return true; }',
     diagnostic: /contains\("metadata"\)|metadata/u,
+  },
+  {
+    name: 'Anthropic structured system reintroduces raw top-level carry',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    from: 'const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";',
+    to: 'const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_entry_system";',
+    diagnostic: /registered_anthropic_system_extension|anthropic_entry_system/u,
+  },
+  {
+    name: 'Structured Anthropic system explicit unmapped test is removed',
+    file: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
+    from: 'anthropic_structured_system_extension_is_not_silently_flattened_for_responses',
+    to: 'anthropic_structured_system_extension_test_removed',
+    diagnostic: /structured_system_unmapped|anthropic_structured_system_extension/u,
+  },
+  {
+    name: 'OpenAI outbound drops registered non-Responses extension rejection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    from: '.map(|key| format!("$.request.{key}"))',
+    to: '.map(|key| key.to_string())',
+    diagnostic: /registered_extension_unmapped|\.request/u,
   },
 ];
 

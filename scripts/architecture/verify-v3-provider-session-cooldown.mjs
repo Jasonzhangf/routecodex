@@ -429,8 +429,13 @@ const serverFailureSessionScopeBuilder = extractBracedBlock(
   "fn build_v3_provider_failure_session_scope_for_request",
   "Server provider failure session scope builder",
 );
+const serverFailureSessionHeaderReader = extractBracedBlock(
+  source.server,
+  "fn provider_failure_session_id_from_request_headers",
+  "Server provider failure session header reader",
+);
 requireMatch(
-  serverFailureSessionScopeBuilder,
+  serverFailureSessionHeaderReader,
   /first_header_text[\s\S]*"session-id"[\s\S]*"session_id"[\s\S]*"x-session-id"[\s\S]*"x-rcc-session-id"/u,
   "Server failure scope builder must consume the existing request session header",
 );

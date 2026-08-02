@@ -22,6 +22,10 @@ const kernelPath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel.rs",
 );
+const directStatePath = path.join(
+  root,
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
+);
 const directSseOutcomePath = path.join(
   root,
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
@@ -37,6 +41,10 @@ const kernelTestsPath = path.join(
 const serverPath = path.join(
   root,
   "v3/crates/routecodex-v3-server/src/lib.rs",
+);
+const directServerOutcomePath = path.join(
+  root,
+  "v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs",
 );
 const serverTestsPath = path.join(
   root,
@@ -117,6 +125,7 @@ const runtimeObservability = relayRuntime.slice(
   ) + 2,
 );
 const kernel = readRequired(kernelPath);
+const directState = readRequired(directStatePath);
 const directSseOutcome = readRequired(directSseOutcomePath);
 const directRuntimeHelpers = readRequired(directRuntimeHelpersPath);
 const kernelTests = readRequired(kernelTestsPath);
@@ -124,6 +133,7 @@ const directSseOutcomeWrapper = directSseOutcome.slice(
   directSseOutcome.indexOf("pub(super) fn wrap_direct_sse_provider_outcome_stream("),
 );
 const server = readRequired(serverPath);
+const directServerOutcome = readRequired(directServerOutcomePath);
 const serverTests = readRequired(serverTestsPath);
 const serverAndTests = `${server}
 ${serverTests}`;
@@ -212,8 +222,23 @@ requireMatch(
 );
 requireMatch(
   runtimeLib,
-  /pub use runtime_timing::V3RuntimeTimingSummary;/,
-  "Runtime must expose only the typed timing summary to projection readers",
+  /pub use runtime_timing::\{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary\};/,
+  "Runtime must expose the typed timing summary and opaque handoff accumulator",
+);
+requireMatch(
+  runtimeTiming,
+  /pub struct V3RuntimeObservabilityAccumulator\s*\{[\s\S]*timing:\s*V3RuntimeTimingState,[\s\S]*attempts:\s*usize,/,
+  "Runtime must own one typed timing and attempt accumulator across protocol handoffs",
+);
+requireMatch(
+  `${directState}\n${relayRuntime}`,
+  /V3ResponsesProtocolRelayHandoff[\s\S]*observability_accumulator:\s*V3RuntimeObservabilityAccumulator[\s\S]*V3ResponsesProtocolDirectHandoff[\s\S]*observability_accumulator:\s*V3RuntimeObservabilityAccumulator|V3ResponsesProtocolDirectHandoff[\s\S]*observability_accumulator:\s*V3RuntimeObservabilityAccumulator[\s\S]*V3ResponsesProtocolRelayHandoff[\s\S]*observability_accumulator:\s*V3RuntimeObservabilityAccumulator/,
+  "Both typed protocol handoff directions must carry the Runtime observability accumulator",
+);
+requireMatch(
+  directServerOutcome,
+  /Some\(handoff\.observability_accumulator\)[\s\S]*Some\(next_handoff\.observability_accumulator\)/,
+  "Server must move the opaque accumulator through Direct-to-Relay and nested Relay-to-Direct handoffs",
 );
 requireMatch(
   runtimeObservability,
@@ -423,7 +448,7 @@ for (const [source, label] of [
 }
 
 const timingStepIds = Array.from(
-  { length: 12 },
+  { length: 14 },
   (_, index) => `v3-runtime-timing-${String(index + 1).padStart(2, "0")}`,
 );
 for (const [source, label] of [
@@ -440,7 +465,7 @@ for (const [source, label] of [
     JSON.stringify(edges.map((edge) => edge?.step_id)) !==
     JSON.stringify(timingStepIds)
   ) {
-    failures.push(`${label} must bind all Runtime timing edges 01 through 12`);
+    failures.push(`${label} must bind all Runtime timing edges 01 through 14`);
   }
   const streamMerge = edges.find(
     (edge) => edge?.step_id === "v3-runtime-timing-06",
@@ -516,7 +541,7 @@ if (
   JSON.stringify(timingStepIds)
 ) {
   failures.push(
-    "Runtime timing lifecycle manifest must bind all Runtime timing edges 01 through 12",
+    "Runtime timing lifecycle manifest must bind all Runtime timing edges 01 through 14",
   );
 }
 for (const stepId of ["v3-runtime-timing-05", "v3-runtime-timing-12"]) {
@@ -550,7 +575,7 @@ for (const [source, collection, label] of [
     JSON.stringify(feature?.mainline_bindings ?? []) !==
     JSON.stringify(timingStepIds)
   ) {
-    failures.push(`${label} must bind all Runtime timing edges 01 through 12`);
+    failures.push(`${label} must bind all Runtime timing edges 01 through 14`);
   }
 }
 const globalVerification = parseYaml(
@@ -565,7 +590,7 @@ if (
   JSON.stringify(timingStepIds)
 ) {
   failures.push(
-    "global verification map must bind all Runtime timing edges 01 through 12",
+    "global verification map must bind all Runtime timing edges 01 through 14",
   );
 }
 const directSseOutcomeOwnerPath =

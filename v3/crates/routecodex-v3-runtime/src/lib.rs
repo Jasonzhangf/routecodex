@@ -42,4 +42,4 @@ pub use nodes::*;
 pub use provider_action_gate::*;
 pub use remote_continuation::*;
 pub use responses_continuation_owner::*;
-pub use runtime_timing::V3RuntimeTimingSummary;
+pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

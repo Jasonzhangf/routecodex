@@ -601,8 +601,7 @@ async fn responses_relay_responses_target_builds_responses_standard_payload_from
 }
 
 #[tokio::test]
-async fn responses_relay_openai_chat_target_projects_responses_builtin_tools_to_chat_functions_without_script_conversion(
-) {
+async fn responses_relay_openai_chat_target_rejects_unmapped_responses_builtin_tools() {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
         response: json!({
@@ -655,61 +654,35 @@ async fn responses_relay_openai_chat_target_projects_responses_builtin_tools_to_
         &transport,
     )
     .await
-    .unwrap();
+    .expect("Responses builtin tools must project a client-visible error");
 
-    assert_eq!(output.status, 200);
-    assert!(
-        output
-            .node_trace
-            .contains(&"ProviderReqCompat06ProviderCompat"),
-        "request must still traverse compat node without letting compat own generic tool semantics"
-    );
-    let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1);
-    let body = &captures[0];
-    assert!(
-        body.get("messages").and_then(Value::as_array).is_some(),
-        "OpenAI Chat target must receive Chat standard messages: {body}"
-    );
-    let serialized = serde_json::to_string(body).unwrap();
-    assert!(!serialized.contains("unsupported Responses tool type"));
-    assert!(!serialized.contains("\"type\":\"tool_search\""));
-    assert!(!serialized.contains("\"type\":\"web_search\""));
-    let tools = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .expect("OpenAI Chat target tools");
-    assert!(
-        tools.len() >= 2,
-        "OpenAI Chat target must include projected builtin tools and may include governed internal tools: {body}"
-    );
-    assert!(tools
-        .iter()
-        .all(|tool| tool.get("type").and_then(Value::as_str) == Some("function")));
-    let tool_search = tools
-        .iter()
-        .find(|tool| tool["function"]["name"] == "tool_search")
-        .expect("tool_search must project as OpenAI Chat function tool");
+    assert_eq!(output.status, 502);
     assert_eq!(
-        tool_search["function"]["parameters"]["required"][0],
-        "query"
+        output.error_chain.as_ref().unwrap(),
+        &V3_ERROR_CHAIN_NODE_IDS
     );
-    assert_eq!(
-        tool_search["function"]["description"],
-        "Search deferred tools"
-    );
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    let provider_event = &output
+        .observability
+        .as_ref()
+        .expect("provider compat failure must be observable")
+        .provider_failure_events[0];
     assert!(
-        tools
-            .iter()
-            .any(|tool| tool["function"]["name"] == "web_search"),
-        "web_search must also avoid Responses-native tool type on OpenAI Chat wire: {body}"
+        provider_event
+            .message
+            .contains("UnmappedOutboundFields target_protocol=openai_chat"),
+        "{}",
+        provider_event.message
     );
-    assert!(!serialized.contains("\"name\":\"exec\""));
-    assert!(!serialized.contains("\"name\":\"script\""));
+    assert!(provider_event.message.contains("$.tools[0].type"));
+    assert!(
+        transport.captures.lock().unwrap().is_empty(),
+        "unmapped Responses builtin tools must not reach provider wire"
+    );
 }
 
 #[tokio::test]
-async fn responses_relay_openai_chat_target_normalizes_redacted_tool_schema_placeholders() {
+async fn responses_relay_openai_chat_target_rejects_redacted_tool_schema_placeholders() {
     let transport = SingleJsonCaptureTransport {
         captures: Mutex::new(Vec::new()),
         response: json!({
@@ -764,33 +737,34 @@ async fn responses_relay_openai_chat_target_normalizes_redacted_tool_schema_plac
         &transport,
     )
     .await
-    .unwrap();
+    .expect("redacted schema placeholders must project a client-visible error");
 
-    assert_eq!(output.status, 200);
-    let captures = transport.captures.lock().unwrap();
-    let body = captures.first().expect("provider request body");
-    let exec_tool = body["tools"]
-        .as_array()
-        .expect("provider tools")
-        .iter()
-        .find(|tool| tool["function"]["name"] == "exec_command")
-        .expect("exec_command tool");
+    assert_eq!(output.status, 502);
     assert_eq!(
-        exec_tool["function"]["parameters"]["properties"]["max_output_tokens"],
-        json!(true),
-        "OpenAI Chat provider wire must not send a scalar JSON Schema placeholder"
+        output.error_chain.as_ref().unwrap(),
+        &V3_ERROR_CHAIN_NODE_IDS
     );
-    assert_eq!(
-        exec_tool["function"]["parameters"]["properties"]["token_budget"],
-        json!(true),
-        "all redacted JSON Schema placeholders inside properties must remain valid boolean schemas"
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    let provider_event = &output
+        .observability
+        .as_ref()
+        .expect("provider compat failure must be observable")
+        .provider_failure_events[0];
+    assert!(provider_event.message.contains("MalformedOutboundField"));
+    assert!(provider_event
+        .message
+        .contains("redacted_schema_placeholder"));
+    assert!(
+        provider_event
+            .message
+            .contains("$.tools[0].parameters.properties.max_output_tokens"),
+        "{}",
+        provider_event.message
     );
-    assert_eq!(
-        exec_tool["function"]["parameters"]["properties"]["cmd"],
-        json!({"type":"string"}),
-        "valid sibling schema must not be loosened"
+    assert!(
+        transport.captures.lock().unwrap().is_empty(),
+        "redacted schema placeholders must not reach provider wire"
     );
-    assert_eq!(exec_tool["function"]["strict"], json!(false));
 }
 
 #[tokio::test]
@@ -2776,6 +2750,11 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "controlled"
 endpoints = ["responses"]
+[servers.controlled.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.chat]
 type = "openai_chat"
 base_url = "http://controlled.invalid/v1"

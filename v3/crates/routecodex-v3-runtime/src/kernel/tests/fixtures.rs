@@ -9,6 +9,11 @@ version = 3
 bind = "127.0.0.1"
 port = 4444
 routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.openai]
 type = "responses"
@@ -177,6 +182,11 @@ version = 3
 bind = "127.0.0.1"
 port = 4444
 routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.optional]
 type = "responses"

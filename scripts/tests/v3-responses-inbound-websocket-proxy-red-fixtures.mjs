@@ -8,6 +8,7 @@ const repo = process.cwd();
 const verifier = resolve(repo, 'scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs');
 const copied = [
   'v3/crates/routecodex-v3-server/src/lib.rs',
+  'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
   'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs',
   'v3/crates/routecodex-v3-server/Cargo.toml',
   'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
@@ -77,6 +78,13 @@ const cases = [
     from: 'async fn execute_responses_relay_websocket_output(',
     to: 'async fn execute_responses_relay_websocket_output_removed(',
     diagnostic: /execute_responses_relay_websocket_output|Relay Runtime/,
+  },
+  {
+    name: 'Relay WebSocket direct handoff consumption removed',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    from: 'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
+    to: 'if false && relay_output.protocol_direct_handoff.is_some()',
+    diagnostic: /protocol_direct_handoff|direct handoff/,
   },
   {
     name: 'runtime SSE decode error hidden',

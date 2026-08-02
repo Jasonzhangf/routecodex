@@ -276,6 +276,12 @@ description: RouteCodex 调试与架构路由入口
 - If `providerRequestCaptured=false`, debug the pre-transport owner: route manifest, target selection, provider wire protocol compatibility, or outbound codec. Do not blame provider network or SSE.
 - Anthropic entry dry-run must select an Anthropic provider wire target. If it selects OpenAI Chat, fix the loaded route manifest or target protocol filtering before touching Anthropic codec, SSE, or error projection.
 
+## V3 protocol-stage validation order invariant
+- Trigger: a field is valid on inbound or in Chat canonical form but fails, or unexpectedly bypasses validation, after cross-protocol/provider-wire projection.
+- Ownership: inbound validators inspect only the inbound protocol node; Chat validators inspect only canonical Chat semantics/extensions; outbound validators inspect the completed selected target-protocol payload.
+- Required outbound order: `source/canonical projection -> complete target payload -> target protocol validation -> wire build/transport`. Never validate a source DTO, temporarily remove a field to pass validation, then project it into the target afterward.
+- Required lock: positive inbound preservation plus negative post-projection target validation, a static order assertion, and a red mutation that swaps projection and validation. Do not repair in MetadataCenter, provider transport, SSE, handler, or by truncation/silent strip.
+
 ## V3 final route/usage diagnosis guard
 - Trigger: console shows a lower-priority provider/model in `[virtual-router-hit]` or `[usage]`, or usage says `usage=unreported` for a streaming OpenAI Chat provider.
 - First inspect `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request.json` and `provider-response.json`. `attempts[]` is the routing truth; the human `[virtual-router-hit]` line may show only the final successful provider after retry/switch.
@@ -293,3 +299,9 @@ description: RouteCodex 调试与架构路由入口
 - Diagnosis: check whether Error05 provider action failure record, recovery witness, recovery wait, and success release use the same `V3ProviderFailureSessionScope`. `routing_group` as session id is a contract bug; it lets same group/provider success from another request clear the lane.
 - Correct owner: `provider_action_gate.rs` and `provider_failure_runtime_policy.rs`. Fix the typed lane key/witness source; do not repair by serializing tests, adding fallback lanes, weakening session identity, or moving logic into SSE/Server/Error06 projection.
 - Required proof: run provider action contract tests, session isolation contract, protocol parity, `verify:architecture-review-surface-light`, and P0 architecture gates.
+
+## V3 Cargo test artifact budget invariant
+- Canonical V3 Cargo tests must use `scripts/run-v3-cargo-test.mjs`; package scripts and CI must not add direct `cargo test --manifest-path v3/Cargo.toml` entries.
+- Keep `[profile.test] debug = 0`, `incremental = false`, and bounded `codegen-units`; every terminal test outcome must release only invocation-owned test executables, dep-info, symbol bundles, and filename-matched `*.rcgu.o` while retaining reusable `*.rlib`, `*.rmeta`, proc-macro, fingerprint, and build-script artifacts. Never infer object ownership from mtime because another Cargo invocation may be compiling in the same target directory.
+- Measure the allocated size of the effective V3 target directory after cleanup. At or below 2 GiB, retain dependencies; above 2 GiB, run Cargo test-profile cleanup only when no other V3 Cargo/rustc builder is active, otherwise fail explicitly rather than racing another build.
+- Required proof pairs a real passing test with a real Cargo failure, confirms cleanup on both paths, proves a warm dependency-cache rerun, verifies `*.rcgu.o = 0`, and runs `verify:v3-build-test-artifact-budget`, its red fixtures, and `verify:v3-architecture-ci`.

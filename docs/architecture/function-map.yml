@@ -9529,6 +9529,7 @@ owners:
     canonical_types:
       - V3RuntimeTimingState
       - V3RuntimeTimingSummary
+      - V3RuntimeObservabilityAccumulator
     canonical_builders:
       - start_external
       - finish_external
@@ -9537,10 +9538,12 @@ owners:
       - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
       - v3/crates/routecodex-v3-runtime/src/lib.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests
       - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
       - docs/goals/v3-runtime-timing-observability-debug-contract.json
       - docs/goals/v3-runtime-timing-observability-test-design.md
       - docs/architecture
@@ -9577,6 +9580,8 @@ owners:
       - v3-runtime-timing-10
       - v3-runtime-timing-11
       - v3-runtime-timing-12
+      - v3-runtime-timing-13
+      - v3-runtime-timing-14
 
   - feature_id: v3.codex_sample_retention_snap_scope
     status: active

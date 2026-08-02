@@ -529,6 +529,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
+        captured_target_09: None,
         failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
@@ -1181,11 +1182,13 @@ fn commit_or_release_local_continuation(
         .now_epoch_ms
         .checked_add(V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS)
         .ok_or(V3AnthropicRelayRuntimeError::LocalContinuationClockOverflow)?;
+    let canonical_context =
+        build_v3_relay_local_response_continuation_context_at_resp04(canonical_response)?;
     for context_id in context_ids {
         store.commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
             context_id,
             local.scope.local_key(),
-            canonical_response.clone(),
+            canonical_context.clone(),
             V3LocalContinuationTerminalOutcome::NonTerminal,
             local.now_epoch_ms,
             expires_at_epoch_ms,

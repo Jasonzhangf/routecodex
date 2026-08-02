@@ -28,6 +28,10 @@ Do not treat the words `malformed SSE` in a log as owner proof. Split the failur
 
 Fix action: move naming/error ownership to the nearest adjacent owner. Do not add provider-specific branches, payload repair, retry, continuation, or tool/history logic to the SSE crate, server SSE handler, response outbound, or WebSocket projection.
 
+JSON Schema fields inside protocol tool declarations are request data-plane semantics, not RouteCodex control fields. A debug redaction placeholder such as `[REDACTED]` in a registered schema position must be projected only by the adjacent target codec to the protocol-valid boolean schema `true`; never copy it verbatim to provider wire, move it into MetadataCenter, silently delete the tool/property, or turn it into a provider failure. Lock every supported target codec with a positive valid-sibling test and a red fixture that removes the projection call.
+
+Provider-returned item IDs are also protocol data. When a prior provider emits a function-call item ID outside the next Responses target's `fc_*` domain, the adjacent Responses outbound codec must deterministically project that item ID and its paired output ID together while preserving `call_id`. Do not reject the turn, rewrite history in continuation storage, or route the ID through control metadata.
+
 Continuation is only the `/v1/responses` protocol save/restore boundary, and its owner is Chat Process.
 
 It is not a history transformer, response repair layer, request converter, stopless hook owner, tool-governance owner, or SSE transport owner.
@@ -136,6 +140,14 @@ Forbidden in MetadataCenter:
 - tool history mirror
 - provider/client body snapshots
 - "for later convenience" copies of data-plane objects
+
+## Protocol Handoff Data/Control Split
+
+- A protocol handoff carries routing decisions, retry/attempt state, and timing/observability only through typed Runtime side-channel resources. None of these fields may be copied into protocol metadata or normal request/response payload.
+- The handoff data plane is the governed Chat request projected by the immediately adjacent outbound codec. Server HTTP/WebSocket orchestration may move that opaque projected value, but must not restart from the original client payload or rebuild it from control state.
+- A fresh Responses request whose configured binding is `PendingNotImplemented` must remain pending. Server entry normalization may select the Relay orchestration shell only for an already executable Direct/Relay binding; it must not turn an unresolved binding into an executable route.
+- Responses reasoning `summary` is inbound payload truth and must normalize into Chat `reasoning_content`. Encrypted replay state is not normal Chat payload and must stay out of this projection.
+- Cumulative provider-send attempts and external timing span all Direct/Relay legs. The Runtime-owned accumulator crosses typed handoffs; Server transport must not recreate, merge, or infer it.
 
 ## Review Checklist
 

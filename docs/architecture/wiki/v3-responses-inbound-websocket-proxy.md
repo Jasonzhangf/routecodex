@@ -8,6 +8,7 @@ Mainline:
 - V3ResponsesInboundWs01ClientUpgrade: GET /v1/responses upgrades only when OpenAI-Beta contains responses_websockets=2026-02-06.
 - V3ResponsesInboundWs02CreateEventParsed: one client response.create event is parsed, its type field is removed, and the remaining data-plane payload enters the configured Responses Direct or Relay Runtime.
 - V3Server03HttpRequestRaw through the client response payload: the configured Responses binding owner runs the normal Direct or Relay path with the server-scoped provider health store.
+- A Relay-to-Direct provider reselection remains a typed runtime handoff; the Server executes it through the existing Direct outcome owner before projecting any WebSocket event.
 - V3ResponsesInboundWs04ClientEventProjected: JSON Runtime output becomes response.completed; Runtime SSE output is decoded incrementally and projected as WebSocket text events.
 
 Boundaries:
@@ -21,6 +22,7 @@ Controlled evidence:
 
 - Plain GET without WebSocket upgrade and WebSocket missing `OpenAI-Beta: responses_websockets=2026-02-06` are rejected at the Server boundary; WebSocket ping/pong stays transport-only.
 - JSON response.create enters the existing Runtime and returns a response.completed WebSocket event.
+- Relay-to-Direct reselection executes the selected Direct target and never projects the Relay handoff placeholder as `response.completed` with a null response.
 - Binary JSON response.create enters the same Runtime path.
 - stream=true response.create projects Runtime SSE events as WebSocket text frames without collecting the full stream.
 - malformed client events, missing type, unsupported `response.cancel`, and nested `response.create.response` payloads fail before provider send.

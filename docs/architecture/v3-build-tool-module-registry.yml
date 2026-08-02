@@ -1,0 +1,29 @@
+version: 1
+status: active
+modules:
+  - module_id: v3-build-test-artifact-budget
+    owner_feature_id: v3.build_test_artifact_budget
+    owned_paths:
+      - .cargo/config.toml
+      - v3/Cargo.toml
+      - scripts/run-v3-cargo-test.mjs
+      - scripts/cargo-test-artifact-runner.mjs
+      - scripts/architecture/verify-v3-build-test-artifact-budget.mjs
+      - scripts/architecture/verify-v3-architecture-ci.mjs
+      - scripts/tests/v3-build-test-artifact-budget-red-fixtures.mjs
+      - docs/goals/v3-build-test-artifact-budget-test-design.md
+      - docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml
+      - docs/architecture/wiki/v3-build-test-artifact-budget.md
+    allowed_dependencies:
+      - node:child_process
+      - node:fs
+      - node:path
+      - node:url
+    forbidden_paths:
+      - v3/crates
+      - src
+      - sharedmodule
+      - ~/.rcc
+    required_gates:
+      - npm run verify:v3-build-test-artifact-budget
+      - npm run test:v3-build-test-artifact-budget-red-fixtures

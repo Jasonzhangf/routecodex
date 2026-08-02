@@ -251,9 +251,12 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3Execution11ProtocolDecision
     identity: [requestId, targetId, providerId, modelId, entryProtocol, selectedProviderProtocol, responsesProcess, executionMode]
+    semantic_contract:
+      single_decision_owner: protocol execution planning writes the Direct-or-Relay decision once into the MetadataCenter side-channel before dispatch
+      downstream_contract: Direct and Relay runtimes consume the selected executionMode; target-local provider-failure reselection may emit only a typed Direct/Relay handoff for the newly selected Target10, carrying the complete request-local failed-candidate exclusion set without payload reconstruction
     allowed_writers: [V3Execution11ProtocolDecision]
-    allowed_readers: [V3ResponsesDirect11Policy]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3Resp15ClientPayload]
+    allowed_readers: [V3ResponsesDirect11Policy, routecodex-v3-server]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3ResponsesDirect11Policy, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -952,7 +955,7 @@ resources:
     owner_node: V3ProtocolConversionFieldParityContract
     identity: [entryProtocol, providerProtocol, clientProjectionProtocol, fieldFamily]
     allowed_writers: [docs/design/v3-protocol-request-field-projection.md, docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/architecture/manifests/v3.protocol_request_field_projection.yml, docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
-    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
+    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
     data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
@@ -1207,8 +1210,8 @@ resources:
     owner_feature_id: v3.runtime_timing_observability
     owner_crate: routecodex-v3-runtime
     owner_node: V3RuntimeTimingSummary
-    allowed_readers: [record_timing, emit_v3_request_complete_console_line]
-    allowed_writers: [V3RuntimeTimingState::start, start_external, finish_external, finish_runtime]
+    allowed_readers: [record_timing, emit_v3_request_complete_console_line, V3ResponsesProtocolRelayHandoff, V3ResponsesProtocolDirectHandoff]
+    allowed_writers: [V3RuntimeObservabilityAccumulator, V3RuntimeTimingState::start, start_external, finish_external, finish_runtime, execute_v3_responses_direct_runtime_kernel_core, execute_v3_responses_relay_runtime_inner]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-sse, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1316,3 +1319,39 @@ resources:
       - npm run verify:v3-provider-action-gate
       - npm run test:v3-provider-action-gate-red-fixtures
       - npm run verify:v3-resource-map
+
+  - resource_id: v3.build.test_artifact_store
+    resource_kind: generated_build_artifact
+    lifecycle: v3.build_test_artifact_budget
+    owner_crate: routecodex-v3-build-tools
+    owner_feature_id: v3.build_test_artifact_budget
+    owner_module: v3-build-test-artifact-budget
+    owner_node: V3BuildTest02ArtifactsProduced
+    identity: [cargoInvocationId, targetName, artifactPath]
+    allowed_writers: [cargo_test]
+    allowed_readers: [run_v3_cargo_test, cargo_test_artifact_runner]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, response.client_payload]
+    release_point: V3BuildTest03OwnedArtifactsReleased
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-build-test-artifact-budget, npm run test:v3-build-test-artifact-budget-red-fixtures]
+
+  - resource_id: v3.build.dependency_cache
+    resource_kind: generated_reusable_build_cache
+    lifecycle: v3.build_test_artifact_budget
+    owner_crate: routecodex-v3-build-tools
+    owner_feature_id: v3.build_test_artifact_budget
+    owner_module: v3-build-test-artifact-budget
+    owner_node: V3BuildTest04BudgetVerified
+    identity: [cargoProfile, crateName, artifactHash]
+    allowed_writers: [cargo_build, cargo_test]
+    allowed_readers: [cargo_build, cargo_test, run_v3_cargo_test]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload]
+    max_allocated_bytes: 2147483648
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-build-test-artifact-budget]

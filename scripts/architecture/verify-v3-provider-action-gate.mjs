@@ -1943,7 +1943,7 @@ try {
   failures.push(`package.json: JSON parse failed: ${error.message}`);
 }
 const commands = {
-  'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-error && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
+  'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
   'verify:v3-provider-action-gate': 'node scripts/architecture/verify-v3-provider-action-gate.mjs',
   'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
 };

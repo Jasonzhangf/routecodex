@@ -3721,7 +3721,7 @@ async fn responses_openai_chat_field_parity_request_matrix() {
                 "logit_bias":{"42":1},
                 "seed":123,
                 "response_format":{"type":"json_object"},
-                "reasoning":{"effort":"medium","summary":"detailed"},
+                "reasoning":{"effort":"medium"},
                 "max_output_tokens":321,
                 "metadata":{"client":"metadata-kept"},
                 "stop":["<END>"]
@@ -3736,7 +3736,12 @@ async fn responses_openai_chat_field_parity_request_matrix() {
     .expect("Responses -> OpenAI Chat request field parity must execute");
 
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
+    assert_eq!(
+        captures.len(),
+        1,
+        "provider send cutpoint must be captured; observability={:?}",
+        result.observability
+    );
     let body = provider_projection_body(&captures[0]);
     assert_eq!(body["model"], "chat-wire-model");
     assert_eq!(body["messages"][0]["role"], "system");
@@ -3746,11 +3751,7 @@ async fn responses_openai_chat_field_parity_request_matrix() {
             .is_some_and(|content| content.starts_with("field parity system")),
         "client instructions must remain the leading provider system text: {body}"
     );
-    assert_eq!(
-        body["messages"][1]["content"],
-        "<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>"
-    );
-    assert_eq!(body["messages"][2]["content"], "run request matrix");
+    assert_eq!(body["messages"][1]["content"], "run request matrix");
     assert_eq!(
         body["tools"][0]["function"]["parameters"],
         json!({"type":"object","properties":{"q":{"type":"string"}},"required":["q"]})
@@ -3768,6 +3769,10 @@ async fn responses_openai_chat_field_parity_request_matrix() {
     assert_eq!(body["seed"], 123);
     assert_eq!(body["response_format"], json!({"type":"json_object"}));
     assert_eq!(body["reasoning_effort"], "medium");
+    assert!(
+        body.get("reasoning_summary_policy").is_none(),
+        "OpenAI Chat provider wire must not receive Responses reasoning summary policy in the positive request matrix: {body}"
+    );
     assert!(
         body.get("reasoning").is_none(),
         "OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort and keep summary/context separate: {body}"
@@ -3789,7 +3794,8 @@ async fn responses_openai_chat_field_parity_request_matrix() {
 }
 
 #[tokio::test]
-async fn responses_openai_chat_field_parity_rejects_client_metadata_before_provider_capture() {
+async fn responses_openai_chat_field_parity_rejects_malformed_client_metadata_before_provider_capture(
+) {
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::new()),
@@ -3803,7 +3809,7 @@ async fn responses_openai_chat_field_parity_rejects_client_metadata_before_provi
         "chatwire",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let error = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -3818,8 +3824,7 @@ async fn responses_openai_chat_field_parity_rejects_client_metadata_before_provi
                 "model":"gpt-5.5",
                 "stream":false,
                 "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"reject client metadata"}]}],
-                "metadata":{"client":"metadata-kept"},
-                "client_metadata":{"codex":"client-metadata-unsupported"}
+                "client_metadata":"client-metadata-must-be-an-object"
             }),
         },
         &transport,
@@ -3828,20 +3833,13 @@ async fn responses_openai_chat_field_parity_rejects_client_metadata_before_provi
         12_000,
     )
     .await
-    .expect("unsupported client_metadata must project as local 502 without provider send");
+    .expect_err("malformed client_metadata must fail before provider send");
 
-    assert_eq!(result.status, 502);
-    let error_text = result
-        .observability
-        .as_ref()
-        .and_then(|observability| observability.provider_failure_events.first())
-        .map(|event| event.message.as_str())
-        .unwrap_or_default();
+    let error_text = error.to_string();
     assert!(
-        error_text.contains("UnmappedOutboundFields"),
+        error_text.contains("metadata/client_metadata must be an object"),
         "{error_text}"
     );
-    assert!(error_text.contains("$.client_metadata"), "{error_text}");
     assert_eq!(
         transport.captures.lock().unwrap().len(),
         0,
@@ -4746,6 +4744,11 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "chatwire"
 endpoints = ["responses"]
+[servers.chatwire.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.chatwire]
 type = "openai_chat"
 base_url = "http://chatwire.invalid/v1"
@@ -4777,6 +4780,11 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "chatwire"
 endpoints = ["responses"]
+[servers.chatwire.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.chatwire]
 type = "openai_chat"
 base_url = "http://chatwire.invalid/v1"

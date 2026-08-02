@@ -13,6 +13,7 @@ use crate::V3_PROVIDER_ACTION_ISOLATED_DELAY_MS;
 mod exact_pin;
 mod fixtures;
 mod preplanned_target_revalidation;
+mod protocol_mode_lock;
 use fixtures::*;
 
 fn test_failure_session_scope(routing_group: &str) -> V3ProviderFailureSessionScope {
@@ -51,17 +52,21 @@ impl ResponsesTransport for CaptureTransport {
 
 #[tokio::test]
 async fn runtime_executes_adjacent_responses_direct_chain() {
-    let output = execute_v3_responses_direct_runtime_kernel(
-        &test_manifest(),
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope("test"),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+    let manifest = test_manifest();
+    let raw = test_responses_raw(
+        "test",
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
         crate::register_responses_direct_hooks(),
         &CaptureTransport,
     )
@@ -133,6 +138,38 @@ fn scoped_test_manifest(
         .expect("test server")
         .routing_group = routing_group.to_string();
     manifest
+}
+
+fn test_responses_raw(
+    routing_group: &str,
+    request_id: &str,
+    execution_id: &str,
+    body: serde_json::Value,
+) -> V3Server03HttpRequestRaw {
+    V3Server03HttpRequestRaw {
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: request_id.to_string(),
+        execution_id: execution_id.to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body,
+    }
+}
+
+fn test_protocol_plan(
+    manifest: &V3Config05ManifestPublished,
+    raw: V3Server03HttpRequestRaw,
+    provider_health: V3ProviderFailureRuntimeHealth,
+    now_epoch_ms: u64,
+) -> V3ResponsesProtocolExecutionPlan {
+    plan_v3_responses_protocol_execution_with_provider_health(
+        manifest,
+        raw,
+        provider_health,
+        now_epoch_ms,
+    )
+    .expect("test protocol plan")
 }
 
 fn test_direct_sse_provider_outcome(routing_group: &str) -> V3DirectSseProviderOutcome {
@@ -444,19 +481,21 @@ async fn normal_direct_request_does_not_consume_unrelated_provider_failure_gate(
         )
         .expect("seed unrelated provider failure gate");
 
+    let raw = test_responses_raw(
+        routing_group,
+        "req-normal-bypass-gate",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = tokio::time::timeout(
         Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS / 2),
-        execute_v3_responses_direct_runtime_kernel(
+        execute_v3_responses_direct_runtime_kernel_core(
+            V3ResponsesDirectRuntimeCoreState::no_continuation()
+                .with_provider_health(provider_health.clone())
+                .with_initial_plan(&plan),
             &manifest,
-            V3Server03HttpRequestRaw {
-                server_id: "test".to_string(),
-                failure_session_scope: test_failure_session_scope("test"),
-                request_id: "req-normal-bypass-gate".to_string(),
-                execution_id: "exec".to_string(),
-                method: "POST".to_string(),
-                path: "/v1/responses".to_string(),
-                body: json!({"model":"client-model","input":"hello"}),
-            },
+            raw,
             crate::register_responses_direct_hooks(),
             &CaptureTransport,
         ),
@@ -505,17 +544,20 @@ async fn provider_error_enters_error_chain_not_success() {
     }
     let routing_group = "provider_error_terminal";
     let manifest = scoped_test_manifest(test_manifest(), routing_group);
-    let output = execute_v3_responses_direct_runtime_kernel(
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        raw,
         crate::register_responses_direct_hooks(),
         &ErrorTransport,
     )
@@ -594,27 +636,31 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
         }
     }
 
-    let output = execute_v3_responses_direct_runtime_kernel(
-        &test_manifest(),
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope("test"),
-            request_id: "req-invalid-image".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({
-                "model":"client-model",
-                "input":[{
-                    "type":"message",
-                    "role":"user",
-                    "content":[
-                        {"type":"input_text","text":"current turn"},
-                        {"type":"input_image","image_url":"data:image/png;base64,AAAA"}
-                    ]
-                }]
-            }),
-        },
+    let manifest = test_manifest();
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        "test",
+        "req-invalid-image",
+        "exec",
+        json!({
+            "model":"client-model",
+            "input":[{
+                "type":"message",
+                "role":"user",
+                "content":[
+                    {"type":"input_text","text":"current turn"},
+                    {"type":"input_image","image_url":"data:image/png;base64,AAAA"}
+                ]
+            }]
+        }),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
         crate::register_responses_direct_hooks(),
         &NoSendTransport,
     )
@@ -769,10 +815,20 @@ async fn provider_failure_reselects_without_router_reentry() {
     };
     let routing_group = "provider_failure_reselection";
     let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let sink_events = Arc::clone(&realtime_events);
     let route_sink_events = Arc::clone(&route_events);
     let output = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan)
             .with_provider_failure_event_sink(Some(Arc::new(move |_observability, event| {
                 sink_events.lock().unwrap().push(event.provider_key.clone());
             })))
@@ -783,15 +839,7 @@ async fn provider_failure_reselects_without_router_reentry() {
                     .push(observability.provider_key.clone().unwrap_or_default());
             }))),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        raw,
         crate::register_responses_direct_hooks(),
         &transport,
     )
@@ -896,20 +944,23 @@ async fn direct_cross_session_revive_failure_sends_once_and_preserves_cooldown_b
     }
     assert!(original_deadline.is_some(), "session A must enter cooldown");
     let sends = AtomicUsize::new(0);
+    let first_raw = V3Server03HttpRequestRaw {
+        server_id: "test".to_string(),
+        failure_session_scope: session_a.clone(),
+        request_id: "req-revive-once".to_string(),
+        execution_id: "exec-revive-once".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    };
+    let first_plan = test_protocol_plan(&manifest, first_raw.clone(), provider_health.clone(), 103);
     let first = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::no_continuation()
             .with_now_epoch_ms(103)
-            .with_provider_health(provider_health.clone()),
+            .with_provider_health(provider_health.clone())
+            .with_initial_plan(&first_plan),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: session_a.clone(),
-            request_id: "req-revive-once".to_string(),
-            execution_id: "exec-revive-once".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        first_raw,
         crate::register_responses_direct_hooks(),
         &AlwaysFails { sends: &sends },
     )
@@ -927,20 +978,24 @@ async fn direct_cross_session_revive_failure_sends_once_and_preserves_cooldown_b
         .expect("failed revive observability");
     assert_eq!(failed_revive.cooldown_until_ms, original_deadline);
 
+    let second_raw = V3Server03HttpRequestRaw {
+        server_id: "test".to_string(),
+        failure_session_scope: session_a,
+        request_id: "req-before-original-deadline".to_string(),
+        execution_id: "exec-before-original-deadline".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    };
+    let second_plan =
+        test_protocol_plan(&manifest, second_raw.clone(), provider_health.clone(), 104);
     let second = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::no_continuation()
             .with_now_epoch_ms(104)
-            .with_provider_health(provider_health),
+            .with_provider_health(provider_health)
+            .with_initial_plan(&second_plan),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: session_a,
-            request_id: "req-before-original-deadline".to_string(),
-            execution_id: "exec-before-original-deadline".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        second_raw,
         crate::register_responses_direct_hooks(),
         &AlwaysFails { sends: &sends },
     )
@@ -1063,76 +1118,6 @@ fn responses_provider_process_chat_without_relay_fails_fast() {
 }
 
 #[tokio::test]
-async fn direct_reselect_to_cross_protocol_returns_relay_handoff_not_error06() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct FirstFailsSecondMustNotDirectSend {
-        sends: AtomicUsize,
-    }
-
-    #[async_trait]
-    impl ResponsesTransport for FirstFailsSecondMustNotDirectSend {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            assert_eq!(request.provider_id(), "first");
-            self.sends.fetch_add(1, Ordering::SeqCst);
-            Err(V3ProviderError::Transport {
-                request_id: request.request_id().to_string(),
-                provider_id: request.provider_id().to_string(),
-                reason: "first failed before relay-only candidate".to_string(),
-            })
-        }
-    }
-
-    let transport = FirstFailsSecondMustNotDirectSend {
-        sends: AtomicUsize::new(0),
-    };
-    let routing_group = "cross_protocol_reselection";
-    let manifest = scoped_test_manifest(mixed_protocol_reselection_manifest(), routing_group);
-    let output = execute_v3_responses_direct_runtime_kernel(
-        &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
-    assert_eq!(output.error_chain, None, "{output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-    let handoff = output
-        .protocol_relay_handoff
-        .expect("cross-protocol reselect must hand off to Relay before Error06 projection");
-    assert_eq!(handoff.target.candidate.provider_id, "chat");
-    assert_eq!(handoff.target.candidate.provider_type, "openai_chat");
-    assert_eq!(handoff.provider_failure_events.len(), 1);
-    assert_eq!(
-        handoff.provider_failure_events[0]
-            .next_provider_key
-            .as_deref(),
-        Some("chat:key:test")
-    );
-    match output.client_payload.body {
-        V3ClientBody::Json(value) => {
-            assert_eq!(value["error"]["code"], "protocol_relay_handoff_unconsumed");
-        }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => {
-            panic!("internal handoff placeholder must be JSON")
-        }
-    }
-}
-
-#[tokio::test]
 async fn provider_response_decode_failure_reselects_without_router_reentry() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1179,17 +1164,20 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
     };
     let routing_group = "provider_decode_reselection";
     let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
-    let output = execute_v3_responses_direct_runtime_kernel(
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello"}),
-        },
+        raw,
         crate::register_responses_direct_hooks(),
         &transport,
     )
@@ -1257,17 +1245,20 @@ async fn provider_sse_failure_event_reselects_before_client_stream() {
     };
     let routing_group = "provider_sse_failure_reselection";
     let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
-    let output = execute_v3_responses_direct_runtime_kernel(
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({"model":"client-model","input":"hello","stream":true}),
-        },
+        raw,
         crate::register_responses_direct_hooks(),
         &transport,
     )
@@ -1342,20 +1333,23 @@ async fn matched_optional_failure_uses_captured_default_without_router_reentry()
     };
     let routing_group = "matched_optional_default_reselection";
     let manifest = scoped_test_manifest(optional_default_manifest(), routing_group);
-    let output = execute_v3_responses_direct_runtime_kernel(
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({
+            "model": "client-model",
+            "input": "hello"
+        }),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::no_continuation()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
         &manifest,
-        V3Server03HttpRequestRaw {
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope(routing_group),
-            request_id: "req".to_string(),
-            execution_id: "exec".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({
-                "model": "client-model",
-                "input": "hello"
-            }),
-        },
+        raw,
         crate::register_responses_direct_hooks(),
         &transport,
     )

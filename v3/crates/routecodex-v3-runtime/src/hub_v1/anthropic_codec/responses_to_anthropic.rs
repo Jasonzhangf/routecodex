@@ -112,7 +112,7 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
     {
         Some(Value::String(raw)) => {
             serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
-                field: "tool_call arguments",
+                field: "tool_call.arguments",
             })?
         }
         Some(value) => value.to_owned(),
@@ -687,7 +687,9 @@ pub(super) fn responses_content_part_as_anthropic_content_part(
             "type":"text",
             "text": object.get("text").cloned().unwrap_or(Value::String(String::new()))
         })),
-        Some("input_image" | "image") => responses_image_part_as_anthropic_image(part),
+        Some("input_image" | "image" | "image_url") => {
+            responses_image_part_as_anthropic_image(part)
+        }
         Some("refusal") => Ok(json!({
             "type":"text",
             "text": object.get("refusal").or_else(|| object.get("text")).cloned().unwrap_or(Value::String(String::new()))
@@ -701,11 +703,23 @@ pub(super) fn responses_content_part_as_anthropic_content_part(
 pub(super) fn responses_image_part_as_anthropic_image(
     part: &Value,
 ) -> Result<Value, V3AnthropicCodecError> {
-    let image_url = part
+    let image_url_value = part
         .get("image_url")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
         .ok_or(V3AnthropicCodecError::MalformedField { field: "image_url" })?;
+    let image_url = match image_url_value {
+        Value::String(value) => value.as_str(),
+        Value::Object(object) => object.get("url").and_then(Value::as_str).ok_or(
+            V3AnthropicCodecError::MalformedField {
+                field: "image_url.url",
+            },
+        )?,
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField { field: "image_url" });
+        }
+    };
+    if image_url.is_empty() {
+        return Err(V3AnthropicCodecError::MalformedField { field: "image_url" });
+    }
     if let Some((media_type, data)) = image_url.strip_prefix("data:").and_then(|rest| {
         let (media_type, data) = rest.split_once(";base64,")?;
         Some((media_type, data))
@@ -732,7 +746,11 @@ pub(super) fn responses_function_call_input(
         };
     }
     match object.get("arguments").or_else(|| object.get("input")) {
-        Some(Value::String(raw)) => Ok(serde_json::from_str(raw).unwrap_or_else(|_| json!({}))),
+        Some(Value::String(raw)) => {
+            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
+                field: "function_call.arguments",
+            })
+        }
         Some(value) => Ok(value.to_owned()),
         None => Ok(json!({})),
     }
@@ -951,4 +969,42 @@ pub(super) fn anthropic_usage_as_responses_usage(value: Option<&Value>) -> Optio
         usage.insert("cache_read_input_tokens".to_string(), cache_read.clone());
     }
     Some(Value::Object(usage))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_chat_tool_call_malformed_arguments_fail_before_anthropic_wire() {
+        let error = openai_chat_tool_call_as_anthropic_tool_use(&json!({
+            "id": "call_malformed_chat",
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
+            }
+        }))
+        .expect_err("malformed Chat arguments cannot be reversibly projected");
+        assert_eq!(
+            error.to_string(),
+            "Anthropic codec malformed tool_call.arguments"
+        );
+    }
+
+    #[test]
+    fn responses_function_call_malformed_arguments_fail_before_anthropic_wire() {
+        let mut object = Map::new();
+        object.insert("type".to_string(), json!("function_call"));
+        object.insert(
+            "arguments".to_string(),
+            json!("{\"cmd\":\"one\"}{\"cmd\":\"two\"}"),
+        );
+        let error = responses_function_call_input(&object)
+            .expect_err("malformed Responses arguments cannot be reversibly projected");
+        assert_eq!(
+            error.to_string(),
+            "Anthropic codec malformed function_call.arguments"
+        );
+    }
 }

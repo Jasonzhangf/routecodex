@@ -134,11 +134,62 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         }
     };
     trace.push("V3Execution11ProtocolDecision");
+    let protocol_candidate_keys = match protocol_candidate_keys_for_decision_mode(
+        &expanded,
+        "responses",
+        &allowed_modes,
+        decision.mode,
+    ) {
+        Ok(keys) => keys,
+        Err(source) => return Err(protocol_plan_failure(source, trace)),
+    };
     Ok(V3ResponsesProtocolExecutionPlan {
         decision,
         node_trace: trace,
         expanded,
+        protocol_candidate_keys,
+        request_local_excluded_candidates: BTreeSet::new(),
     })
+}
+
+fn protocol_candidate_keys_for_decision_mode(
+    expanded: &routecodex_v3_target::V3Target09CandidateSetExpanded,
+    entry_protocol: &str,
+    allowed_modes: &[String],
+    mode: V3Execution11ProtocolDecisionMode,
+) -> Result<BTreeSet<String>, V3Error01SourceRaised> {
+    let mut candidate_keys = BTreeSet::new();
+    for candidate in &expanded.candidates {
+        let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+            route: expanded.route.clone(),
+            candidate: candidate.clone(),
+            unavailable_candidates: Vec::new(),
+            attempts: 1,
+            default_floor_protected: false,
+        };
+        match build_v3_execution_11_protocol_decision_from_v3_target_10(
+            selected,
+            entry_protocol,
+            allowed_modes,
+        ) {
+            Ok(decision) if decision.mode == mode => {
+                candidate_keys.insert(candidate_key(candidate));
+            }
+            Ok(_) => {}
+            Err(source) if source.code == "protocol_mismatch_relay_not_allowed" => {}
+            Err(source) if source.code == "responses_process_chat_relay_not_allowed" => {}
+            Err(source) => return Err(source),
+        }
+    }
+    if candidate_keys.is_empty() {
+        return Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Execution11ProtocolDecision",
+            "protocol_mode_candidate_set_empty",
+            "protocol decision produced no candidate keys for selected execution mode",
+        ));
+    }
+    Ok(candidate_keys)
 }
 
 fn protocol_plan_failure(

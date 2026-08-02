@@ -1,6 +1,6 @@
 # V3 request field projection contract
 
-Status: design contract; runtime conformance pending
+Status: runtime active; live verified on V3 `0.90.4017` at 5520
 Owner feature: `v3.protocol_conversion_field_parity`
 Machine manifest: `docs/architecture/manifests/v3.protocol_request_field_projection.yml`
 Feature module boundaries:
@@ -42,10 +42,12 @@ Its physical Chat representation is fixed as follows:
 
 | Semantic path | Governed Chat storage | Storage class |
 | --- | --- | --- |
+| `request.metadata` | `routecodex_chat_extension.responses_request.metadata` | registered payload extension |
 | `request.client_metadata` | `routecodex_chat_extension.responses_request.client_metadata` | registered payload extension |
 | `request.prompt_cache_key` | `routecodex_chat_extension.responses_request.prompt_cache_key` | registered payload extension |
 | `request.store` | `routecodex_chat_extension.responses_request.store` | registered payload extension |
 | `request.text.output_config` | `routecodex_chat_extension.responses_request.text` | registered payload extension |
+| `request.anthropic_system_blocks` | `routecodex_chat_extension.anthropic_request.system` | registered payload extension |
 | `request.reasoning_effort` | `reasoning_effort` | Chat request field |
 | `request.reasoning_budget_tokens` | `reasoning_budget_tokens` | registered Chat request field |
 | `request.reasoning_summary_policy` | `reasoning_summary_policy` | registered Chat request field |
@@ -67,23 +69,23 @@ representations instead of selecting one.
 | --- | --- |
 | `exact` | Source and target fields have the same meaning and the concrete value belongs to both target value domains. Project and consume the Chat field. |
 | `conditional_exact` | Meaning matches, but model/version/value constraints apply. Project only after target capability and value validation. |
-| `compatible` | The target has a narrower field with the same operational intent. The adjacent outbound codec performs the documented value/shape projection and consumes the source extension. |
-| `explicit_cleanup` | The target has no carrier and the field is non-model control data whose absence is the target protocol's equivalent/default behavior. Cleanup is allowed only in the adjacent outbound codec and must be locked by a named test. |
 | `source_roundtrip_only` | Preserve in a registered Chat extension so the source protocol can be reconstructed; other targets fail explicitly. |
 | `unmapped` | No target field has the same meaning. Return `UnmappedOutboundFields` with the Chat semantic path. |
 
 There is no `approximate` generic projection, prompt-marker, silent-strip,
-fallback, or MetadataCenter reconstruction class. Every compatible or cleanup
-projection must be field-specific and owned by the adjacent codec.
+fallback, or MetadataCenter reconstruction class. Every projection must be
+field-specific and owned by the adjacent codec.
 
 ## Canonical request semantics
 
 | Chat semantic path | Type and domain | Meaning |
 | --- | --- | --- |
-| `request.client_metadata` | object preserving source entries | Client-owned business metadata; never RouteCodex control state. |
+| `request.metadata` | object constrained by the public target metadata schema | Public API metadata; distinct from Codex client metadata and never RouteCodex control state. |
+| `request.client_metadata` | object preserving source entries | Codex client-owned request metadata; long `x-codex-turn-metadata` values remain data-plane payload and do not inherit public metadata's 512-character value limit. |
 | `request.prompt_cache_key` | string | Client-owned prompt-cache key; not RouteCodex cache or routing state. |
 | `request.store` | boolean | Upstream request storage preference; not continuation ownership or local persistence policy. |
 | `request.text.output_config` | typed object | Output format and verbosity request semantics; not response content. |
+| `request.anthropic_system_blocks` | typed Anthropic system block array/object | Source-protocol system block structure, including block-local cache control; plain string system text uses canonical Chat instructions instead. |
 | `request.reasoning_effort` | enum/string validated at target | Qualitative reasoning effort. It is not a token budget. |
 | `request.reasoning_budget_tokens` | integer | Numeric reasoning-token budget. It is not output-token capacity or qualitative effort. |
 | `request.reasoning_summary_policy` | `auto \| concise \| detailed` for Responses source | Requested reasoning-summary policy. It is not returned reasoning content or display visibility. |
@@ -106,9 +108,10 @@ protocol can reconstruct it. `unmapped` always returns the canonical Chat path.
 
 | Chat semantic | Responses | OpenAI Chat | Anthropic | Gemini |
 | --- | --- | --- | --- | --- |
-| `client_metadata` | rename to `metadata`, OpenAI limits | rename to `metadata`, OpenAI limits | conditional rename to `metadata.user_id` only | unmapped |
-| `prompt_cache_key` | same | same | unmapped; cache-control blocks are not the same semantic | unmapped |
-| `store` | same | same | unmapped | unmapped |
+| `metadata` | same, OpenAI limits | same, OpenAI limits | conditional only for exactly one non-empty `user_id` | unmapped |
+| `client_metadata` | same source extension; never public `metadata` | optional non-empty `user_id` projection; every other key fails | optional non-empty `user_id` projection; every other key fails | unmapped |
+| `prompt_cache_key` | same | same | unmapped | unmapped |
+| `store` | same | same | `false` consumed before wire; `true` fails | unmapped |
 | `text.output_config` | rename to `text` | field-wise conditional projection to `verbosity` / `response_format` | conditional projection only where the semantic matrix declares an exact target field | conditional projection only where the semantic matrix declares an exact target field |
 | `reasoning_effort` | rename to `reasoning.effort` | same | conditional rename to `output_config.effort` | conditional enum-case projection to `thinkingLevel` |
 | `reasoning_budget_tokens` | unmapped | unmapped | conditional rename to `thinking.budget_tokens` | conditional rename to `thinkingBudget` |
@@ -196,10 +199,10 @@ Target rules:
 - OpenAI Responses/OpenAI Chat `metadata`: maximum 16 string pairs; key length
   at most 64 characters; value length at most 512 characters. Projection is
   allowed only after validating this schema.
-- Anthropic `metadata`: only `user_id` is declared. Projection is allowed only
-  when the source object contains exactly `user_id` and its value is a non-empty
-  opaque string. `x-codex-installation-id`, `session_id`, `thread_id`, and mixed
-  objects are unmapped; a codec may not relabel them as an Anthropic user id.
+- Anthropic `metadata`: only `user_id` is declared. The adjacent codec may
+  project an object containing exactly one non-empty `user_id`. Session, thread,
+  turn, and installation identifiers remain distinct payload semantics and may
+  not be relabeled as `user_id`; mixed or unknown keys remain unmapped.
 - Gemini: no general request metadata field with equivalent client payload
   semantics is declared in the audited GenerateContent schema.
 
@@ -209,12 +212,16 @@ continuation, routing, provider-selection, or health state.
 ## Prompt cache, storage, and text output configuration
 
 - OpenAI Responses and OpenAI Chat both declare `prompt_cache_key`; it is an
-  exact data-plane value after adjacent field projection. Anthropic cache-control
-  blocks have different placement and semantics and are not reconstructed from
-  it.
+  exact data-plane value after adjacent field projection. Anthropic
+  `cache_control` does not carry the same key semantic, so a non-empty
+  Responses cache key is validated and consumed before Anthropic wire. It must
+  not rebuild `cache_control`, and malformed values fail.
 - OpenAI Responses and OpenAI Chat both declare `store`; it remains an upstream
   storage preference. RouteCodex continuation save/restore is separately owned by
   the continuation control resource and cannot be inferred from `store`.
+  Anthropic has no equivalent request field; `false` is validated and consumed
+  before Anthropic wire, while `true` fails because remote storage semantics
+  cannot be preserved.
 - Responses `text.format` and `text.verbosity` are decoded into the registered
   text output configuration. OpenAI Chat projection is allowed only through its
   declared `response_format` and `verbosity` fields with shape validation. No
@@ -228,15 +235,22 @@ must not cross ReqInbound02.
 
 | Responses extension | Anthropic projection |
 | --- | --- |
-| `client_metadata` | Only an object containing exactly non-empty `user_id` projects to `metadata.user_id`; every other key is unmapped. |
-| `prompt_cache_key` | Unmapped. Anthropic per-content cache control is not reconstructed from an OpenAI request cache key. |
-| `store` | Unmapped for both values. RouteCodex does not equate omission with an OpenAI storage guarantee. |
-| `text.verbosity` | Unmapped. Output verbosity is not Anthropic reasoning effort. |
+| `client_metadata` | Optional non-empty `user_id` projects to `metadata.user_id`; every other key fails because Anthropic has no reversible target field. |
+| `prompt_cache_key` | Valid non-empty and malformed values both fail explicitly because Anthropic has no reversible equivalent; it must not rebuild `cache_control` or silently consume the field. |
+| `store` | `false` is validated and consumed before wire; `true` fails because Anthropic cannot preserve remote storage semantics; neither value changes RouteCodex continuation state. |
+| `text.verbosity` | Fails as unmapped because Anthropic has no reversible verbosity field; it never becomes Anthropic reasoning effort. |
 | `text.format.type=text` | Conditional exact default-text projection; emits no format object only after the outbound codec verifies no conflicting format field. |
 | `text.format.type=json_schema` | Maps to `output_config.format` with `type` and `schema`; `strict=false` is not representable and fails. |
 
 No field in this table may enter MetadataCenter, provider selection, retry,
 continuation, SSE, or server-handler compensation.
+
+Structured Anthropic system blocks use the separate
+`request.anthropic_system_blocks` source-roundtrip extension. Anthropic outbound
+reconstructs `system` only from that registered field. Responses, OpenAI Chat,
+and Gemini outbound fail explicitly because block-local `cache_control` and block
+boundaries have no exact target field; they must not flatten the extension into
+plain instructions and silently discard those semantics.
 
 ## Error contract
 
@@ -245,7 +259,7 @@ wire aliases:
 
 ```text
 UnmappedOutboundFields target_protocol=anthropic
-paths=$.request.reasoning_summary_policy,$.request.client_metadata.session_id
+paths=$.request.reasoning_context_policy,$.request.client_metadata.unknown_key
 ```
 
 Malformed source values fail at the inbound codec. Target-domain violations fail
@@ -285,9 +299,10 @@ Before implementation, red tests must prove:
    OpenAI effort.
 4. Summary/context/mode cannot become Anthropic system markers.
 5. Responses request extensions survive ReqInbound02 and Chat Process without raw
-   top-level field carry; Anthropic projects exact `client_metadata.user_id` and
-   compatible structured format, while cache key, storage, verbosity, and extra
-   metadata keys fail with canonical Chat paths.
+   top-level field carry; Anthropic projects only exact `metadata.user_id` and
+   compatible structured format. Cache key, storage, verbosity, identifier
+   relabeling, mixed metadata, and incompatible format fail with canonical Chat
+   paths.
 6. OpenAI metadata limits are validated before wire emission.
 7. Node snapshots prove source wire -> Chat semantic -> governed Chat semantic ->
    provider semantic, with no raw shortcut and no MetadataCenter copy.

@@ -566,7 +566,7 @@ chains:
     status: anchored
 - chain_id: v3.responses_direct.required_mainline
   owner_feature_id: v3.responses_direct_mvp_architecture
-  summary: Required no-shortcut lifecycle. P6 is source-bound from Server03 through Server16; after Target10 the runtime must decide direct-vs-relay before Direct policy, while target-local reselection stays inside the single Runtime kernel without Router re-entry.
+  summary: Required no-shortcut lifecycle. P6 is source-bound from Server03 through Server16; protocol execution planning decides initial Direct-or-Relay from the selected Target10, and provider-failure reselection may recompute that decision for the newly selected Target10 without re-entering the Router.
   edges:
   - step_id: v3-rd-01
     from_node: V3Config05ManifestPublished
@@ -720,6 +720,7 @@ chains:
     semantic_contract:
       - reads selected provider_type and provider.responses.process from v3.target.concrete_provider
       - responses provider with responses.process=chat chooses HubRelay before SameProtocolDirect
+      - writes the initial protocol decision before dispatch; after provider-failure reselection the execution owner recomputes the decision only for the newly selected Target10, while previous_response_id continuation owner remains the only Direct/Relay lock
     resource_flow:
       consumes:
       - v3.target.concrete_provider
@@ -755,6 +756,9 @@ chains:
       - v3.request.protocol_context
       side_channel_writes:
       - v3.responses_direct.policy
+    semantic_contract:
+      - consumes the current selected Target10 protocol decision and fails fast if Direct receives a non-Direct mode at initial entry
+      - Direct runtime reselects from the full captured Target09 candidate set; when the new selected target requires Hub Relay and no Direct-owned previous_response_id is active, it returns a typed relay handoff side-channel carrying every request-local failed candidate so Relay cannot retry an already-failed Direct target
   - step_id: v3-rd-10
     from_node: V3ResponsesDirect11Policy
     to_node: V3Provider12ResponsesWirePayload
@@ -1060,6 +1064,64 @@ chains:
       - v3.provider.transport_request
       side_channel_reads:
       - v3.secret.provider_auth_handle
+      side_channel_writes: []
+- chain_id: v3.protocol_conversion_field_parity.outbound_helper_bindings
+  owner_feature_id: v3.protocol_conversion_field_parity
+  summary: Verification bindings for OpenAI outbound helper calls inside the existing Req07 to ProviderCompat06 adjacent codec edge; this chain does not add runtime nodes.
+  edges:
+  - step_id: v3-protocol-field-parity-openai-outbound-metadata-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: apply_outbound_projection_transforms
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    callee_symbol: project_openai_client_metadata_to_metadata
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
+    status: anchored
+    binding_kind: adjacent_outbound_codec_helper
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes:
+      - v3.request.provider_semantic
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-openai-outbound-metadata-02
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: apply_outbound_projection_transforms
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    callee_symbol: validate_openai_metadata
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
+    status: anchored
+    binding_kind: adjacent_outbound_codec_helper
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes:
+      - v3.request.provider_semantic
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-openai-outbound-summary-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: apply_outbound_projection_transforms
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    callee_symbol: reject_openai_chat_unmapped_reasoning_summary_policy
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
+    status: anchored
+    binding_kind: adjacent_outbound_codec_helper
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes:
+      - v3.request.provider_semantic
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
       side_channel_writes: []
 - chain_id: v3.hub_pipeline.v1.relay_request_source_slice
   owner_feature_id: v3.hub_relay_request_semantics
@@ -4037,8 +4099,8 @@ chains:
   - step_id: v3-responses-relay-server-03
     from_node: V3HubReqInbound01ClientRaw
     to_node: V3ServerRespOutbound06ClientFrame
-    caller_symbol: execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    caller_symbol: finalize_v3_responses_relay_server_output
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
     callee_symbol: responses_relay_output_response
     callee_file: v3/crates/routecodex-v3-server/src/lib.rs
     status: anchored
@@ -5460,6 +5522,47 @@ chains:
       - v3.runtime.responses_timing_observability
       side_channel_writes:
       - v3.runtime.responses_observability
+  - step_id: v3-runtime-timing-13
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingProtocolHandoff
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3RuntimeObservabilityAccumulator::with_additional_attempts
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_contract:
+      - Direct and Relay runtime owners place the same monotonic timing state plus completed provider-attempt count into their typed protocol handoff carrier.
+      - The carrier is diagnostic side-channel truth and cannot enter request or response normal payloads.
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+  - step_id: v3-runtime-timing-14
+    from_node: V3RuntimeTimingProtocolHandoff
+    to_node: V3RuntimeTimingExternalAttempt
+    caller_symbol: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_contract:
+      - Server moves the opaque typed accumulator across Direct-to-Relay, Relay-to-Direct, and nested handoffs without reading, merging, restarting, or inferring timing and attempts.
+      - The receiving Runtime resumes the same accumulator before its next provider transport attempt.
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes: []
 - chain_id: v3.responses_session_admission
   owner_feature_id: v3.responses_session_inflight_admission
   summary: The listener-local HTTP boundary admits one active Responses request per explicit session or conversation, rejects overlap through Error01-06 before Runtime/provider send, and holds the exact permit until the client response body reaches EOF, errors, or is dropped.
@@ -6565,3 +6668,54 @@ chains:
           - v3.error.provider_action_gate
         side_channel_writes:
           - v3.error.provider_action_gate
+
+- chain_id: v3.build_test_artifact_budget
+  owner_feature_id: v3.build_test_artifact_budget
+  summary: Canonical V3 Cargo tests emit test-owned artifacts, release them on every terminal outcome, retain reusable dependencies within budget, and fail explicitly above 2 GiB.
+  manifest: docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml
+  entry_contract:
+    node: V3BuildTest01CommandAccepted
+    owner_doc: docs/architecture/wiki/v3-build-test-artifact-budget.md
+  edges:
+    - step_id: v3-build-test-budget-01
+      from_node: V3BuildTest01CommandAccepted
+      to_node: V3BuildTest02ArtifactsProduced
+      caller_symbol: runV3CargoTest
+      caller_file: scripts/run-v3-cargo-test.mjs
+      callee_symbol: executeCargo
+      callee_file: scripts/run-v3-cargo-test.mjs
+      status: anchored
+      owner_feature_id: v3.build_test_artifact_budget
+      resource_flow:
+        consumes: [v3.build.dependency_cache]
+        produces: [v3.build.test_artifact_store]
+        side_channel_reads: []
+        side_channel_writes: []
+    - step_id: v3-build-test-budget-02
+      from_node: V3BuildTest02ArtifactsProduced
+      to_node: V3BuildTest03OwnedArtifactsReleased
+      caller_symbol: runV3CargoTest
+      caller_file: scripts/run-v3-cargo-test.mjs
+      callee_symbol: releaseOwnedTestArtifacts
+      callee_file: scripts/run-v3-cargo-test.mjs
+      status: anchored
+      owner_feature_id: v3.build_test_artifact_budget
+      resource_flow:
+        consumes: [v3.build.test_artifact_store]
+        produces: []
+        side_channel_reads: []
+        side_channel_writes: []
+    - step_id: v3-build-test-budget-03
+      from_node: V3BuildTest03OwnedArtifactsReleased
+      to_node: V3BuildTest04BudgetVerified
+      caller_symbol: runV3CargoTest
+      caller_file: scripts/run-v3-cargo-test.mjs
+      callee_symbol: verifyV3DebugBudget
+      callee_file: scripts/run-v3-cargo-test.mjs
+      status: anchored
+      owner_feature_id: v3.build_test_artifact_budget
+      resource_flow:
+        consumes: [v3.build.dependency_cache]
+        produces: []
+        side_channel_reads: []
+        side_channel_writes: []

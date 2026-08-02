@@ -277,6 +277,7 @@ async fn relay_failed_revive_preserves_deadline_and_returns_no_second_retry() {
     };
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
+        captured_target_09: None,
         failure_session_scope: session_a,
         provider_health: &health,
         retry_policy: V3RelayProviderFailureRetryPolicy::default(),
@@ -420,6 +421,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
+        captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(
             "compat_default_floor",
             "compat_default_floor",
@@ -478,6 +480,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
+        captured_target_09: None,
         failure_session_scope: test_provider_failure_scope(
             "resolution_policy",
             "resolution_policy",
@@ -539,4 +542,52 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         .body
         .to_string()
         .contains("prior provider returned 429"));
+}
+
+#[test]
+fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
+    let mut manifest = global_pool_alive_manifest("relay_protocol_filter");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(
+        &manifest,
+        "relay_protocol_filter",
+        &BTreeSet::new(),
+        &health,
+    ) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("fixture must select the first provider"),
+    };
+    let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
+    let target = V3TargetInterpreter::default();
+    let captured_target_09 = target
+        .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
+        .expect("capture Target09 before execution");
+    manifest.providers.clear();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&captured_target_09),
+        failure_session_scope: test_provider_failure_scope(
+            "relay_protocol_filter",
+            "relay_protocol_filter",
+            "session-relay-protocol-filter",
+        )
+        .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+
+    let resolution = reselect_from_captured_target_plan(
+        &context,
+        &selected,
+        &BTreeSet::from([selected_key.clone()]),
+        1,
+    );
+    let V3RelayProviderTargetResolution::Selected(reselected) = resolution else {
+        panic!("provider failure must reselect from the full captured route pool");
+    };
+    assert_ne!(
+        v3_relay_provider_candidate_key(&reselected.candidate),
+        selected_key
+    );
 }

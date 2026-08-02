@@ -46,6 +46,10 @@ projection preparation remain internal Runtime time.
 9. A terminal-success body Drop before clean EOF emits no terminal console
    projection while timing is still absent. A clean-EOF completion with missing
    timing is a Runtime observability contract failure and remains explicit.
+10. Direct-to-Relay and Relay-to-Direct protocol handoffs transfer the same
+    Runtime-owned timing/attempt accumulator through a typed diagnostic
+    side-channel. The receiving Runtime continues that accumulator; Server may
+    only move the carrier and must not merge, infer, or restart its truth.
 
 ## Positive Tests
 
@@ -54,6 +58,10 @@ projection preparation remain internal Runtime time.
   identity.
 - Responses Direct JSON publishes the same typed summary before output returns.
 - Retry/reselect accumulates every completed provider attempt in `external`.
+- Direct failure followed by Relay success reports two request-wide attempts;
+  Relay failure followed by Direct success reports two request-wide attempts.
+- A nested Relay-to-Direct-to-Relay sequence neither loses nor double-counts an
+  attempt, while a request without a handoff retains its existing one-leg count.
 - Relay materialized SSE includes the complete provider stream lifetime.
 - Direct SSE has no terminal summary at headers or after `[DONE]` alone.
 - Direct SSE publishes timing after decoder `finish()` accepts clean EOF.
@@ -86,6 +94,8 @@ projection preparation remain internal Runtime time.
   Target, or provider codec crates.
 - Request/response payload semantics are byte-equivalent apart from existing
   transport framing.
+- Runtime observability/timing/attempt state is absent from every provider and
+  client normal payload across both handoff directions.
 
 ## Verification
 

@@ -92,7 +92,6 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
                 "model":"claude-client-alias",
                 "messages":[{"role":"user","content":"Lookup alpha"}],
                 "tools":[{"name":"lookup","input_schema":{"type":"object"}}],
-                "thinking":{"type":"enabled","budget_tokens":512},
                 "stream":false
             }),
         },
@@ -104,9 +103,8 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         transport.captured.lock().unwrap().as_ref().unwrap(),
         &json!({
             "model":"responses-wire-model",
-            "input":[{"role":"user","content":[{"type":"input_text","text":"Lookup alpha"}]}],
+            "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Lookup alpha"}]}],
             "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}],
-            "reasoning":{"thinking":{"type":"enabled","budget_tokens":512}},
             "stream":false
         })
     );
@@ -176,8 +174,8 @@ async fn anthropic_responses_field_parity_request_matrix() {
                     "input_schema":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}
                 }],
                 "tool_choice":{"type":"tool","name":"lookup"},
-                "thinking":{"type":"enabled","budget_tokens":1024},
-                "metadata":{"client":"kept"},
+                "output_config":{"effort":"medium"},
+                "metadata":{"user_id":"opaque-user"},
                 "temperature":0.2,
                 "top_p":0.9,
                 "top_k":5,
@@ -190,6 +188,7 @@ async fn anthropic_responses_field_parity_request_matrix() {
     )
     .await
     .unwrap();
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
     let body = transport.captured.lock().unwrap().clone().unwrap();
     assert_eq!(body["model"], "responses-wire-model");
     assert!(body.get("instructions").is_none());
@@ -226,22 +225,58 @@ async fn anthropic_responses_field_parity_request_matrix() {
         body["tool_choice"],
         json!({"type":"function","name":"lookup"})
     );
-    assert!(
-        body["reasoning"].get("effort").is_none(),
-        "Anthropic inbound thinking must not invent reasoning.effort: {body}"
-    );
-    assert_eq!(
-        body["reasoning"]["thinking"],
-        json!({"type":"enabled","budget_tokens":1024})
-    );
-    assert_eq!(body["metadata"], json!({"client":"kept"}));
+    assert_eq!(body["reasoning"]["effort"], "medium");
+    assert_eq!(body["client_metadata"], json!({"user_id":"opaque-user"}));
+    assert!(body.get("metadata").is_none(), "{body}");
     assert_eq!(body["temperature"], 0.2);
     assert_eq!(body["top_p"], 0.9);
     assert_eq!(body["top_k"], 5);
     assert_eq!(body["max_output_tokens"], 123);
     assert_eq!(body["stop"], json!(["</stop>"]));
     assert_eq!(body["stream"], false);
-    assert_eq!(output.status, 200);
+}
+
+#[tokio::test]
+async fn anthropic_structured_system_extension_is_not_silently_flattened_for_responses() {
+    let scope = "anthropic_structured_system_unmapped";
+    let transport = MatrixJsonTransport {
+        captured: Mutex::new(None),
+        response: json!({"id":"unused","status":"completed","output":[]}),
+    };
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest(scope),
+        V3AnthropicRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-anthropic-structured-system-unmapped".into(),
+            payload: json!({
+                "model":"claude-client-alias",
+                "system":[{
+                    "type":"text",
+                    "text":"cache this system block",
+                    "cache_control":{"type":"ephemeral"}
+                }],
+                "messages":[{"role":"user","content":"hello"}],
+                "max_tokens":128,
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 502, "runtime output: {output:?}");
+    assert!(transport.captured.lock().unwrap().is_none());
+    assert!(
+        output.client_response.to_string().contains("anthropic_request"),
+        "structured Anthropic system semantics must fail explicitly when Responses has no exact field: {output:?}"
+    );
 }
 
 #[test]

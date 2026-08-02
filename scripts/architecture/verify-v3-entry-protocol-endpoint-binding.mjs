@@ -304,6 +304,13 @@ function verifyServerSource(server, parsedManifest) {
   requireAnyText(server, files.server, ['entry_protocol_binding_for_endpoint', 'lookup_v3_entry_protocol_binding'], 'binding registry consumer');
   requireAnyText(server, files.server, ['PendingNotImplemented', 'pending_not_implemented'], 'explicit pending_not_implemented status');
   requireText(server, files.server, 'v3.protocol.pending_projection');
+  const effectiveModeCalls = server.match(/responses_effective_execution_mode_for_entry_facts\s*\(/gu) ?? [];
+  if (effectiveModeCalls.length < 3) {
+    failures.push(`${files.server}: HTTP and WebSocket must share the fresh Responses execution-mode owner`);
+  }
+  if (!/V3EntryProtocolExecutionMode::PendingNotImplemented\s*=>\s*configured_mode/gu.test(server)) {
+    failures.push(`${files.server}: fresh Responses execution mode must preserve Config-owned PendingNotImplemented`);
+  }
   if (/fn\s+endpoint_protocol\s*\(/u.test(server)) {
     failures.push(`${files.server}: Server duplicates endpoint protocol registry in endpoint_protocol()`);
   }

@@ -25,10 +25,11 @@ describe('install-global artifact isolation', () => {
     expect(script).not.toContain('$INSTALL_BUILD_ROOT/.install-pack');
   });
 
-  it('serializes release writers and removes the release shim immediately before npm owns the bin', () => {
+  it('serializes release writers and lets npm atomically replace older release shims', () => {
     expect(script).toContain('source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"');
     expect(script).toContain('acquire_routecodex_install_lock');
-    expect(script).toMatch(/rm -f "\$NPM_PREFIX\/bin\/routecodex" "\$NPM_PREFIX\/bin\/rcc" "\$NPM_PREFIX\/bin\/rccv3" "\$NPM_PREFIX\/bin\/routecodex-v3"\s+npm install -g "\$packed_path"/);
+    expect(script).toContain('npm install -g "$packed_path" --force');
+    expect(script).not.toMatch(/rm -f "\$NPM_PREFIX\/bin\/routecodex" "\$NPM_PREFIX\/bin\/rcc" "\$NPM_PREFIX\/bin\/rccv3" "\$NPM_PREFIX\/bin\/routecodex-v3"\s+npm install -g "\$packed_path"/);
   });
 
   it('copies tracked governance contracts required by architecture gates', () => {

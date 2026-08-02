@@ -209,9 +209,6 @@ function buildSnapshotRuntimeMetadata(metadata) {
     if (typeof continuation?.previousResponseId === 'string' && continuation.previousResponseId.trim()) {
         projected.previousResponseId = continuation.previousResponseId.trim();
     }
-    if (continuation?.responsesResume && typeof continuation.responsesResume === 'object') {
-        projected.responsesResume = continuation.responsesResume;
-    }
     if (runtimeControl.routeHint) {
         projected.routeHint = runtimeControl.routeHint;
     }

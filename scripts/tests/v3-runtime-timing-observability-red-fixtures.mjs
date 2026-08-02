@@ -22,11 +22,13 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/runtime_timing.rs",
   "v3/crates/routecodex-v3-runtime/src/lib.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+  "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
   "v3/crates/routecodex-v3-server/src/lib.rs",
+  "v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs",
   "v3/crates/routecodex-v3-server/src/tests/mod.rs",
   "docs/architecture/function-map.yml",
   "docs/architecture/mainline-call-map.yml",
@@ -60,6 +62,16 @@ function mutateTimingChain(source, mutate) {
 }
 
 const cases = [
+  {
+    name: "Direct-to-Relay handoff drops the Runtime accumulator",
+    path: "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
+    mutate: (source) =>
+      source.replace(
+        "    pub observability_accumulator: V3RuntimeObservabilityAccumulator,",
+        "    pub observability_accumulator_removed: V3RuntimeObservabilityAccumulator,",
+      ),
+    diagnostic: /Both typed protocol handoff directions must carry/u,
+  },
   {
     name: "Server restores successful unreported timing",
     path: "v3/crates/routecodex-v3-server/src/lib.rs",
@@ -204,7 +216,7 @@ const cases = [
           (edge) => edge?.step_id !== "v3-runtime-timing-01",
         );
       }),
-    diagnostic: /must bind all Runtime timing edges 01 through 12/u,
+    diagnostic: /must bind all Runtime timing edges 01 through 14/u,
   },
   {
     name: "Direct SSE timing publication edge is deleted",
@@ -215,7 +227,7 @@ const cases = [
           (edge) => edge?.step_id !== "v3-runtime-timing-12",
         );
       }),
-    diagnostic: /must bind all Runtime timing edges 01 through 12/u,
+    diagnostic: /must bind all Runtime timing edges 01 through 14/u,
   },
   {
     name: "manifest sync allows global and V3 timing callable drift",

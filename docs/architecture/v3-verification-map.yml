@@ -167,6 +167,7 @@ features:
       - docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml
     required_contract:
       - "Every exposed endpoint must bind one known entry protocol execution mode implementation status and owner."
+      - "Fresh Responses orchestration may wrap implemented Direct or Relay bindings with the Relay shell, but Config-owned PendingNotImplemented remains pending for HTTP and WebSocket and cannot enter provider execution."
       - "Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent."
       - "Gemini relay implementation must be explicit and bound to v3.gemini_relay_runtime_integration."
       - "No unbound endpoint can fall through to generic foundation pending."
@@ -188,6 +189,26 @@ features:
       source: "Complete when maps, manifest, wiki, verifier, red fixtures, Config registry source, Server binding consumer source, architecture gates, and diff check pass."
       runtime: "Review/gate/source integration only. endpoint binding complete does not mean runtime protocol implementation is separate work."
       forbidden_claim: "Do not claim Gemini runtime implementation live provider compatibility global install restart or production cutover."
+
+  - feature_id: v3.protocol_stage_shape_lock
+    status: active_build_gate
+    change_risk: critical
+    owner_kind: v3_architecture_machine_contract
+    owner_scope: "Direct preserves entry protocol end to end; Relay converts only at adjacent inbound/outbound codecs and validates every stage shape."
+    contract:
+      - docs/architecture/manifests/v3.stage_protocol_shape_contract.yml
+      - docs/design/v3-stage-protocol-shape-contract.md
+    required_positive:
+      - Every Direct stage retains same_as_entry protocol identity.
+      - Every Relay node has a declared entry shape, exit shape, and real validator owner.
+    required_negative:
+      - Direct cannot invoke Relay protocol codecs.
+      - Relay cannot carry source wire through Chat stages or Chat extensions into provider wire.
+      - Control fields cannot enter any business payload shape.
+    required_gates:
+      - npm run verify:v3-stage-protocol-shapes
+      - npm run test:v3-stage-protocol-shapes-red-fixtures
+      - npm run verify:v3-architecture-ci
 
   - feature_id: v3.hub_pipeline_static_skeleton
     status: h1_typed_skeleton_and_static_registry_implemented
@@ -229,6 +250,8 @@ features:
       - Relay and new protocols fill hooks without changing or renumbering the skeleton
       - servertool followup Dry Run JSON SSE retry and Error paths use existing hook slots and the sole response exit
     required_gates:
+      - npm run verify:v3-stage-protocol-shapes
+      - npm run test:v3-stage-protocol-shapes-red-fixtures
       - npm run verify:v3-hub-pipeline-core-manifests
       - npm run test:v3-hub-pipeline-core-manifest-red-fixtures
       - npm run verify:v3-hub-v1-node-file-topology
@@ -795,11 +818,12 @@ features:
       - Server and CLI cannot import or call Provider transport
       - no relay continuation servertool other protocol V2 compatibility fallback repair sanitize or raw replay
       - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
-      - V3Target10ConcreteProviderSelected carries provider.responses.process; selected Responses providers with process=chat must choose Hub Relay before SameProtocolDirect
+      - V3Execution11ProtocolDecision is written by protocol execution planning before initial dispatch and recomputed only for the currently selected Target10 after provider failure reselection; continuation owner remains the only Direct/Relay lock
+      - V3Target10ConcreteProviderSelected carries provider.responses.process; selected Responses providers with process=chat must choose Hub Relay before SameProtocolDirect during protocol execution planning
       - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport with a no-network effect
       - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
       - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
-      - Direct target-local reselection that selects a Relay-only provider protocol must return a Relay handoff before Error06 projection; protocol_mismatch_relay_not_allowed is valid only when Relay is not allowed
+      - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a typed relay handoff side-channel carrying the complete request-local failed-candidate exclusion set so Relay cannot retry an already-failed Direct target
       - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
       - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider JSON as client SSE without treating provider inbound transport as client protocol truth
       - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
@@ -1370,16 +1394,18 @@ features:
 
 
   - feature_id: v3.protocol_conversion_field_parity
-    status: source_field_parity_focused_gates_only
+    status: runtime_active_live_verified_5520
     change_risk: high
     owner_kind: rust_v3_protocol_codec_field_parity
     owner_scope: "Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths and same-protocol Responses Direct provider wire preservation without server/SSE/MetadataCenter repair owners."
     owner_modules:
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_stopless_anthropic_provider_wire_integration.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
     design:
@@ -1398,15 +1424,17 @@ features:
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
       - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
       - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents `thinking.budget_tokens`.
-      - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions, round-trip to Responses, and fail on Anthropic projection without any system marker.
+      - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat, Anthropic, and Gemini outbound reject summary policy as unmapped because none has an equivalent target field.
       - Anthropic thinking.budget_tokens and Gemini thinkingBudget share the numeric budget extension only after target constraint validation; OpenAI targets reject numeric budget rather than compressing it into qualitative effort.
-      - Anthropic thinking.display, Gemini includeThoughts, and OpenAI reasoning.summary remain separate source-roundtrip semantics.
-      - Responses client_metadata/prompt_cache_key/store/text normalize into registered Chat request fields; Anthropic outbound projects exactly client_metadata.user_id and compatible JSON schema, while extra metadata keys, prompt cache key, both store values, verbosity, and incompatible format fail without MetadataCenter/SSE/handler reconstruction.
+      - Anthropic thinking.display, Gemini includeThoughts, and OpenAI reasoning.summary remain separate source-roundtrip semantics and are never reconstructed from each other.
+      - Responses metadata and client_metadata remain distinct registered Chat request fields through inbound, Chat canonicalization, and Responses outbound. Public metadata retains 16-pair/64-key/512-value validation; client_metadata does not inherit those limits. Anthropic outbound projects exact client_metadata.user_id, rejects every other client_metadata key, rejects valid and malformed prompt_cache_key because no reversible target field exists, rejects verbosity and incompatible format, consumes store:false only where the target semantics remain equivalent, and rejects store:true without MetadataCenter/SSE/handler reconstruction.
+      - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening block-local cache semantics.
       - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
       - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
       - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
       - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
+      - OpenAI Chat outbound maps only exact client_metadata.user_id to public metadata.user_id, rejects every other client_metadata key, rejects valid reasoning-summary policy as unmapped, and rejects unknown or malformed fields before provider send.
       - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat messages.
       - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production nodes.
     required_blackbox:
@@ -1414,7 +1442,12 @@ features:
       - responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect
       - responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
       - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
-      - No live 5555/provider replay is claimed by this feature until global install and managed restart gates run separately.
+      - openai_chat_wire_rejects_registered_codex_client_metadata_without_target_equivalent
+      - openai_chat_wire_rejects_unknown_client_metadata
+      - openai_chat_wire_rejects_unmapped_reasoning_summary_policy
+      - openai_chat_wire_rejects_invalid_reasoning_summary_policy
+      - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action` after the complete typed node chain.
+      - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
     required_gates:
       - npm run render:v3-protocol-semantic-field-matrix
       - npm run test:v3-protocol-conversion-field-parity
@@ -1429,7 +1462,7 @@ features:
       - git diff --check
     completion_rule:
       source: "Complete when focused parity tests, verifier, red fixtures, architecture/resource/module/Rust-only/function-map gates, fmt, and diff checks pass."
-      runtime: "Live completion additionally requires global install, managed restart, and same-entry 5555 replay; this source feature does not claim that evidence."
+      runtime: "Live complete for the registered Responses-to-Anthropic field projection on V3 0.90.4017 after global install, one aggregate managed restart, all-port health, and 5520 same-entry replay."
       forbidden_claim: "Do not claim live provider compatibility, production cutover, MetadataCenter ownership, SSE transport ownership, or V2 sharedmodule mutation from this source closeout."
 
   - feature_id: v3.gemini_relay_runtime_integration
@@ -1739,6 +1772,7 @@ features:
     owner_scope: "Client-facing /v1/responses WebSocket upgrade and frame projection shell into the configured Responses Direct or Relay Runtime and Provider path."
     owner_modules:
       - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
       - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
       - scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs
       - scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs
@@ -1753,6 +1787,7 @@ features:
     required_unit:
       - WebSocket handshake rejects plain GET without upgrade and missing OpenAI-Beta responses_websockets=2026-02-06 while preserving ping/pong transport behavior
       - controlled JSON WebSocket response.create enters the configured Responses Runtime and returns response.completed
+      - Relay-to-Direct typed provider reselection handoff is executed before WebSocket projection and can never emit the handoff placeholder as response.completed null
       - controlled binary JSON response.create enters the same Runtime path
       - controlled stream=true response.create projects Runtime SSE output as WebSocket events without full materialization
       - malformed client WebSocket event fails before provider send; missing type, unsupported response.cancel, and nested response.create response payload also fail before provider send
@@ -2302,10 +2337,12 @@ features:
     unit:
       - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
       - v3/crates/routecodex-v3-runtime/src/kernel.rs
+      - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/tests.rs
       - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
       - v3/crates/routecodex-v3-server/src/tests/mod.rs
+      - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
     contract:
       - docs/goals/v3-runtime-timing-observability-test-design.md
       - docs/goals/v3-runtime-timing-observability-debug-contract.json
@@ -2316,6 +2353,8 @@ features:
       - Direct SSE clean EOF publishes typed runtime_total, external, and internal timing after response.completed.
       - Direct SSE terminal event before EOF does not fabricate terminal timing.
       - Relay/Direct JSON timing remains Runtime-owned and Server read-only.
+      - Direct and Relay handoffs move one typed Runtime-owned timing and attempt accumulator; Server does not restart, merge, or infer it.
+      - Final attempts and external timing cover every provider transport leg across Direct-to-Relay, Relay-to-Direct, and nested handoffs without duplication.
     required_negative:
       - Duplicate or premature external timing closeout fails instead of silently succeeding.
       - Direct SSE malformed tail or [DONE] without response.completed does not publish successful Runtime timing.
@@ -2339,6 +2378,8 @@ features:
       - v3-runtime-timing-10
       - v3-runtime-timing-11
       - v3-runtime-timing-12
+      - v3-runtime-timing-13
+      - v3-runtime-timing-14
     completion_rule:
       source: "Positive/negative Rust tests plus runtime timing verifier and red fixtures pass."
       runtime: "After global install and managed restart, same-entry live Direct SSE sample completes without duplicate external attempt panic and prints numeric timing."
@@ -2505,3 +2546,34 @@ features:
     completion_rule:
       source: Debug budget, red fixtures, resource map, and build gate pass.
       runtime: Live sample capture remains required before production closeout.
+
+  - feature_id: v3.build_test_artifact_budget
+    status: source_active
+    change_risk: medium
+    owner_kind: build_tooling
+    owner_scope: Canonical V3 Cargo test execution, test-owned artifact release, reusable dependency retention, and the 2 GiB steady-state debug budget.
+    owner_modules:
+      - v3-build-test-artifact-budget
+    contract:
+      - docs/goals/v3-build-test-artifact-budget-test-design.md
+      - docs/architecture/v3-build-tool-module-registry.yml
+      - docs/architecture/manifests/v3.build_test_artifact_budget.mainline.yml
+      - docs/architecture/wiki/v3-build-test-artifact-budget.md
+    required_positive:
+      - Passing and failing tests both release invocation-owned test artifacts.
+      - Reusable dependency artifacts remain when the post-cleanup cache is within 2 GiB.
+      - An idle retained cache above 2 GiB is evicted through Cargo test-profile cleanup and remeasured.
+    required_negative:
+      - Raw package-script V3 Cargo tests cannot bypass the wrapper.
+      - Cleanup cannot touch runtime source, installed releases, payloads, control resources, or unrelated dependency artifacts.
+      - Active external V3 builders prevent cache eviction and produce an explicit failure.
+      - PID reuse cannot preserve a stale canonical-test lock because ownership also requires the recorded process-start identity.
+      - Post-eviction allocation above 2 GiB fails explicitly.
+    required_gates:
+      - npm run verify:v3-build-test-artifact-budget
+      - npm run test:v3-build-test-artifact-budget-red-fixtures
+      - npm run verify:v3-resource-map
+      - npm run verify:function-map-compile-gate
+    completion_rule:
+      source: Wrapper behavior, red fixtures, profile contract, package-script wiring, maps, and diff check pass.
+      runtime: No install or live request replay is required because this owner cannot enter runtime or payload paths.

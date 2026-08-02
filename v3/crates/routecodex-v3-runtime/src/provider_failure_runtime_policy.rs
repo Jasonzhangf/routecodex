@@ -104,6 +104,7 @@ pub(crate) struct V3RelayProviderFailurePolicyResult {
 
 pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
     pub(crate) manifest: &'ctx V3Config05ManifestPublished,
+    pub(crate) captured_target_09: Option<&'ctx V3Target09CandidateSetExpanded>,
     pub(crate) failure_session_scope: V3ProviderFailureSessionScope,
     pub(crate) provider_health: &'ctx V3ProviderFailureRuntimeHealth,
     pub(crate) retry_policy: V3RelayProviderFailureRetryPolicy,
@@ -510,19 +511,24 @@ fn reselect_from_captured_target_plan(
     now_ms: u64,
 ) -> V3RelayProviderTargetResolution {
     let target = V3TargetInterpreter::default();
-    let classified = target.classify_kind(selected.route.clone());
-    let expanded = match target.expand_candidates(
-        context.manifest,
-        classified,
-        context.deterministic_sample,
-    ) {
-        Ok(expanded) => expanded,
-        Err(error) => {
-            return V3RelayProviderTargetResolution::Failed(target_resolution_source(
-                "V3Target09CandidateSetExpanded",
-                "captured_target_plan_expansion_failed",
-                error,
-            ))
+    let expanded = match context.captured_target_09 {
+        Some(expanded) => expanded.clone(),
+        None => {
+            let classified = target.classify_kind(selected.route.clone());
+            match target.expand_candidates(
+                context.manifest,
+                classified,
+                context.deterministic_sample,
+            ) {
+                Ok(expanded) => expanded,
+                Err(error) => {
+                    return V3RelayProviderTargetResolution::Failed(target_resolution_source(
+                        "V3Target09CandidateSetExpanded",
+                        "captured_target_plan_expansion_failed",
+                        error,
+                    ))
+                }
+            }
         }
     };
     let session_bound_availability = context
@@ -1023,6 +1029,18 @@ pub(crate) fn resolve_v3_relay_target(
             Err(format!("{}: {}", source.code, source.message))
         }
     }
+}
+
+pub(crate) fn expand_v3_relay_target_plan_for_selected(
+    manifest: &V3Config05ManifestPublished,
+    selected: &V3Target10ConcreteProviderSelected,
+    deterministic_sample: u64,
+) -> Result<V3Target09CandidateSetExpanded, String> {
+    let target = V3TargetInterpreter::default();
+    let kind = target.classify_kind(selected.route.clone());
+    target
+        .expand_candidates(manifest, kind, deterministic_sample)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn resolve_v3_relay_target_outcome(

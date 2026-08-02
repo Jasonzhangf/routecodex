@@ -56,6 +56,9 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         let anthropic_reasoning_effort = responses_semantic
             .as_object_mut()
             .and_then(|object| object.remove("reasoning_effort"));
+        let anthropic_request_extension = responses_semantic
+            .as_object_mut()
+            .and_then(|object| object.remove("routecodex_chat_extension"));
         let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
             &responses_semantic,
         )
@@ -64,16 +67,27 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             (canonical.as_object_mut(), responses_semantic.as_object())
         {
             for key in [
-                "anthropic_entry_system",
                 "context_management",
                 "output_config",
+                "reasoning_budget_tokens",
+                "reasoning_display_policy",
+                "reasoning_thinking_mode",
             ] {
                 if let Some(value) = semantic_object.get(key) {
                     canonical_object.insert(key.to_string(), value.clone());
                 }
-                if let Some(value) = anthropic_reasoning_effort.as_ref() {
-                    canonical_object.insert("reasoning_effort".to_string(), value.clone());
+            }
+            if let Some(value) = anthropic_reasoning_effort.as_ref() {
+                canonical_object.insert("reasoning_effort".to_string(), value.clone());
+            }
+            if let Some(value) = anthropic_request_extension {
+                if canonical_object.contains_key("routecodex_chat_extension") {
+                    return Err(
+                        "Anthropic inbound produced conflicting registered Chat extensions"
+                            .to_string(),
+                    );
                 }
+                canonical_object.insert("routecodex_chat_extension".to_string(), value);
             }
         }
         input.payload.0 = canonical;
@@ -264,6 +278,7 @@ mod tests {
                 "system":system,
                 "context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},
                 "output_config":{"effort":"high"},
+                "thinking":{"type":"enabled","budget_tokens":1024,"display":"omitted"},
                 "messages":[{"role":"user","content":"hello"}]
             }),
             super::super::V3HubEntryProtocol::Anthropic,
@@ -275,7 +290,8 @@ mod tests {
             .expect("Anthropic system data must survive non-destructive Req02 normalization");
 
         assert_eq!(
-            normalized.previous.payload.0["anthropic_entry_system"],
+            normalized.previous.payload.0["routecodex_chat_extension"]["anthropic_request"]
+                ["system"],
             system
         );
         assert_eq!(
@@ -283,6 +299,18 @@ mod tests {
             json!({"edits":[{"type":"clear_thinking_20251015","keep":"all"}]})
         );
         assert_eq!(normalized.previous.payload.0["reasoning_effort"], "high");
+        assert_eq!(
+            normalized.previous.payload.0["reasoning_thinking_mode"],
+            "enabled"
+        );
+        assert_eq!(
+            normalized.previous.payload.0["reasoning_budget_tokens"],
+            1024
+        );
+        assert_eq!(
+            normalized.previous.payload.0["reasoning_display_policy"],
+            "omitted"
+        );
         assert!(
             normalized.previous.payload.0.get("output_config").is_none(),
             "Anthropic effort must normalize into Chat reasoning_effort before Chat Process"

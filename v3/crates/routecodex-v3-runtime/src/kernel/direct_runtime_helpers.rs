@@ -1,35 +1,3 @@
-fn select_v3_preplanned_direct_target(
-    target: &V3TargetInterpreter,
-    expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
-    session_availability: &routecodex_v3_provider_responses::V3ProviderSessionAvailabilityReader,
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    failed_candidates: &BTreeSet<String>,
-    now_epoch_ms: u64,
-) -> Result<routecodex_v3_target::V3Target10ConcreteProviderSelected, V3Error01SourceRaised> {
-    let expanded = expanded.ok_or_else(|| {
-        runtime_source(
-            "V3Target09CandidateSetExpanded",
-            "preplanned candidate set missing",
-        )
-    })?;
-    select_v3_target_with_session_then_global(
-        target,
-        expanded.clone(),
-        session_availability,
-        provider_health,
-        failed_candidates,
-        now_epoch_ms,
-    )
-    .map_err(|error| {
-        build_v3_error_01_source_raised(
-            V3ErrorSourceKind::TargetPoolExhausted,
-            "V3Target10ConcreteProviderSelected",
-            "preplanned_target_exhausted",
-            format!("{} candidates unavailable", error.attempted_candidates.len()),
-        )
-    })
-}
-
 fn v3_direct_selected_available_for_send(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
@@ -180,11 +148,7 @@ async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
-        remaining_available_candidates(
-            expanded_candidates,
-            context.availability,
-            &failed_with_current,
-        )
+        remaining_available_candidates(expanded_candidates, context.availability, &failed_with_current)
     });
     let mut next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
         first_remaining_available_candidate_key(
@@ -450,9 +414,10 @@ fn publish_v3_direct_provider_failure_event(
     status: Option<u16>,
     provider_failure_events: &[V3RuntimeProviderFailureObservation],
     event: &V3RuntimeProviderFailureObservation,
+    attempts: usize,
 ) {
     if let Some(sink) = sink {
-        let observability = build_v3_direct_runtime_observability(
+        let mut observability = build_v3_direct_runtime_observability(
             selected,
             transport,
             status,
@@ -460,6 +425,7 @@ fn publish_v3_direct_provider_failure_event(
             provider_failure_events.to_vec(),
             false,
         );
+        observability.attempts = Some(attempts);
         sink(&observability, event);
     }
 }
@@ -1270,8 +1236,11 @@ fn projected_error_output_with_observability(
 
 fn relay_handoff_output(
     target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: BTreeSet<String>,
     node_trace: Vec<&'static str>,
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+    observability_accumulator: V3RuntimeObservabilityAccumulator,
 ) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability: None,
@@ -1282,7 +1251,7 @@ fn relay_handoff_output(
             body: V3ClientBody::Json(json!({
                 "error": {
                     "code": "protocol_relay_handoff_unconsumed",
-                    "message": "V3 Responses Direct selected a Relay-only provider; server must execute Hub Relay instead of projecting this internal handoff"
+                    "message": "V3 Responses Direct selected a Relay target; server must consume the typed handoff side-channel"
                 }
             })),
         },
@@ -1290,8 +1259,11 @@ fn relay_handoff_output(
         error_chain: None,
         protocol_relay_handoff: Some(V3ResponsesProtocolRelayHandoff {
             target,
+            expanded,
+            request_local_excluded_candidates,
             node_trace,
             provider_failure_events,
+            observability_accumulator,
         }),
     }
 }
@@ -1433,4 +1405,40 @@ fn require_static_hooks(hook_registry: &V3HookRegistry) {
             "missing static hook {hook}"
         );
     }
+}
+
+fn direct_runtime_allowed_execution_modes(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> Vec<String> {
+    manifest
+        .servers
+        .get(server_id)
+        .and_then(|server| server.execution.as_ref())
+        .map(|execution| execution.allowed_modes.clone())
+        .filter(|modes| !modes.is_empty())
+        .unwrap_or_else(|| vec!["direct".to_string()])
+}
+
+fn total_attempts(
+    accumulator: &V3RuntimeObservabilityAccumulator,
+    current_leg_attempts: usize,
+) -> usize {
+    accumulator
+        .attempts()
+        .saturating_add(current_leg_attempts)
+}
+
+fn validate_initial_direct_plan(
+    has_previous_response_id: bool,
+    has_initial_target: bool,
+    has_initial_protocol_decision: bool,
+) -> Result<(), &'static str> {
+    if has_previous_response_id && has_initial_target {
+        return Err("direct continuation must be resolved from Req03 owner store, not from a non-continuation preselected target");
+    }
+    if has_initial_target && !has_initial_protocol_decision {
+        return Err("preselected direct target requires an initial protocol execution decision");
+    }
+    Ok(())
 }

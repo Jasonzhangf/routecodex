@@ -268,8 +268,8 @@ const cases = [
     path: copied[12],
     mutate: (source) =>
       source.replace(
-        "first_header_text(\n        headers,\n        &[\n            \"session-id\",\n            \"session_id\",\n            \"x-session-id\",\n            \"x-rcc-session-id\",\n        ],\n    )?\n    .ok_or_else(|| {",
-        "first_header_text(\n        headers,\n        &[\n            \"session-id\",\n            \"session_id\",\n            \"x-session-id\",\n            \"x-rcc-session-id\",\n        ],\n    )?\n        .or_else(|| Some(request_id.to_string()))\n    .ok_or_else(|| {",
+        "provider_failure_session_id_from_request_headers(headers)?.ok_or_else(|| {",
+        "provider_failure_session_id_from_request_headers(headers)?\n            .or_else(|| Some(request_id.to_string()))\n            .ok_or_else(|| {",
       ),
     diagnostic: /must not derive control identity from request identity/u,
   },

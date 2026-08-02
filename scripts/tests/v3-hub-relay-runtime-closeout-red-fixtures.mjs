@@ -190,6 +190,13 @@ const cases = [
     diagnostic: /must appear after occurrence|missing ordered occurrence/,
   },
   {
+    name: 'server relay finalizer bypasses the sole client response projector',
+    file: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    marker: 'responses_relay_output_response(',
+    mutation: 'removed_relay_client_response_projector(',
+    diagnostic: /finalize_v3_responses_relay_server_output: missing responses_relay_output_response\(/,
+  },
+  {
     name: 'manifest owner drift',
     file: 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml',
     marker: 'owner_feature_id: v3.hub_relay_runtime_closeout',
@@ -213,7 +220,7 @@ const cases = [
   {
     name: 'focused duplicate identity package gate removed',
     file: 'package.json',
-    marker: '    "test:v3-5520-duplicate-tool-identity": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib terminal_merge -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate -- --nocapture && CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_duplicate_tool_identity -- --nocapture && npm run verify:v3-hub-relay-runtime-closeout && npm run test:v3-hub-relay-runtime-closeout-red-fixtures",\n',
+    marker: '    "test:v3-5520-duplicate-tool-identity": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib terminal_merge -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --lib provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_duplicate_tool_identity -- --nocapture && npm run verify:v3-hub-relay-runtime-closeout && npm run test:v3-hub-relay-runtime-closeout-red-fixtures",\n',
     mutation: '',
     diagnostic: /missing script test:v3-5520-duplicate-tool-identity/,
   },

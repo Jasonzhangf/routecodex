@@ -34,10 +34,12 @@ edges:
     to: ProtocolFieldErr01Unmapped
     transform: explicit_unmapped_outbound_fields
 payload_semantics:
+  - request.metadata
   - request.client_metadata
   - request.prompt_cache_key
   - request.store
   - request.text.output_config
+  - request.anthropic_system_blocks
   - request.reasoning_effort
   - request.reasoning_budget_tokens
   - request.reasoning_summary_policy
@@ -47,13 +49,21 @@ payload_semantics:
   - request.reasoning_display_policy
   - request.reasoning_thinking_mode
 semantic_registry:
-  - semantic_id: request.client_metadata
-    chat_storage: routecodex_chat_extension.responses_request.client_metadata
+  - semantic_id: request.metadata
+    chat_storage: routecodex_chat_extension.responses_request.metadata
     type: object
     projections:
       responses: metadata_openai_limits
       openai_chat: metadata_openai_limits
       anthropic: metadata_user_id_only
+      gemini: unmapped
+  - semantic_id: request.client_metadata
+    chat_storage: routecodex_chat_extension.responses_request.client_metadata
+    type: object
+    projections:
+      responses: client_metadata
+      openai_chat: user_id_projection_other_fields_unmapped
+      anthropic: user_id_projection_other_fields_unmapped
       gemini: unmapped
   - semantic_id: request.prompt_cache_key
     chat_storage: routecodex_chat_extension.responses_request.prompt_cache_key
@@ -69,7 +79,7 @@ semantic_registry:
     projections:
       responses: store
       openai_chat: store
-      anthropic: unmapped
+      anthropic: false_consumed_true_unsupported
       gemini: unmapped
   - semantic_id: request.text.output_config
     chat_storage: routecodex_chat_extension.responses_request.text
@@ -79,6 +89,14 @@ semantic_registry:
       openai_chat: fieldwise_response_format_and_verbosity
       anthropic: semantic_matrix_exact_fields_only
       gemini: semantic_matrix_exact_fields_only
+  - semantic_id: request.anthropic_system_blocks
+    chat_storage: routecodex_chat_extension.anthropic_request.system
+    type: typed_anthropic_system_blocks
+    projections:
+      responses: unmapped
+      openai_chat: unmapped
+      anthropic: system
+      gemini: unmapped
   - semantic_id: request.reasoning_effort
     chat_storage: reasoning_effort
     type: qualitative_enum

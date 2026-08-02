@@ -3733,6 +3733,45 @@ chains:
       side_channel_writes:
       - v3.runtime.responses_observability
     status: anchored
+  - step_id: v3-runtime-timing-13
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingProtocolHandoff
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
+    callee_symbol: V3RuntimeObservabilityAccumulator::with_additional_attempts
+    callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: completed Direct or Relay provider attempts before a protocol-owner handoff
+    semantic_output: one typed Runtime timing and attempt accumulator carried outside normal payloads
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes:
+      - v3.runtime.responses_timing_observability
+    status: anchored
+  - step_id: v3-runtime-timing-14
+    from_node: V3RuntimeTimingProtocolHandoff
+    to_node: V3RuntimeTimingExternalAttempt
+    caller_symbol: execute_responses_direct_server_outcome
+    caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_input: opaque typed accumulator moved by Server across Direct or Relay protocol ownership
+    semantic_output: receiving Runtime resumes the same accumulator before its next provider transport attempt
+    resource_flow:
+      consumes:
+      - v3.runtime.responses_timing_observability
+      produces:
+      - v3.runtime.responses_timing_observability
+      side_channel_reads:
+      - v3.runtime.responses_timing_observability
+      side_channel_writes: []
+    status: anchored
 - chain_id: v3.codex_sample_retention_snap_scope
   summary: Explicit CLI authorization is published through the managed manifest; Debug bounds diagnostic copies; Server alone persists and trims Codex samples.
   entry_contract:

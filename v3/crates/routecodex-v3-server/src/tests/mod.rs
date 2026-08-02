@@ -187,6 +187,88 @@ fn test_listener_state_owns_request_counter_path_beside_log_file() {
 }
 
 #[test]
+fn responses_protocol_plan_only_accepts_fresh_requests() {
+    let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "previous_response_id": null,
+        "input": "fresh"
+    }));
+    assert!(responses_entry_facts_allow_fresh_protocol_plan(&fresh));
+
+    let remote_continuation = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "previous_response_id": "resp_remote",
+        "input": "continue"
+    }));
+    assert!(!responses_entry_facts_allow_fresh_protocol_plan(
+        &remote_continuation
+    ));
+
+    let relay_local_continuation = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_local",
+            "output": "ok"
+        }]
+    }));
+    assert!(!responses_entry_facts_allow_fresh_protocol_plan(
+        &relay_local_continuation
+    ));
+
+    let paired_tool_turn = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_inline",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_inline",
+                "output": "ok"
+            }
+        ]
+    }));
+    assert!(responses_entry_facts_allow_fresh_protocol_plan(
+        &paired_tool_turn
+    ));
+}
+
+#[test]
+fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
+    let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
+        "model": "client-test",
+        "input": "fresh"
+    }));
+
+    assert_eq!(
+        responses_effective_execution_mode_for_entry_facts(
+            V3EntryProtocolExecutionMode::PendingNotImplemented,
+            &fresh,
+        ),
+        V3EntryProtocolExecutionMode::PendingNotImplemented,
+        "Config-owned pending status must remain terminal for HTTP and WebSocket dispatch",
+    );
+    assert_eq!(
+        responses_effective_execution_mode_for_entry_facts(
+            V3EntryProtocolExecutionMode::Direct,
+            &fresh,
+        ),
+        V3EntryProtocolExecutionMode::Relay,
+    );
+    assert_eq!(
+        responses_effective_execution_mode_for_entry_facts(
+            V3EntryProtocolExecutionMode::Relay,
+            &fresh,
+        ),
+        V3EntryProtocolExecutionMode::Relay,
+    );
+}
+
+#[test]
 fn codex_sample_scope_blocks_direct_and_preserves_relay() {
     let log_file = std::env::temp_dir().join(format!(
         "routecodex-v3-sample-scope-{}.log",
@@ -418,6 +500,7 @@ fn relay_provider_snapshots_are_redacted_before_codex_sample_persistence() {
                 "output": [{"image_data": format!("data:image/png;base64,{}", "B".repeat(16_384))}]
             })),
         }),
+        protocol_direct_handoff: None,
     };
 
     assert!(capture_v3_responses_relay_provider_snapshots(
@@ -542,6 +625,57 @@ fn test_direct_observability(
             internal: std::time::Duration::from_millis(5),
         }),
     }
+}
+
+#[test]
+fn direct_to_relay_handoff_preserves_failure_event_order() {
+    let direct_event = test_provider_failure_observation();
+    let mut relay_event = test_provider_failure_observation();
+    relay_event.provider_key = "second:key:gpt-5.5".to_string();
+    relay_event.provider_id = "second".to_string();
+    relay_event.next_provider_key = Some("third:key:gpt-5.5".to_string());
+    let mut output = V3ResponsesRelayRuntimeOutput {
+        status: 200,
+        client_body: V3ResponsesRelayClientBody::Json(json!({"status":"completed"})),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: Some(test_direct_observability(vec![relay_event])),
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    merge_v3_direct_handoff_provider_failure_events(&mut output, vec![direct_event]);
+
+    let events = &output
+        .observability
+        .expect("handoff observability")
+        .provider_failure_events;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].provider_id, "first");
+    assert_eq!(events[1].provider_id, "second");
+}
+
+#[test]
+fn nested_relay_to_direct_handoff_uses_governed_handoff_payload() {
+    let source = include_str!("../responses_direct_server_outcome.rs");
+    let nested_handoff_block = source
+        .split("if let Some(next_handoff) = relay_output.protocol_direct_handoff.take()")
+        .nth(1)
+        .expect("nested Relay-to-Direct handoff block")
+        .split("Some(&next_handoff.plan)")
+        .next()
+        .expect("nested Direct recursive call");
+
+    assert!(
+        nested_handoff_block.contains("next_handoff.request_payload.clone(),"),
+        "nested Direct handoff must consume Relay-owned governed request payload"
+    );
+    assert!(
+        !nested_handoff_block.contains("\n                payload,\n"),
+        "nested Direct handoff must not reuse the stale outer Direct payload"
+    );
 }
 
 fn test_runtime_stream_observation_from_provider_event_json(
@@ -2200,12 +2334,13 @@ async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_jso
         None,
         None,
         None,
+        None,
     )
     .await;
     let frame = match outcome {
         V3ResponsesDirectServerOutcome::DirectFrame(frame) => frame,
-        V3ResponsesDirectServerOutcome::RelayHandoff(_) => {
-            panic!("scope error must project direct frame, not relay handoff")
+        V3ResponsesDirectServerOutcome::RelayOutput(_) => {
+            panic!("direct continuation scope error must not relay")
         }
     };
     assert_eq!(frame.status, 400);
@@ -2524,6 +2659,7 @@ async fn relay_sse_body_error_propagates_without_fabricated_error_event() {
         stream_observation: None,
         finalized_response: None,
         provider_snapshots: None,
+        protocol_direct_handoff: None,
     };
 
     let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));
@@ -2548,6 +2684,7 @@ async fn relay_sse_body_abruptly_closes_without_fabricating_error_event() {
         stream_observation: None,
         finalized_response: None,
         provider_snapshots: None,
+        protocol_direct_handoff: None,
     };
 
     let response = responses_relay_output_response(output, None, Duration::from_millis(3_000));

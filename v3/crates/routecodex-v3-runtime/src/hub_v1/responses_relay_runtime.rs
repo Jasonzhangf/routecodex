@@ -5,20 +5,25 @@ use crate::local_continuation::{
 };
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_candidate_key_parts,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
-    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
+    provider_runtime_failure_stage, resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
+    V3RelayProviderTargetResolutionInput, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
-use crate::runtime_timing::{V3RuntimeTimingState, V3RuntimeTimingSummary};
+use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
+use crate::{
+    build_v3_execution_11_protocol_decision_from_v3_target_10, project_v3_debug_failure,
+    V3Execution11ProtocolDecisionMode, V3ResponsesProtocolExecutionPlan,
+};
 use futures_util::StreamExt;
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderErrorActionPolicyManifest,
     V3ProviderErrorMatcherManifest,
 };
+use routecodex_v3_debug::V3DebugError;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
@@ -84,6 +89,36 @@ pub struct V3ResponsesRelayRuntimeOutput {
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub finalized_response: Option<Value>,
     pub provider_snapshots: Option<V3ResponsesRelayProviderSnapshots>,
+    pub protocol_direct_handoff: Option<V3ResponsesProtocolDirectHandoff>,
+}
+
+#[derive(Debug)]
+pub struct V3ResponsesProtocolDirectHandoff {
+    pub request_payload: Value,
+    pub plan: V3ResponsesProtocolExecutionPlan,
+    pub node_trace: Vec<&'static str>,
+    pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+    pub observability_accumulator: V3RuntimeObservabilityAccumulator,
+}
+
+pub enum V3ResponsesRelayDryRunOutcome {
+    Foundation(crate::V3FoundationRuntimeOutput),
+    DirectHandoff(V3ResponsesProtocolDirectHandoff),
+}
+
+impl V3ResponsesRelayDryRunOutcome {
+    fn into_foundation(self) -> crate::V3FoundationRuntimeOutput {
+        match self {
+            Self::Foundation(output) => output,
+            Self::DirectHandoff(_) => project_v3_debug_failure(
+                "V3Execution11ProtocolDecision",
+                V3DebugError::MalformedFixture(
+                    "Responses Relay provider-request dry run requires its Direct handoff owner"
+                        .to_string(),
+                ),
+            ),
+        }
+    }
 }
 
 pub type V3RuntimeProviderFailureEventSink = Arc<
@@ -1055,6 +1090,7 @@ impl std::fmt::Debug for V3ResponsesRelayRuntimeOutput {
                 "finalized_response",
                 &self.finalized_response.as_ref().map(|_| "present"),
             )
+            .field("protocol_direct_handoff", &self.protocol_direct_handoff)
             .finish()
     }
 }
@@ -1135,6 +1171,9 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
         None,
         None,
         None,
+        None,
+        BTreeSet::new(),
+        None,
     )
     .await
 }
@@ -1170,6 +1209,9 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         provider_failure_event_sink,
         local_stopless.route_selection_event_sink.clone(),
         None,
+        None,
+        BTreeSet::new(),
+        None,
     )
     .await
 }
@@ -1183,6 +1225,9 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: BTreeSet<String>,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
     let provider_failure_event_sink = local_stopless.provider_failure_event_sink.clone();
@@ -1206,6 +1251,9 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
         provider_failure_event_sink,
         local_stopless.route_selection_event_sink.clone(),
         Some(initial_selected_target),
+        Some(initial_expanded),
+        request_local_excluded_candidates,
+        observability_accumulator,
     )
     .await
 }
@@ -1243,6 +1291,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
         manifest,
@@ -1256,6 +1305,9 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
             now_epoch_ms,
         ),
         initial_selected_target,
+        initial_expanded,
+        BTreeSet::new(),
+        None,
     )
     .await
 }
@@ -1282,6 +1334,9 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: BTreeSet<String>,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
         manifest,
@@ -1290,6 +1345,9 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
         provider_health,
         local_stopless,
         initial_selected_target,
+        initial_expanded,
+        request_local_excluded_candidates,
+        observability_accumulator,
     )
     .await
 }
@@ -1324,6 +1382,9 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
     capture: V3ResponsesRelayProviderSnapshotCapture,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: BTreeSet<String>,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -1335,6 +1396,9 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
             provider_health,
             local_stopless,
             initial_selected_target,
+            initial_expanded,
+            request_local_excluded_candidates,
+            observability_accumulator,
         )
         .await?;
     output.provider_snapshots =
@@ -1374,6 +1438,9 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         None,
         None,
+        None,
+        BTreeSet::new(),
+        None,
     )
     .await
 }
@@ -1397,6 +1464,9 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         retry_policy,
         None,
         None,
+        None,
+        None,
+        BTreeSet::new(),
         None,
     )
     .await
@@ -1433,6 +1503,9 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
         None,
         None,
         None,
+        None,
+        BTreeSet::new(),
+        None,
     )
     .await
 }
@@ -1461,8 +1534,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let runtime_timing = V3RuntimeTimingState::start();
+    let observability_accumulator =
+        initial_observability_accumulator.unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let runtime_timing = observability_accumulator.timing();
     compile_v3_hub_v1_static_registry()
         .map_err(|error| V3ResponsesRelayRuntimeError::StaticRegistry(error.to_string()))?;
     let transition_request_id = input.request_id.clone();
@@ -1479,6 +1557,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         v3_responses_relay_transport_intent_from_stream_field(&input.payload);
     let provider_request_transport_intent = client_response_transport_intent;
     let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
+    let protocol_switch_allowed =
+        responses_relay_protocol_switch_allowed(&input.payload, &local_tool_output_ids);
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -1581,7 +1661,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         V3HubExecutionMode::Relay,
     );
     trace.push("V3HubReqExecution05Planned");
-    let mut failed_candidates = BTreeSet::new();
+    let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
     let mut initial_selected_target = initial_selected_target;
@@ -1593,11 +1673,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
     let provider_failure_health = provider_health.clone();
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
+        captured_target_09: initial_expanded.as_ref(),
         failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_failure_health,
         retry_policy: shared_retry_policy,
         deterministic_sample,
     };
+    let allowed_modes = allowed_execution_modes_for_relay_server(manifest, &input.server_id)?;
     loop {
         let selected = if let Some(selected) = retry_selected.take() {
             selected
@@ -1629,10 +1711,78 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         };
+        if protocol_switch_allowed {
+            let decision = build_v3_execution_11_protocol_decision_from_v3_target_10(
+                selected.clone(),
+                "responses",
+                &allowed_modes,
+            )
+            .map_err(|source| V3ResponsesRelayRuntimeError::Target(source.message.clone()))?;
+            if decision.mode == V3Execution11ProtocolDecisionMode::SameProtocolDirect {
+                trace.push("V3Execution11ProtocolDecision");
+                let expanded = match initial_expanded.clone() {
+                    Some(expanded) => expanded,
+                    None => expand_v3_relay_target_plan_for_selected(
+                        manifest,
+                        &selected,
+                        deterministic_sample,
+                    )
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                };
+                clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                    manifest,
+                    &input.server_id,
+                    stopless_control.as_ref(),
+                    stopless_state.as_ref(),
+                )?;
+                return Ok(V3ResponsesRelayRuntimeOutput {
+                    status: 0,
+                    client_body: V3ResponsesRelayClientBody::Json(Value::Null),
+                    node_trace: Vec::new(),
+                    error_chain: None,
+                    observability: None,
+                    stream_observation: None,
+                    finalized_response: None,
+                    provider_snapshots: None,
+                    protocol_direct_handoff: Some(V3ResponsesProtocolDirectHandoff {
+                        request_payload:
+                            build_v3_openai_responses_standard_request_from_chat_canonical(
+                                &provider_semantic_body,
+                            )
+                            .map_err(V3ResponsesRelayRuntimeError::ProviderWireEncoding)?,
+                        plan: V3ResponsesProtocolExecutionPlan {
+                            decision,
+                            node_trace: vec![
+                                "V3Req04StandardizedResponses",
+                                "V3Router05RequestClassified",
+                                "V3Router06RoutePoolResolved",
+                                "V3Router07OpaqueTargetHitOnce",
+                                "V3Target08KindClassified",
+                                "V3Target09CandidateSetExpanded",
+                                "V3Target10ConcreteProviderSelected",
+                                "V3Execution11ProtocolDecision",
+                            ],
+                            expanded,
+                            protocol_candidate_keys: BTreeSet::new(),
+                            request_local_excluded_candidates: failed_candidates.clone(),
+                        },
+                        node_trace: trace,
+                        provider_failure_events: provider_failure_events.clone(),
+                        observability_accumulator: observability_accumulator
+                            .clone()
+                            .with_additional_attempts(provider_send_attempts),
+                    }),
+                });
+            }
+        }
         provider_send_attempts = provider_send_attempts.saturating_add(1);
         let mut selected_observability =
             build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
-        selected_observability.attempts = Some(provider_send_attempts);
+        selected_observability.attempts = Some(
+            observability_accumulator
+                .attempts()
+                .saturating_add(provider_send_attempts),
+        );
         selected_observability.provider_failure_events = provider_failure_events.clone();
         if let Some(sink) = route_selection_event_sink.as_ref() {
             sink(&selected_observability);
@@ -2117,6 +2267,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     stream_observation: None,
                     finalized_response: Some(finalized_response),
                     provider_snapshots: None,
+                    protocol_direct_handoff: None,
                 });
             }
             V3ProviderResponseBody::Sse(stream) => {
@@ -2374,6 +2525,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     },
                     finalized_response: Some(finalized_response),
                     provider_snapshots: None,
+                    protocol_direct_handoff: None,
                 });
             }
         }
@@ -2493,6 +2645,18 @@ fn find_responses_tool_output_ids(
         }
     }
     Ok(ids)
+}
+
+fn responses_relay_protocol_switch_allowed(
+    payload: &Value,
+    tool_output_ids: &V3ResponsesRelayToolOutputIds,
+) -> bool {
+    payload
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .is_none()
+        && tool_output_ids.restore_ids.is_empty()
 }
 
 async fn handle_v3_responses_relay_provider_failure(
@@ -2678,7 +2842,9 @@ pub async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None).await
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None, None)
+        .await
+        .into_foundation()
 }
 
 pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
@@ -2705,8 +2871,10 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
             commit_effects: false,
         }),
         None,
+        None,
     )
     .await
+    .into_foundation()
 }
 
 pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
@@ -2733,8 +2901,10 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
             commit_effects: false,
         }),
         None,
+        None,
     )
     .await
+    .into_foundation()
 }
 
 pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target(
@@ -2745,6 +2915,7 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> crate::V3FoundationRuntimeOutput {
     let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
@@ -2762,6 +2933,37 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
             commit_effects: false,
         }),
         Some(initial_selected_target),
+        Some(initial_expanded),
+    )
+    .await
+    .into_foundation()
+}
+
+pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    state: &V3ResponsesRelayLocalContinuationState,
+    stopless_control: &V3ResponsesRelayStoplessControlState,
+    scope: V3ResponsesRelayLocalContinuationScope,
+    now_epoch_ms: u64,
+) -> V3ResponsesRelayDryRunOutcome {
+    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+    execute_v3_responses_relay_dry_run_runtime_inner(
+        manifest,
+        input,
+        Some(V3ResponsesRelayLocalContinuationExecution {
+            state,
+            scope,
+            now_epoch_ms,
+            commit_resp04_effects: false,
+        }),
+        Some(V3ResponsesRelayStoplessControlExecution {
+            control: stopless_control,
+            scope: stopless_scope,
+            commit_effects: false,
+        }),
+        None,
+        None,
     )
     .await
 }
@@ -2772,7 +2974,8 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
     stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-) -> crate::V3FoundationRuntimeOutput {
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+) -> V3ResponsesRelayDryRunOutcome {
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
         json!({
@@ -2799,12 +3002,18 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
         None,
         None,
         initial_selected_target,
+        initial_expanded,
+        BTreeSet::new(),
+        None,
     )
     .await
     {
         Ok(output) => output,
         Err(error) => project_v3_responses_relay_runtime_failure(error),
     };
+    if let Some(handoff) = output.protocol_direct_handoff.take() {
+        return V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff);
+    }
     if let Some(index) = output
         .node_trace
         .iter()
@@ -2835,7 +3044,7 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
         },
         "message": "routecodex provider-request dry-run stopped before provider send"
     });
-    crate::V3FoundationRuntimeOutput {
+    V3ResponsesRelayDryRunOutcome::Foundation(crate::V3FoundationRuntimeOutput {
         status: dry_run_status,
         body: json!({
             "object": "routecodex.pipeline_dry_run",
@@ -2872,7 +3081,7 @@ async fn execute_v3_responses_relay_dry_run_runtime_inner(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
-    }
+    })
 }
 
 pub fn project_v3_responses_relay_runtime_failure(
@@ -4469,6 +4678,20 @@ fn server_routing_group(
         .ok_or_else(|| V3ResponsesRelayRuntimeError::Target("server missing".to_string()))
 }
 
+fn allowed_execution_modes_for_relay_server(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+) -> Result<Vec<String>, V3ResponsesRelayRuntimeError> {
+    let server = manifest.servers.get(server_id).ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::Target(format!("server {server_id} missing"))
+    })?;
+    Ok(server
+        .execution
+        .as_ref()
+        .map(|execution| execution.allowed_modes.clone())
+        .unwrap_or_else(|| vec!["relay".to_string()]))
+}
+
 fn provider_http_failure(
     status: u16,
     body: &[u8],
@@ -4695,6 +4918,7 @@ fn provider_failure_output(
         stream_observation: None,
         finalized_response: None,
         provider_snapshots: None,
+        protocol_direct_handoff: None,
     }
 }
 
@@ -4733,6 +4957,7 @@ fn error_output(
         stream_observation: None,
         finalized_response: None,
         provider_snapshots: None,
+        protocol_direct_handoff: None,
     }
 }
 
@@ -4742,6 +4967,198 @@ mod tests {
     use futures_util::{stream, StreamExt};
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RelayOnlyFailureTransport {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponsesTransport for RelayOnlyFailureTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            assert_eq!(request.provider_id(), "relay_first");
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Err(V3ProviderError::Transport {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                reason: "relay target failed before direct target".to_string(),
+            })
+        }
+    }
+
+    fn relay_to_direct_reselection_manifest() -> V3Config05ManifestPublished {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.relay_first]
+type = "openai_chat"
+base_url = "http://relay.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "RELAY_FIRST_KEY" }] }
+[providers.relay_first.models.test]
+wire_name = "wire-relay-first"
+
+[providers.direct_second]
+type = "responses"
+base_url = "http://direct.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "DIRECT_SECOND_KEY" }] }
+[providers.direct_second.models.test]
+wire_name = "wire-direct-second"
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "relay_first", model = "test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "direct_second", model = "test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
+"#,
+        )
+        .expect("relay-to-direct authoring");
+        compile_v3_config_05_manifest(authoring).expect("relay-to-direct manifest")
+    }
+
+    #[test]
+    fn missing_execution_block_preserves_relay_mode() {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+
+[providers.relay]
+type = "openai_chat"
+base_url = "http://relay.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "RELAY_KEY" }] }
+[providers.relay.models.test]
+wire_name = "wire-relay"
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "relay", model = "test", key = "key", priority = 1 }]
+"#,
+        )
+        .expect("relay-only authoring");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("relay-only manifest");
+
+        assert_eq!(
+            allowed_execution_modes_for_relay_server(&manifest, "test").unwrap(),
+            vec!["relay".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_reselect_can_handoff_to_direct_target_after_provider_failure() {
+        std::env::set_var("RELAY_FIRST_KEY", "relay-secret");
+        std::env::set_var("DIRECT_SECOND_KEY", "direct-secret");
+        let manifest = relay_to_direct_reselection_manifest();
+        let session_scope =
+            V3ProviderFailureSessionScope::new("test", "default", "relay-direct-session")
+                .expect("session scope");
+        let transport = RelayOnlyFailureTransport {
+            sends: AtomicUsize::new(0),
+        };
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            execute_v3_responses_relay_runtime_inner(
+                &manifest,
+                V3ResponsesRelayRuntimeInput {
+                    server_id: "test".to_string(),
+                    failure_session_scope: session_scope,
+                    request_id: "req-relay-direct".to_string(),
+                    payload: json!({"model":"client-model","input":"hello"}),
+                },
+                &transport,
+                None,
+                None,
+                V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+                V3ResponsesRelayRetryPolicy::default(),
+                None,
+                None,
+                None,
+                None,
+                BTreeSet::new(),
+                None,
+            ),
+        )
+        .await
+        .expect("relay failure handoff must not wait for normal cooldown")
+        .expect("relay failure should hand off to Direct target");
+
+        assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+        let handoff = output
+            .protocol_direct_handoff
+            .expect("same-protocol reselected target must hand off to Direct");
+        assert_eq!(
+            handoff.plan.decision.mode,
+            V3Execution11ProtocolDecisionMode::SameProtocolDirect
+        );
+        assert_eq!(
+            handoff.plan.decision.target.candidate.provider_id,
+            "direct_second"
+        );
+        assert_eq!(
+            handoff.observability_accumulator.attempts(),
+            1,
+            "Relay-to-Direct handoff must carry the completed provider attempt",
+        );
+        assert!(handoff
+            .plan
+            .request_local_excluded_candidates
+            .contains("relay_first:key:test"));
+        assert!(handoff.node_trace.contains(&"V3TargetLocalReselected"));
+        assert!(handoff.provider_failure_events.len() == 1);
+        assert!(
+            handoff.request_payload.get("input").is_some(),
+            "Direct handoff must carry the ReqChatProcess result projected by the adjacent Responses outbound codec"
+        );
+        assert!(
+            handoff.request_payload.get("messages").is_none(),
+            "Chat canonical fields must not cross the typed Direct handoff"
+        );
+    }
+
+    #[test]
+    fn relay_local_tool_output_cannot_enter_fresh_protocol_switch() {
+        let payload = json!({
+            "model": "client-model",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_relay_owned",
+                "output": "done"
+            }]
+        });
+        let ids = find_responses_tool_output_ids(&payload).expect("tool output ids");
+
+        assert!(!ids.restore_ids.is_empty());
+        assert!(
+            !responses_relay_protocol_switch_allowed(&payload, &ids),
+            "Relay-owned local continuation must remain in Relay after ReqChatProcess restore"
+        );
+    }
 
     #[test]
     fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate() {
@@ -4924,6 +5341,11 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "g"
 endpoints = ["responses"]
+[servers.s.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.glm]
 type = "openai_chat"

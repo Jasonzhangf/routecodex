@@ -169,6 +169,30 @@ fn anthropic_image_shape_branch_semantics_do_not_mutate_provider_wire_payload() 
 }
 
 #[test]
+fn openai_chat_image_url_part_projects_to_anthropic_base64_image() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"claude-fable-5",
+        "stream": false,
+        "messages": [{
+            "role":"user",
+            "content": [
+                {"type":"text","text":"describe"},
+                {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA","detail":"high"}}
+            ]
+        }]
+    }))
+    .expect("Chat-native image_url must map to Anthropic image content");
+
+    assert_eq!(
+        provider_request["messages"][0]["content"][1],
+        json!({
+            "type":"image",
+            "source":{"type":"base64","media_type":"image/png","data":"AAAA"}
+        })
+    );
+}
+
+#[test]
 fn responses_custom_tool_call_raw_input_encodes_as_anthropic_tool_use_object() {
     let raw_patch = "*** Begin Patch\n*** Update File: project.private.config.json\n@@\n-}\n+}\n*** End Patch\n";
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
@@ -207,32 +231,23 @@ fn responses_custom_tool_call_raw_input_encodes_as_anthropic_tool_use_object() {
 }
 
 #[test]
-fn responses_reasoning_request_config_projects_to_anthropic_thinking_wire() {
-    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_reasoning_summary_policy_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": true,
-        "reasoning":{"effort":"medium","summary":"detailed"},
-        "input":[
-            {
-                "type":"message",
-                "role":"user",
-                "content":[{"type":"input_text","text":"keep reasoning enabled"}]
-            }
-        ]
+        "reasoning_effort":"medium",
+        "reasoning_summary_policy":"detailed",
+        "messages":[{"role":"user","content":"keep reasoning enabled"}]
     }))
-    .expect("Responses reasoning request config must be valid Anthropic wire");
+    .expect_err("Anthropic cannot preserve Responses reasoning summary policy");
 
     assert!(
-        provider_request.get("thinking").is_none(),
-        "Responses effort/summary must not synthesize Anthropic thinking budget: {provider_request}"
+        error.to_string().contains("UnmappedOutboundFields"),
+        "{error}"
     );
     assert!(
-        provider_request.get("reasoning").is_none(),
-        "Responses reasoning must not leak as provider body reasoning: {provider_request}"
-    );
-    assert!(
-        provider_request["system"].as_str().is_some_and(|system| system.contains("<routecodex_reasoning_request summary_policy=detailed></routecodex_reasoning_request>")),
-        "Responses reasoning summary must be compatibly projected as target-valid Anthropic system marker: {provider_request}"
+        error.to_string().contains("reasoning_summary_policy"),
+        "{error}"
     );
 }
 
@@ -356,14 +371,12 @@ fn responses_reasoning_embedded_thinking_config_preserves_exact_anthropic_shape(
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": false,
-        "reasoning":{
-            "effort":"high",
-            "summary":"auto",
-            "thinking":{"type":"enabled","budget_tokens":8192}
-        },
-        "input":"preserve Anthropic-compatible thinking"
+        "reasoning_effort":"high",
+        "reasoning_thinking_mode":"enabled",
+        "reasoning_budget_tokens":8192,
+        "messages":[{"role":"user","content":"preserve Anthropic-compatible thinking"}]
     }))
-    .expect("Responses reasoning.thinking must stay lossless for Anthropic wire");
+    .expect("Chat thinking fields must stay lossless for Anthropic wire");
 
     assert_eq!(
         provider_request["thinking"],
@@ -914,57 +927,52 @@ fn responses_consecutive_tool_calls_group_before_results_for_anthropic_order() {
 }
 
 #[test]
-fn responses_malformed_function_call_arguments_become_empty_anthropic_input_and_preserve_feedback_pair(
-) {
-    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_malformed_function_call_arguments_fail_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": true,
         "input": [
             {
-                "type":"message",
-                "role":"user",
-                "content":[{"type":"input_text","text":"continue the task"}]
-            },
-            {
                 "type":"function_call",
-                "call_id":"call_8bdfda0c2e5b45d08a6b10db",
+                "call_id":"call_unpaired_bad_args",
                 "name":"exec_command",
-                "arguments":"{\"cmd\": \"cat -n apps/api/src/composite-preview.js | head -80\", \"workdir\": \"/Volumes/extension/code/OneStop\"}{\"cmd\": \"cat -n apps/api/src/composite-preview.js | sed -n '80,180p'\", \"workdir\": \"/Volumes/extension/code/OneStop\"}"
+                "arguments":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
             },
             {
                 "type":"function_call_output",
-                "call_id":"call_8bdfda0c2e5b45d08a6b10db",
-                "output":"failed to parse function arguments: trailing characters at line 1 column 109"
+                "call_id":"call_unpaired_bad_args",
+                "output":"failed to parse function arguments"
             }
         ]
     }))
-    .expect("malformed ordinary Responses function_call arguments must not produce invalid Anthropic provider wire");
+    .expect_err("malformed Responses arguments cannot be reversibly projected to Anthropic");
+    assert_eq!(
+        error.to_string(),
+        "Anthropic codec malformed function_call.arguments"
+    );
+}
 
-    let messages = provider_request["messages"]
-        .as_array()
-        .expect("Anthropic messages");
-    assert_eq!(messages.len(), 3);
-    assert_eq!(messages[1]["role"], json!("assistant"));
-    assert_eq!(messages[1]["content"][0]["type"], json!("tool_use"));
+#[test]
+fn chat_malformed_tool_call_arguments_fail_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "messages":[
+            {"role":"assistant","content":"","tool_calls":[{
+                "id":"call_malformed_chat",
+                "type":"function",
+                "function":{
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
+                }
+            }]},
+            {"role":"tool","tool_call_id":"call_malformed_chat","content":"failed to parse function arguments"}
+        ]
+    }))
+    .expect_err("malformed Chat arguments cannot be reversibly projected to Anthropic");
     assert_eq!(
-        messages[1]["content"][0]["id"],
-        json!("call_8bdfda0c2e5b45d08a6b10db")
+        error.to_string(),
+        "Anthropic codec malformed tool_call.arguments"
     );
-    assert_eq!(messages[1]["content"][0]["name"], json!("exec_command"));
-    assert_eq!(messages[1]["content"][0]["input"], json!({}));
-    assert_eq!(messages[2]["role"], json!("user"));
-    assert_eq!(messages[2]["content"][0]["type"], json!("tool_result"));
-    assert_eq!(
-        messages[2]["content"][0]["tool_use_id"],
-        json!("call_8bdfda0c2e5b45d08a6b10db")
-    );
-    assert_eq!(
-        messages[2]["content"][0]["content"],
-        json!("failed to parse function arguments: trailing characters at line 1 column 109")
-    );
-    let serialized = serde_json::to_string(&provider_request).expect("Anthropic request JSON");
-    assert!(!serialized.contains("composite-preview.js | head -80"));
-    assert!(!serialized.contains("composite-preview.js | sed -n"));
 }
 
 #[test]
@@ -1657,4 +1665,167 @@ fn side_channel_and_protocol_fields_cannot_enter_anthropic_payloads() {
         ),
         Err(V3AnthropicCodecError::EntryProtocolNotAnthropic)
     ));
+}
+
+fn base_chat_for_field_projection() -> serde_json::Value {
+    json!({
+        "model":"claude-test",
+        "messages":[{"role":"user","content":"hello"}],
+        "max_tokens":4096
+    })
+}
+
+#[test]
+fn anthropic_thinking_fields_require_valid_exact_shape() {
+    let mut enabled = base_chat_for_field_projection();
+    enabled["reasoning_thinking_mode"] = json!("enabled");
+    enabled["reasoning_budget_tokens"] = json!(2048);
+    enabled["reasoning_display_policy"] = json!("omitted");
+    let wire = encode_v3_responses_semantic_as_anthropic_request(enabled)
+        .expect("valid enabled thinking must project exactly");
+    assert_eq!(
+        wire["thinking"],
+        json!({"type":"enabled","budget_tokens":2048,"display":"omitted"})
+    );
+
+    let mut missing_budget = base_chat_for_field_projection();
+    missing_budget["reasoning_thinking_mode"] = json!("enabled");
+    assert!(encode_v3_responses_semantic_as_anthropic_request(missing_budget).is_err());
+
+    let mut disabled_with_budget = base_chat_for_field_projection();
+    disabled_with_budget["reasoning_thinking_mode"] = json!("disabled");
+    disabled_with_budget["reasoning_budget_tokens"] = json!(2048);
+    assert!(encode_v3_responses_semantic_as_anthropic_request(disabled_with_budget).is_err());
+
+    let mut excessive_budget = base_chat_for_field_projection();
+    excessive_budget["reasoning_thinking_mode"] = json!("enabled");
+    excessive_budget["reasoning_budget_tokens"] = json!(4096);
+    assert!(encode_v3_responses_semantic_as_anthropic_request(excessive_budget).is_err());
+}
+
+#[test]
+fn anthropic_client_metadata_projects_only_exact_user_id() {
+    let mut exact = base_chat_for_field_projection();
+    exact["routecodex_chat_extension"] = json!({
+        "responses_request":{"client_metadata":{"user_id":"opaque-user"}}
+    });
+    let wire = encode_v3_responses_semantic_as_anthropic_request(exact)
+        .expect("exact client_metadata.user_id must project");
+    assert_eq!(wire["metadata"], json!({"user_id":"opaque-user"}));
+
+    let mut session = base_chat_for_field_projection();
+    session["routecodex_chat_extension"] =
+        json!({"responses_request":{"client_metadata":{"session_id":"session"}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(session)
+        .expect_err("session_id has no exact Anthropic metadata field");
+    assert!(error.to_string().contains("client_metadata.session_id"));
+
+    let mut unsupported = base_chat_for_field_projection();
+    unsupported["routecodex_chat_extension"] =
+        json!({"responses_request":{"client_metadata":{"turn":"unsupported"}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(unsupported)
+        .expect_err("unknown client_metadata must remain fail-fast");
+    assert!(error.to_string().contains("client_metadata.turn"));
+}
+
+#[test]
+fn anthropic_rejects_responses_cache_key_store_and_verbosity_without_equivalents() {
+    let mut cache_key = base_chat_for_field_projection();
+    cache_key["routecodex_chat_extension"] = json!({"responses_request":{
+        "prompt_cache_key":"session-1",
+    }});
+    let error = encode_v3_responses_semantic_as_anthropic_request(cache_key)
+        .expect_err("valid prompt_cache_key has no reversible Anthropic field");
+    assert!(
+        error.to_string().contains("$.request.prompt_cache_key"),
+        "{error}"
+    );
+
+    let mut verbosity = base_chat_for_field_projection();
+    verbosity["routecodex_chat_extension"] =
+        json!({"responses_request":{"text":{"verbosity":"high"}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(verbosity)
+        .expect_err("Responses verbosity has no reversible Anthropic projection");
+    assert!(error.to_string().contains("verbosity"), "{error}");
+
+    let mut not_stored = base_chat_for_field_projection();
+    not_stored["routecodex_chat_extension"] = json!({"responses_request":{"store":false}});
+    let wire = encode_v3_responses_semantic_as_anthropic_request(not_stored)
+        .expect("store=false is semantically equivalent to omitting Anthropic storage");
+    assert!(wire.get("store").is_none(), "{wire}");
+
+    let mut stored = base_chat_for_field_projection();
+    stored["routecodex_chat_extension"] = json!({"responses_request":{"store":true}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(stored)
+        .expect_err("store=true has no Anthropic equivalent");
+    assert!(error.to_string().contains("$.request.store"), "{error}");
+
+    let mut malformed_cache_key = base_chat_for_field_projection();
+    malformed_cache_key["routecodex_chat_extension"] =
+        json!({"responses_request":{"prompt_cache_key":""}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(malformed_cache_key)
+        .expect_err("empty prompt_cache_key must fail target validation");
+    assert!(error.to_string().contains("prompt_cache_key"), "{error}");
+
+    let mut malformed_verbosity = base_chat_for_field_projection();
+    malformed_verbosity["routecodex_chat_extension"] =
+        json!({"responses_request":{"text":{"verbosity":"verbose"}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(malformed_verbosity)
+        .expect_err("unknown verbosity must fail target validation");
+    assert!(error.to_string().contains("verbosity"), "{error}");
+}
+
+#[test]
+fn anthropic_reasoning_effort_preserves_high_effort_intersection_values() {
+    for effort in ["xhigh", "max"] {
+        let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"MiniMax-M3",
+            "stream": false,
+            "reasoning_effort": effort,
+            "messages":[{"role":"user","content":"preserve effort"}]
+        }))
+        .expect("Anthropic effort projection must preserve declared intersection values");
+
+        assert_eq!(provider_request["output_config"]["effort"], effort);
+    }
+}
+
+#[test]
+fn anthropic_rejects_unmapped_responses_text_format_nested_fields() {
+    let mut json_schema_name = base_chat_for_field_projection();
+    json_schema_name["routecodex_chat_extension"] = json!({"responses_request":{"text":{"format":{
+        "type":"json_schema",
+        "name":"contract_name",
+        "schema":{"type":"object"}
+    }}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(json_schema_name)
+        .expect_err("Anthropic cannot preserve Responses json_schema.name");
+    assert!(
+        error
+            .to_string()
+            .contains("$.request.text.output_config.format.name"),
+        "{error}"
+    );
+
+    let mut text_extra = base_chat_for_field_projection();
+    text_extra["routecodex_chat_extension"] =
+        json!({"responses_request":{"text":{"format":{"type":"text","description":"strict"}}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(text_extra)
+        .expect_err("Anthropic cannot preserve extra text format fields");
+    assert!(
+        error
+            .to_string()
+            .contains("$.request.text.output_config.format.description"),
+        "{error}"
+    );
+
+    let mut malformed_strict = base_chat_for_field_projection();
+    malformed_strict["routecodex_chat_extension"] = json!({"responses_request":{"text":{"format":{
+        "type":"json_schema",
+        "strict":"false",
+        "schema":{"type":"object"}
+    }}}});
+    let error = encode_v3_responses_semantic_as_anthropic_request(malformed_strict)
+        .expect_err("malformed strict must fail before dropping structured-output semantics");
+    assert!(error.to_string().contains("format.strict"), "{error}");
 }

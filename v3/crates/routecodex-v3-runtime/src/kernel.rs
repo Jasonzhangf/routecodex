@@ -20,7 +20,12 @@ use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
     V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
-use crate::runtime_timing::V3RuntimeTimingState;
+use crate::remote_continuation::{
+    V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
+    V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
+};
+use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
+use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -38,39 +43,28 @@ use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw,
     V3ProviderResponseBodyKind, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
-use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
-use routecodex_v3_virtual_router::V3VirtualRouter;
-use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
-
-use crate::remote_continuation::{
-    V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
-    V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
-};
-use crate::shared::{V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState};
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
     build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
     SseTransportLimits,
 };
+use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
+use routecodex_v3_virtual_router::V3VirtualRouter;
+use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Arc, Mutex, OnceLock};
 
 mod direct_sse_provider_outcome;
 use direct_sse_provider_outcome::{
     wrap_direct_sse_provider_outcome_stream, V3DirectSseProviderOutcome,
 };
-
 const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
-
 static DEFAULT_RESPONSES_TRANSPORT: OnceLock<ReqwestResponsesTransport> = OnceLock::new();
-
 fn default_responses_transport() -> &'static ReqwestResponsesTransport {
     DEFAULT_RESPONSES_TRANSPORT.get_or_init(ReqwestResponsesTransport::default)
 }
-
 include!("kernel/direct_state.rs");
-
 pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation(
     state: &V3ResponsesDirectContinuationState,
     manifest: &V3Config05ManifestPublished,
@@ -97,7 +91,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_d
     )
     .await
 }
-
 pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
     shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
     manifest: &V3Config05ManifestPublished,
@@ -126,7 +119,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_de
     )
     .await
 }
-
 pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
     shared_state: V3ResponsesDirectRuntimeSharedState<'_>,
     manifest: &V3Config05ManifestPublished,
@@ -136,6 +128,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
     initial_plan: &V3ResponsesProtocolExecutionPlan,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
 ) -> V3ResponsesDirectRuntimeOutput {
     let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
@@ -148,7 +141,8 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
         .with_provider_health(shared_state.provider_health)
         .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
         .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
-        .with_initial_plan(initial_plan),
+        .with_initial_plan(initial_plan)
+        .with_observability_accumulator(observability_accumulator),
         manifest,
         raw,
         hook_registry,
@@ -157,9 +151,7 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     )
     .await
 }
-
 include!("kernel/direct_protocol_plan.rs");
-
 pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
@@ -175,7 +167,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     )
     .await
 }
-
 pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: ResponsesTransport>(
     state: &V3ResponsesDirectContinuationState,
     manifest: &V3Config05ManifestPublished,
@@ -198,7 +189,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: Res
     )
     .await
 }
-
 pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control<
     T: ResponsesTransport,
 >(
@@ -222,7 +212,6 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_st
     )
     .await
 }
-
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     state: V3ResponsesDirectRuntimeCoreState<'_>,
     manifest: &V3Config05ManifestPublished,
@@ -230,7 +219,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     hook_registry: V3HookRegistry,
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let runtime_timing = V3RuntimeTimingState::start();
+    let accumulator = state
+        .observability_accumulator
+        .clone()
+        .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
+    let runtime_timing = accumulator.timing();
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     require_static_hooks(&hook_registry);
     let V3ResponsesDirectRuntimeCoreState {
@@ -242,10 +235,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         provider_health,
         initial_selected_target,
         initial_expanded,
+        initial_request_local_excluded_candidates,
+        initial_protocol_decision,
         initial_plan_trace,
         provider_health_neutral,
         provider_failure_event_sink,
         route_selection_event_sink,
+        observability_accumulator: _,
     } = state;
 
     let mut standardized = match build_v3_req_04_standardized_responses_from_v3_server_03(raw) {
@@ -313,17 +309,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         }
         _ => None,
     };
-    if previous_response_id.is_some() && initial_selected_target.is_some() {
+    if let Err(message) = validate_initial_direct_plan(
+        previous_response_id.is_some(),
+        initial_selected_target.is_some(),
+        initial_protocol_decision.is_some(),
+    ) {
+        trace.push("V3Execution11ProtocolDecision");
         return error_output(
-            runtime_source(
-                "V3Execution11ProtocolDecision",
-                "direct continuation must be resolved from Req03 owner store, not from a non-continuation preselected target",
-            ),
+            runtime_source("V3Execution11ProtocolDecision", message),
             trace,
             &hook_registry,
         );
     }
-
     let target = V3TargetInterpreter::default();
     let direct_failure_session_scope = match (&previous_response_id, continuation_scope.as_ref()) {
         (Some(_), Some(scope)) => match V3ProviderFailureSessionScope::new(
@@ -489,11 +486,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
     } else {
         None
     };
-    let mut failed_candidates = BTreeSet::new();
+    let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
+    let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
     let mut continuation_provider_action_lookup = previous_response_id.is_some();
     let mut pre_send_cross_session_revive_candidate = None::<String>;
@@ -503,17 +501,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         let selected = match pinned_selected.take() {
             Some(selected) => selected,
             None => match initial_selected_target.take() {
-                Some(_preplanned_selected) => match select_v3_preplanned_direct_target(
-                    &target,
-                    expanded.as_ref(),
-                    &availability,
-                    &provider_health,
-                    &failed_candidates,
-                    now_epoch_ms,
-                ) {
-                    Ok(selected) => selected,
-                    Err(source) => return error_output(source, trace, &hook_registry),
-                },
+                Some(selected) => selected,
                 None => match retry_selected.take() {
                     Some(selected) => selected,
                     None => {
@@ -596,7 +584,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             } else {
                 "json"
             };
-            let observability = build_v3_direct_runtime_observability(
+            let mut observability = build_v3_direct_runtime_observability(
                 &selected,
                 transport_label,
                 None,
@@ -604,6 +592,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                 provider_failure_events.clone(),
                 false,
             );
+            observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
         let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
@@ -776,6 +765,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     Some(event.status),
                     &provider_failure_events,
                     &event,
+                    total_attempts(&accumulator, send_attempts),
                 );
             }
             match &policy_result.decision.action {
@@ -860,7 +850,27 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             ) {
                 return error_output(source, trace, &hook_registry);
             }
-            return relay_handoff_output(decision.target, trace, provider_failure_events.clone());
+            let captured_target_09 = match expanded.as_ref() {
+                Some(expanded) => expanded.clone(),
+                None => {
+                    return error_output(
+                        runtime_source(
+                            "V3Target09CandidateSetExpanded",
+                            "typed Relay handoff requires the captured Target09 candidate set",
+                        ),
+                        trace,
+                        &hook_registry,
+                    )
+                }
+            };
+            return relay_handoff_output(
+                decision.target,
+                captured_target_09,
+                failed_candidates.clone(),
+                trace,
+                provider_failure_events.clone(),
+                accumulator.with_additional_attempts(send_attempts),
+            );
         }
         if !direct_stopless_control_prepared {
             match prepare_v3_responses_direct_stopless_control_request(
@@ -942,6 +952,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
         };
         trace.push("V3Transport13ResponsesHttpRequest");
 
+        send_attempts = send_attempts.saturating_add(1);
         if let Err(error) = runtime_timing.start_external() {
             return error_output(
                 runtime_source("V3RuntimeTimingExternal", error),
@@ -995,6 +1006,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         Some(event.status),
                         &provider_failure_events,
                         &event,
+                        total_attempts(&accumulator, send_attempts),
                     );
                 }
                 match &policy_result.decision.action {
@@ -1021,7 +1033,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         if previous_response_id.is_some() {
                             trace.push("V3HubRespContinuation04Committed");
                         }
-                        let observability = build_v3_direct_runtime_observability(
+                        let mut observability = build_v3_direct_runtime_observability(
                             &policy.target,
                             "json",
                             policy_result.event.as_ref().map(|event| event.status),
@@ -1029,6 +1041,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             provider_failure_events.clone(),
                             false,
                         );
+                        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                         let terminal = policy_result
                             .decision
                             .try_into_terminal()
@@ -1142,6 +1155,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             Some(event.status),
                             &provider_failure_events,
                             &event,
+                            total_attempts(&accumulator, send_attempts),
                         );
                     }
                     match &policy_result.decision.action {
@@ -1168,7 +1182,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             if previous_response_id.is_some() {
                                 trace.push("V3HubRespContinuation04Committed");
                             }
-                            let observability = build_v3_direct_runtime_observability(
+                            let mut observability = build_v3_direct_runtime_observability(
                                 &policy.target,
                                 "json",
                                 policy_result.event.as_ref().map(|event| event.status),
@@ -1176,6 +1190,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                                 provider_failure_events.clone(),
                                 false,
                             );
+                            observability.attempts =
+                                Some(total_attempts(&accumulator, send_attempts));
                             let terminal = policy_result
                                 .decision
                                 .try_into_terminal()
@@ -1340,15 +1356,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             trace.push("V3DirectResp15ClientPayloadReady");
             trace.push("V3Resp15ClientPayload");
 
+            let mut observability = build_v3_direct_runtime_observability(
+                &policy.target,
+                v3_direct_client_transport_label(&response_projection.client_payload),
+                Some(provider_status),
+                "streaming",
+                provider_failure_events.clone(),
+                direct_stopless_request_state.is_some(),
+            );
+            observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             return V3ResponsesDirectRuntimeOutput {
-                observability: Some(build_v3_direct_runtime_observability(
-                    &policy.target,
-                    v3_direct_client_transport_label(&response_projection.client_payload),
-                    Some(provider_status),
-                    "streaming",
-                    provider_failure_events.clone(),
-                    direct_stopless_request_state.is_some(),
-                )),
+                observability: Some(observability),
                 stream_observation: Some(stream_observation),
                 client_payload: response_projection.client_payload,
                 node_trace: trace,
@@ -1458,6 +1476,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             provider_failure_events.clone(),
             direct_stopless_projected,
         );
+        observability.attempts = Some(total_attempts(&accumulator, send_attempts));
         observability.timing = Some(timing);
 
         return V3ResponsesDirectRuntimeOutput {
@@ -1472,21 +1491,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
 }
 
 include!("kernel/direct_stopless.rs");
-
-fn direct_runtime_allowed_execution_modes(
-    manifest: &V3Config05ManifestPublished,
-    server_id: &str,
-) -> Vec<String> {
-    manifest
-        .servers
-        .get(server_id)
-        .and_then(|server| server.execution.as_ref())
-        .map(|execution| execution.allowed_modes.clone())
-        .filter(|modes| !modes.is_empty())
-        .unwrap_or_else(|| vec!["direct".to_string()])
-}
-
 include!("kernel/direct_runtime_helpers.rs");
-
 #[cfg(test)]
 mod tests;

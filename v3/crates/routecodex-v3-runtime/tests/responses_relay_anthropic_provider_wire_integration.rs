@@ -184,7 +184,7 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     assert!(captured.get("user").is_none());
     assert_eq!(captured["metadata"], json!({"user_id":"anthropic-user-1"}));
 
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
     let client = match output.client_body {
         V3ResponsesRelayClientBody::Json(value) => value,
         V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
@@ -383,13 +383,13 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
     let observability = output.observability.as_ref().expect("observability");
     assert!(observability.provider_failure_events.iter().all(|failure| {
         failure.error_type.as_deref() == Some("provider_request_compat_error")
-            && failure.message.contains("$.request.client_metadata.client")
+            && failure.message.contains("$.request.metadata.client")
     }), "unmappable Responses metadata must be projected through the provider error chain: {observability:?}");
     assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
 #[tokio::test]
-async fn responses_relay_codex_request_extension_rejects_non_equivalent_anthropic_fields() {
+async fn responses_relay_rejects_codex_client_metadata_at_anthropic_codec_boundary() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -412,11 +412,14 @@ async fn responses_relay_codex_request_extension_rejects_non_equivalent_anthropi
                     "session_id":"session-1",
                     "thread_id":"thread-1",
                     "turn_id":"turn-1",
-                    "x-codex-installation-id":"installation-1"
+                    "x-codex-installation-id":"installation-1",
+                    "x-codex-turn-metadata":"{\"request_kind\":\"turn\"}",
+                    "x-codex-window-id":"window-1"
                 },
                 "prompt_cache_key":"session-1",
                 "store":false,
                 "text":{"verbosity":"high"},
+                "reasoning":{"effort":"medium","summary":"detailed"},
                 "stream":false
             }),
         },
@@ -425,26 +428,18 @@ async fn responses_relay_codex_request_extension_rejects_non_equivalent_anthropi
     .await
     .unwrap();
 
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 502, "runtime output: {output:?}");
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
     let observability = output.observability.as_ref().expect("observability");
-    let failure = observability
-        .provider_failure_events
-        .first()
-        .expect("provider compatibility failure");
-    for path in [
-        "$.request.client_metadata.session_id",
-        "$.request.client_metadata.thread_id",
-        "$.request.client_metadata.turn_id",
-        "$.request.client_metadata.x-codex-installation-id",
-        "$.request.prompt_cache_key",
-        "$.request.store",
-        "$.request.text.output_config.verbosity",
-    ] {
-        assert!(
-            failure.message.contains(path),
-            "missing {path}: {failure:?}"
-        );
-    }
+    assert!(observability.provider_failure_events.iter().all(|failure| {
+        failure.error_type.as_deref() == Some("provider_request_compat_error")
+            && failure
+                .message
+                .contains("$.request.client_metadata.session_id")
+    }));
     assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
@@ -589,7 +584,7 @@ async fn responses_relay_reasoning_effort_projects_anthropic_output_config_effor
 }
 
 #[tokio::test]
-async fn responses_relay_reasoning_summary_fails_without_anthropic_equivalent() {
+async fn responses_relay_reasoning_summary_fails_before_anthropic_wire() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -615,14 +610,16 @@ async fn responses_relay_reasoning_summary_fails_without_anthropic_equivalent() 
         &transport,
     )
     .await
-    .unwrap();
+    .expect("codec rejection must project through the explicit error chain");
 
     assert_eq!(output.status, 502);
-    let observability = output.observability.as_ref().expect("observability");
-    assert!(observability.provider_failure_events.iter().all(|failure| {
-        failure.error_type.as_deref() == Some("provider_request_compat_error")
-            && failure.message.contains("reasoning_summary_policy")
-    }), "summary policy must fail at Anthropic outbound with its Chat semantic path: {observability:?}");
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON error projection"),
+    };
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("UnmappedOutboundFields"), "{body}");
+    assert!(message.contains("reasoning_summary_policy"), "{body}");
     assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
@@ -847,6 +844,12 @@ port = 5555
 routing_group = "gateway_priority_5555"
 endpoints = ["responses", "anthropic"]
 
+[servers.gateway_priority_5555.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
 [providers.minimax]
 type = "anthropic"
 base_url = "http://controlled.invalid/anthropic"
@@ -879,6 +882,12 @@ bind = "127.0.0.1"
 port = 10000
 routing_group = "anthropic_v3_10000"
 endpoints = ["responses"]
+
+[servers.anthropic_v3_10000.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.modrouter_anthropic]
 type = "anthropic"

@@ -4600,6 +4600,7 @@ verification:
       - npm run build:min
     notes:
       - "Runtime owns responses timing observability; Server may only project it into console/debug output."
+      - "Direct and Relay protocol handoffs carry one opaque Runtime-owned timing and provider-attempt accumulator; Server only moves the typed carrier."
       - "A successful human response headline requires typed response status, finish reason, and Runtime timing; missing usage is omitted from the human line and retained only in dim diagnostics."
     mainline_bindings:
       - v3-runtime-timing-01
@@ -4614,6 +4615,8 @@ verification:
       - v3-runtime-timing-10
       - v3-runtime-timing-11
       - v3-runtime-timing-12
+      - v3-runtime-timing-13
+      - v3-runtime-timing-14
 
   - feature_id: v3.console_request_count_visibility
     change_risk: low

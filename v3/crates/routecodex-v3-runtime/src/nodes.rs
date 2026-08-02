@@ -120,17 +120,19 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     }
     let mut body = raw.body;
     let previous_response_id = match body.get("previous_response_id") {
-        None => None,
+        None | Some(Value::Null) => None,
         Some(Value::String(value)) => {
             let value = value.trim();
             if value.is_empty() {
-                return Err("previous_response_id must be a non-empty string".to_string());
+                return Err("previous_response_id must be null or a non-empty string".to_string());
             }
             Some(value.to_string())
         }
-        Some(_) => return Err("previous_response_id must be a non-empty string".to_string()),
+        Some(_) => {
+            return Err("previous_response_id must be null or a non-empty string".to_string())
+        }
     };
-    if previous_response_id.is_some() {
+    if body.get("previous_response_id").is_some() {
         body.as_object_mut()
             .ok_or_else(|| "Responses request payload must be an object".to_string())?
             .remove("previous_response_id");
@@ -352,15 +354,18 @@ pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
         }
         V3Execution11ProtocolDecisionMode::HubRelay
     } else if entry_protocol == selected_provider_protocol {
-        if !direct_allowed {
+        if direct_allowed {
+            V3Execution11ProtocolDecisionMode::SameProtocolDirect
+        } else if relay_allowed {
+            V3Execution11ProtocolDecisionMode::HubRelay
+        } else {
             return Err(build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3Execution11ProtocolDecision",
-                "protocol_same_direct_not_allowed",
-                "same protocol selected target requires direct mode but direct is not allowed",
+                "protocol_same_execution_mode_not_allowed",
+                "same protocol selected target requires direct or relay mode but neither is allowed",
             ));
         }
-        V3Execution11ProtocolDecisionMode::SameProtocolDirect
     } else if relay_allowed {
         V3Execution11ProtocolDecisionMode::HubRelay
     } else {
@@ -447,6 +452,58 @@ mod tests {
             normalized.protocol_context.previous_response_id.as_deref(),
             Some("resp_typed_1")
         );
+    }
+
+    #[test]
+    fn req04_treats_null_previous_response_id_as_fresh_request() {
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            json!({
+                "model":"gpt-5.5",
+                "previous_response_id": null,
+                "input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]
+            }),
+        );
+
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("null previous_response_id is semantically absent");
+
+        assert!(normalized.protocol_context.previous_response_id.is_none());
+        assert!(normalized.body.get("previous_response_id").is_none());
+        assert_eq!(normalized.body["model"], "gpt-5.5");
+    }
+
+    #[test]
+    fn req04_rejects_malformed_previous_response_id_instead_of_starting_fresh() {
+        for previous_response_id in [json!(""), json!(42), json!({"id":"resp_1"}), json!([])] {
+            let raw = build_v3_server_03_http_request_raw(
+                "server".to_string(),
+                V3ProviderFailureSessionScope::new("server", "default", "request")
+                    .expect("failure scope"),
+                "request".to_string(),
+                "execution".to_string(),
+                "POST".to_string(),
+                "/v1/responses".to_string(),
+                json!({
+                    "model":"gpt-5.5",
+                    "previous_response_id": previous_response_id,
+                    "input":"hello"
+                }),
+            );
+
+            let error = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+                .expect_err("malformed continuation locator must fail before routing");
+            assert_eq!(
+                error,
+                "previous_response_id must be null or a non-empty string"
+            );
+        }
     }
 
     #[test]

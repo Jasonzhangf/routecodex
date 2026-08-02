@@ -338,47 +338,45 @@ mod tests {
     }
 
     #[test]
-    fn responses_request_chat_extension_projects_to_anthropic_wire_at_adjacent_codec() {
+    fn responses_prompt_cache_key_fails_when_anthropic_has_no_equivalent() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
                 "model": "client-route-alias",
                 "input": "hello",
-                "client_metadata": {
-                    "session_id": "session-1",
-                    "thread_id": "thread-1",
-                    "turn_id": "turn-1"
-                },
                 "prompt_cache_key": "session-1",
-                "store": false,
-                "text": {"verbosity": "high"},
                 "stream": false
             }),
             V3HubProviderWireProtocol::Anthropic,
         );
 
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("Responses Chat extension fields must project into Anthropic wire");
-        let payload = req_compat.provider_semantic_payload();
-
-        assert_eq!(payload["metadata"]["user_id"], "session-1");
-        assert_eq!(
-            payload["cache_control"],
-            serde_json::json!({"type":"ephemeral"})
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("valid prompt_cache_key has no reversible Anthropic projection");
+        assert!(
+            error.reason.contains("$.request.prompt_cache_key"),
+            "{error:?}"
         );
-        assert_eq!(payload["output_config"]["effort"], "high");
-        for source_field in [
-            "routecodex_chat_extension",
-            "client_metadata",
-            "prompt_cache_key",
-            "store",
-            "text",
-        ] {
-            assert!(
-                payload.get(source_field).is_none(),
-                "source Chat/Responses field {source_field} leaked into Anthropic wire: {payload}"
-            );
-        }
+    }
+
+    #[test]
+    fn responses_registered_client_metadata_fails_at_anthropic_target_codec() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "client_metadata": {"session_id": "session-1"},
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("client metadata without an Anthropic equivalent must fail explicitly");
+        assert!(
+            error.reason.contains("client_metadata.session_id"),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -392,7 +390,6 @@ mod tests {
                 "text": {
                     "format": {
                         "type": "json_schema",
-                        "name": "answer",
                         "strict": true,
                         "schema": {
                             "type": "object",
@@ -419,6 +416,26 @@ mod tests {
     }
 
     #[test]
+    fn responses_store_false_is_consumed_when_anthropic_also_does_not_store() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "store": false
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("store=false is semantically equivalent to Anthropic non-storage");
+        assert!(
+            req_compat.provider_semantic_payload().get("store").is_none(),
+            "Anthropic wire must not invent a store field"
+        );
+    }
+
+    #[test]
     fn responses_store_true_fails_when_anthropic_cannot_preserve_remote_storage_semantics() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
@@ -433,6 +450,40 @@ mod tests {
         let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect_err("Anthropic wire must not silently strip store=true");
         assert!(error.reason.contains("store"), "{error:?}");
+    }
+
+    #[test]
+    fn responses_unsupported_verbosity_fails_at_anthropic_adjacent_codec() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "text": {"verbosity": "extreme"}
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("unsupported Responses verbosity must fail before Anthropic wire");
+        assert!(error.reason.contains("verbosity"), "{error:?}");
+    }
+
+    #[test]
+    fn responses_supported_verbosity_fails_when_anthropic_cannot_preserve_semantics() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "text": {"verbosity": "high"}
+            }),
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("Responses verbosity has no reversible Anthropic field");
+        assert!(error.reason.contains("verbosity"), "{error:?}");
     }
 
     #[test]

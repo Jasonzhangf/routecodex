@@ -323,17 +323,27 @@ requireText(
 for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
+  'fn finalize_v3_responses_relay_server_output(',
   'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control',
   'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots',
   'responses_relay_local_continuation',
   'responses_relay_stopless_control',
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
-  'execute_v3_responses_relay_dry_run_runtime',
-  'return responses_relay_output_response(',
+  'execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control',
   'wrap_v3_relay_sse_console_stream',
   'V3SseConsoleCloseoutStream',
 ]) requireText(server, serverPath, phrase);
+const relayServerFinalizerBody = functionBody(
+  server,
+  serverPath,
+  'fn finalize_v3_responses_relay_server_output(',
+);
+requireText(
+  relayServerFinalizerBody,
+  `${serverPath}: finalize_v3_responses_relay_server_output`,
+  'responses_relay_output_response(',
+);
 for (const phrase of [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',

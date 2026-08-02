@@ -9203,10 +9203,7 @@ mod tests {
                 }
             }
         }));
-        assert_eq!(
-            submit["keys"],
-            serde_json::json!(["port:5520|entry:responses|owner:direct|session:sess-submit"])
-        );
+        assert_eq!(submit["keys"], serde_json::json!([]));
     }
 
     #[test]
@@ -10091,20 +10088,15 @@ mod tests {
 
         assert_eq!(output["responseId"], json!("resp_relay_1"));
         assert_eq!(output["continuationOwner"], json!("relay"));
-        assert_eq!(output["restored"], json!(true));
-        assert_eq!(output["deltaInputItems"], json!(2));
+        assert_eq!(output["previousResponseId"], json!("resp_relay_1"));
+        assert!(output.get("restored").is_none());
+        assert!(output.get("deltaInputItems").is_none());
         assert!(output.get("providerKey").is_none());
         assert!(output.get("routeHint").is_none());
         assert!(output.get("sessionId").is_none());
         assert!(output.get("conversationId").is_none());
         assert!(output.get("fullInput").is_none());
-        assert_eq!(
-            output["toolOutputsDetailed"],
-            json!([
-                {"callId": "call_1", "outputText": "ok"},
-                {"callId": "call_2", "outputText": "text output"}
-            ])
-        );
+        assert!(output.get("toolOutputsDetailed").is_none());
     }
 
     #[test]
@@ -10134,13 +10126,7 @@ mod tests {
 
         assert_eq!(output["metadata"]["clientRequestId"], json!("client-req-1"));
         assert_eq!(output["metadata"]["clientStream"], json!(true));
-        assert_eq!(
-            output["metadata"]["responsesResume"]["responseId"],
-            json!("resp_1")
-        );
-        assert!(output["metadata"]["responsesResume"]
-            .get("providerKey")
-            .is_none());
+        assert!(output["metadata"].get("responsesResume").is_none());
         assert!(output["metadata"]["clientConnectionState"].is_null());
         let writes = output["metadataCenterWrites"].as_array().unwrap();
         assert!(writes.iter().any(|write| {
@@ -10155,8 +10141,8 @@ mod tests {
         }));
         assert!(writes.iter().any(|write| {
             write["family"] == json!("continuation_context")
-                && write["key"] == json!("responsesResume")
-                && write["value"]["continuationOwner"] == json!("relay")
+                && write["key"] == json!("continuationOwner")
+                && write["value"] == json!("relay")
         }));
         assert!(!writes
             .iter()
@@ -10232,20 +10218,12 @@ mod tests {
 
         assert_eq!(output["responseId"], json!("resp_direct_1"));
         assert_eq!(output["continuationOwner"], json!("direct"));
-        assert_eq!(output["providerKey"], json!("provider.key1.gpt-5.5"));
-        assert_eq!(output["materialized"], json!(true));
-        assert_eq!(output["materializedMode"], json!("submit_tool_outputs"));
-        assert_eq!(output["toolOutputs"], json!(1));
-        assert_eq!(output["incomingInputItems"], json!(3));
-        assert_eq!(
-            output["toolOutputsDetailed"],
-            json!([
-                {
-                    "callId": "original_call_1",
-                    "originalId": "original_call_1",
-                    "outputText": "stdout"
-                }
-            ])
-        );
+        assert_eq!(output["previousResponseId"], json!("resp_direct_1"));
+        assert!(output.get("providerKey").is_none());
+        assert!(output.get("materialized").is_none());
+        assert!(output.get("materializedMode").is_none());
+        assert!(output.get("toolOutputs").is_none());
+        assert!(output.get("incomingInputItems").is_none());
+        assert!(output.get("toolOutputsDetailed").is_none());
     }
 }

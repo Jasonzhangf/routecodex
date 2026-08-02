@@ -259,9 +259,9 @@ global_install() {
         echo "❌ 全局安装失败：release pack 未生成 tarball: $packed_path"
         exit 1
     fi
-    # The release shim may predate this install, but no concurrent installer can recreate it after this point.
-    rm -f "$NPM_PREFIX/bin/routecodex" "$NPM_PREFIX/bin/rcc" "$NPM_PREFIX/bin/rccv3" "$NPM_PREFIX/bin/routecodex-v3"
-    npm install -g "$packed_path" --no-audit --no-fund --omit=optional --ignore-scripts --offline --progress=false --loglevel=warn
+    # Keep the currently installed commands available until npm owns replacement.
+    # --force lets npm replace an older release shim without a delete-first gap.
+    npm install -g "$packed_path" --force --no-audit --no-fund --omit=optional --ignore-scripts --offline --progress=false --loglevel=warn
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
     node "$INSTALL_BUILD_ROOT/scripts/ensure-cli-executable.mjs" || true

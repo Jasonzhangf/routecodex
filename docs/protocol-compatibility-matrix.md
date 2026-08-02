@@ -23,6 +23,8 @@
   - 能进入 chat canonical，并能从 chat canonical 恢复目标协议字段，语义等价。
 - `lossy`
   - 可以映射，但目标协议缺少完全等价表达；必须写入 `semantics.audit.protocolMapping`。
+- `conditional`
+  - 仅已声明的一对一子字段可映射；其余字段必须在相邻 outbound codec 显式 fail-fast，禁止近似映射或静默消费。
 - `dropped`
   - chat canonical 可识别，但目标协议无承载位；字段显式丢弃并记录 audit。
 - `unsupported`
@@ -63,10 +65,10 @@
 | tool_choice | `full` | `full` | `full` | Anthropic 顶层保留；Gemini 通过 metadata passthrough 保留 |
 | parallel_tool_calls | `full` | `dropped` | `dropped` | 目标协议无完全等价表达，必须 audit |
 | include | `full` | `dropped` | `dropped` | Responses 专属恢复语义 |
-| client_metadata | `full` | `lossy` | `unsupported` | Anthropic 只接收一个 `metadata.user_id`；按已声明优先级投影一个 opaque id，其余 client detail 在相邻 codec 消费 |
-| store | `full` | `conditional` | `dropped` | Anthropic `store:false` 等价于无状态默认；`store:true` 显式失败 |
-| prompt_cache_key | `full` | `lossy` | `dropped` | Anthropic 以 prompt prefix 管 cache identity；只把 caching intent 投影为 `cache_control: ephemeral`，不发送 OpenAI key |
-| text / structured output | `full` | `lossy` | `unsupported` | verbosity 映射 `output_config.effort`；兼容 JSON schema 映射 `output_config.format` |
+| client_metadata | `full` | `conditional` | `unsupported` | 仅恰好一个非空 `client_metadata.user_id` 可投影为 Anthropic `metadata.user_id`；session/thread/turn/installation id 不得改名重建 |
+| store | `full` | `unsupported` | `dropped` | Anthropic 无等价请求字段；`false` 与 `true` 均显式 unmapped |
+| prompt_cache_key | `full` | `unsupported` | `dropped` | Anthropic `cache_control` 不是 OpenAI cache key；禁止重建，显式 unmapped |
+| text / structured output | `full` | `conditional` | `unsupported` | 兼容 JSON schema 精确投影 `output_config.format`；verbosity 与 `output_config.effort` 语义不同，显式 unmapped |
 | reasoning | `full` | `lossy` | `lossy` | Anthropic 映射到 `thinking/output_config`；Gemini 映射到 `generationConfig.thinkingConfig` |
 | previous_response_id / submit_tool_outputs continuity | `full` | `lossy` | `lossy` | 统一由 `semantics.continuation` / `semantics.responses.resume` 承接 |
 | required_action / tool outputs | `full` | `lossy` | `lossy` | 目标协议表面不同，但统一语义可恢复到 chat process |
@@ -122,7 +124,7 @@
    - 若 alias map 丢失，只能回退到 canonical tool name，属于真实兼容缺口，不得伪装为 full。
 
 ### 设计性非完全兼容（必须 audit，不算 bug）
-1. `Responses -> Anthropic/Gemini` 的 `parallel_tool_calls/include/store/prompt_cache_key`。
+1. `Responses -> Anthropic/Gemini` 的 `parallel_tool_calls/include`；Anthropic 对两个 `store` 值和 `prompt_cache_key` 都没有一对一请求字段，必须显式 unmapped。
 2. `Responses -> Anthropic/Gemini` 的 `response_format`。
 3. `Responses <-> Anthropic/Gemini` 的 reasoning/thinking 双向映射。
 4. Gemini 作为 public client protocol 暂未开放。

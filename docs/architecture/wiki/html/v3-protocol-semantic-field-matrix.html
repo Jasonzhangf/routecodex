@@ -1581,7 +1581,7 @@
       <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized thinking; otherwise the field remains decision-required.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Source-roundtrip only. Anthropic/OpenAI Chat/Gemini outbound must report request.reasoning_summary_policy as unmapped.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses round-trips the field; OpenAI Chat, Anthropic, and Gemini outbound report request.reasoning_summary_policy as unmapped because none has an equivalent summary-policy field.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>

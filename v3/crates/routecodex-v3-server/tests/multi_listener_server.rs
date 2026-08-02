@@ -469,6 +469,86 @@ fn responses_direct_binding_openai_chat_provider_direct_only_manifest(
     )
 }
 
+fn responses_relay_nested_protocol_handoff_manifest(
+    port_a: u16,
+    port_b: u16,
+    failed_base_url: &str,
+    success_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.relay_first]
+type = "openai_chat"
+base_url = "{failed_base_url}"
+default_model = "relay-first"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_NESTED_HANDOFF_RELAY_FIRST_KEY" }}] }}
+[providers.relay_first.models.relay-first]
+wire_name = "wire-relay-first"
+[providers.direct_second]
+type = "responses"
+base_url = "{failed_base_url}"
+default_model = "direct-second"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_NESTED_HANDOFF_DIRECT_SECOND_KEY" }}] }}
+[providers.direct_second.models.direct-second]
+wire_name = "wire-direct-second"
+[providers.relay_third]
+type = "openai_chat"
+base_url = "{failed_base_url}"
+default_model = "relay-third"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_NESTED_HANDOFF_RELAY_THIRD_KEY" }}] }}
+[providers.relay_third.models.relay-third]
+wire_name = "wire-relay-third"
+[providers.direct_final]
+type = "responses"
+base_url = "{success_base_url}"
+default_model = "direct-final"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_NESTED_HANDOFF_DIRECT_FINAL_KEY" }}] }}
+[providers.direct_final.models.direct-final]
+wire_name = "wire-direct-final"
+[forwarders.mixed]
+model = "client-test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "relay_first", model = "relay-first", key = "key", priority = 1 }},
+  {{ kind = "provider_model", provider = "direct_second", model = "direct-second", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "relay_third", model = "relay-third", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "direct_final", model = "direct-final", key = "key", priority = 4 }}
+]
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "mixed", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "mixed", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn p6_remote_continuation_manifest(
     port_a: u16,
     port_b: u16,
@@ -1129,6 +1209,25 @@ async fn controlled_failure_upstream() -> Response<Body> {
         .header("content-type", "application/json")
         .body(Body::from(r#"{"error":"controlled_unavailable"}"#))
         .unwrap()
+}
+
+async fn start_controlled_failure_upstream_all_protocols() -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_failure_upstream))
+        .route("/v1/chat/completions", post(controlled_failure_upstream))
+        .route("/v1/messages", post(controlled_failure_upstream));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
 }
 
 async fn controlled_capturing_failure_upstream(
@@ -1988,6 +2087,81 @@ async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runt
 }
 
 #[tokio::test]
+// feature_id: v3.responses_inbound_websocket_proxy
+async fn responses_relay_websocket_consumes_direct_handoff_instead_of_projecting_null() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failed_base_url, failed_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY", "secret-relay-first");
+    std::env::set_var(
+        "V3_NESTED_HANDOFF_DIRECT_SECOND_KEY",
+        "secret-direct-second",
+    );
+    std::env::set_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY", "secret-relay-third");
+    std::env::set_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY", "secret-direct-final");
+    let handle = spawn_v3_server_aggregate(responses_relay_nested_protocol_handoff_manifest(
+        free_port(),
+        free_port(),
+        &failed_base_url,
+        &success_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    request.headers_mut().insert(
+        "session-id",
+        HeaderValue::from_static("nested-websocket-handoff-session"),
+    );
+    request.headers_mut().insert(
+        "thread-id",
+        HeaderValue::from_static("nested-websocket-handoff-thread"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "relay websocket must execute typed direct handoff",
+                "previous_response_id": null,
+                "stream": false
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed", "{event}");
+    assert_eq!(event["response"]["id"], "resp_json", "{event}");
+    assert_ne!(event["response"], Value::Null, "{event}");
+
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(
+        capture.authorization.as_deref(),
+        Some("Bearer secret-direct-final")
+    );
+    assert_eq!(capture.body["model"], "wire-direct-final");
+
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    std::env::remove_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_SECOND_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY");
+    failed_shutdown.send(()).unwrap();
+    success_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
@@ -2520,7 +2694,7 @@ async fn responses_inbound_websocket_projects_json_completed_event_and_enters_ru
         .unwrap();
     let message = socket.next().await.unwrap().unwrap();
     let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["type"], "response.completed", "{event}");
     assert_eq!(event["response"]["id"], "resp_server_remote_1");
     assert_eq!(event["response"]["output"][0]["type"], "function_call");
 
@@ -2532,7 +2706,17 @@ async fn responses_inbound_websocket_projects_json_completed_event_and_enters_ru
     let provider_event = captures.recv().await.unwrap();
     assert_eq!(provider_event.body["type"], "response.create");
     assert_eq!(provider_event.body["model"], "wire-test");
-    assert_eq!(provider_event.body["input"], "use tool");
+    let projected_input = provider_event.body["input"]
+        .as_array()
+        .expect("Hub Relay WebSocket request must project canonical input items");
+    assert!(projected_input.iter().any(|item| {
+        item["role"] == "user"
+            && item["content"].as_array().is_some_and(|content| {
+                content
+                    .iter()
+                    .any(|part| part["type"] == "input_text" && part["text"] == "use tool")
+            })
+    }));
     assert_control_fields_absent(&provider_event.body);
 
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -2577,7 +2761,7 @@ async fn responses_inbound_websocket_accepts_binary_response_create_payload() {
         .unwrap();
     let message = socket.next().await.unwrap().unwrap();
     let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["type"], "response.completed", "{event}");
     assert_eq!(event["response"]["id"], "resp_server_remote_1");
 
     let _handshake_capture = captures.recv().await.unwrap();
@@ -3102,6 +3286,72 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
 }
 
 #[tokio::test]
+async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projection() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (failed_base_url, failed_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY", "secret-relay-first");
+    std::env::set_var(
+        "V3_NESTED_HANDOFF_DIRECT_SECOND_KEY",
+        "secret-direct-second",
+    );
+    std::env::set_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY", "secret-relay-third");
+    std::env::set_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY", "secret-direct-final");
+    let handle = spawn_v3_server_aggregate(responses_relay_nested_protocol_handoff_manifest(
+        free_port(),
+        free_port(),
+        &failed_base_url,
+        &success_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("session-id", "nested-handoff-session")
+        .header("thread-id", "nested-handoff-thread")
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay direct relay direct handoff drain",
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let trace = response
+        .headers()
+        .get("x-routecodex-v3-node-trace")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let response_body = response.text().await.unwrap();
+    handle.shutdown().await;
+    std::env::remove_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_SECOND_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY");
+    std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY");
+    failed_shutdown.send(()).unwrap();
+    success_shutdown.send(()).unwrap();
+
+    assert_eq!(status, 200, "unexpected response body: {response_body}");
+    let body: Value = serde_json::from_str(&response_body).unwrap();
+    assert_eq!(body["id"], "resp_json");
+    assert_eq!(body["output_text"], "ok");
+    assert!(
+        trace.contains("V3TargetLocalReselected"),
+        "nested handoff trace must include target-local reselection: {trace}"
+    );
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(
+        capture.authorization.as_deref(),
+        Some("Bearer secret-direct-final")
+    );
+    assert_eq!(capture.body["model"], "wire-direct-final");
+}
+
+#[tokio::test]
 async fn responses_direct_missing_failure_session_fails_before_any_provider_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
@@ -3422,6 +3672,8 @@ async fn responses_without_snap_authorization_writes_no_codex_sample() {
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "direct-binding-openai-chat-dry-run")
+        .header("x-conversation-id", "direct-binding-openai-chat-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "no snap authorization must not persist",
@@ -3467,6 +3719,8 @@ async fn responses_direct_relay_only_snap_scope_writes_no_codex_sample() {
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "direct-binding-anthropic-dry-run")
+        .header("x-conversation-id", "direct-binding-anthropic-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "direct relay-only snap must not persist",
@@ -3619,6 +3873,10 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "direct-binding-relay-disabled-dry-run")
+        .header("x-conversation-id", "direct-binding-relay-disabled-dry-run")
+        .header("x-session-id", "direct-provider-request-dry-run")
+        .header("x-conversation-id", "direct-provider-request-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "dry-run no upstream send",
@@ -3672,9 +3930,17 @@ async fn p6_provider_request_dry_run_header_returns_final_request_without_upstre
         "[REDACTED]"
     );
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
-    assert_eq!(
-        body["providerRequest"]["body"]["input"][0]["content"][0]["text"],
-        "dry-run no upstream send"
+    assert!(
+        body["providerRequest"]["body"]["input"]
+            .as_array()
+            .expect("Responses provider input")
+            .iter()
+            .any(
+                |item| item["content"].as_array().is_some_and(|content| content
+                    .iter()
+                    .any(|part| part["text"] == "dry-run no upstream send"))
+            ),
+        "the governed Direct handoff must preserve the original user input: {body}"
     );
     assert!(
         !response_body.contains("\"id\":\"dry_run_")
@@ -3713,6 +3979,8 @@ async fn responses_direct_binding_uses_post_target_relay_for_openai_chat_provide
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "direct-binding-openai-chat-dry-run")
+        .header("x-conversation-id", "direct-binding-openai-chat-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "route openai chat provider through relay",
@@ -3739,10 +4007,13 @@ async fn responses_direct_binding_uses_post_target_relay_for_openai_chat_provide
     assert!(body["providerRequest"]["body"].get("messages").is_some());
     assert!(body["providerRequest"]["body"].get("input").is_none());
     let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
-    assert!(node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3Target10ConcreteProviderSelected")));
-    assert!(node_ids
+    assert!(
+        node_ids
+            .iter()
+            .any(|node| node.as_str() == Some("V3HubReqTarget06Resolved")),
+        "post-Chat target selection must appear in the dry-run trace: {body}"
+    );
+    assert!(!node_ids
         .iter()
         .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision")));
     assert!(!node_ids
@@ -3768,6 +4039,8 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "direct-binding-anthropic-dry-run")
+        .header("x-conversation-id", "direct-binding-anthropic-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "route anthropic provider through relay",
@@ -3799,10 +4072,13 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
     assert!(body["providerRequest"]["body"].get("messages").is_some());
     assert!(body["providerRequest"]["body"].get("input").is_none());
     let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
-    assert!(node_ids
-        .iter()
-        .any(|node| node.as_str() == Some("V3Target10ConcreteProviderSelected")));
-    assert!(node_ids
+    assert!(
+        node_ids
+            .iter()
+            .any(|node| node.as_str() == Some("V3HubReqTarget06Resolved")),
+        "post-Chat target selection must appear in the dry-run trace: {body}"
+    );
+    assert!(!node_ids
         .iter()
         .any(|node| node.as_str() == Some("V3Execution11ProtocolDecision")));
     assert!(!node_ids
@@ -3827,6 +4103,8 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "direct-binding-relay-disabled-dry-run")
+        .header("x-conversation-id", "direct-binding-relay-disabled-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "relay disabled should fail before provider send",
@@ -3846,10 +4124,18 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
     handle.shutdown().await;
     std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
 
-    assert_eq!(status, 500);
-    assert_eq!(body["error"]["code"], "protocol_mismatch_relay_not_allowed");
-    assert!(node_trace.contains("V3Target10ConcreteProviderSelected"));
-    assert!(node_trace.contains("V3Execution11ProtocolDecision"));
+    assert_eq!(status, 503, "unexpected response body: {body}");
+    assert_eq!(
+        body["evidence"]["providerNetworkSend"], false,
+        "unexpected response body: {body}"
+    );
+    let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
+    assert!(node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3Error01SourceRaised")));
+    assert!(node_ids
+        .iter()
+        .any(|node| node.as_str() == Some("V3Error06ClientProjected")));
     assert!(!node_trace.contains("V3ResponsesDirect11Policy"));
 }
 
@@ -3868,6 +4154,8 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .header("x-routecodex-dry-run", "provider-request")
+        .header("x-session-id", "relay-provider-request-dry-run")
+        .header("x-conversation-id", "relay-provider-request-dry-run")
         .json(&json!({
             "model": "client-test",
             "input": "relay dry-run no upstream send",
@@ -3931,9 +4219,17 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
         "[REDACTED]"
     );
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-test");
-    assert_eq!(
-        body["providerRequest"]["body"]["input"][0]["content"][0]["text"],
-        "relay dry-run no upstream send"
+    assert!(
+        body["providerRequest"]["body"]["input"]
+            .as_array()
+            .expect("Responses provider input")
+            .iter()
+            .any(
+                |item| item["content"].as_array().is_some_and(|content| content
+                    .iter()
+                    .any(|part| part["text"] == "relay dry-run no upstream send"))
+            ),
+        "the governed Relay provider request must preserve the original user input: {body}"
     );
     assert!(
         !response_body.contains("\"id\":\"dry_run_")

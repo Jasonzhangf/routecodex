@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 
 const runtimePath = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
+const runtimeHelpersPath = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs';
 const storePath = 'v3/crates/routecodex-v3-runtime/src/remote_continuation.rs';
 const responsePath = 'v3/crates/routecodex-v3-runtime/src/shared.rs';
 const targetPath = 'v3/crates/routecodex-v3-target/src/lib.rs';
@@ -16,6 +17,7 @@ const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_serv
 const designPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md';
 const planPath = 'docs/goals/v3-responses-direct-remote-continuation-integration-plan.md';
 const runtime = readFileSync(runtimePath, 'utf8');
+const runtimeHelpers = readFileSync(runtimeHelpersPath, 'utf8');
 const store = readFileSync(storePath, 'utf8');
 const response = readFileSync(responsePath, 'utf8');
 const target = readFileSync(targetPath, 'utf8');
@@ -50,7 +52,9 @@ for (const [owner, text, phrases] of [
     'let input = V3RemoteContinuationCommitInput::locator_only(locator);',
     'store.rebind_for_resp04(previous_response_id, input)',
     'None => store.commit(input)',
-    'release_terminal_failure_locator(',
+  ]],
+  [runtimeHelpersPath, runtimeHelpers, [
+    'fn release_terminal_failure_locator(',
   ]],
   [storePath, store, [
     'pub fn load_for_req03(',
@@ -177,7 +181,7 @@ if (observedStreamStart < 0 || observedStreamEnd < 0 || observedStreamEnd <= obs
     requireText(observedStream, `${responsePath}: observed_sse_client_stream`, phrase);
   }
 }
-forbid(runtime, runtimePath, [
+forbid(`${runtime}\n${runtimeHelpers}`, `${runtimePath}+${runtimeHelpersPath}`, [
   /execute_selected_continuation/,
   /\.load\(response_id\)/,
   /fallback/i,

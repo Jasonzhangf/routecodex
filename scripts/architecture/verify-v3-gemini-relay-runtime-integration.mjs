@@ -43,7 +43,7 @@ const wikiHtml = read(wikiHtmlPath);
 const packageJson = read(packagePath);
 const failures = [];
 
-requirePackageScript('test:v3-gemini-relay-runtime-integration', 'CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test gemini_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test gemini_relay_controlled -- --nocapture');
+requirePackageScript('test:v3-gemini-relay-runtime-integration', 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test gemini_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test gemini_relay_controlled -- --nocapture');
 requirePackageScript('verify:v3-gemini-relay-runtime-integration', 'node scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
 requirePackageScript('test:v3-gemini-relay-runtime-integration-red-fixtures', 'node scripts/tests/v3-gemini-relay-runtime-integration-red-fixtures.mjs');
 

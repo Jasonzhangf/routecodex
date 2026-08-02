@@ -193,20 +193,17 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         }
     }
     let mut responses_request_extension = Map::new();
-    let client_metadata = match (root.get("metadata"), root.get("client_metadata")) {
-        (Some(metadata), Some(client_metadata)) if metadata != client_metadata => {
-            return Err(
-                "Conflicting Responses metadata and client_metadata payload fields".to_string(),
-            );
+    if let Some(metadata) = root.get("metadata") {
+        if !metadata.is_object() {
+            return Err("Responses metadata/client_metadata must be an object".to_string());
         }
-        (Some(metadata), _) | (_, Some(metadata)) => Some(metadata.clone()),
-        (None, None) => None,
-    };
-    if let Some(client_metadata) = client_metadata {
+        responses_request_extension.insert("metadata".to_string(), metadata.clone());
+    }
+    if let Some(client_metadata) = root.get("client_metadata") {
         if !client_metadata.is_object() {
             return Err("Responses metadata/client_metadata must be an object".to_string());
         }
-        responses_request_extension.insert("client_metadata".to_string(), client_metadata);
+        responses_request_extension.insert("client_metadata".to_string(), client_metadata.clone());
     }
     for key in ["prompt_cache_key", "store", "text"] {
         if let Some(value) = root.get(key) {
@@ -1050,6 +1047,7 @@ fn collect_v3_openai_chat_reasoning_segments(value: Option<&Value>) -> Vec<Strin
         Value::Object(row) => row
             .get("text")
             .or_else(|| row.get("content"))
+            .or_else(|| row.get("summary"))
             .or_else(|| row.get("reasoning_content"))
             .or_else(|| row.get("thinking"))
             .into_iter()
@@ -1484,71 +1482,8 @@ mod tests {
             "unexpected error: {error}"
         );
     }
-
-    #[test]
-    fn live_5555_web_search_call_history_indexes_project_to_stable_tool_pairs() {
-        let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
-            "model": "gpt-5.5",
-            "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "prefix"}]
-                },
-                {
-                    "type": "web_search_call",
-                    "status": "failed",
-                    "action": {
-                        "type": "search",
-                        "query": "微信小程序 发布 流程 上传 审核 发布 官方 文档",
-                        "queries": [
-                            "微信小程序 发布 流程 上传 审核 发布 官方 文档",
-                            "微信小程序 服务器域名 request合法域名 官方 文档"
-                        ]
-                    }
-                },
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "continue"}]
-                },
-                {
-                    "type": "web_search_call",
-                    "status": "failed",
-                    "action": {
-                        "type": "search",
-                        "query": "site:developers.weixin.qq.com miniprogram 发布 审核 上传"
-                    }
-                }
-            ]
-        }))
-        .expect("live 5555-like web_search_call history must project");
-
-        let messages = request["messages"].as_array().expect("messages");
-        assert_eq!(messages.len(), 6, "user + pair + user + pair: {request}");
-        assert_eq!(
-            messages[1]["tool_calls"][0]["id"],
-            json!("call_routecodex_web_search_1")
-        );
-        assert_eq!(
-            messages[2]["tool_call_id"],
-            json!("call_routecodex_web_search_1")
-        );
-        assert_eq!(
-            messages[4]["tool_calls"][0]["id"],
-            json!("call_routecodex_web_search_3")
-        );
-        assert_eq!(
-            messages[5]["tool_call_id"],
-            json!("call_routecodex_web_search_3")
-        );
-        assert_eq!(
-            messages[1]["tool_calls"][0]["function"]["name"],
-            json!("web_search")
-        );
-        assert_eq!(
-            messages[4]["tool_calls"][0]["function"]["name"],
-            json!("web_search")
-        );
-    }
 }
+
+#[cfg(test)]
+#[path = "responses_openai_codec_extra_tests.rs"]
+mod responses_openai_codec_extra_tests;

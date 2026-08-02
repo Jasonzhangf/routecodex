@@ -82,6 +82,15 @@ const cases = [
     ),
     diagnostic: /v3\.entry_protocol\.binding_registry must not enter provider\/client body/u,
   },
+  {
+    name: 'override fresh pending Responses binding with Relay',
+    path: 'v3/crates/routecodex-v3-server/src/lib.rs',
+    mutate: (source) => source.replace(
+      'V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,',
+      'V3EntryProtocolExecutionMode::PendingNotImplemented => V3EntryProtocolExecutionMode::Relay,',
+    ),
+    diagnostic: /fresh Responses execution mode must preserve Config-owned PendingNotImplemented/u,
+  },
 ];
 
 const failures = [];

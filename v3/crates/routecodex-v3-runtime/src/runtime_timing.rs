@@ -9,6 +9,34 @@ pub struct V3RuntimeTimingSummary {
 }
 
 #[derive(Debug, Clone)]
+pub struct V3RuntimeObservabilityAccumulator {
+    timing: V3RuntimeTimingState,
+    attempts: usize,
+}
+
+impl V3RuntimeObservabilityAccumulator {
+    pub(crate) fn start() -> Self {
+        Self {
+            timing: V3RuntimeTimingState::start(),
+            attempts: 0,
+        }
+    }
+
+    pub(crate) fn timing(&self) -> V3RuntimeTimingState {
+        self.timing.clone()
+    }
+
+    pub(crate) fn attempts(&self) -> usize {
+        self.attempts
+    }
+
+    pub(crate) fn with_additional_attempts(mut self, attempts: usize) -> Self {
+        self.attempts = self.attempts.saturating_add(attempts);
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct V3RuntimeTimingState {
     inner: Arc<Mutex<V3RuntimeTimingStateInner>>,
 }
@@ -126,5 +154,25 @@ mod tests {
         timing.finish_runtime().unwrap();
         assert!(timing.finish_runtime().is_err());
         assert!(timing.start_external().is_err());
+    }
+
+    #[test]
+    fn observability_accumulator_survives_nested_handoffs_without_reset_or_double_count() {
+        let first_leg = V3RuntimeObservabilityAccumulator::start();
+        let timing = first_leg.timing();
+        timing.start_external().unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+        timing.finish_external().unwrap();
+
+        let second_leg = first_leg.with_additional_attempts(1);
+        assert_eq!(second_leg.attempts(), 1);
+        let third_leg = second_leg.with_additional_attempts(1);
+        assert_eq!(third_leg.attempts(), 2);
+
+        third_leg.timing().start_external().unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+        third_leg.timing().finish_external().unwrap();
+        let summary = third_leg.timing().finish_runtime().unwrap();
+        assert!(summary.external >= Duration::from_millis(2), "{summary:?}");
     }
 }

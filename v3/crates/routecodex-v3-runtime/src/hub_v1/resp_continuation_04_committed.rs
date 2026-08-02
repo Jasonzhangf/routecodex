@@ -155,13 +155,148 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
             &Value::Object(responses_context),
         )
         .map_err(|message| V3LocalContinuationError::Codec { message })?;
-    Ok(chat_context)
+    Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
+        chat_context,
+    ))
+}
+
+pub(crate) fn build_v3_relay_local_response_continuation_context_at_resp04(
+    finalized_response: &Value,
+) -> Result<Value, V3LocalContinuationError> {
+    let response_output = finalized_response
+        .get("output")
+        .and_then(Value::as_array)
+        .ok_or_else(|| V3LocalContinuationError::Codec {
+            message: "Resp04 local finalized response output must be an array".to_string(),
+        })?;
+    let response_input = response_output
+        .iter()
+        .map(project_v3_resp04_output_item_to_chat_input_item)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut responses_context = Map::new();
+    responses_context.insert("input".to_string(), Value::Array(response_input));
+    let chat_context =
+        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &Value::Object(responses_context),
+        )
+        .map_err(|message| V3LocalContinuationError::Codec { message })?;
+    Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
+        chat_context,
+    ))
+}
+
+fn coalesce_v3_resp04_reasoning_with_following_tool_call(mut chat_context: Value) -> Value {
+    let Some(messages) = chat_context
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
+    else {
+        return chat_context;
+    };
+    let mut coalesced = Vec::with_capacity(messages.len());
+    let mut pending_reasoning: Option<Value> = None;
+    for message in std::mem::take(messages) {
+        if v3_resp04_chat_message_is_reasoning_only(&message) {
+            pending_reasoning = Some(match pending_reasoning.take() {
+                Some(mut pending) => {
+                    merge_v3_resp04_reasoning_content(&mut pending, &message);
+                    pending
+                }
+                None => message,
+            });
+            continue;
+        }
+        if v3_resp04_chat_message_has_tool_calls(&message) {
+            let mut target = message;
+            if let Some(pending) = pending_reasoning.take() {
+                merge_v3_resp04_reasoning_content(&mut target, &pending);
+            }
+            coalesced.push(target);
+            continue;
+        }
+        if let Some(pending) = pending_reasoning.take() {
+            coalesced.push(pending);
+        }
+        coalesced.push(message);
+    }
+    if let Some(pending) = pending_reasoning {
+        coalesced.push(pending);
+    }
+    *messages = coalesced;
+    chat_context
+}
+
+fn v3_resp04_chat_message_is_reasoning_only(message: &Value) -> bool {
+    message
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
+        && message
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+        && !v3_resp04_chat_message_has_tool_calls(message)
+        && message
+            .get("content")
+            .is_none_or(v3_resp04_chat_content_is_empty)
+}
+
+fn v3_resp04_chat_message_has_tool_calls(message: &Value) -> bool {
+    message
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
+        && message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(|tool_calls| !tool_calls.is_empty())
+}
+
+fn v3_resp04_chat_content_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(text) => text.trim().is_empty(),
+        Value::Array(parts) => parts.is_empty(),
+        _ => false,
+    }
+}
+
+fn merge_v3_resp04_reasoning_content(target: &mut Value, source: &Value) {
+    let Some(source_reasoning) = source
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let Some(target_object) = target.as_object_mut() else {
+        return;
+    };
+    let merged = match target_object
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(existing) => format!("{existing}\n{source_reasoning}"),
+        None => source_reasoning.to_string(),
+    };
+    target_object.insert("reasoning_content".to_string(), Value::String(merged));
 }
 
 fn project_v3_resp04_output_item_to_chat_input_item(
     item: &Value,
 ) -> Result<Value, V3LocalContinuationError> {
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    if item_type == "reasoning" {
+        let mut reasoning = item.clone();
+        if let Some(reasoning_object) = reasoning.as_object_mut() {
+            if let Some(summary) = v3_resp04_reasoning_summary_text(item) {
+                reasoning_object.insert("reasoning_content".to_string(), Value::String(summary));
+            }
+        }
+        return Ok(reasoning);
+    }
     if item_type != "output_text" {
         return Ok(item.clone());
     }
@@ -175,6 +310,22 @@ fn project_v3_resp04_output_item_to_chat_input_item(
         "role": "assistant",
         "content": [{"type": "output_text", "text": text}]
     }))
+}
+
+fn v3_resp04_reasoning_summary_text(item: &Value) -> Option<String> {
+    let summary = item.get("summary").and_then(Value::as_array)?;
+    let text = summary
+        .iter()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 fn canonical_request_input_items_at_resp04(

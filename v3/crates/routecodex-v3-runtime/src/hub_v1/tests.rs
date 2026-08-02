@@ -8,7 +8,72 @@ fn build_v3_openai_chat_provider_payload_from_responses_payload(
 }
 
 #[test]
-fn openai_chat_function_tool_redacted_schema_placeholders_remain_valid_json_schema() {
+fn responses_reasoning_fields_decode_to_independent_chat_fields() {
+    let chat = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
+        "model": "gpt-test",
+        "input": "reason",
+        "reasoning": {
+            "effort": "high",
+            "summary": "concise",
+            "context": "all_turns",
+            "mode": "pro"
+        },
+        "metadata": {"user_id": "opaque-user"}
+    }))
+    .expect("declared Responses reasoning fields must decode into Chat semantics");
+
+    assert_eq!(chat["reasoning_effort"], "high");
+    assert_eq!(chat["reasoning_summary_policy"], "concise");
+    assert_eq!(chat["reasoning_context_policy"], "all_turns");
+    assert_eq!(chat["reasoning_mode"], "pro");
+    assert_eq!(
+        chat["routecodex_chat_extension"]["responses_request"]["metadata"],
+        json!({"user_id":"opaque-user"})
+    );
+    assert!(chat.get("reasoning").is_none());
+    assert!(chat.get("metadata").is_none());
+}
+
+#[test]
+fn responses_deprecated_generate_summary_alias_requires_exact_match() {
+    let chat = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
+        "model": "gpt-test",
+        "input": "reason",
+        "reasoning": {"summary": "detailed", "generate_summary": "detailed"}
+    }))
+    .expect("matching deprecated summary alias must decode once");
+    assert_eq!(chat["reasoning_summary_policy"], "detailed");
+
+    let error = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
+        "model": "gpt-test",
+        "input": "reason",
+        "reasoning": {"summary": "detailed", "generate_summary": "concise"}
+    }))
+    .expect_err("conflicting summary aliases must fail at inbound");
+    assert!(error.contains("conflicts"), "{error}");
+}
+
+#[test]
+fn responses_reasoning_rejects_anthropic_fields_in_openai_source_schema() {
+    for reasoning in [
+        json!({"budget_tokens": 2048}),
+        json!({"thinking": {"type":"enabled", "budget_tokens":2048}}),
+    ] {
+        let error = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
+            "model": "gpt-test",
+            "input": "reason",
+            "reasoning": reasoning
+        }))
+        .expect_err("undeclared Responses reasoning fields must fail at inbound");
+        assert!(
+            error.contains("Unsupported Responses reasoning field"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn openai_chat_function_tool_redacted_schema_placeholders_fail_fast() {
     let payload = json!({
         "model": "glm-5.2",
         "messages": [{"role": "user", "content": "continue the coding task"}],
@@ -31,22 +96,130 @@ fn openai_chat_function_tool_redacted_schema_placeholders_remain_valid_json_sche
         }]
     });
 
-    let provider = build_v3_openai_chat_standard_request_from_chat_canonical(&payload).unwrap();
-    assert_eq!(
-        provider["tools"][0]["function"]["parameters"]["properties"]["max_output_tokens"],
-        json!(true),
-        "OpenAI Chat JSON Schema positions may only contain an object or boolean; a client-side redaction placeholder must retain the property as an unconstrained boolean schema"
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("redacted schema node must fail before provider wire");
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(
+        error.contains("$.tools[0].function.parameters.properties.max_output_tokens"),
+        "{error}"
     );
-    assert_eq!(
-        provider["tools"][0]["function"]["parameters"]["properties"]["cmd"],
-        json!({"type":"string"}),
-        "valid sibling tool schema must stay byte-semantic-equivalent"
+    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+}
+
+#[test]
+fn openai_chat_function_tool_redacted_schema_placeholders_fail_fast_in_defs() {
+    let payload = json!({
+        "model": "glm-5.2",
+        "messages": [{"role": "user", "content": "continue the coding task"}],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "exec_command",
+                "description": "Runs a command.",
+                "parameters": {
+                    "type": "object",
+                    "$defs": {
+                        "Command": "[REDACTED]"
+                    },
+                    "properties": {
+                        "cmd": {"$ref": "#/$defs/Command"}
+                    },
+                    "required": ["cmd"],
+                    "additionalProperties": false
+                }
+            }
+        }]
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("redacted schema definitions must fail before provider wire");
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(
+        error.contains("$.tools[0].function.parameters.$defs.Command"),
+        "{error}"
     );
-    assert_eq!(
-        provider["tools"][0]["function"]["strict"],
-        json!(false),
-        "tool strictness must be preserved"
+    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+}
+
+#[test]
+fn openai_chat_tool_search_rejects_unmapped_builtin_tool() {
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.2",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [{
+            "type": "tool_search",
+            "name": "tool_search",
+            "parameters": "invalid"
+        }]
+    }))
+    .expect_err("Responses builtin tool_search must not be emulated on OpenAI Chat wire");
+
+    assert!(
+        error.contains("UnmappedOutboundFields target_protocol=openai_chat paths=$.tools[0].type"),
+        "{error}"
     );
+}
+
+#[test]
+fn openai_responses_function_tool_redacted_schema_placeholders_fail_fast() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "continue the coding task"}],
+        "tools": [{
+            "type": "function",
+            "name": "create_goal",
+            "description": "Create a goal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {"type": "string"},
+                    "token_budget": "[REDACTED]"
+                },
+                "required": ["objective"],
+                "additionalProperties": false
+            }
+        }]
+    });
+
+    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect_err("redacted schema node must fail before provider wire");
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(
+        error.contains("$.tools[0].parameters.properties.token_budget"),
+        "{error}"
+    );
+    assert!(error.contains("redacted_schema_placeholder"), "{error}");
+}
+
+#[test]
+fn openai_responses_function_tool_redacted_schema_placeholders_fail_fast_in_definitions() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "continue the coding task"}],
+        "tools": [{
+            "type": "function",
+            "name": "create_goal",
+            "description": "Create a goal.",
+            "parameters": {
+                "type": "object",
+                "definitions": {
+                    "Budget": "[REDACTED]"
+                },
+                "properties": {
+                    "token_budget": {"$ref": "#/definitions/Budget"}
+                }
+            }
+        }]
+    });
+
+    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect_err("redacted schema definitions must fail before provider wire");
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(
+        error.contains("$.tools[0].parameters.definitions.Budget"),
+        "{error}"
+    );
+    assert!(error.contains("redacted_schema_placeholder"), "{error}");
 }
 
 #[test]
@@ -80,7 +253,7 @@ fn openai_chat_stream_relay_requests_preserve_explicit_stream_options() {
 }
 
 #[test]
-fn openai_chat_provider_wire_rejects_client_metadata() {
+fn openai_chat_provider_wire_rejects_codex_client_metadata_without_reclassification() {
     let error = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.2",
         "messages": [{"role": "user", "content": "continue"}],
@@ -90,10 +263,17 @@ fn openai_chat_provider_wire_rejects_client_metadata() {
             "x-codex-turn-metadata": "{\"workspaces\":{\"/Volumes/extension/code\":{\"has_changes\":true}}}"
         }
     }))
-    .expect_err("OpenAI Chat provider wire must reject unsupported client_metadata");
+    .expect_err("Codex client metadata must remain distinct from public metadata");
 
     assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.client_metadata"), "{error}");
+    assert!(
+        error.contains("$.request.client_metadata.session_id"),
+        "{error}"
+    );
+    assert!(
+        error.contains("$.request.client_metadata.x-codex-turn-metadata"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -429,7 +609,7 @@ fn protocol_data_fields_are_not_misclassified_as_routecodex_control() {
 }
 
 #[test]
-fn openai_chat_request_encoding_skips_replay_safe_reasoning_and_preserves_tool_context() {
+fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encrypted_content() {
     let request = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
         "model": "client-responses",
         "input": [
@@ -458,19 +638,24 @@ fn openai_chat_request_encoding_skips_replay_safe_reasoning_and_preserves_tool_c
             }
         ]
     }))
-    .expect("replay-safe Responses reasoning must not make OpenAI Chat encoding fail");
+    .expect("Responses reasoning must normalize into Chat without encrypted replay state");
 
     let messages = request["messages"]
         .as_array()
         .expect("OpenAI Chat request messages");
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 4);
     assert_eq!(messages[0]["role"], "user");
     assert_eq!(messages[0]["content"], "inspect the cwd");
     assert_eq!(messages[1]["role"], "assistant");
-    assert_eq!(messages[1]["tool_calls"][0]["id"], "call-1");
-    assert_eq!(messages[2]["role"], "tool");
-    assert_eq!(messages[2]["tool_call_id"], "call-1");
-    assert_eq!(messages[2]["content"], "/tmp");
+    assert_eq!(
+        messages[1]["reasoning_content"],
+        "Need to inspect cwd first."
+    );
+    assert_eq!(messages[2]["role"], "assistant");
+    assert_eq!(messages[2]["tool_calls"][0]["id"], "call-1");
+    assert_eq!(messages[3]["role"], "tool");
+    assert_eq!(messages[3]["tool_call_id"], "call-1");
+    assert_eq!(messages[3]["content"], "/tmp");
     let serialized = serde_json::to_string(&request).expect("OpenAI Chat request JSON");
     assert!(!serialized.contains("opaque-reasoning"));
     assert!(!serialized.contains("summary_text"));
@@ -496,6 +681,35 @@ fn openai_chat_request_encoding_preserves_reasoning_content_on_assistant_tool_ca
         "Need to inspect the directory before answering."
     );
     assert_eq!(request["messages"][0]["tool_calls"][0]["id"], "call-2");
+}
+
+#[test]
+fn openai_responses_request_encoding_preserves_assistant_reasoning_before_tool_call() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "client-responses",
+        "messages": [{
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "Need lookup",
+            "tool_calls": [{
+                "id": "call-2",
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "arguments": "{\"q\":\"alpha\"}"
+                }
+            }]
+        }]
+    }))
+    .expect("assistant reasoning plus tool call must encode into Responses wire");
+
+    assert_eq!(request["input"][0]["type"], "reasoning");
+    assert_eq!(
+        request["input"][0]["summary"],
+        json!([{"type":"summary_text","text":"Need lookup"}])
+    );
+    assert_eq!(request["input"][1]["type"], "function_call");
+    assert_eq!(request["input"][1]["call_id"], "call-2");
 }
 
 #[test]
@@ -656,4 +870,71 @@ fn req04_rejects_responses_shaped_continuation_instead_of_rebuilding_chat() {
         .expect_err("Req04 must not rebuild Chat from a stored Responses payload");
 
     assert!(error.to_string().contains("Chat canonical messages"));
+}
+
+#[test]
+fn live_5555_web_search_call_history_indexes_project_to_stable_tool_pairs() {
+    let request = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "prefix"}]
+            },
+            {
+                "type": "web_search_call",
+                "status": "failed",
+                "action": {
+                    "type": "search",
+                    "query": "微信小程序 发布 流程 上传 审核 发布 官方 文档",
+                    "queries": [
+                        "微信小程序 发布 流程 上传 审核 发布 官方 文档",
+                        "微信小程序 服务器域名 request合法域名 官方 文档"
+                    ]
+                }
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            },
+            {
+                "type": "web_search_call",
+                "status": "failed",
+                "action": {
+                    "type": "search",
+                    "query": "site:developers.weixin.qq.com miniprogram 发布 审核 上传"
+                }
+            }
+        ]
+    }))
+    .expect("live 5555-like web_search_call history must project");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 6, "user + pair + user + pair: {request}");
+    assert_eq!(
+        messages[1]["tool_calls"][0]["id"],
+        json!("call_routecodex_web_search_1")
+    );
+    assert_eq!(
+        messages[2]["tool_call_id"],
+        json!("call_routecodex_web_search_1")
+    );
+    assert_eq!(
+        messages[4]["tool_calls"][0]["id"],
+        json!("call_routecodex_web_search_3")
+    );
+    assert_eq!(
+        messages[5]["tool_call_id"],
+        json!("call_routecodex_web_search_3")
+    );
+    assert_eq!(
+        messages[1]["tool_calls"][0]["function"]["name"],
+        json!("web_search")
+    );
+    assert_eq!(
+        messages[4]["tool_calls"][0]["function"]["name"],
+        json!("web_search")
+    );
 }

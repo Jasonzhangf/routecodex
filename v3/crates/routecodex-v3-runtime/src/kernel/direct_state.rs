@@ -257,10 +257,13 @@ struct V3ResponsesDirectRuntimeCoreState<'a> {
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_protocol_decision: Option<V3Execution11ProtocolDecision>,
     // Candidate set from the Server-side protocol plan; always set together
     // with initial_selected_target so in-Target reselection keeps working
     // when routing was preplanned.
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    initial_request_local_excluded_candidates: BTreeSet<String>,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     // Node trace the protocol plan already executed for this request; the
     // kernel splices it in instead of re-running Router05..Target09.
     initial_plan_trace: Option<Vec<&'static str>>,
@@ -279,7 +282,10 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             provider_health: None,
             provider_health_neutral: false,
             initial_selected_target: None,
+            initial_protocol_decision: None,
             initial_expanded: None,
+            initial_request_local_excluded_candidates: BTreeSet::new(),
+            observability_accumulator: None,
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
@@ -300,7 +306,10 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
             provider_health: None,
             provider_health_neutral: false,
             initial_selected_target: None,
+            initial_protocol_decision: None,
             initial_expanded: None,
+            initial_request_local_excluded_candidates: BTreeSet::new(),
+            observability_accumulator: None,
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
@@ -351,8 +360,19 @@ impl<'a> V3ResponsesDirectRuntimeCoreState<'a> {
 
     fn with_initial_plan(mut self, plan: &V3ResponsesProtocolExecutionPlan) -> Self {
         self.initial_selected_target = Some(plan.decision.target.clone());
+        self.initial_protocol_decision = Some(plan.decision.clone());
         self.initial_expanded = Some(plan.expanded.clone());
+        self.initial_request_local_excluded_candidates =
+            plan.request_local_excluded_candidates.clone();
         self.initial_plan_trace = Some(plan.routing_trace_segment());
+        self
+    }
+
+    fn with_observability_accumulator(
+        mut self,
+        accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    ) -> Self {
+        self.observability_accumulator = accumulator;
         self
     }
 }
@@ -367,11 +387,14 @@ pub struct V3ResponsesDirectRuntimeOutput {
     pub protocol_relay_handoff: Option<V3ResponsesProtocolRelayHandoff>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct V3ResponsesProtocolRelayHandoff {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+    pub request_local_excluded_candidates: BTreeSet<String>,
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
+    pub observability_accumulator: V3RuntimeObservabilityAccumulator,
 }
 
 #[derive(Debug, Clone)]
@@ -382,6 +405,14 @@ pub struct V3ResponsesProtocolExecutionPlan {
     // kernel can reselect inside the Target on provider failure without
     // re-entering the Router (Router re-entry after Target10 is forbidden).
     pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
+    // Candidate keys whose protocol decision matches the initial `decision.mode`;
+    // initial Relay entry may use this as an admission set, but provider-failure
+    // reselection must not treat it as a Direct/Relay protocol lock.
+    pub protocol_candidate_keys: BTreeSet<String>,
+    // Request-local candidates already failed before this plan/handoff was
+    // consumed. This keeps Direct/Relay handoffs on one Error01-06 attempt set
+    // without storing control state in the normal request payload.
+    pub request_local_excluded_candidates: BTreeSet<String>,
 }
 
 impl V3ResponsesProtocolExecutionPlan {

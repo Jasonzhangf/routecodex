@@ -148,7 +148,7 @@ const cases = [
     path: "package.json",
     mutate: (source) =>
       source.replace(
-        " && cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact --nocapture",
+        " && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact --nocapture",
         "",
       ),
     diagnostic: /must execute the controlled client-drop HTTP blackbox/u,

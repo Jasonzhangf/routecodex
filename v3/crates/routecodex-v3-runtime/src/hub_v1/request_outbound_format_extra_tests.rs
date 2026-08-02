@@ -134,6 +134,82 @@ fn responses_wire_reuses_chat_extension_responses_item_id() {
 }
 
 #[test]
+fn responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_original",
+                    "type": "function",
+                    "function": {"name":"lookup", "arguments":"{\"q\":\"x\"}"},
+                    "routecodex_chat_extension": {"responses_item_id":"item_e4dbebeb61535f2bdf4c15c7"}
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_original",
+                "content": "ok",
+                "routecodex_chat_extension": {"responses_item_id":"item_e4dbebeb61535f2bdf4c15c7"}
+            }
+        ]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projects function item ids at the adjacent codec");
+    let input = request["input"].as_array().expect("Responses input array");
+
+    assert!(input[0]["id"].as_str().unwrap().starts_with("fc_"));
+    assert_eq!(input[1]["id"], input[0]["id"]);
+    assert_eq!(input[0]["call_id"], "call_original");
+    assert_eq!(input[1]["call_id"], "call_original");
+}
+
+#[test]
+fn responses_wire_preserves_custom_tool_item_ids() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_custom",
+                    "type": "function",
+                    "function": {"name":"custom.render", "arguments":"{\"input\":\"raw script\"}"},
+                    "routecodex_chat_extension": {
+                        "responses_tool_call_type":"custom_tool_call",
+                        "responses_item_id":"ctc_provider_owned"
+                    }
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_custom",
+                "content": "rendered",
+                "routecodex_chat_extension": {
+                    "responses_tool_output_type":"custom_tool_call_output",
+                    "responses_item_id":"ctc_provider_owned"
+                }
+            }
+        ]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire must preserve opaque custom-tool item identity");
+    let input = request["input"].as_array().expect("Responses input array");
+
+    assert_eq!(input[0]["type"], "custom_tool_call");
+    assert_eq!(input[0]["id"], "ctc_provider_owned");
+    assert_eq!(input[0]["call_id"], "call_custom");
+    assert_eq!(input[1]["type"], "custom_tool_call_output");
+    assert_eq!(input[1]["id"], "ctc_provider_owned");
+    assert_eq!(input[1]["call_id"], "call_custom");
+}
+
+#[test]
 fn responses_openai_chat_field_parity_include_is_rejected_from_chat_wire() {
     let payload = json!({
         "model": "gpt-test",
@@ -166,18 +242,174 @@ fn outbound_projection_rejects_control_fields_with_precise_path() {
 }
 
 #[test]
-fn outbound_projection_rejects_client_metadata_before_provider_capture() {
+fn openai_chat_wire_rejects_codex_client_metadata_without_exact_target_field() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
-        "client_metadata": {"session_id":"client-owned"}
+        "client_metadata": {
+            "session_id":"client-owned",
+            "x-codex-turn-metadata":"x".repeat(600)
+        }
     });
 
     let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("client_metadata has no OpenAI Chat provider-wire equivalent");
+        .expect_err("Codex client metadata must not be reclassified as public metadata");
 
     assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("$.client_metadata"), "{error}");
+    assert!(
+        error.contains("$.request.client_metadata.session_id"),
+        "{error}"
+    );
+    assert!(
+        error.contains("$.request.client_metadata.x-codex-turn-metadata"),
+        "{error}"
+    );
+}
+
+#[test]
+fn openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "client_metadata": {"unknown":{"nested":true}}
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("client metadata projected to OpenAI Chat metadata must be string-valued");
+
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(
+        error.contains("$.request.client_metadata.unknown"),
+        "{error}"
+    );
+}
+
+#[test]
+fn openai_chat_wire_projects_exact_client_metadata_user_id() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "client_metadata": {"user_id":"client-user"}
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("OpenAI Chat can project exact client_metadata.user_id");
+
+    assert!(request.get("client_metadata").is_none(), "{request}");
+    assert_eq!(request["metadata"], json!({"user_id":"client-user"}));
+}
+
+#[test]
+fn openai_chat_wire_maps_responses_text_json_schema_to_chat_response_format() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "name": "answer_shape",
+                        "description": "Answer schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "answer": {"type": "string"}
+                            },
+                            "required": ["answer"],
+                            "additionalProperties": false
+                        },
+                        "strict": true
+                    },
+                    "verbosity": "low"
+                }
+            }
+        }
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Responses text.format json_schema must map to Chat response_format shape");
+
+    assert_eq!(
+        request["response_format"],
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "answer_shape",
+                "description": "Answer schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "answer": {"type": "string"}
+                    },
+                    "required": ["answer"],
+                    "additionalProperties": false
+                },
+                "strict": true
+            }
+        })
+    );
+    assert_eq!(request["verbosity"], json!("low"));
+    assert!(request.get("text").is_none(), "{request}");
+    assert!(
+        request.get("routecodex_chat_extension").is_none(),
+        "{request}"
+    );
+}
+
+#[test]
+fn openai_chat_wire_rejects_raw_responses_text_json_schema_shape() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "text": {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": {"type": "object"}
+                    }
+                }
+            }
+        }
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("Responses json_schema format without Chat-required name must fail");
+
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(error.contains("$.request.text.format.name"), "{error}");
+}
+
+#[test]
+fn openai_chat_wire_rejects_unmapped_reasoning_summary_policy() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_effort": "medium",
+        "reasoning_summary_policy": "detailed"
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("OpenAI Chat cannot preserve Responses reasoning summary policy");
+
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(error.contains("reasoning_summary_policy"), "{error}");
+}
+
+#[test]
+fn openai_chat_wire_rejects_invalid_reasoning_summary_policy() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_summary_policy": "verbose"
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("invalid summary policy must fail before provider send");
+
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(error.contains("reasoning_summary_policy"), "{error}");
 }
 
 #[test]
@@ -279,4 +511,262 @@ fn openai_chat_wire_preserves_same_protocol_request_fields() {
     ] {
         assert_eq!(request[key], payload[key], "field {key} drifted");
     }
+}
+
+#[test]
+fn tool_search_chat_extensions_round_trip_to_responses_fields() {
+    let input = build_responses_input_from_chat_messages(&[
+        json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_search",
+                "type": "function",
+                "function": {
+                    "name": "tool_search",
+                    "arguments": "{\"query\":\"node repl\",\"limit\":8}"
+                },
+                "routecodex_chat_extension": {
+                    "responses_tool_call_type": "tool_search_call",
+                    "responses_status": "completed",
+                    "responses_execution": "client"
+                }
+            }]
+        }),
+        json!({
+            "role": "tool",
+            "tool_call_id": "call_search",
+            "content": "[{\"type\":\"namespace\",\"name\":\"mcp__node_repl\",\"tools\":[]}]",
+            "routecodex_chat_extension": {
+                "responses_tool_output_type": "tool_search_output",
+                "responses_output_field": "tools",
+                "responses_item_id": "tso_123",
+                "responses_status": "completed",
+                "responses_execution": "client"
+            }
+        }),
+    ])
+    .expect("registered Chat extensions must project back to Responses wire fields");
+
+    assert_eq!(
+        input,
+        json!([
+            {
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "arguments": {"query": "node repl", "limit": 8},
+                "status": "completed",
+                "execution": "client"
+            },
+            {
+                "type": "tool_search_output",
+                "id": "tso_123",
+                "call_id": "call_search",
+                "tools": [{"type": "namespace", "name": "mcp__node_repl", "tools": []}],
+                "status": "completed",
+                "execution": "client"
+            }
+        ])
+    );
+}
+
+#[test]
+fn responses_openai_chat_field_parity_responses_wire_preserves_include_projection() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "include": ["reasoning.encrypted_content"]
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projection must succeed");
+    assert_eq!(request["include"], json!(["reasoning.encrypted_content"]));
+}
+
+#[test]
+fn openai_responses_wire_preserves_client_metadata_and_projects_reasoning_effort() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "client_metadata": {"session_id":"codex-review"},
+        "reasoning_effort": "medium"
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses wire projection must preserve supported protocol fields");
+    assert_eq!(
+        request["client_metadata"],
+        json!({"session_id":"codex-review"})
+    );
+    assert!(request.get("reasoning_effort").is_none(), "{request}");
+    assert!(request.get("metadata").is_none(), "{request}");
+    assert_eq!(request["reasoning"], json!({"effort":"medium"}));
+}
+
+#[test]
+fn openai_responses_wire_rebuilds_registered_reasoning_fields_only() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_effort": "max",
+        "reasoning_summary_policy": "detailed",
+        "reasoning_context_policy": "current_turn",
+        "reasoning_mode": "standard"
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("registered Chat reasoning fields must project to Responses reasoning");
+    assert_eq!(
+        request["reasoning"],
+        json!({"effort":"max","summary":"detailed","context":"current_turn","mode":"standard"})
+    );
+    for field in [
+        "reasoning_effort",
+        "reasoning_summary_policy",
+        "reasoning_context_policy",
+        "reasoning_mode",
+    ] {
+        assert!(request.get(field).is_none(), "{request}");
+    }
+}
+
+#[test]
+fn openai_responses_wire_rejects_non_responses_reasoning_extensions() {
+    for field in [
+        "reasoning_budget_tokens",
+        "reasoning_include_thoughts",
+        "reasoning_display_policy",
+        "reasoning_thinking_mode",
+    ] {
+        let mut payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+        payload
+            .as_object_mut()
+            .unwrap()
+            .insert(field.to_string(), json!(2048));
+        let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect_err("non-Responses reasoning semantic must be unmapped");
+        assert!(error.contains(field), "{error}");
+    }
+}
+
+#[test]
+fn anthropic_thinking_chat_fields_are_unmapped_for_responses_wire() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "reasoning"}],
+        "reasoning_thinking_mode": "enabled",
+        "reasoning_budget_tokens": 1024
+    });
+    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect_err("Anthropic thinking mode and numeric budget have no Responses field");
+    assert!(error.contains("reasoning_thinking_mode"), "{error}");
+    assert!(error.contains("reasoning_budget_tokens"), "{error}");
+}
+
+#[test]
+fn openai_responses_metadata_limits_fail_before_wire() {
+    let cases = [
+        (json!({"k": 1}), "value_must_be_string"),
+        (json!({"k".repeat(65): "v"}), "key_max_64"),
+        (json!({"k": "v".repeat(513)}), "value_max_512"),
+        (
+            Value::Object(
+                (0..17)
+                    .map(|index| (format!("k{index}"), json!("v")))
+                    .collect(),
+            ),
+            "max_16_pairs",
+        ),
+    ];
+    for (metadata, expected) in cases {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hello"}],
+            "metadata": metadata
+        });
+        let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect_err("invalid OpenAI metadata must fail before wire");
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn codex_client_metadata_remains_client_metadata_on_responses_wire() {
+    let turn_metadata = json!({
+        "installation_id": "15252310-9634-460d-9809-64a631ebd187",
+        "session_id": "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b",
+        "thread_id": "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b",
+        "turn_id": "019fbda6-9f13-7163-8828-2dae4bf08506",
+        "window_id": "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b:56",
+        "request_kind": "turn",
+        "forked_from_thread_id": "019fa6fd-4283-7a80-95c7-a0f3cda91c73",
+        "thread_source": "user",
+        "sandbox": "none",
+        "workspaces": {
+            "/Users/fanzhang/Documents/github/removead": {
+                "latest_git_commit_hash": "87107ac2b113e07f237032690a64beab79929bb1",
+                "has_changes": true
+            }
+        },
+        "turn_started_at_unix_ms": 1785593241374_u64
+    })
+    .to_string();
+    assert!(turn_metadata.chars().count() > 512);
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "client_metadata": {
+                    "session_id": "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b",
+                    "x-codex-turn-metadata": turn_metadata
+                }
+            }
+        }
+    });
+
+    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Responses outbound must preserve the distinct client_metadata field");
+
+    assert_eq!(
+        wire["client_metadata"]["x-codex-turn-metadata"],
+        turn_metadata
+    );
+    assert_eq!(
+        wire["client_metadata"]["session_id"],
+        "019fbd31-bb6e-7a43-bfb2-17a1e46ec23b"
+    );
+    assert!(wire.get("metadata").is_none(), "{wire}");
+}
+
+#[test]
+fn relay_responses_wire_rejects_unconsumed_previous_response_id() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "previous_response_id": "resp_must_be_resolved_at_req03"
+    });
+    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect_err("continuation owner state must not cross into Relay outbound");
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(error.contains("$.previous_response_id"), "{error}");
+}
+
+#[test]
+fn relay_responses_wire_preserves_non_continuation_provider_fields() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "safety_identifier": "safety-client",
+        "moderation": {"mode":"auto"},
+        "stream_options": {"include_obfuscation":false}
+    });
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("ordinary Responses provider fields must survive Relay projection");
+    assert_eq!(request["safety_identifier"], "safety-client");
+    assert_eq!(request["moderation"], json!({"mode":"auto"}));
+    assert_eq!(
+        request["stream_options"],
+        json!({"include_obfuscation":false})
+    );
 }

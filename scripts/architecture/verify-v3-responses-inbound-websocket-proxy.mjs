@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const files = {
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
+  directOutcome: 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
   tests: 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs',
   serverCargo: 'v3/crates/routecodex-v3-server/Cargo.toml',
   providerTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
@@ -37,11 +38,11 @@ for (const phrase of [
   'unsupported client WebSocket event type',
   'expected response.create',
   'response.create must be a flat event; nested response payload is unsupported',
-  'execute_responses_direct_server_frame(',
+  'execute_responses_direct_server_outcome(',
   'async fn execute_responses_relay_websocket_output(',
+  'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
   'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(',
-  'execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(',
   'send_responses_websocket_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
@@ -64,6 +65,7 @@ for (const phrase of [
   'responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback',
   'responses_inbound_websocket_client_disconnect_drops_incremental_runtime_stream',
   'responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime',
+  'responses_relay_websocket_consumes_direct_handoff_instead_of_projecting_null',
   'connect_async(request)',
   'responses_websockets=2026-02-06',
   'assert_control_fields_absent(&provider_event.body)',
@@ -79,7 +81,7 @@ for (const phrase of [
   'routecodex-v3-server',
   'responses_websocket_endpoint',
   'responses_websocket_create_payload',
-  'execute_responses_direct_server_frame',
+  'execute_responses_direct_server_outcome',
   'execute_responses_relay_websocket_output',
   'send_responses_relay_websocket_output',
   'send_responses_websocket_sse_stream',
@@ -161,13 +163,13 @@ if (runtimeSseDecodeGuards.length !== 2) {
   failures.push(files.server + ': expected Direct and Relay runtime SSE decode guards, got ' + runtimeSseDecodeGuards.length);
 }
 
-const directRuntimeCalls = text.server.match(/execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug\(/g) ?? [];
+const directRuntimeCalls = text.directOutcome.match(/execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug\(/g) ?? [];
 if (directRuntimeCalls.length !== 1) {
   failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
 }
 const relayRuntimeCalls = text.server.match(/execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control\(/g) ?? [];
-if (relayRuntimeCalls.length !== 2) {
-  failures.push(files.server + ': expected HTTP plus WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
+if (relayRuntimeCalls.length !== 1) {
+  failures.push(files.server + ': expected one WebSocket Relay Runtime entry call, got ' + relayRuntimeCalls.length);
 }
 
 forbid(files.server, text.server, [

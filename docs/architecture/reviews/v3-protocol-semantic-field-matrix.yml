@@ -1587,7 +1587,7 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_summary_policy
     current_impl: extension_declared
-    gap: Source-roundtrip only. Anthropic/OpenAI Chat/Gemini outbound must report request.reasoning_summary_policy as unmapped.
+    gap: Responses round-trips the field; OpenAI Chat, Anthropic, and Gemini outbound report request.reasoning_summary_policy as unmapped because none has an equivalent summary-policy field.
   - group_id: reasoning.request_context_policy
     standard_chat_field: request.reasoning_context_policy
     chat_fields:
@@ -9007,7 +9007,7 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: extension_declared
     source_fields: *a1
-    projection_rule: Responses source-roundtrip only; all non-Responses targets must report this semantic path as unmapped.
+    projection_rule: Responses source-roundtrip; OpenAI Chat and Anthropic consume before wire; Gemini must report this semantic path as unmapped.
   - field: request.reasoning_context_policy
     semantic_id: request.reasoning_context_policy
     direction: request
@@ -10447,11 +10447,16 @@ outbound_projection_contract:
       target_protocol: openai_chat
       status: transformed
       fields:
-        - request.client_metadata -> request.metadata
+        - request.client_metadata -> request.metadata -> OpenAI Chat target metadata validation
         - request.prompt_cache_key -> request.prompt_cache_key
         - request.store -> request.store
         - request.text.verbosity -> request.verbosity
         - request.text.format -> request.response_format
+    - source_protocol: responses
+      target_protocol: openai_chat
+      status: consumed_by_transform
+      fields:
+        - request.reasoning.summary[auto|concise|detailed]
     - source_protocol: openai_chat
       target_protocol: responses
       status: target_unsupported
@@ -10487,17 +10492,25 @@ outbound_projection_contract:
         - request.text.format.json_schema -> request.output_config.format.json_schema
     - source_protocol: responses
       target_protocol: anthropic
-      status: target_unsupported
+      status: consumed_by_transform
       fields:
-        - request.reasoning.effort[none|minimal]
         - request.reasoning.summary
         - request.reasoning.generate_summary
+        - request.client_metadata[session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id]
+        - request.store[false]
+        - request.text.verbosity[low|medium|high]
+    - source_protocol: responses
+      target_protocol: anthropic
+      status: target_unsupported
+      fields:
+        - request.prompt_cache_key[non_empty_string]
+        - request.reasoning.effort[none|minimal]
         - request.reasoning.context
         - request.reasoning.mode
-        - request.client_metadata.* except user_id
-        - request.prompt_cache_key
-        - request.store
-        - request.text.verbosity
+        - request.client_metadata[unknown_keys]
+        - request.prompt_cache_key[malformed]
+        - request.store[true]
+        - request.text.verbosity[unsupported]
         - request.text.format.strict=false
     - source_protocol: gemini
       target_protocol: any_cross_protocol_outbound

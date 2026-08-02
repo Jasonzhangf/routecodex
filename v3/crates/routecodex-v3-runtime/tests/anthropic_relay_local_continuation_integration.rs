@@ -79,8 +79,8 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -107,8 +107,8 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
+                server_id,
+                server_id,
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
@@ -140,8 +140,8 @@ async fn json_two_turn_save_restore_order_and_terminal_release() {
         captures[1]["input"],
         json!([
             {"type":"reasoning","summary":[{"type":"summary_text","text":"Need lookup"}]},
-            {"type":"function_call","call_id":"call_local_1","name":"lookup","arguments":"{\"q\":\"alpha\"}"},
-            {"type":"function_call_output","call_id":"call_local_1","output":"alpha"}
+            {"type":"function_call","id":"fc_local_1_d0d3a191cbda1f79","call_id":"call_local_1","name":"lookup","arguments":"{\"q\":\"alpha\"}"},
+            {"type":"function_call_output","id":"fc_local_1_d0d3a191cbda1f79","call_id":"call_local_1","output":"alpha"}
         ])
     );
     for payload in captures.iter() {
@@ -503,8 +503,8 @@ fn request(
     V3AnthropicRelayRuntimeInput {
         server_id: server_id.into(),
         failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-            "test-server",
-            "test-group",
+            server_id,
+            server_id,
             concat!(module_path!(), ":", line!()),
         )
         .expect("test provider failure session scope"),

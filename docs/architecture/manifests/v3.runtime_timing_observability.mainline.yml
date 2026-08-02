@@ -11,6 +11,7 @@ node_ids:
   - V3RuntimeTimingExternalAttempt
   - V3RuntimeTimingExternalComplete
   - V3RuntimeTimingObservability
+  - V3RuntimeTimingProtocolHandoff
   - V3RuntimeTimingServerProjection
   - V3RuntimeTimingStart
   - V3RuntimeTimingStreamObservation
@@ -203,6 +204,37 @@ edges:
         - v3.runtime.responses_timing_observability
       side_channel_writes:
         - v3.runtime.responses_observability
+  - step_id: v3-runtime-timing-13
+    from_node: V3RuntimeTimingExternalComplete
+    to_node: V3RuntimeTimingProtocolHandoff
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.runtime.responses_timing_observability
+      produces:
+        - v3.runtime.responses_timing_observability
+      side_channel_reads:
+        - v3.runtime.responses_timing_observability
+      side_channel_writes:
+        - v3.runtime.responses_timing_observability
+  - step_id: v3-runtime-timing-14
+    from_node: V3RuntimeTimingProtocolHandoff
+    to_node: V3RuntimeTimingExternalAttempt
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - v3.runtime.responses_timing_observability
+      produces:
+        - v3.runtime.responses_timing_observability
+      side_channel_reads:
+        - v3.runtime.responses_timing_observability
+      side_channel_writes: []
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

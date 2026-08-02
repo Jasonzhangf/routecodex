@@ -13,6 +13,11 @@ Supported V3 runtime paths in this slice:
 3. OpenAI Chat entry -> OpenAI Chat provider wire -> OpenAI Chat client projection.
 4. Responses entry -> Anthropic Messages provider wire -> Responses client projection.
 
+Relay protocol-mode regression coverage must also prove that a published server
+without the optional `execution` block retains Relay execution. Such a manifest
+must not fail merely because the post-Chat target is being evaluated for a typed
+Direct handoff; explicit `allowed_modes` still controls whether a handoff is legal.
+
 V2 reference files are read-only comparison sources:
 
 - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/responses_openai_codec.rs`
@@ -65,8 +70,8 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 
 ## Data-plane / control-plane rule
 
-- `metadata` and `client_metadata` in client protocol bodies are data-plane fields. `client_metadata` first becomes the registered Chat payload extension `request.client_metadata`; it is not a raw wire shortcut.
-- OpenAI metadata projection requires at most 16 string pairs, key length at most 64, and value length at most 512. Anthropic projection accepts exactly one `user_id` string key. Other target shapes fail as `UnmappedOutboundFields`.
+- `metadata` and `client_metadata` in client protocol bodies are distinct data-plane fields. `client_metadata` first becomes the registered Chat payload extension `request.client_metadata`; it is not a raw wire shortcut and must retain its source identity through Req02.
+- Public OpenAI `metadata` requires at most 16 string pairs, key length at most 64, and value length at most 512. Codex `client_metadata` remains distinct through Responses inbound, Chat canonicalization, and Responses outbound, so it never inherits public `metadata` limits. OpenAI Chat and Anthropic may project an exact non-empty `user_id`; every other key fails as `UnmappedOutboundFields` because those targets have no reversible field.
 - RouteCodex-created control fields (`metadata_center`, `routeHint`, `stoplessCenter`, `requestCapabilities`, etc.) must fail before provider/client normal payload.
 - Unsupported target-protocol fields must not be silently dropped or prompt-encoded. This slice either maps an exact target semantic or fails with the canonical Chat semantic path.
 
@@ -90,7 +95,8 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `stream` | preserved | request matrix |
 | `response_format` | preserved | request matrix |
 | `max_output_tokens` / `max_tokens` | preserve target-compatible token limit; do not drop the explicit client field | request matrix |
-| `metadata` / `client_metadata` | `request.client_metadata` Chat extension, then target-schema-validated `metadata` or explicit unmapped error | request matrix + metadata limits negative matrix |
+| `metadata` | `request.metadata` Chat extension, then public OpenAI metadata limits or explicit unmapped error | metadata limits negative matrix |
+| `client_metadata` | `request.client_metadata` Chat extension, then Responses target `client_metadata`; public `metadata` remains separately validated | inbound and outbound long-value preservation positive + public metadata value-max negative + malformed inbound shape negative |
 | `stop` | preserved | request matrix |
 | RouteCodex control fields | rejected before wire | negative gate already existing; keep covered |
 
@@ -146,7 +152,8 @@ tests exist and pass.
 
 | Responses field | OpenAI Chat provider wire | Required test |
 | --- | --- | --- |
-| `reasoning.effort` / `reasoning.summary` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
+| `reasoning.effort` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
+| `reasoning.summary` | valid registered policy fails as unmapped at the adjacent OpenAI Chat codec; invalid values fail as malformed before provider send | `openai_chat_wire_rejects_unmapped_reasoning_summary_policy` / `openai_chat_wire_rejects_invalid_reasoning_summary_policy` |
 | `include` | rejected from OpenAI Chat provider wire; preserved on Responses wire only | `responses_openai_chat_field_parity_include_is_elided_from_chat_wire` |
 | Historical malformed `function_call.arguments`, with or without matching `function_call_output` parse-failure truth | adjacent OpenAI Chat argument projector preserves the exact string value, keeps parse-failure tool output paired, sends the selected OpenAI Chat target exactly once, and records no provider failure or Error05 reselect; forbid deletion, empty-object repair, JSON-string rewrapping, provider switch, MetadataCenter reconstruction, or continuation mutation | `responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect` / `responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect` |
 
@@ -163,6 +170,9 @@ tests exist and pass.
 | `finish_reason` | `finish_reason` and status terminality | response matrix |
 | `usage.prompt_tokens/completion_tokens/total_tokens` | `usage.input_tokens/output_tokens/total_tokens` | response matrix |
 | malformed custom-tool wrapper | explicit error, not `{}` or text fallback | negative test |
+| function `parameters` schema-position `[REDACTED]` placeholder | adjacent OpenAI Chat/Responses codec fails fast before provider wire; debug redaction placeholders must not be widened into provider JSON Schema | `openai_chat_function_tool_redacted_schema_placeholders_fail_fast` / `openai_responses_function_tool_redacted_schema_placeholders_fail_fast` |
+| Responses function history `id` with a non-`fc_` provider prefix | adjacent Responses outbound codec deterministically projects the item id to `fc_*` and applies the same id to the paired `function_call_output`; `call_id` remains unchanged | `responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids` |
+| Responses custom-tool history `id` | adjacent Responses outbound codec preserves the opaque provider-owned custom item id for both `custom_tool_call` and its paired output; function-only `fc_*` normalization must not run | `responses_wire_preserves_custom_tool_item_ids` |
 
 ### Responses request -> Anthropic provider wire
 
@@ -170,19 +180,22 @@ tests exist and pass.
 | --- | --- | --- |
 | `reasoning.effort=low/medium/high/xhigh/max` | `output_config.effort` with identical value | positive effort intersection matrix |
 | `reasoning.effort=none/minimal` | `UnmappedOutboundFields` at Anthropic outbound codec | negative effort value-domain matrix |
-| `reasoning.summary/context/mode` | registered Chat extensions, then `UnmappedOutboundFields`; never system text | paired source-roundtrip and Anthropic rejection tests |
+| `reasoning.summary` | registered Chat extension, then rejected as unmapped at Anthropic outbound; never system text or provider wire | source-roundtrip and Anthropic fail-fast tests |
+| `reasoning.context/mode` | registered Chat extensions, then `UnmappedOutboundFields`; never system text | paired source-roundtrip and Anthropic rejection tests |
 | `reasoning.budget_tokens` / `reasoning.thinking` | not declared by the audited OpenAI Responses `Reasoning` schema; Responses inbound rejects them rather than treating Anthropic fields as OpenAI extensions | malformed source-schema negative tests |
-| `client_metadata.user_id` | registered `request.client_metadata`, then Anthropic `metadata.user_id` | positive metadata projection test |
-| any other `client_metadata` key or mixed object | `UnmappedOutboundFields` with the canonical Chat key path | negative metadata projection tests |
-| `prompt_cache_key` | `UnmappedOutboundFields`; Anthropic per-content `cache_control` is not reconstructed from an OpenAI request cache key | negative cache semantic test |
-| `store=false` / `store=true` | `UnmappedOutboundFields`; no Anthropic Messages request field is declared equivalent | paired storage semantic tests |
-| `text.verbosity` | `UnmappedOutboundFields`; verbosity is never converted into Anthropic reasoning effort | negative cross-semantic test |
+| exactly one non-empty `client_metadata.user_id` | registered `request.client_metadata`, then exact projection to Anthropic `metadata.user_id` | positive exact projection test |
+| registered Codex `client_metadata` keys without `user_id` | `UnmappedOutboundFields` before Anthropic wire with canonical Chat paths | negative target-equivalence tests |
+| `prompt_cache_key` | valid non-empty value fails as unmapped; malformed value fails validation; it never creates Anthropic cache control | paired cache validation tests |
+| `store=false` / `store=true` | `false` is explicitly consumed before wire; `true` fails | paired storage semantic tests |
+| `text.verbosity` | `UnmappedOutboundFields`; never maps to Anthropic reasoning effort | paired verbosity rejection tests |
 | `text.format` | text default is consumed; compatible strict JSON schema maps to `output_config.format`; incompatible schema policy fails | paired output config tests |
 | governed Chat semantic after Req04 | preserved through `ProviderReqCompat06ProviderCompat`; original Responses raw body is unavailable | Req02/Req04/Req07/Compat06 node snapshot assertions |
 | Anthropic provider `thinking` JSON response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` |
 | Anthropic request history `thinking/signature` and `redacted_thinking/data` | ordered Responses `reasoning.summary/encrypted_content`; malformed blocks fail before Hub semantic | `anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasoning`, `anthropic_malformed_thinking_history_fails_instead_of_disappearing` |
 | Responses reasoning history `summary/content/encrypted_content` | Anthropic `thinking/signature` or `redacted_thinking/data`; no silent skip | `responses_replay_reasoning_restores_anthropic_thinking_and_redacted_blocks` |
 | Responses SSE reasoning | materialized canonical response -> Resp03/Resp04 -> Anthropic events; no pre-Resp04 client projection | `structured_sse_contract_preserves_reasoning_tool_and_terminal_order`, `responses_sse_projects_anthropic_thinking_from_resp04_finalized_truth` |
+
+OpenAI metadata projection requires at most 16 string pairs, keys no longer than 64 characters, and values no longer than 512 characters before provider wire emission.
 
 ### Anthropic request -> Responses provider semantic
 
@@ -250,6 +263,8 @@ Required closeout after source green: V3 fmt, protocol characterization gates, r
 | OpenAI `medium` -> Chat effort -> Anthropic `output_config.effort=medium` | OpenAI `minimal` -> Anthropic fails; no invented `thinking` budget |
 | Anthropic `output_config.effort=xhigh` -> Chat effort -> Responses `reasoning.effort=xhigh` | Unsupported target-model effort fails before transport |
 | Anthropic numeric budget -> Chat budget -> valid Gemini `thinkingBudget` | Numeric budget never becomes OpenAI qualitative effort |
-| `client_metadata.user_id` -> Anthropic `metadata.user_id` | `client_metadata.session_id` and mixed-key objects fail without MetadataCenter copy |
+| Exact `client_metadata.user_id` -> Anthropic `metadata.user_id`; registered Codex ids are consumed without provider-wire projection | Unknown or malformed client metadata fails without MetadataCenter copy |
+| Exact structured format -> Anthropic `output_config.format` | `store=false` is consumed as semantically equivalent; valid or malformed `prompt_cache_key`, `store=true`, and unsupported verbosity fail at the adjacent codec |
+| Codex `client_metadata["x-codex-turn-metadata"]` longer than 512 survives Responses inbound, Chat canonicalization, and Responses outbound unchanged | Public `metadata` still enforces its 512-character value limit; malformed non-object `client_metadata` fails at inbound |
 | Responses summary/context/mode round-trip back to Responses | Anthropic projection fails and no system marker is emitted |
 | Gemini includeThoughts round-trips to Gemini | It never becomes Anthropic display or OpenAI summary |

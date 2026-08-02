@@ -211,6 +211,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
         manifest,
+        captured_target_09: None,
         failure_session_scope: input.failure_session_scope.clone(),
         provider_health: &provider_health,
         retry_policy,
