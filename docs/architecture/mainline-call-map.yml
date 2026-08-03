@@ -1,6 +1,31 @@
 version: 1
 status: seed
 chains:
+- chain_id: architecture.repository_filesystem.mainline
+  summary: Repository authoring policy is verified by the required repo-sanity build and CI gate without entering runtime paths.
+  entry_contract:
+    node: RepoFilesystemAuthoring01Policy
+    owner_doc: docs/architecture/function-map.yml
+  edges:
+  - step_id: repo-filesystem-01
+    from_node: RepoFilesystemAuthoring01Policy
+    to_node: RepoFilesystemVerify02Gate
+    caller_symbol: checkRepositoryFilesystemGovernance
+    caller_file: scripts/ci/repo-sanity.mjs
+    callee_symbol: verifyRepositoryFilesystemGovernance
+    callee_file: scripts/architecture/verify-repository-filesystem-governance.mjs
+    owner_feature_id: architecture.repository_filesystem_governance
+    semantic_input: repository root entries, Git tracked paths, and Git ignore decisions
+    semantic_output: fail-fast repository filesystem contract verdict
+    resource_flow:
+      consumes:
+      - architecture.repository_filesystem_contract
+      produces:
+      - architecture.repository_filesystem_contract
+      side_channel_reads: []
+      side_channel_writes: []
+    status: anchored
+
 - chain_id: config.user_config_materialization.mainline
   summary: RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig.
   entry_contract:

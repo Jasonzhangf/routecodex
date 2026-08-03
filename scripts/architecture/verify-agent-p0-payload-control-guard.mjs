@@ -7,7 +7,6 @@ const projectFiles = [
   'AGENTS.md',
   '.agents/skills/rcc-dev-skills/SKILL.md',
   '.agents/skills/rcc-v3-architecture/SKILL.md',
-  '.agents/skills/rcc-server-restart/SKILL.md',
 ];
 const globalFiles = [
   resolve(homedir(), '.codex/AGENTS.md'),

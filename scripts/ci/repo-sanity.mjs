@@ -68,6 +68,7 @@ function isForbiddenTrackedPath(p) {
 function checkRootLayout() {
   // Fixed top-level layout. Adding new root entries requires an explicit policy change.
   const sourceRoots = new Set([
+    '.agent-collab',
     '.agents',
     '.beads',
     '.github',
@@ -95,7 +96,7 @@ function checkRootLayout() {
     'tests',
     'tsconfig.jest.json',
     'tsconfig.json',
-    'vendor',
+    'v3',
     'webui',
   ]);
   const generatedRoots = new Set([
@@ -112,7 +113,6 @@ function checkRootLayout() {
     '.agent-state',
     '.cache',
     '.DS_Store',
-    '.reasonix',
     '.local-index',
     'CACHE.md',
     'bin',
@@ -345,6 +345,24 @@ function checkLlmswitchRustificationAudit() {
   }
 }
 
+function checkRepositoryFilesystemGovernance() {
+  const checks = [
+    ['scripts/architecture/verify-repository-filesystem-governance.mjs'],
+    ['scripts/tests/repository-filesystem-governance-red-fixtures.mjs'],
+  ];
+  for (const args of checks) {
+    const out = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    if (out.status !== 0) {
+      console.error(`[repo-sanity] ${args[0]} failed`);
+      const stdout = String(out.stdout || '').trim();
+      const stderr = String(out.stderr || '').trim();
+      if (stdout) console.error(stdout);
+      if (stderr) console.error(stderr);
+      process.exit(2);
+    }
+  }
+}
+
 const files = runGit(['ls-files']).split('\n').map((s) => s.trim()).filter(Boolean);
 const forbidden = [];
 for (const p of files) {
@@ -367,6 +385,7 @@ checkRootWriteSources();
 checkLegacyInstallScriptsDeleted();
 checkUntrackedNotIgnored();
 checkTrackedSecrets();
+checkRepositoryFilesystemGovernance();
 checkLlmswitchRustificationAudit();
 
 console.log('[repo-sanity] ok');

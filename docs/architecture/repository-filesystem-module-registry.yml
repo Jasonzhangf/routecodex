@@ -1,0 +1,40 @@
+version: 1
+status: active
+modules:
+  - module_id: architecture.repository_filesystem_governance
+    owner_feature_id: architecture.repository_filesystem_governance
+    owned_paths:
+      - .gitignore
+      - scripts/ci/repo-sanity.mjs
+      - scripts/architecture/verify-repository-filesystem-governance.mjs
+      - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+      - scripts/start-verify.mjs
+      - .agents/skills/rcc-dev-skills/SKILL.md
+      - .agents/skills/rcc-dev-skills/references
+      - .agents/skills/rcc-v3-architecture/SKILL.md
+      - docs/architecture/repository-filesystem-module-registry.yml
+      - docs/goals/root-generated-artifacts-governance-plan.md
+      - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+    allowed_paths:
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/verification-map.yml
+      - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
+      - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
+      - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates
+      - config
+    allowed_edges:
+      - from: RepoFilesystemAuthoring01Policy
+        to: RepoFilesystemVerify02Gate
+      - from: RepoFilesystemVerify02Gate
+        to: RepoFilesystemBuild03Required
+    forbidden_resources:
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+      - metadata.runtime_control

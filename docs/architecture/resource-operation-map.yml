@@ -3,6 +3,19 @@ version: 1
 status: m0
 
 resources:
+  - resource_id: architecture.repository_filesystem_contract
+    resource_kind: repository_governance
+    lifecycle: architecture.repository_filesystem
+    identity: [root_entry, tracked_path, ignore_rule]
+    owner_feature_id: architecture.repository_filesystem_governance
+    owner_node: RepoFilesystemAuthoring01Policy
+    allowed_readers: [RepoFilesystemVerify02Gate, RepoFilesystemBuild03Required]
+    allowed_writers: [RepoFilesystemAuthoring01Policy]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic, ServerRespOutbound05ClientFrame, MetaReq04RuntimeControlBound]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    required_gates: [npm run verify:repo-sanity, npm run verify:function-map-compile-gate]
+
   - resource_id: architecture.agent_collab_protocol_contract
     resource_kind: governance_contract
     lifecycle: architecture.collaboration_protocol

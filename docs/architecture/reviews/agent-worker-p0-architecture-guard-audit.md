@@ -7,7 +7,7 @@ This audit covers the non-routing entry surfaces that a worker can see before it
 - global Agent entry: `~/.codex/AGENTS.md`
 - project Agent entry: `AGENTS.md`
 - global engineering/review entries: `coding-principals`, `pipedebug`, `rcc-v3-config-ssot`, `codex-review`
-- project RouteCodex entries: `rcc-dev-skills`, `rcc-v3-architecture`, `rcc-server-restart`
+- project RouteCodex entries: `rcc-dev-skills`, `rcc-v3-architecture`; the duplicate `rcc-server-restart` entry is physically retired
 - V3 architecture CI wiring and negative fixtures
 
 ## Findings

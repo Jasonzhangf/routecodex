@@ -10,6 +10,11 @@ It does not redefine user runtime state under `~/.rcc`. `~/.rcc` remains the run
 
 Evidence collected on 2026-06-07 and updated on 2026-06-08:
 
+- 2026-08-03 audit removed tracked root `fwd.*` markers, tracked `.reasonix/truncated-results`, tracked `dist/debug/snapshot` emit, `note.md.d`, and `samples/mock-provider/_archive`. The same paths are now rejected by the repository filesystem verifier and its red fixtures.
+- 2026-08-03 audit confirmed `.agent-collab/` and `v3/` are active source/contract roots. `repo-sanity` now permits them explicitly instead of treating them as unexplained residue.
+- 2026-08-03 audit retired root `.reasonix/`, `vendor/`, `docs/architecture/backups/`, and the duplicate `.agents/skills/rcc-server-restart/` entry. `.reasonix` state belongs under `.agent-state/reasonix/`; restart governance belongs only in `rcc-dev-skills`.
+- 2026-08-03 audit found that broad ignore rules hid project skill and start-verification source. Project `.agents/` source and `scripts/start-verify.mjs` are no longer ignored, and the gate rejects their reintroduction into ignored state.
+
 - `git check-ignore -v` proves these root items are ignored generated/local state: `tmp/`, `bin/`, `lib/`, `.clock/`, `.codex-work/`, `.drudge/`, `.hypatia/`, `.hypatia_data/`, `.reasonix/`, `clock.md`, `entities.json`, `mempalace.yaml`, `hypatia`, `models/`, `tmp-route-sample.mjs`, `tmp-route-test.mjs`.
 - `git ls-files` proved these suspicious root items were tracked, so they required source changes instead of local-trash deletion: `package/`, historical `nested/deep/ap003.txt`, `rcc`.
 - `.git/info/exclude` currently ignores `webui/`, but `package.json`, `jest.config.js`, and `scripts/install-global.sh` treat `webui/` as source input. This is a local exclude hazard: ignored status alone is not sufficient deletion evidence.
@@ -43,7 +48,7 @@ Current root classification:
 | `.agent-state/` | Agent/tool local state | `.reasonix/`, `.codex-work/`, `.drudge/`, `clock.md` migrated from root | Approved local root; old root state names forbidden |
 | `.cache/model-cache/` | Model cache | root `models/bert` migrated without deletion | Approved local cache root; root `models/` and non-model-cache `.cache/*` are forbidden |
 | `samples/` | Tracked/evidence samples | package/test usage | Keep as sample/evidence truth |
-| `vendor/` | Project dependency/vendor input | tracked-visible root | Keep until owner audit proves obsolete |
+| `vendor/` | Retired dependency copy | `scripts/vendor-core.mjs` uses `sharedmodule/llmswitch-core` directly; no runtime/package consumer | Deleted on 2026-08-03; gate forbids reappearance |
 
 ## Root Layout Contract
 
@@ -147,13 +152,19 @@ Do not delete without a dedicated migration decision:
 
 - `webui/`, even if locally ignored;
 - `samples/`;
-- `vendor/`;
 - `~/.rcc/diag` or `~/.rcc/codex-samples`.
 
 2026-06-08 migration decisions:
 
 - `package/` and root `rcc` were deleted after source reference audit.
 - `models/`, Hypatia/MemPalace, and agent/tool state were migrated, not deleted.
+
+2026-08-03 migration decisions:
+
+- Root `.reasonix/` was retired after its state moved to `.agent-state/reasonix/`.
+- `vendor/` was deleted after reference audit confirmed the sharedmodule is the direct source.
+- `docs/architecture/backups/`, `note.md.d/`, and `samples/mock-provider/_archive/` were deleted as unreferenced backup/archive residue.
+- Stale per-run Cargo target directories were removed while retaining `.agent-collab` actor, heartbeat, event, evidence, and log records.
 
 ## Verification
 

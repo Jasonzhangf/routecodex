@@ -5,6 +5,61 @@
 # - bind feature to canonical types/builders/tests
 version: 1
 owners:
+  - feature_id: architecture.repository_filesystem_governance
+    status: active
+    summary: "repository root, generated output, tracked residue, and critical source ignore governance"
+    owner_kind: architecture_contract
+    owner_scope: "repository-only filesystem policy and build gate; no runtime request, response, provider, metadata, or routing behavior"
+    owner_module: scripts/architecture/verify-repository-filesystem-governance.mjs
+    canonical_types:
+      - RepositoryFilesystemContract
+    canonical_builders:
+      - verifyRepositoryFilesystemGovernance
+    allowed_paths:
+      - .gitignore
+      - scripts/ci/repo-sanity.mjs
+      - scripts/architecture/verify-repository-filesystem-governance.mjs
+      - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+      - scripts/start-verify.mjs
+      - .agents/skills/rcc-dev-skills/SKILL.md
+      - .agents/skills/rcc-dev-skills/references
+      - .agents/skills/rcc-v3-architecture/SKILL.md
+      - docs/architecture/repository-filesystem-module-registry.yml
+      - docs/architecture/function-map.yml
+      - docs/architecture/mainline-call-map.yml
+      - docs/architecture/resource-operation-map.yml
+      - docs/architecture/verification-map.yml
+      - docs/goals/root-generated-artifacts-governance-plan.md
+      - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+      - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
+      - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
+      - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
+    forbidden_paths:
+      - src
+      - sharedmodule/llmswitch-core/rust-core
+      - v3/crates
+      - config
+    required_tests:
+      - scripts/architecture/verify-repository-filesystem-governance.mjs
+      - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+      - scripts/ci/repo-sanity.mjs
+    required_gates:
+      - npm run verify:repo-sanity
+      - npm run verify:architecture-mainline-call-map
+    migration_target: none
+    resource_bindings:
+      writes:
+        - architecture.repository_filesystem_contract@RepoFilesystemAuthoring01Policy
+      reads:
+        - architecture.repository_filesystem_contract@RepoFilesystemVerify02Gate
+      forbidden:
+        - request.normal_payload@HubReqInbound02Standardized
+        - provider.wire_payload@ProviderReqOutbound06WirePayload
+        - response.client_payload@ServerRespOutbound05ClientFrame
+        - metadata.runtime_control@MetaReq04RuntimeControlBound
+    notes:
+      - "This owner governs repository files only and cannot own or mutate runtime semantics."
+
   - feature_id: architecture.resource_ownership_model
     status: active
     summary: "resource ownership taxonomy, operation map, resource-flow gate, and source-binding gate for request/response/resource convergence"

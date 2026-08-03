@@ -55,7 +55,6 @@ samples/ci-goldens/_regressions/apply_patch/invalid_json/*.json
 samples/ci-goldens/_regressions/apply_patch/missing_changes/*.json
 # Development and test scripts
 scripts/install-verify.mjs
-scripts/start-verify.mjs
 scripts/test-*.mjs
 scripts/capture-*.mjs
 scripts/demo-*.mjs
@@ -92,7 +91,6 @@ botpy.log
 sharedmodule/llmswitch-core/CACHE.md
 sharedmodule/llmswitch-core/note.md
 sharedmodule/llmswitch-core/rust-core/note.md
-vendor/llmswitch-core/
 
 # Local agent/tooling state (never commit)
 .agent-state/
@@ -114,10 +112,9 @@ vendor/llmswitch-core/
 .agent-collab/current*.run_dir
 .agent-collab/.last-*
 
-# Local agent skills (local only)
-.agents/
+# Project-local skills are repository source. Tool runtime state belongs in
+# .agent-state/ or .agent-collab/, never under .agents/.
 sharedmodule/llmswitch-core/router_hotpath_napi.node
-sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/text_guidance_web.rs
 # mempalace/hypatia local artifacts now live under .local-index/
 .mempalace/
 # Rust build artifacts (cargo target/)

@@ -5,6 +5,26 @@
 
 version: 1
 verification:
+  - feature_id: architecture.repository_filesystem_governance
+    change_risk: low
+    unit:
+      - scripts/architecture/verify-repository-filesystem-governance.mjs
+      - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
+    contract:
+      - docs/architecture/repository-filesystem-module-registry.yml
+      - docs/goals/root-generated-artifacts-governance-plan.md
+    integration:
+      - .gitignore
+      - scripts/ci/repo-sanity.mjs
+      - docs/architecture/mainline-call-map.yml
+    smoke:
+      - npm run verify:repo-sanity
+      - npm run verify:architecture-mainline-call-map
+    build:
+      - npm run verify:repo-sanity
+    notes:
+      - "Positive gate accepts active .agent-collab and v3 roots; negative fixtures reject deprecated roots, tracked generated residue, and ignored critical source."
+
   - feature_id: architecture.resource_ownership_model
     change_risk: high
     unit:
