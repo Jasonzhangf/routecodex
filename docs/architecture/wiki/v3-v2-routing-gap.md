@@ -45,7 +45,7 @@ keeps the route as `thinking`.
 | Aspect | V2 (legacy) | V3 (current) |
 | --- | --- | --- |
 | Old user `messages[0].content` | Could bias route selection in old scripts | Ignored unless it is the *newest* user carrier inside the active turn (`active_turn.rs::extract_message_signals`) |
-| Declared tool inventory | Could push the request to `coding`/`search`/`tools` | Never; only actual tool calls inside the active turn count |
+| Declared client function/custom tool inventory | Could push the request to `coding`/`search`/`tools` | Adds the `tools` route fact for pool matching; actual tool calls inside the active turn still decide coding/search/tool route semantics |
 | `reasoning` field on the request body | Could override route to `thinking` | Not a route signal; routing ignores it (see `v3-v2-route-classifier-parity-test-design.md` bullet 4) |
 | Longcontext threshold | Hard-coded `180000` in some V2 callers | Per-server-group `routing.longcontext.match.min_input_tokens` (was lost during the V2→V3 config compile, now restored) |
 

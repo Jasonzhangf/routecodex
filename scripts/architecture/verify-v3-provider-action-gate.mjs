@@ -1088,7 +1088,7 @@ for (const rel of Object.values(files)) {
 const text = Object.fromEntries(Object.entries(files).map(([key, rel]) => [key, read(rel)]));
 
 for (const token of [
-  'handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(',
+  'target_protocol_unmapped_field_fails_without_provider_switch_or_transport',
   '"ProviderReqCompat06ProviderCompat"',
   '"provider_request_compat_error"',
   '"V3ProviderReqOutbound08WirePayload"',
@@ -1103,8 +1103,8 @@ const responsesRelayRequestBody = findFunctionBody(
 );
 for (const [label, pattern] of [
   [
-    'ProviderReqCompat06ProviderCompat failure branch',
-    /let\s+req_compat\s*=\s*match\s+build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\{[\s\S]{0,1200}?Err\s*\(\s*error\s*\)\s*=>\s*\{\s*handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::ProviderCompat\s*\(\s*error\s*\)\s*\)\s*;/u,
+    'ProviderReqCompat06ProviderCompat request-local fail-fast branch',
+    /let\s+req_compat\s*=\s*try_before_resp03!\s*\(\s*build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\)\s*;/u,
   ],
   [
     'V3ProviderReqOutbound08WirePayload failure branch',
@@ -1113,8 +1113,19 @@ for (const [label, pattern] of [
 ]) {
   if (!pattern.test(responsesRelayRequestBody)) {
     failures.push(
-      `${files.responses}: ${label} must enter handle_provider_request_failure`,
+      label.startsWith('V3ProviderReqOutbound08WirePayload')
+        ? `${files.responses}: ${label} must enter handle_provider_request_failure`
+        : `${files.responses}: ${label} is missing`,
     );
+  }
+}
+for (const forbidden of [
+  'provider_compat_error_is_target_protocol_incompatible',
+  'target_protocol_incompatible_candidates',
+  'last_target_protocol_incompatible_error',
+]) {
+  if (responsesRelayRequestBody.includes(forbidden)) {
+    failures.push(`${files.responses}: ProviderReqCompat06ProviderCompat must not switch provider through ${forbidden}`);
   }
 }
 assertCallerInvokesCallee({

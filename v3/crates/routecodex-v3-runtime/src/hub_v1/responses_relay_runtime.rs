@@ -1654,6 +1654,11 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         };
     }
     let provider_semantic_body = request_outcome.payload().clone();
+    let anthropic_response_projection_context =
+        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
+            })?;
     let local_continuation_request_body = provider_semantic_body.clone();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
@@ -1775,6 +1780,23 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 });
             }
         }
+        let selected_target_provider_id = selected.candidate.provider_id.clone();
+        let selected_target_auth_alias = selected.candidate.auth_alias.clone();
+        let selected_target_model_id = selected.candidate.model_id.clone();
+        let provider_wire_protocol = try_before_resp03!(
+            provider_wire_protocol_for_selected_candidate(&selected.candidate)
+        );
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05.clone(),
+            V3HubTargetResolution::Routed,
+            selected.candidate.clone(),
+        );
+        let req07 =
+            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        let target = try_before_resp03!(provider_target(manifest, req07.selected_target()));
+        let req_compat = try_before_resp03!(
+            build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+        );
         provider_send_attempts = provider_send_attempts.saturating_add(1);
         let mut selected_observability =
             build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
@@ -1787,12 +1809,6 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         if let Some(sink) = route_selection_event_sink.as_ref() {
             sink(&selected_observability);
         }
-        let selected_target_provider_id = selected.candidate.provider_id.clone();
-        let selected_target_auth_alias = selected.candidate.auth_alias.clone();
-        let selected_target_model_id = selected.candidate.model_id.clone();
-        let provider_wire_protocol = try_before_resp03!(
-            provider_wire_protocol_for_selected_candidate(&selected.candidate)
-        );
         macro_rules! handle_provider_request_failure {
             ($error:expr) => {{
                 let failure = provider_request_relay_failure(
@@ -1830,24 +1846,8 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }};
         }
-        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-            req05.clone(),
-            V3HubTargetResolution::Routed,
-            selected.candidate.clone(),
-        );
         trace.push("V3HubReqTarget06Resolved");
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
         trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = try_before_resp03!(provider_target(manifest, req07.selected_target()));
-        let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
-            Ok(req_compat) => req_compat,
-            Err(error) => {
-                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(
-                    error
-                ));
-            }
-        };
         trace.push("ProviderReqCompat06ProviderCompat");
         let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
         let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
@@ -2090,12 +2090,15 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 }
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        try_before_resp03!(project_v3_anthropic_message_as_responses_response(
-                            &provider_value
+                        try_before_resp03!(
+                            project_v3_anthropic_message_as_responses_response_with_context(
+                                &provider_value,
+                                &anthropic_response_projection_context,
+                            )
+                            .map_err(|error| {
+                                V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
+                            })
                         )
-                        .map_err(|error| {
-                            V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())
-                        }))
                     } else {
                         provider_value.clone()
                     };
@@ -2273,10 +2276,11 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             V3ProviderResponseBody::Sse(stream) => {
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value_result =
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
                         provider_wire_protocol,
                         stream,
                         &stream_observation,
+                        &anthropic_response_projection_context,
                     )
                     .await;
                 try_before_resp03!(runtime_timing
@@ -3183,9 +3187,9 @@ fn run_json_response_hooks(
     let resp04 = hooks.commit(resp03)?;
     let action = resp04.action();
     let finalized_payload = resp04.finalized_payload().clone();
-    let response_stopless_state = resp04.stopless_center_state().cloned();
+    let response_stopless_state = resp04.control_transition().cloned();
     trace.push("V3HubRespContinuation04Committed");
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
@@ -3924,6 +3928,56 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "OpenAI Chat tool_call must be an object before Responses projection".to_string(),
         )
     })?;
+    let call_id = object
+        .get("id")
+        .or_else(|| object.get("call_id"))
+        .or_else(|| object.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat tool_call id is required before Responses projection".to_string(),
+            )
+        })?;
+    if object.get("type").and_then(Value::as_str) == Some("custom") {
+        let custom = object
+            .get("custom")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "OpenAI Chat custom tool_call.custom must be an object before Responses projection"
+                        .to_string(),
+                )
+            })?;
+        let name = custom
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                    "OpenAI Chat custom tool name is required before Responses projection"
+                        .to_string(),
+                )
+            })?;
+        if !custom_tool_names.contains(name) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat custom tool response requires an active governed custom declaration"
+                    .to_string(),
+            ));
+        }
+        let input = custom.get("input").and_then(Value::as_str).ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat custom tool input must be a string before Responses projection"
+                    .to_string(),
+            )
+        })?;
+        return Ok(json!({
+            "type":"custom_tool_call",
+            "call_id":call_id,
+            "name":name,
+            "input":input
+        }));
+    }
     let function = object
         .get("function")
         .and_then(Value::as_object)
@@ -3947,27 +4001,6 @@ fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .get("arguments")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let call_id = object
-        .get("id")
-        .or_else(|| object.get("call_id"))
-        .or_else(|| object.get("tool_call_id"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                "OpenAI Chat tool_call id is required before Responses projection".to_string(),
-            )
-        })?;
-    if custom_tool_names.contains(name) {
-        let input =
-            extract_v3_responses_custom_tool_input_from_openai_chat_arguments(name, arguments)?;
-        return Ok(json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":name,
-            "input":input
-        }));
-    }
     if name == "tool_search" {
         let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
         return Ok(json!({
@@ -4104,113 +4137,6 @@ fn collect_v3_responses_custom_tool_names_from_tools(
             names.insert(name.to_string());
         }
     }
-}
-
-fn extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
-    name: &str,
-    arguments: &str,
-) -> Result<String, V3ResponsesRelayRuntimeError> {
-    let parsed: Value = match serde_json::from_str(arguments) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            if let Some(input) =
-                extract_v3_responses_custom_tool_input_from_relaxed_openai_chat_arguments(arguments)
-            {
-                return Ok(input);
-            }
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                format!(
-                    "OpenAI Chat custom tool_call {name} arguments must be JSON object with string input before Responses projection: {error}"
-                ),
-            ));
-        }
-    };
-    let object = parsed.as_object().ok_or_else(|| {
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-            "OpenAI Chat custom tool_call {name} arguments must be JSON object before Responses projection"
-        ))
-    })?;
-    object
-        .get("input")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "OpenAI Chat custom tool_call {name} arguments.input must be string before Responses projection"
-            ))
-        })
-}
-
-fn extract_v3_responses_custom_tool_input_from_relaxed_openai_chat_arguments(
-    arguments: &str,
-) -> Option<String> {
-    let trimmed = arguments.trim();
-    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-        return None;
-    }
-    let key = "\"input\"";
-    let key_start = trimmed.find(key)?;
-    if !trimmed[1..key_start].trim().is_empty() {
-        return None;
-    }
-    let after_key_start = key_start + key.len();
-    let after_key = &trimmed[after_key_start..];
-    let colon_offset = after_key.find(':')?;
-    if !after_key[..colon_offset].trim().is_empty() {
-        return None;
-    }
-    let after_colon_start = after_key_start + colon_offset + 1;
-    let after_colon = &trimmed[after_colon_start..];
-    let value_ws_len = after_colon.len() - after_colon.trim_start().len();
-    let opening_quote = after_colon_start + value_ws_len;
-    if trimmed.as_bytes().get(opening_quote) != Some(&b'"') {
-        return None;
-    }
-    let end_brace = trimmed.rfind('}')?;
-    let before_end_brace = &trimmed[..end_brace];
-    let closing_quote = before_end_brace.rfind('"')?;
-    if closing_quote <= opening_quote {
-        return None;
-    }
-    if !trimmed[closing_quote + 1..end_brace].trim().is_empty() {
-        return None;
-    }
-    decode_v3_relaxed_json_string_content(&trimmed[opening_quote + 1..closing_quote])
-}
-
-fn decode_v3_relaxed_json_string_content(content: &str) -> Option<String> {
-    let mut output = String::with_capacity(content.len());
-    let mut chars = content.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '\\' {
-            output.push(ch);
-            continue;
-        }
-        let escaped = chars.next()?;
-        match escaped {
-            '"' => output.push('"'),
-            '\\' => output.push('\\'),
-            '/' => output.push('/'),
-            'b' => output.push('\u{0008}'),
-            'f' => output.push('\u{000c}'),
-            'n' => output.push('\n'),
-            'r' => output.push('\r'),
-            't' => output.push('\t'),
-            'u' => {
-                let mut hex = String::with_capacity(4);
-                for _ in 0..4 {
-                    hex.push(chars.next()?);
-                }
-                let code = u32::from_str_radix(&hex, 16).ok()?;
-                output.push(char::from_u32(code)?);
-            }
-            other => {
-                output.push('\\');
-                output.push(other);
-            }
-        }
-    }
-    Some(output)
 }
 
 fn build_v3_relay_observability_from_selected(
@@ -5037,6 +4963,137 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
         compile_v3_config_05_manifest(authoring).expect("relay-to-direct manifest")
     }
 
+    fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.anthropic_first]
+type = "anthropic"
+base_url = "http://anthropic.invalid/v1"
+default_model = "claude-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "ANTHROPIC_FIRST_KEY" }] }
+[providers.anthropic_first.models.claude-test]
+wire_name = "claude-test"
+capabilities = ["text", "tools"]
+
+[providers.openai_second]
+type = "openai_chat"
+base_url = "http://openai.invalid/v1"
+default_model = "chat-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "OPENAI_SECOND_KEY" }] }
+[providers.openai_second.models.chat-test]
+wire_name = "chat-test"
+capabilities = ["text", "tools"]
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "anthropic_first", model = "claude-test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "openai_second", model = "chat-test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
+"#,
+        )
+        .expect("mixed protocol authoring");
+        compile_v3_config_05_manifest(authoring).expect("mixed protocol manifest")
+    }
+
+    struct RecordingChatTransport {
+        provider_ids: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponsesTransport for RecordingChatTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            assert_eq!(request.provider_id(), "anthropic_first");
+            self.provider_ids
+                .lock()
+                .expect("provider id recorder")
+                .push(request.provider_id().to_string());
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"msg_static_projection","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#.to_vec(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn target_protocol_unmapped_field_fails_without_provider_switch_or_transport() {
+        std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
+        std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
+        let manifest = anthropic_then_openai_chat_manifest();
+        let session_scope =
+            V3ProviderFailureSessionScope::new("test", "default", "protocol-incompatible-session")
+                .expect("session scope");
+        let transport = RecordingChatTransport {
+            provider_ids: Mutex::new(Vec::new()),
+        };
+
+        let error = execute_v3_responses_relay_runtime_inner(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "test".to_string(),
+                failure_session_scope: session_scope,
+                request_id: "req-unmapped-field-no-switch".to_string(),
+                payload: json!({
+                    "model": "client-model",
+                    "input": "hello",
+                    "prompt_cache_key": "codex-cache-key"
+                }),
+            },
+            &transport,
+            None,
+            None,
+            V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+            V3ResponsesRelayRetryPolicy::default(),
+            None,
+            None,
+            None,
+            None,
+            BTreeSet::new(),
+            None,
+        )
+        .await
+        .expect_err("unmapped target field must fail before provider transport");
+
+        assert!(
+            error.to_string().contains("$.request.prompt_cache_key"),
+            "{error:?}"
+        );
+        assert!(
+            transport
+                .provider_ids
+                .lock()
+                .expect("provider ids")
+                .is_empty(),
+            "target protocol projection failure must not switch provider or enter transport"
+        );
+    }
+
     #[test]
     fn missing_execution_block_preserves_relay_mode() {
         let authoring = parse_v3_config_02_authoring(
@@ -5707,10 +5764,10 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
                         "reasoning_content": "Need inspect before running the tool.",
                         "tool_calls": [{
                             "id": "call_reasoning_exec",
-                            "type": "function",
-                            "function": {
+                            "type": "custom",
+                            "custom": {
                                 "name": "exec",
-                                "arguments": "{\"input\":\"pwd\"}"
+                                "input": "pwd"
                             }
                         }]
                     },
@@ -5735,6 +5792,46 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         );
         assert_eq!(response["output"][1]["type"], "custom_tool_call");
         assert_eq!(response["output"][1]["call_id"], "call_reasoning_exec");
+    }
+
+    #[test]
+    fn openai_chat_custom_tool_response_round_trips_to_responses_custom_call() {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id": "chatcmpl_apply_patch",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_apply_patch",
+                            "type": "custom",
+                            "custom": {
+                                "name": "apply_patch",
+                                "input": "*** Begin Patch\n*** End Patch"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            &json!({
+                "tools": [{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
+                }]
+            }),
+        )
+        .expect("Chat function projection must reverse to the declared Responses custom tool");
+
+        assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["output"][0]["type"], "custom_tool_call");
+        assert_eq!(response["output"][0]["name"], "apply_patch");
+        assert_eq!(
+            response["output"][0]["input"],
+            "*** Begin Patch\n*** End Patch"
+        );
     }
 
     #[test]
@@ -5815,34 +5912,6 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert!(
             response["usage"].get("completion_tokens").is_none(),
             "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
-        );
-    }
-
-    #[test]
-    fn openai_chat_custom_tool_arguments_extracts_unescaped_raw_input_wrapper() {
-        let raw_input = "python - <<'PY'\nprint(\"hello\")\nPY";
-        let arguments = format!("{{\"input\":\"{raw_input}\"}}");
-
-        let input =
-            extract_v3_responses_custom_tool_input_from_openai_chat_arguments("exec", &arguments)
-                .expect("relaxed custom tool input wrapper");
-
-        assert_eq!(input, raw_input);
-    }
-
-    #[test]
-    fn openai_chat_custom_tool_arguments_rejects_malformed_non_input_wrapper() {
-        let error = extract_v3_responses_custom_tool_input_from_openai_chat_arguments(
-            "exec",
-            "{\"command\":\"print(\"hello\")\"}",
-        )
-        .expect_err("malformed non-input wrapper must fail fast");
-
-        assert!(
-            error
-                .to_string()
-                .contains("arguments must be JSON object with string input"),
-            "{error}"
         );
     }
 
@@ -6352,6 +6421,76 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         let snapshot = observation.snapshot().expect("stream observation");
         assert_eq!(snapshot.response_status.as_deref(), Some("completed"));
         assert_eq!(snapshot.finish_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_sse_uses_responses_projection_context_for_metadata_and_custom_tools(
+    ) {
+        let observation = V3RuntimeStreamObservation::default();
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools":[{
+                "type":"custom",
+                "name":"apply_patch",
+                "description":"apply a patch"
+            }],
+            "routecodex_chat_extension":{
+                "responses_request":{
+                    "metadata":{"trace_id":"sse-context-kept"}
+                }
+            }
+        }))
+        .expect("projection context");
+        let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_sse_custom","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":10}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_apply_patch","name":"apply_patch"}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"*** Begin Patch\\n*** End Patch\"}"}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":2}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#
+            .to_vec()),
+        ]));
+
+        let response =
+            build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                V3HubProviderWireProtocol::Anthropic,
+                provider,
+                &observation,
+                &context,
+            )
+            .await
+            .expect("Anthropic SSE projection must use request context");
+
+        assert_eq!(response["metadata"]["trace_id"], "sse-context-kept");
+        assert_eq!(response["output"][0]["type"], "custom_tool_call");
+        assert_eq!(response["output"][0]["call_id"], "call_apply_patch");
+        assert_eq!(response["output"][0]["name"], "apply_patch");
+        assert_eq!(
+            response["output"][0]["input"],
+            "*** Begin Patch\n*** End Patch"
+        );
     }
 
     #[tokio::test]

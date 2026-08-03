@@ -1115,7 +1115,7 @@ where
     )?;
     let client_payload = project_client_response(resp04.finalized_payload())?;
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(
-        resp04,
+        resp04.into_data(),
         client_payload,
     );
     trace.push("V3HubRespOutbound05ClientSemantic");

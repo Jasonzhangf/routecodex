@@ -600,6 +600,20 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.request.response_projection_context
+    resource_kind: projection_resource
+    lifecycle: v3.hub_pipeline.v1
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3HubReqOutbound07ProviderSemantic
+    identity: [requestId, entryProtocol]
+    payload_contract: typed_request_fields_explicitly_registered_for_same_request_response_projection
+    allowed_writers: [V3AnthropicResponsesProjectionContext::from_chat_canonical_request]
+    allowed_readers: [project_v3_anthropic_message_as_responses_response_with_context]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, MetadataCenter, V3HubRespOutbound05ClientSemantic, V3ServerRespOutbound06ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    release_point: V3HubRespInbound02Normalized
+    binding_status: anchored
   - resource_id: v3.hub.provider_wire_payload
     resource_kind: provider_wire
     lifecycle: v3.hub_pipeline.v1

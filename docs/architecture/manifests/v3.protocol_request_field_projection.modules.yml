@@ -6,6 +6,17 @@ owner_feature_id: v3.protocol_conversion_field_parity
 canonical_doc: docs/design/v3-protocol-request-field-projection.md
 scope_rule: Every runtime source file modified by this feature must appear in exactly one module owned_paths list below. This registry does not claim full-repository source ownership coverage.
 modules:
+  - module_id: v3.protocol_codec.shared_client_metadata
+    owner: routecodex-v3-runtime::hub_v1::client_metadata_projection
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
+    allowed_operations:
+      - classify registered Codex client metadata keys for explicit target projection rejection or exact user_id mapping
+      - report unknown client metadata payload paths
+    forbidden_operations:
+      - read or write MetadataCenter
+      - construct routing, continuation, retry, or provider selection state
+      - emit provider wire fields
   - module_id: v3.protocol_codec.req_inbound_dispatch
     owner: routecodex-v3-runtime::hub_v1::req_inbound_02_normalized
     owned_paths:
@@ -49,6 +60,7 @@ modules:
     owner: routecodex-v3-runtime::hub_v1::anthropic_codec
     owned_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
     allowed_operations:
@@ -85,6 +97,12 @@ modules:
       - implement field-specific approximation
       - read MetadataCenter payload copies
 allowed_edges:
+  - from: v3.protocol_codec.openai_outbound
+    to: v3.protocol_codec.shared_client_metadata
+    direction: outbound_client_metadata_classification
+  - from: v3.protocol_codec.anthropic
+    to: v3.protocol_codec.shared_client_metadata
+    direction: outbound_client_metadata_classification
   - from: v3.protocol_codec.req_inbound_dispatch
     to: v3.protocol_codec.responses_inbound
     direction: inbound_responses

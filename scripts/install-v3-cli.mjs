@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,38 +27,146 @@ const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
 const repoBin = path.join(repoRoot, 'dist', 'bin', binaryName);
 const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
 
-function buildV3CargoEnv() {
-  const env = { ...process.env };
+export function buildV3CargoEnv(sourceEnv = process.env) {
+  const env = { ...sourceEnv };
   if (!Object.prototype.hasOwnProperty.call(env, 'RUSTUP_TOOLCHAIN')) {
     env.RUSTUP_TOOLCHAIN = 'stable';
   }
   if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
     env.CARGO_NET_OFFLINE = 'true';
   }
-  const cargoTargetDir = env.CARGO_TARGET_DIR
-    ? path.resolve(env.CARGO_TARGET_DIR)
-    : fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'));
+  const ownsCargoTargetDir = !env.CARGO_TARGET_DIR;
+  const cargoTargetDir = ownsCargoTargetDir
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-v3-install-target-'))
+    : path.resolve(env.CARGO_TARGET_DIR);
   env.CARGO_TARGET_DIR = cargoTargetDir;
-  return { env, cargoTargetDir };
+  return { env, cargoTargetDir, ownsCargoTargetDir };
 }
 
 function fail(message) {
-  console.error(`[install-v3-cli] ${message}`);
-  process.exit(2);
+  throw new Error(message);
 }
 
-function requireSpawnSuccess(result, label) {
-  if (result.error) {
-    fail(`${label} could not start: ${result.error.message}`);
+class InstallInterruptedError extends Error {
+  constructor(signal) {
+    super(`V3 install interrupted by ${signal}`);
+    this.exitCode = signal === 'SIGINT' ? 130 : 143;
   }
-  if (result.signal) {
-    fail(`${label} terminated by signal ${result.signal}`);
+}
+
+export function runInterruptibleCommand(command, args, options, build, label) {
+  return new Promise((resolve, reject) => {
+    let spawnFailed = false;
+    const child = spawn(command, args, options);
+    build.activeChildRootPid = child.pid;
+    build.activeChild = child;
+    child.once('error', (error) => {
+      spawnFailed = true;
+      build.activeChild = null;
+      reject(new Error(`${label} could not start: ${error.message}`));
+    });
+    child.once('close', async (status, signal) => {
+      if (spawnFailed) {
+        return;
+      }
+      await waitForOwnedProcessTreeExit(build.interruptedPids);
+      build.activeChild = null;
+      build.activeChildRootPid = null;
+      if (build.interruptedSignal) {
+        reject(new InstallInterruptedError(build.interruptedSignal));
+      } else if (signal) {
+        reject(new Error(`${label} terminated by signal ${signal}`));
+      } else if (status !== 0) {
+        reject(new Error(`${label} failed with status ${status}`));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ESRCH') {
+      return false;
+    }
+    throw error;
   }
-  if (result.status === null) {
-    fail(`${label} exited without a status`);
+}
+
+function collectOwnedProcessTreePids(rootPid) {
+  if (!Number.isInteger(rootPid) || rootPid <= 0 || process.platform === 'win32') {
+    return Number.isInteger(rootPid) && rootPid > 0 ? [rootPid] : [];
   }
-  if (result.status !== 0) {
-    fail(`${label} failed with status ${result.status}`);
+  const result = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], {
+    encoding: 'utf8',
+  });
+  if (result.status !== 0 || result.error) {
+    return [rootPid];
+  }
+  const childrenByParent = new Map();
+  for (const line of result.stdout.split('\n')) {
+    const [pidText, ppidText] = line.trim().split(/\s+/);
+    const pid = Number.parseInt(pidText, 10);
+    const ppid = Number.parseInt(ppidText, 10);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) {
+      continue;
+    }
+    const children = childrenByParent.get(ppid) ?? [];
+    children.push(pid);
+    childrenByParent.set(ppid, children);
+  }
+  const ordered = [];
+  const visit = (pid) => {
+    for (const childPid of childrenByParent.get(pid) ?? []) {
+      visit(childPid);
+    }
+    ordered.push(pid);
+  };
+  visit(rootPid);
+  return ordered;
+}
+
+function signalOwnedProcessTree(rootPid, signal) {
+  const pids = collectOwnedProcessTreePids(rootPid);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if (error?.code !== 'ESRCH') {
+        throw error;
+      }
+    }
+  }
+  return pids;
+}
+
+async function waitForOwnedProcessTreeExit(pids) {
+  for (const pid of pids ?? []) {
+    while (processExists(pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
+async function waitForOwnedTargetSafeToRemove(build) {
+  await waitForOwnedProcessTreeExit(build.interruptedPids);
+  if (build.activeChildRootPid) {
+    await waitForOwnedProcessTreeExit([build.activeChildRootPid]);
+  }
+}
+
+async function cleanupOwnedCargoTargetWhenSafe(build) {
+  await waitForOwnedTargetSafeToRemove(build);
+  cleanupOwnedCargoTarget(build.cargoTargetDir, build.ownsCargoTargetDir);
+}
+
+async function waitForInterruptCleanup(build) {
+  while (build.interruptedSignal && build.activeChild) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
@@ -80,24 +188,22 @@ function expandUserPath(value) {
   return path.resolve(normalized);
 }
 
-function buildV3Cli() {
+async function buildV3Cli(build) {
+  const { env, cargoTargetDir } = build;
   if (!fs.existsSync(manifestPath)) {
     fail(`missing V3 manifest: ${manifestPath}`);
   }
-  const { env, cargoTargetDir } = buildV3CargoEnv();
-  const v3ArchitectureGateResult = spawnSync(process.execPath, [v3ArchitectureCiGate], {
+  await runInterruptibleCommand(process.execPath, [v3ArchitectureCiGate], {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
-  });
-  requireSpawnSuccess(v3ArchitectureGateResult, 'V3 architecture CI gate');
-  const gateResult = spawnSync(process.execPath, [routeClassifierFileSizeGate], {
+  }, build, 'V3 architecture CI gate');
+  await runInterruptibleCommand(process.execPath, [routeClassifierFileSizeGate], {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
-  });
-  requireSpawnSuccess(gateResult, 'route classifier file-size gate');
-  const semanticGateResult = spawnSync(
+  }, build, 'route classifier file-size gate');
+  await runInterruptibleCommand(
     process.platform === 'win32' ? 'npm.cmd' : 'npm',
     ['run', 'test:route-classifier-semantics'],
     {
@@ -105,15 +211,15 @@ function buildV3Cli() {
       env,
       stdio: 'inherit',
     },
+    build,
+    'route classifier semantic gate',
   );
-  requireSpawnSuccess(semanticGateResult, 'route classifier semantic gate');
-  const buildInfoResult = spawnSync(process.execPath, [buildInfoScript], {
+  await runInterruptibleCommand(process.execPath, [buildInfoScript], {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
-  });
-  requireSpawnSuccess(buildInfoResult, 'build-info/version generation');
-  const result = spawnSync('cargo', [
+  }, build, 'build-info/version generation');
+  await runInterruptibleCommand('cargo', [
     'build',
     '--manifest-path',
     manifestPath,
@@ -123,13 +229,49 @@ function buildV3Cli() {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
-  });
-  requireSpawnSuccess(result, 'cargo build for routecodex-v3-cli');
+  }, build, 'cargo build for routecodex-v3-cli');
   const sourceBin = path.join(cargoTargetDir, 'debug', binaryName);
   if (!fs.existsSync(sourceBin)) {
     fail(`built V3 CLI binary not found: ${sourceBin}`);
   }
   return sourceBin;
+}
+
+export function cleanupOwnedCargoTarget(cargoTargetDir, ownsCargoTargetDir) {
+  if (!ownsCargoTargetDir) {
+    return;
+  }
+  fs.rmSync(cargoTargetDir, { recursive: true, force: true });
+}
+
+export async function withOwnedV3CargoTarget(run, sourceEnv = process.env) {
+  const build = buildV3CargoEnv(sourceEnv);
+  build.activeChild = null;
+  build.activeChildRootPid = null;
+  build.interruptedSignal = null;
+  build.interruptedPids = [];
+  const handleSignal = (signal) => {
+    build.interruptedSignal ??= signal;
+    if (Number.isInteger(build.activeChildRootPid)) {
+      build.interruptedPids = signalOwnedProcessTree(build.activeChildRootPid, signal);
+    } else if (build.activeChild && !build.activeChild.killed) {
+      build.activeChild.kill(signal);
+    }
+  };
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
+  try {
+    const result = await run(build);
+    if (build.interruptedSignal) {
+      await waitForInterruptCleanup(build);
+      throw new InstallInterruptedError(build.interruptedSignal);
+    }
+    return result;
+  } finally {
+    process.removeListener('SIGINT', handleSignal);
+    process.removeListener('SIGTERM', handleSignal);
+    await cleanupOwnedCargoTargetWhenSafe(build);
+  }
 }
 
 function copyExecutableAtomic(sourcePath, targetPath) {
@@ -235,29 +377,34 @@ function resolveInstallTargets() {
   return homes;
 }
 
-function main() {
-  const sourceBin = buildV3Cli();
-  copyExecutableAtomic(sourceBin, repoBin);
-  const expectedHash = sha256(repoBin);
-  console.log(`[install-v3-cli] installed repo ${path.relative(repoRoot, repoBin)} sha256=${expectedHash}`);
+async function main() {
+  return withOwnedV3CargoTarget(async (build) => {
+    const sourceBin = await buildV3Cli(build);
+    copyExecutableAtomic(sourceBin, repoBin);
+    const expectedHash = sha256(repoBin);
+    console.log(`[install-v3-cli] installed repo ${path.relative(repoRoot, repoBin)} sha256=${expectedHash}`);
 
-  const targets = resolveInstallTargets();
-  for (const target of targets) {
-    copyExecutableAtomic(repoBin, target.currentBin);
-    const targetPackageJson = path.join(target.home, 'install', 'current', 'package.json');
-    copyPackageJsonAtomic(targetPackageJson);
-    const actualHash = sha256(target.currentBin);
-    if (actualHash !== expectedHash) {
-      fail(`hash mismatch after installing ${target.currentBin}`);
+    const targets = resolveInstallTargets();
+    for (const target of targets) {
+      copyExecutableAtomic(repoBin, target.currentBin);
+      const targetPackageJson = path.join(target.home, 'install', 'current', 'package.json');
+      copyPackageJsonAtomic(targetPackageJson);
+      const actualHash = sha256(target.currentBin);
+      if (actualHash !== expectedHash) {
+        fail(`hash mismatch after installing ${target.currentBin}`);
+      }
+      console.log(`[install-v3-cli] installed ${target.currentBin} sha256=${actualHash}`);
     }
-    console.log(`[install-v3-cli] installed ${target.currentBin} sha256=${actualHash}`);
-  }
-  console.log(`[install-v3-cli] ok: installed V3 CLI only; skipped TS build, WebUI build, and release snapshot`);
+    console.log(`[install-v3-cli] ok: installed V3 CLI only; skipped TS build, WebUI build, and release snapshot`);
+  });
 }
 
-try {
-  main();
-} catch (error) {
-  const reason = error instanceof Error ? error.stack || error.message : String(error);
-  fail(reason);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    const reason = error instanceof Error ? error.stack || error.message : String(error);
+    console.error(`[install-v3-cli] ${reason}`);
+    process.exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 2;
+  }
 }

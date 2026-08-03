@@ -30,7 +30,7 @@ flowchart LR
   V3HubReqChatProcess04Governed["V3HubReqChatProcess04Governed"]
   V3StoplessReq01RuntimeControlLoaded["V3StoplessReq01RuntimeControlLoaded"]
   V3StoplessReq02NoopCliConsumed["V3StoplessReq02NoopCliConsumed"]
-  V3StoplessReq03GuidanceToolInjected["V3StoplessReq03GuidanceToolInjected"]
+  V3StoplessReq03ControlTransitioned["V3StoplessReq03ControlTransitioned"]
   V3HubRespChatProcess03Governed["V3HubRespChatProcess03Governed"]
   V3StoplessResp01ReasoningStopInspected["V3StoplessResp01ReasoningStopInspected"]
   V3StoplessResp02RuntimeControlUpdated["V3StoplessResp02RuntimeControlUpdated"]
@@ -39,7 +39,7 @@ flowchart LR
   V3HubReqContinuation03Classified -->|v3-servertool-stopless-req-01| V3HubReqChatProcess04Governed
   V3HubReqChatProcess04Governed -->|v3-servertool-stopless-req-02| V3StoplessReq01RuntimeControlLoaded
   V3StoplessReq01RuntimeControlLoaded -->|v3-servertool-stopless-req-03| V3StoplessReq02NoopCliConsumed
-  V3StoplessReq02NoopCliConsumed -->|v3-servertool-stopless-req-04| V3StoplessReq03GuidanceToolInjected
+  V3StoplessReq02NoopCliConsumed -->|v3-servertool-stopless-req-04| V3StoplessReq03ControlTransitioned
   V3HubRespChatProcess03Governed -->|v3-servertool-stopless-resp-01| V3StoplessResp01ReasoningStopInspected
   V3StoplessResp01ReasoningStopInspected -->|v3-servertool-stopless-resp-02| V3StoplessResp02RuntimeControlUpdated
   V3StoplessResp02RuntimeControlUpdated -->|v3-servertool-stopless-resp-03| V3StoplessResp03NoopCliOrTerminalProjected
@@ -115,11 +115,11 @@ stateDiagram-v2
 | `v3-servertool-stopless-req-01` | `V3HubReqContinuation03Classified` | `V3HubReqChatProcess04Governed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`, `v3.hub.continuation_ownership`<br/>produces: `v3.request.normal_payload`<br/>side_channel_reads: `v3.continuation.local_context_truth` |
 | `v3-servertool-stopless-req-02` | `V3HubReqChatProcess04Governed` | `V3StoplessReq01RuntimeControlLoaded` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`<br/>produces: `v3.request.normal_payload`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless` |
 | `v3-servertool-stopless-req-03` | `V3StoplessReq01RuntimeControlLoaded` | `V3StoplessReq02NoopCliConsumed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`<br/>produces: `v3.request.normal_payload` |
-| `v3-servertool-stopless-req-04` | `V3StoplessReq02NoopCliConsumed` | `V3StoplessReq03GuidanceToolInjected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.request.normal_payload`<br/>produces: `v3.request.normal_payload`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless`<br/>side_channel_writes: `v3.hub.tool_governance_truth` |
+| `v3-servertool-stopless-req-04` | `V3StoplessReq02NoopCliConsumed` | `V3StoplessReq03ControlTransitioned` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | side_channel_reads: `v3.metadata.runtime_control_stopless`<br/>side_channel_writes: `v3.metadata.runtime_control_stopless` |
 | `v3-servertool-stopless-resp-01` | `V3HubRespChatProcess03Governed` | `V3StoplessResp01ReasoningStopInspected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.hub.response_semantic`<br/>side_channel_reads: `v3.hub.static_hook_registry` |
 | `v3-servertool-stopless-resp-02` | `V3StoplessResp01ReasoningStopInspected` | `V3StoplessResp02RuntimeControlUpdated` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.hub.response_semantic`<br/>side_channel_writes: `v3.metadata.runtime_control_stopless` |
-| `v3-servertool-stopless-resp-03` | `V3StoplessResp02RuntimeControlUpdated` | `V3StoplessResp03NoopCliOrTerminalProjected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.response.client_payload`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless` |
-| `v3-servertool-stopless-resp-04` | `V3StoplessResp03NoopCliOrTerminalProjected` | `V3HubRespContinuation04Committed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`, `v3.response.client_payload`<br/>produces: `v3.continuation.local_context_truth`<br/>side_channel_writes: `v3.continuation.local_context_truth` |
+| `v3-servertool-stopless-resp-03` | `V3StoplessResp02RuntimeControlUpdated` | `V3StoplessResp03NoopCliOrTerminalProjected` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.hub.response_semantic`<br/>side_channel_reads: `v3.metadata.runtime_control_stopless` |
+| `v3-servertool-stopless-resp-04` | `V3StoplessResp03NoopCliOrTerminalProjected` | `V3HubRespContinuation04Committed` | `anchored` | `v3.servertool_hook_skeleton_lifecycle` | consumes: `v3.hub.response_semantic`<br/>produces: `v3.continuation.local_context_truth`<br/>side_channel_writes: `v3.continuation.local_context_truth` |
 
 ## State Transition Matrix
 

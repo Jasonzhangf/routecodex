@@ -1123,6 +1123,43 @@ chains:
       side_channel_reads:
       - v3.protocol_conversion.field_parity_contract
       side_channel_writes: []
+  - step_id: v3-protocol-field-parity-openai-outbound-web-search-01
+    from_node: V3HubReqOutbound07ProviderSemantic
+    to_node: ProviderReqCompat06ProviderCompat
+    caller_symbol: normalize_openai_chat_messages_payload
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    callee_symbol: project_openai_chat_provider_tools
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+    status: anchored
+    binding_kind: adjacent_outbound_codec_helper
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes:
+      - v3.request.provider_semantic
+      produces:
+      - v3.hub.provider_wire_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
+  - step_id: v3-protocol-field-parity-anthropic-response-context-01
+    from_node: ProviderRespCompat02ProviderCompat
+    to_node: V3HubRespInbound02Normalized
+    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    callee_symbol: project_v3_anthropic_message_as_responses_response_with_context
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+    status: anchored
+    binding_kind: adjacent_response_codec_with_typed_same_request_projection_context
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes:
+      - v3.response.provider_raw
+      - v3.request.response_projection_context
+      produces:
+      - v3.hub.response_semantic
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
 - chain_id: v3.hub_pipeline.v1.relay_request_source_slice
   owner_feature_id: v3.hub_relay_request_semantics
   summary: Relay request-side source slice. Req02 normalizes, Req03 classifies only, and Req04 restores/governs; later fixed nodes remain the standard Hub v1 chain.
@@ -1270,6 +1307,9 @@ chains:
       side_channel_writes:
       - v3.continuation.remote_binding
       - v3.continuation.local_context_truth
+    semantic_contract:
+      - V3HubRespContinuation04Committed contains finalized response and continuation data only
+      - StoplessCenter transition stays in a typed outcome side channel and is consumed by its registered runtime-control edge, never by Resp04 or Resp05 data nodes
   - step_id: v3-hub-resp-05
     from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
@@ -4191,22 +4231,20 @@ chains:
       side_channel_writes: []
   - step_id: v3-servertool-stopless-req-04
     from_node: V3StoplessReq02NoopCliConsumed
-    to_node: V3StoplessReq03GuidanceToolInjected
+    to_node: V3StoplessReq03ControlTransitioned
     caller_symbol: apply_v3_stopless_request_hook_at_req04
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: inject_stopless_guidance
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs
+    callee_symbol: V3StoplessCenterState::provider_turn_in_flight
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
     status: anchored
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
     resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      produces:
-      - v3.request.normal_payload
+      consumes: []
+      produces: []
       side_channel_reads:
       - v3.metadata.runtime_control_stopless
       side_channel_writes:
-      - v3.hub.tool_governance_truth
+      - v3.metadata.runtime_control_stopless
   - step_id: v3-servertool-stopless-resp-01
     from_node: V3HubRespChatProcess03Governed
     to_node: V3StoplessResp01ReasoningStopInspected
@@ -4243,10 +4281,10 @@ chains:
       - v3.metadata.runtime_control_stopless
   - step_id: v3-servertool-stopless-resp-03
     from_node: V3StoplessResp02RuntimeControlUpdated
-    to_node: V3StoplessResp03NoopCliOrTerminalProjected
+    to_node: V3StoplessResp03BusinessPayloadPreserved
     caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: build_stopless_cli_projection_payload
+    callee_symbol: build_stopless_guard_passthrough_visible_payload
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     status: anchored
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
@@ -4254,12 +4292,12 @@ chains:
       consumes:
       - v3.hub.response_semantic
       produces:
-      - v3.response.client_payload
+      - v3.hub.response_semantic
       side_channel_reads:
       - v3.metadata.runtime_control_stopless
       side_channel_writes: []
   - step_id: v3-servertool-stopless-resp-04
-    from_node: V3StoplessResp03NoopCliOrTerminalProjected
+    from_node: V3StoplessResp03BusinessPayloadPreserved
     to_node: V3HubRespContinuation04Committed
     caller_symbol: commit_v3_hub_relay_response
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
@@ -4270,7 +4308,6 @@ chains:
     resource_flow:
       consumes:
       - v3.hub.response_semantic
-      - v3.response.client_payload
       produces:
       - v3.continuation.local_context_truth
       side_channel_reads: []
@@ -5527,7 +5564,7 @@ chains:
     to_node: V3RuntimeTimingProtocolHandoff
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3RuntimeObservabilityAccumulator::with_additional_attempts
+    callee_symbol: with_additional_attempts
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
     status: anchored
     owner_feature_id: v3.runtime_timing_observability

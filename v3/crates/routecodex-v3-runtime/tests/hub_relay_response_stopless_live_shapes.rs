@@ -7,25 +7,6 @@ use routecodex_v3_runtime::{
 };
 use serde_json::{json, Value};
 
-fn stopless_projected_call(payload: &Value) -> &Value {
-    payload["output"]
-        .as_array()
-        .expect("output array")
-        .iter()
-        .find(|item| item["call_id"] == json!("call_stopless_reasoning"))
-        .expect("projected stopless exec_command call")
-}
-
-fn stopless_projected_cmd(payload: &Value) -> String {
-    let arguments = stopless_projected_call(payload)["arguments"]
-        .as_str()
-        .expect("projected stopless arguments");
-    serde_json::from_str::<Value>(arguments).expect("arguments JSON")["cmd"]
-        .as_str()
-        .expect("cmd")
-        .to_string()
-}
-
 fn relay_raw(payload: Value) -> routecodex_v3_runtime::V3ProviderRespInbound01Raw {
     build_v3_provider_resp_inbound_01_raw(
         payload,
@@ -56,7 +37,7 @@ fn active_stopless_response_profile(
 }
 
 #[test]
-fn stopless_live_shape_natural_stop_missing_finish_reason_projects_noop_cli() {
+fn stopless_live_shape_natural_stop_missing_finish_reason_is_control_only() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(json!({
@@ -80,25 +61,16 @@ fn stopless_live_shape_natural_stop_missing_finish_reason_projects_noop_cli() {
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    assert_eq!(
-        resp04.stopless_center_state().unwrap().natural_stop_count(),
-        1
-    );
-    let payload = resp04.canonical_context_payload().unwrap();
-    assert_eq!(payload["status"], "requires_action");
-    assert_eq!(
-        stopless_projected_cmd(payload),
-        "routecodex hook run reasoningStop"
-    );
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.control_transition().unwrap().natural_stop_count(), 1);
+    let payload = resp04.finalized_payload();
+    assert_eq!(payload["status"], "completed");
     let serialized = serde_json::to_string(payload).unwrap();
-    assert!(!serialized.contains("--input-json"));
     for forbidden in [
-        "repeatCount",
-        "triggerHint",
-        "schemaFeedback",
-        "next_step",
-        "continuationPrompt",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
+        "reasoningStop",
+        "requires_action",
     ] {
         assert!(
             !serialized.contains(forbidden),
@@ -134,15 +106,16 @@ fn stopless_live_shape_preface_and_fenced_schema_text_is_visible_only_not_state(
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    assert_eq!(
-        stopless_projected_cmd(resp04.canonical_context_payload().unwrap()),
-        "routecodex hook run reasoningStop"
-    );
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert!(resp04.control_transition().is_some());
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!serialized.contains("<rcc_stop_schema>"));
 }
 
 #[test]
-fn stopless_live_shape_third_natural_stop_projects_noop_cli() {
+fn stopless_live_shape_third_natural_stop_keeps_control_out_of_payload() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let live_text = "第三次自然 stop，仍应完成第三次投影。";
     let resp02 = hooks
@@ -163,13 +136,14 @@ fn stopless_live_shape_third_natural_stop_projects_noop_cli() {
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    assert_eq!(resp03.tool_call_count(), 1);
+    assert_eq!(resp03.tool_call_count(), 0);
     let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.control_transition().unwrap().natural_stop_count(), 3);
     let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
     assert!(serialized.contains(live_text));
-    assert!(serialized.contains("call_stopless_reasoning"));
-    assert!(serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!serialized.contains("call_stopless_reasoning"));
+    assert!(!serialized.contains("routecodex hook run reasoningStop"));
 }
 
 #[test]
@@ -283,15 +257,12 @@ fn stopless_live_shape_reasoning_stop_tool_call_is_the_only_state_source() {
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     let resp04 = hooks.commit(resp03).unwrap();
+    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
     assert_eq!(
-        resp04.stopless_center_state().unwrap().steering(),
+        resp04.control_transition().unwrap().steering(),
         V3StoplessCenterSteering::Continue
     );
-    let payload = resp04.canonical_context_payload().unwrap();
-    assert_eq!(
-        stopless_projected_cmd(payload),
-        "routecodex hook run reasoningStop"
-    );
+    let payload = resp04.finalized_payload();
     let serialized = serde_json::to_string(payload).unwrap();
     assert!(!serialized.contains("call_model_reasoning_stop_live"));
     assert!(!serialized.contains("\"name\":\"reasoningStop\""));
@@ -328,7 +299,7 @@ fn stopless_live_shape_guard_reasoning_continue_tool_does_not_project_noop_or_di
     assert_eq!(resp03.tool_call_count(), 0);
     let resp04 = hooks.commit(resp03).unwrap();
     assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert!(resp04.stopless_center_state().is_none());
+    assert!(resp04.control_transition().is_none());
     let payload = resp04.finalized_payload();
     assert_eq!(payload["status"], "completed");
     let serialized = serde_json::to_string(payload).unwrap();

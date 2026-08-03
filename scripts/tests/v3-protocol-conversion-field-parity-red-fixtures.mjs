@@ -20,6 +20,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
@@ -27,6 +28,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
@@ -46,8 +48,34 @@ const files = [
 ];
 
 const cases = [
-
-
+  {
+    name: 'OpenAI Chat custom declaration is relabeled as a function tool',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
+    from: '("type".to_string(), Value::String("custom".to_string())),\n        ("custom".to_string(), Value::Object(custom)),',
+    to: '("type".to_string(), Value::String("function".to_string())),\n        ("function".to_string(), Value::Object(custom)),',
+    diagnostic: /native_openai_chat_custom_tool/u,
+  },
+  {
+    name: 'OpenAI Chat custom response is selected from function calls by name',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    from: 'if object.get("type").and_then(Value::as_str) == Some("custom") {',
+    to: 'if custom_tool_names.contains("custom") {',
+    diagnostic: /native_openai_chat_custom_tool_response/u,
+  },
+  {
+    name: 'Native OpenAI Chat custom grammar regression test is removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
+    from: 'openai_chat_wire_projects_custom_grammar_to_native_chat_custom_tool',
+    to: 'openai_chat_wire_projects_custom_grammar_removed',
+    diagnostic: /native_openai_chat_custom_tool_tests/u,
+  },
+  {
+    name: 'Target projection failure no-switch regression test is removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
+    from: 'target_protocol_unmapped_field_fails_without_provider_switch_or_transport',
+    to: 'target_protocol_unmapped_field_switch_regression_removed',
+    diagnostic: /projection_failure_no_provider_switch/u,
+  },
 
   {
     name: 'Responses outbound drops its protocol client_metadata field',
@@ -93,14 +121,6 @@ const cases = [
     to: '    - extended_openai_chat_field: request.reasoning.summary_policy\n      semantic_id: request.reasoning.summary_policy\n',
     diagnostic: /provider-shaped invented canonical extension hierarchy|request\.reasoning\.summary_policy/u,
   },
-  {
-    name: 'OpenAI Chat reasoning summary unmapped owner removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
-    from: 'pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy(',
-    to: 'pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy_removed(',
-    diagnostic: /openai_chat_reasoning_summary_unmapped/u,
-  },
-
   {
     name: 'Extended Chat renames native OpenAI Chat field',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
@@ -336,7 +356,7 @@ const cases = [
   {
     name: 'Manual semantic translation removes Anthropic transform',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '      transform: Anthropic tool_use.input object serializes to Chat function.arguments.\n',
+    from: '        transform: Valid Chat function.arguments JSON maps exactly to Anthropic tool_use.input. Malformed raw argument text uses compatibility id v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the exact raw text on reverse projection.\n',
     to: '      transform: \n',
     diagnostic: /tool\.call\.arguments|anthropic|missing manual transform/u,
   },
@@ -350,8 +370,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 223\n',
-    to: '    extension_declared: 222\n',
+    from: '    extension_declared: 220\n',
+    to: '    extension_declared: 219\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -371,9 +391,9 @@ const cases = [
   {
     name: 'Textual truth audited extension count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
-    from: '| `extension_declared` | 223 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    to: '| `extension_declared` | 224 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
-    diagnostic: /`extension_declared` \| 223|v3-protocol-semantic-matrix-review/u,
+    from: '| `extension_declared` | 221 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    to: '| `extension_declared` | 222 | The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed. |\n',
+    diagnostic: /`extension_declared` \| 221|v3-protocol-semantic-matrix-review/u,
   },
   {
     name: 'Gap audit drops runtime extension closeout row',
@@ -533,21 +553,6 @@ const cases = [
     diagnostic: /responses_relay_reasoning_effort_projects_anthropic_output_config_effort/u,
   },
   {
-    name: 'Responses string input to Anthropic provider-wire reasoning runtime test removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
-    from: 'responses_relay_reasoning_summary_fails_before_anthropic_wire',
-    to: 'responses_relay_string_input_reasoning_request_config_removed',
-    all: true,
-    diagnostic: /responses_relay_reasoning_summary_fails_before_anthropic_wire/u,
-  },
-  {
-    name: 'Anthropic outbound drops explicit Responses reasoning summary rejection',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
-    from: '    reject_responses_reasoning_summary_for_anthropic(object)?;\n',
-    to: '',
-    diagnostic: /responses_reasoning_summary_unmapped|reject_responses_reasoning_summary_for_anthropic/u,
-  },
-  {
     name: 'Anthropic request projection drops registered cache and store validation',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
     from: 'pub(super) fn validate_responses_cache_and_store_for_anthropic(',
@@ -555,12 +560,11 @@ const cases = [
     diagnostic: /validate_responses_cache_and_store_for_anthropic/u,
   },
   {
-    name: 'Responses Codex client metadata rejection integration test removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
-    from: 'responses_relay_rejects_codex_client_metadata_at_anthropic_codec_boundary',
-    to: 'responses_relay_codex_client_metadata_rejection_removed',
-    all: true,
-    diagnostic: /codex_client_metadata_unmapped|responses_relay_rejects_codex/u,
+    name: 'Outbound client metadata silently consumes unknown metadata',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
+    from: '    "x-codex-window-id",\n];',
+    to: '    "x-codex-window-id",\n    "unknown",\n];',
+    diagnostic: /no_unknown_client_metadata_silent_consumption|unknown/u,
   },
   {
     name: 'Anthropic outbound silently accepts Responses store field',
@@ -570,18 +574,33 @@ const cases = [
     diagnostic: /extension\.get\("store"\)|store_true_unmapped/u,
   },
   {
-    name: 'Anthropic outbound drops Responses verbosity rejection',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
-    from: '    if text.contains_key("verbosity") {\n        return Err(V3AnthropicCodecError::UnmappedOutboundFields {\n            paths: "$.request.text.output_config.verbosity".to_string(),\n        });\n    }\n',
-    to: '',
-    diagnostic: /text[.]output_config[.]verbosity|anthropic_request_field_projection/u,
+    name: 'Anthropic malformed historical arguments lose reversible raw text',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+    from: 'json!({"input": raw})',
+    to: 'json!({})',
+    all: true,
+    diagnostic: /malformed_chat_tool_arguments|input.*raw/su,
   },
   {
-    name: 'Anthropic outbound maps Responses verbosity to effort',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
-    from: '    if text.contains_key("verbosity") {\n        return Err(V3AnthropicCodecError::UnmappedOutboundFields {\n            paths: "$.request.text.output_config.verbosity".to_string(),\n        });\n    }\n    if !output_config.is_empty() {',
-    to: '    if let Some(verbosity) = text.get("verbosity") {\n        insert_matching_anthropic_output_config_field(\n            &mut output_config,\n            "effort",\n            verbosity.clone(),\n        )?;\n    }\n    if !output_config.is_empty() {',
-    diagnostic: /"effort",\s*verbosity\.clone\(\)|responses_request_to_anthropic|compatible_fields_only/u,
+    name: 'OpenAI Chat Responses web-search projection owner removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
+    from: 'pub(super) fn project_openai_chat_provider_tools(',
+    to: 'pub(super) fn project_openai_chat_provider_tools_removed(',
+    diagnostic: /responses_web_search_projection|project_openai_chat_provider_tools/u,
+  },
+  {
+    name: 'OpenAI Chat Responses tool-search projection owner removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
+    from: 'fn normalize_openai_chat_tool_search(',
+    to: 'fn normalize_openai_chat_tool_search_removed(',
+    diagnostic: /responses_tool_search_projection|normalize_openai_chat_tool_search/u,
+  },
+  {
+    name: 'Anthropic Responses metadata projection context owner removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    from: 'pub struct V3AnthropicResponsesProjectionContext',
+    to: 'pub struct RemovedAnthropicResponsesProjectionContext',
+    diagnostic: /responses_metadata_projection_context|V3AnthropicResponsesProjectionContext/u,
   },
   {
     name: 'Malformed function arguments fail-fast parser removed',
@@ -678,15 +697,22 @@ const cases = [
     diagnostic: /responses_arguments_payload_projection|forbidden|Map::new|json/u,
   },
   {
-    name: 'Anthropic adjacent codec replaces malformed Chat arguments with an empty object',
+    name: 'Anthropic adjacent codec restores malformed Chat argument fail-fast',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
-    from: `Some(Value::String(raw)) => {
-            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
+    from: 'serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))',
+    to: `serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
                 field: "tool_call.arguments",
-            })?
-        }`,
-    to: 'Some(Value::String(raw)) => serde_json::from_str(raw).unwrap_or_else(|_| json!({})),',
+            })?`,
     diagnostic: /malformed_chat_tool_arguments|tool_call[.]arguments/u,
+  },
+  {
+    name: 'Anthropic adjacent codec restores malformed Responses argument fail-fast',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
+    from: 'Ok(serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw})))',
+    to: `serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
+                field: "function_call.arguments",
+            })`,
+    diagnostic: /malformed_chat_tool_arguments|function_call[.]arguments/u,
   },
   {
     name: 'Malformed OpenAI Chat arguments incorrectly assert Error05 reselect',

@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_prompt_cache_key_fails_when_anthropic_has_no_equivalent() {
+    fn responses_prompt_cache_key_is_registered_local_cache_hint_for_anthropic() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -350,16 +350,19 @@ mod tests {
             V3HubProviderWireProtocol::Anthropic,
         );
 
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("valid prompt_cache_key has no reversible Anthropic projection");
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("valid prompt_cache_key is a registered local cache hint");
         assert!(
-            error.reason.contains("$.request.prompt_cache_key"),
-            "{error:?}"
+            req_compat
+                .provider_semantic_payload()
+                .get("prompt_cache_key")
+                .is_none(),
+            "Anthropic wire must not invent a prompt_cache_key field"
         );
     }
 
     #[test]
-    fn responses_registered_client_metadata_fails_at_anthropic_target_codec() {
+    fn responses_registered_client_metadata_is_local_context_at_anthropic_target_codec() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -371,11 +374,14 @@ mod tests {
             V3HubProviderWireProtocol::Anthropic,
         );
 
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("client metadata without an Anthropic equivalent must fail explicitly");
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("registered Codex client metadata is local request context");
         assert!(
-            error.reason.contains("client_metadata.session_id"),
-            "{error:?}"
+            req_compat
+                .provider_semantic_payload()
+                .get("client_metadata")
+                .is_none(),
+            "Anthropic wire must not forward client_metadata"
         );
     }
 
@@ -473,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_supported_verbosity_fails_when_anthropic_cannot_preserve_semantics() {
+    fn responses_supported_verbosity_is_registered_local_style_hint_for_anthropic() {
         let req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -484,9 +490,15 @@ mod tests {
             V3HubProviderWireProtocol::Anthropic,
         );
 
-        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect_err("Responses verbosity has no reversible Anthropic field");
-        assert!(error.reason.contains("verbosity"), "{error:?}");
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("supported Responses verbosity is a registered local style hint");
+        assert!(
+            req_compat
+                .provider_semantic_payload()
+                .get("verbosity")
+                .is_none(),
+            "Anthropic wire must not relabel text.verbosity as output_config.effort"
+        );
     }
 
     #[test]

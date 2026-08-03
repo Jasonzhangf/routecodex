@@ -1,0 +1,30 @@
+lifecycle_id: architecture.repository_filesystem.mainline
+summary: Repository authoring policy is verified by the required repo-sanity
+  build and CI gate without entering runtime paths.
+owner_feature_id: architecture.repository_filesystem_governance
+entrypoint:
+  node_id: RepoFilesystemAuthoring01Policy
+  wiki_page: null
+  call_map_chain_id: architecture.repository_filesystem.mainline
+node_ids:
+  - RepoFilesystemAuthoring01Policy
+  - RepoFilesystemVerify02Gate
+edges:
+  - step_id: repo-filesystem-01
+    from_node: RepoFilesystemAuthoring01Policy
+    to_node: RepoFilesystemVerify02Gate
+    status: anchored
+    owner_feature_id: architecture.repository_filesystem_governance
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes:
+        - architecture.repository_filesystem_contract
+      produces:
+        - architecture.repository_filesystem_contract
+      side_channel_reads: []
+      side_channel_writes: []
+verification:
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-manifest-sync

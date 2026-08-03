@@ -111,9 +111,7 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         .or_else(|| object.get("arguments"))
     {
         Some(Value::String(raw)) => {
-            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
-                field: "tool_call.arguments",
-            })?
+            serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))
         }
         Some(value) => value.to_owned(),
         None => json!({}),
@@ -741,15 +739,17 @@ pub(super) fn responses_function_call_input(
     if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
         return match object.get("input") {
             Some(Value::String(raw)) => Ok(json!({"input": raw})),
-            Some(value) => Ok(value.to_owned()),
-            None => Ok(json!({})),
+            Some(_) => Err(V3AnthropicCodecError::MalformedField {
+                field: "custom_tool_call.input",
+            }),
+            None => Err(V3AnthropicCodecError::MalformedField {
+                field: "custom_tool_call.input",
+            }),
         };
     }
     match object.get("arguments").or_else(|| object.get("input")) {
         Some(Value::String(raw)) => {
-            serde_json::from_str(raw).map_err(|_| V3AnthropicCodecError::MalformedField {
-                field: "function_call.arguments",
-            })
+            Ok(serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw})))
         }
         Some(value) => Ok(value.to_owned()),
         None => Ok(json!({})),
@@ -814,6 +814,9 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
 pub(super) fn responses_tool_as_anthropic_tool(
     tool: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
+    if tool.get("type").and_then(Value::as_str) == Some("custom") {
+        return responses_custom_tool_as_anthropic_compatibility_tool(tool);
+    }
     if matches!(
         tool.get("type").and_then(Value::as_str),
         Some("web_search" | "web_search_preview")
@@ -857,6 +860,91 @@ pub(super) fn responses_tool_as_anthropic_tool(
             .unwrap_or_else(|| json!({"type":"object"})),
     );
     Ok(Value::Object(output))
+}
+
+fn responses_custom_tool_as_anthropic_compatibility_tool(
+    tool: &Map<String, Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    for key in tool.keys() {
+        if !matches!(key.as_str(), "type" | "name" | "description" | "format") {
+            return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+                paths: format!("$.request.tools[].{key}"),
+            });
+        }
+    }
+    let name = tool
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "tools[].name",
+        })?;
+    let source_description = match tool.get("description") {
+        Some(Value::String(description)) => Some(description.as_str()),
+        Some(_) => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "tools[].description",
+            })
+        }
+        None => None,
+    };
+    let format = tool.get("format").and_then(Value::as_object).ok_or(
+        V3AnthropicCodecError::MalformedField {
+            field: "tools[].format",
+        },
+    )?;
+    let format_type = format.get("type").and_then(Value::as_str).ok_or(
+        V3AnthropicCodecError::MalformedField {
+            field: "tools[].format.type",
+        },
+    )?;
+    let compatibility_note = match format_type {
+        "text" if format.len() == 1 => format!(
+            "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
+        ),
+        "grammar" if format.len() == 3 => {
+            let syntax = format
+                .get("syntax")
+                .and_then(Value::as_str)
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "tools[].format.syntax",
+                })?;
+            let definition = format
+                .get("definition")
+                .and_then(Value::as_str)
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "tools[].format.definition",
+                })?;
+            format!(
+                "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: source grammar syntax={} definition={}; Anthropic does not natively enforce this grammar; provide the exact raw string in the input field.",
+                serde_json::to_string(syntax).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.syntax" })?,
+                serde_json::to_string(definition).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.definition" })?
+            )
+        }
+        _ => {
+            return Err(V3AnthropicCodecError::UnmappedOutboundFields {
+                paths: "$.request.tools[].format".to_string(),
+            })
+        }
+    };
+    let description = source_description
+        .map(|source| format!("{source}\n\n{compatibility_note}"))
+        .unwrap_or_else(|| compatibility_note.clone());
+    Ok(json!({
+        "name":name,
+        "description":description,
+        "input_schema":{
+            "type":"object",
+            "properties":{
+                "input":{
+                    "type":"string",
+                    "description":compatibility_note
+                }
+            },
+            "required":["input"],
+            "additionalProperties":false
+        }
+    }))
 }
 
 pub(super) fn responses_web_search_tool_as_anthropic_tool(
@@ -911,7 +999,7 @@ pub(super) fn responses_tool_choice_as_anthropic_tool_choice(
         });
     };
     let mut projected = match object.get("type").and_then(Value::as_str) {
-        Some("function") | Some("tool") => object
+        Some("function") | Some("tool") | Some("custom") => object
             .get("name")
             .or_else(|| {
                 object
@@ -976,8 +1064,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn openai_chat_tool_call_malformed_arguments_fail_before_anthropic_wire() {
-        let error = openai_chat_tool_call_as_anthropic_tool_use(&json!({
+    fn openai_chat_tool_call_malformed_arguments_project_reversible_anthropic_input() {
+        let tool_use = openai_chat_tool_call_as_anthropic_tool_use(&json!({
             "id": "call_malformed_chat",
             "type": "function",
             "function": {
@@ -985,26 +1073,23 @@ mod tests {
                 "arguments": "{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
             }
         }))
-        .expect_err("malformed Chat arguments cannot be reversibly projected");
+        .expect("malformed historical Chat arguments project to legal Anthropic input");
         assert_eq!(
-            error.to_string(),
-            "Anthropic codec malformed tool_call.arguments"
+            tool_use["input"],
+            json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
         );
     }
 
     #[test]
-    fn responses_function_call_malformed_arguments_fail_before_anthropic_wire() {
+    fn responses_function_call_malformed_arguments_project_reversible_anthropic_input() {
         let mut object = Map::new();
         object.insert("type".to_string(), json!("function_call"));
         object.insert(
             "arguments".to_string(),
             json!("{\"cmd\":\"one\"}{\"cmd\":\"two\"}"),
         );
-        let error = responses_function_call_input(&object)
-            .expect_err("malformed Responses arguments cannot be reversibly projected");
-        assert_eq!(
-            error.to_string(),
-            "Anthropic codec malformed function_call.arguments"
-        );
+        let input = responses_function_call_input(&object)
+            .expect("malformed historical Responses arguments project to legal Anthropic input");
+        assert_eq!(input, json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"}));
     }
 }

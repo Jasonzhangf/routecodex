@@ -7,10 +7,10 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = process.cwd();
 const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-relay-response-semantics.mjs');
 const fixtures = [
-  ['Resp05 continuation save', 'V3HubRespOutbound05ClientSemantic { previous: input }', 'V3HubRespOutbound05ClientSemantic { previous: input, canonical_context: Some(input) }', /Resp05\/Server immutable interval/],
+  ['Resp05 continuation save', 'V3HubRespOutbound05ClientSemantic {\n        previous: input,\n        client_payload,\n    }', 'V3HubRespOutbound05ClientSemantic {\n        previous: input,\n        client_payload,\n        canonical_context: Some(Value::Null),\n    }', /Resp05\/Server immutable interval/],
   ['SSE semantic repair', 'V3ServerRespOutbound06ClientFrame { previous: input }', 'V3ServerRespOutbound06ClientFrame { previous: input }; serde_json::to_string(&"repair").unwrap()', /Resp05\/Server immutable interval/],
   ['handler continuation save', 'use routecodex_v3_runtime', 'use routecodex_v3_runtime; fn save() { compile_v3_hub_relay_response_hooks(); }', /semantics escaped Hub/],
-  ['required_action outbound inference', 'V3HubRespOutbound05ClientSemantic { previous: input }', 'if required_action { unreachable!() } V3HubRespOutbound05ClientSemantic { previous: input }', /Resp05\/Server immutable interval/],
+  ['required_action outbound inference', 'V3HubRespOutbound05ClientSemantic {\n        previous: input,\n        client_payload,\n    }', 'if required_action { unreachable!() }\n    V3HubRespOutbound05ClientSemantic {\n        previous: input,\n        client_payload,\n    }', /Resp05\/Server immutable interval/],
   ['second response exit', '"V3ServerRespOutbound06ClientFrame"', '"V3ServerRespOutbound06AlternateFrame"', /missing "V3ServerRespOutbound06ClientFrame"|single response exit/],
   [
     'provider compat tool_search rejection',

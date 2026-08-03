@@ -22,8 +22,10 @@ const paths = {
   directStopless: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs',
   directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-  hookStoplessInjection:
-    'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs',
+  respChatProcess:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  respContinuation:
+    'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   packageJson: 'package.json',
 };
 
@@ -51,7 +53,9 @@ const directRuntimeSource = [
   readText(paths.directStopless),
   readText(paths.directHelpers),
 ].join('\n');
-const hookSource = [readText(paths.hooks), readText(paths.hookStoplessInjection)].join('\n');
+const hookSource = readText(paths.hooks);
+const respChatProcessSource = readText(paths.respChatProcess);
+const respContinuationSource = readText(paths.respContinuation);
 const packageJson = readJson(paths.packageJson);
 
 verifyPackageScripts();
@@ -509,6 +513,28 @@ function verifyMainlineOwnership() {
 }
 
 function verifyRuntimeSeparation() {
+  const resp03Node = extractBlock(
+    respChatProcessSource,
+    'pub struct V3HubRespChatProcess03Governed {',
+    '\n}',
+  );
+  if (resp03Node?.includes('V3StoplessCenterState')) {
+    fail(`${paths.respChatProcess}: Resp03 data node must not carry StoplessCenter control state`);
+  }
+  const resp04Node = extractBlock(
+    respContinuationSource,
+    'pub struct V3HubRespContinuation04Committed {',
+    '\n}',
+  );
+  if (resp04Node?.includes('V3StoplessCenterState')) {
+    fail(`${paths.respContinuation}: Resp04 continuation data node must not carry StoplessCenter control state`);
+  }
+  if (!respChatProcessSource.includes('pub struct V3HubRespChatProcess03Outcome')) {
+    fail(`${paths.respChatProcess}: missing typed Resp03 data/control outcome`);
+  }
+  if (!respContinuationSource.includes('pub struct V3HubRespContinuation04Outcome')) {
+    fail(`${paths.respContinuation}: missing typed Resp04 data/control outcome`);
+  }
   const localExecution = extractBlock(
     runtimeSource,
     "struct V3ResponsesRelayLocalContinuationExecution<'state>",
@@ -649,115 +675,31 @@ function verifyStoplessStateMachineShape() {
 }
 
 function verifyCliProjection() {
-  const commandBlock = extractBlock(
-    hookSource,
-    'fn build_stopless_cli_command() -> String {',
-    '\n}',
-  );
-  if (!commandBlock) {
-    fail(`${paths.hooks}: missing build_stopless_cli_command`);
-    return;
-  }
-  requireTextIncludes(
-    commandBlock,
-    `"routecodex hook run reasoningStop"`,
-    `${paths.hooks} build_stopless_cli_command`,
-  );
-  if (commandBlock.includes('--input-json')) {
-    fail(`${paths.hooks}: reasoningStop CLI must be no-input and must not include --input-json`);
-  }
   for (const forbidden of [
-    'input-json',
-    'session_id',
-    'sessionId',
-    'conversation_id',
-    'conversationId',
-    'request_id',
-    'requestId',
-    'repeatCount',
-    'schemaFeedback',
-    'runtime_control',
-    'StoplessCenter',
+    'fn build_stopless_cli_command() -> String {',
+    'fn build_stopless_cli_projection_payload(',
   ]) {
-    if (commandBlock.includes(forbidden)) {
-      fail(`${paths.hooks}: reasoningStop CLI must not carry ${forbidden}`);
+    if (hookSource.includes(forbidden)) {
+      fail(`${paths.hooks}: stopless control CLI projection must not enter client business payload via ${forbidden}`);
     }
-  }
-  if (/stdout|parse|from_str|serde_json/u.test(commandBlock)) {
-    fail(`${paths.hooks}: reasoningStop CLI must not parse stdout/state JSON`);
   }
 }
 
 function verifyStoplessGuideline() {
-  const baseInstruction = extractBlock(
-    hookSource,
-    'const STOPLESS_BASE_INSTRUCTION',
-    'const STOPLESS_NOOP_CONTINUATION_GUIDELINE',
-  );
-  const continuationGuideline = extractBlock(
-    hookSource,
-    'const STOPLESS_NOOP_CONTINUATION_GUIDELINE',
-    'pub struct V3StoplessResponseHookOutcome',
-  );
-  const stateGuidanceBuilders = extractBlock(
-    hookSource,
-    'fn stopless_instruction_for_state',
-    'fn strip_legacy_stopless_instruction',
-  );
-  const providerVisibleGuidance = `${baseInstruction}\n${continuationGuideline}\n${stateGuidanceBuilders}`;
-  if (!baseInstruction || !continuationGuideline || !stateGuidanceBuilders) {
-    fail(`${paths.hooks}: cannot extract provider-visible stopless guideline blocks`);
-  }
-  for (const token of [
-    'STOPLESS_NOOP_CONTINUATION_GUIDELINE',
-    '当前轮继续推进准则',
-    '继续当前目标',
-    '基于已经恢复的完整上下文',
-    '复核当前目标',
-    '已有结论',
-    '未完成事项',
-    '继续推理',
-    '按需调用可用工具',
-    '不要只总结',
-    '目标确实完成并有证据',
-    'needs_user_input',
-    '既未完成也未阻塞，继续工作',
-    '更严格地推进',
-    '当前完成/阻塞证据不足',
-  ]) {
-    requireTextIncludes(providerVisibleGuidance, token, `${paths.hooks} full transparent stopless continuation guideline`);
-  }
-  if (hookSource.includes('STOPLESS_NOOP_CONTINUATION_PROMPT: &str = "继续。"')) {
-    fail(`${paths.hooks}: terse stopless continuation prompt must not be the request-side policy`);
+  const injectionOwner = abs('v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs');
+  if (fs.existsSync(injectionOwner)) {
+    fail(`${paths.hooks}: stopless payload injection owner must remain physically absent`);
   }
   for (const forbidden of [
-    'RouteCodex stopless continuation',
-    '上一轮 reasoningStop CLI',
-    'no-op 只表示客户端工具轮',
-    'no-op',
-    'CLI',
-    'client tool round',
-    '客户端工具轮',
-    'routecodex hook run reasoningStop',
-    'finish_reason=stop',
-    '不是工具结果',
-    'blocked reason',
-    '这是连续第',
-    '最多',
-    '续轮上限',
-    '连续 stop 次数',
+    'inject_stopless_guidance(',
+    'append_stopless_noop_continuation(',
+    'stopless_continuation_prompt_for_state(',
+    'build_reasoning_stop_tool(',
+    'STOPLESS_BASE_INSTRUCTION',
+    'STOPLESS_NOOP_CONTINUATION_GUIDELINE',
   ]) {
-    if (providerVisibleGuidance.includes(forbidden)) {
-      fail(`${paths.hooks}: provider-visible stopless guideline must not contain ${forbidden}`);
-    }
-  }
-  for (const [label, feature] of [
-    [paths.functionMap, (functionMap.features ?? []).find((candidate) => candidate?.feature_id === featureId)],
-    [paths.verificationMap, (verificationMap.features ?? []).find((candidate) => candidate?.feature_id === featureId)],
-  ]) {
-    const serialized = YAML.stringify(feature ?? {});
-    for (const token of ['complete non-persistent', 'guideline', '继续。', 'transparent']) {
-      requireTextIncludes(serialized, token, `${label} ${featureId} guideline contract`);
+    if (hookSource.includes(forbidden)) {
+      fail(`${paths.hooks}: stopless control guidance/tool/prompt must not enter business payload via ${forbidden}`);
     }
   }
 }

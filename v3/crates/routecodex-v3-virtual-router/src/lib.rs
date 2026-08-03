@@ -265,6 +265,21 @@ impl V3VirtualRouter {
                 )?;
             }
         }
+        for signal in capability_route_pool_signals(&classified.facts) {
+            if let Some(pool) = select_best_matching_pool(
+                &classified.routing_group_id,
+                &group.pools,
+                &classified.facts,
+                |pool_id, rule| pool_route_signal_matches(pool_id, rule, signal),
+            )? {
+                append_route_pool_tier(
+                    &classified.routing_group_id,
+                    pool,
+                    &mut selected_pool_ids,
+                    &mut tiers,
+                )?;
+            }
+        }
         if tiers.is_empty() {
             if let Some(pool) = select_best_matching_pool(
                 &classified.routing_group_id,
@@ -542,6 +557,16 @@ fn pool_has_route_signal(pool_id: &str, rule: &V3RoutePoolMatchManifest) -> bool
         || ROUTE_PRIORITY.iter().any(|signal| {
             *signal != DEFAULT_ROUTE && pool_route_signal_matches(pool_id, rule, signal)
         })
+}
+
+fn capability_route_pool_signals(facts: &V3RouterRequestFacts) -> Vec<&str> {
+    ROUTE_PRIORITY
+        .iter()
+        .copied()
+        .filter(|signal| *signal != DEFAULT_ROUTE)
+        .filter(|signal| !is_hard_capability_pool_signal(signal))
+        .filter(|signal| facts.capabilities.contains(*signal))
+        .collect()
 }
 
 fn is_hard_capability_pool_signal(signal: &str) -> bool {

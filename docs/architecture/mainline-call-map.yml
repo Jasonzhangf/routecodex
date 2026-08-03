@@ -3763,7 +3763,7 @@ chains:
     to_node: V3RuntimeTimingProtocolHandoff
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3RuntimeObservabilityAccumulator::with_additional_attempts
+    callee_symbol: with_additional_attempts
     callee_file: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
     owner_feature_id: v3.runtime_timing_observability
     semantic_input: completed Direct or Relay provider attempts before a protocol-owner handoff

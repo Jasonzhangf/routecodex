@@ -18,6 +18,7 @@ const paths = {
   hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
   reqInbound02: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
+  clientMetadataProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
@@ -26,6 +27,7 @@ const paths = {
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
@@ -91,7 +93,7 @@ if (requestFieldProjectionManifest?.status !== 'design' || requestFieldProjectio
 }
 const projectionSemantics = new Map((requestFieldProjectionManifest?.semantic_registry ?? []).map((entry) => [entry?.semantic_id, entry]));
 for (const [semanticId, chatStorage, projections] of [
-  ['request.metadata', 'routecodex_chat_extension.responses_request.metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'metadata_user_id_only', gemini: 'unmapped' }],
+  ['request.metadata', 'routecodex_chat_extension.responses_request.metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
   ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'unmapped' }],
   ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
@@ -135,7 +137,10 @@ for (const [from, to, direction] of [
 
 const outboundContract = fieldMatrix?.outbound_projection_contract;
 for (const status of ['mapped', 'transformed', 'consumed_by_transform', 'target_unsupported', 'control_forbidden']) {
-  if (!outboundContract?.statuses?.[status]) failures.push(`${paths.fieldMatrix}: missing outbound projection status ${status}`);
+  if (!outboundContract?.legacy_outbound_consumption_statuses?.[status]) failures.push(`${paths.fieldMatrix}: missing legacy outbound projection status bridge ${status}`);
+}
+for (const phrase of ['mapped_exact', 'mapped_compatible_registered', 'unsupported']) {
+  if (!String(JSON.stringify(outboundContract?.projection_class_bridge ?? {})).includes(phrase)) failures.push(`${paths.fieldMatrix}: projection class bridge missing ${phrase}`);
 }
 for (const phrase of ['UnmappedOutboundFields', 'ControlFieldLeak', 'recursive automatic strip', 'unknown source field ignore']) {
   if (!JSON.stringify(outboundContract ?? {}).includes(phrase)) failures.push(`${paths.fieldMatrix}: outbound projection contract missing ${phrase}`);
@@ -294,6 +299,18 @@ forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_st
   /row\.remove\("reasoning"\)/,
 ]);
 requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::responses_client_metadata_projection`, 'pub(super) fn project_openai_client_metadata_to_metadata');
+requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::client_metadata_user_id_only`, 'pub(super) fn unsupported_client_metadata_paths(');
+requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::registered_client_local_metadata`, 'REGISTERED_CLIENT_LOCAL_METADATA_KEYS');
+requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::registered_client_local_metadata`, '"x-codex-turn-metadata"');
+requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::unknown_client_metadata_rejected`, '!REGISTERED_CLIENT_LOCAL_METADATA_KEYS.contains(&key.as_str())');
+forbid(text.clientMetadataProjection, `${paths.clientMetadataProjection}::no_unknown_client_metadata_silent_consumption`, [
+  /CONSUMED_CODEX_CLIENT_METADATA_KEYS/,
+  /"unknown"/,
+]);
+forbid(text.clientMetadataProjection, `${paths.clientMetadataProjection}::no_provider_header_projection`, [/V3StandardRequestHeaderGroup/, /anthropic_provider_headers/, /build_v3_anthropic_provider_request_header/, /x-claude-code-session-id/, /x-codex-turn-metadata.*headers/s]);
+requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::registered_codex_client_metadata`, 'unsupported_client_metadata_paths(client_metadata)');
+requireText(text.anthropicCodec, `${paths.anthropicCodec}::registered_codex_client_metadata`, 'unsupported_client_metadata_paths(client_metadata)');
+requireText(text.anthropicRequestFieldProjection, `${paths.anthropicRequestFieldProjection}::registered_codex_client_metadata`, 'unsupported_client_metadata_paths(client_metadata)');
 const responsesProviderRequestBuilder = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
@@ -309,19 +326,23 @@ const outboundProjectionTransforms = functionSlice(
 );
 forbid(outboundProjectionTransforms, `${paths.requestOutboundFormat}::responses_client_metadata_not_renamed`, [/project_openai_client_metadata_to_metadata\(projected, "responses"\)/]);
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_target_validation_after_projection`, 'project_openai_client_metadata_to_metadata(projected, "openai_chat")?;\n            validate_openai_metadata(projected, "openai_chat")?;');
-requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::openai_chat_reasoning_summary_unmapped`, 'pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy(');
-requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_reasoning_summary_unmapped`, 'fn openai_chat_wire_rejects_unmapped_reasoning_summary_policy()');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_reasoning_summary_negative`, 'fn openai_chat_wire_rejects_invalid_reasoning_summary_policy()');
+requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_registered_client_metadata_local_context`, 'openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context');
+requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_unknown_client_metadata_rejected`, 'openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_remains_client_metadata_on_responses_wire');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
+  'openai_chat_provider_wire_consumes_registered_codex_client_metadata_as_local_context',
   'openai_chat_function_tool_redacted_schema_placeholders_fail_fast',
+  'openai_chat_function_tool_redacted_schema_placeholders_fail_fast_in_defs',
   'openai_chat_tool_search_rejects_unmapped_builtin_tool',
   'openai_responses_function_tool_redacted_schema_placeholders_fail_fast',
+  'openai_responses_function_tool_redacted_schema_placeholders_fail_fast_in_definitions',
   'openai_responses_provider_wire_maps_chat_token_and_logprob_pairs',
   'openai_responses_provider_wire_drops_top_logprobs_when_logprobs_disabled',
   'Responses provider wire must not emit non-spec max_tokens',
+  'redacted_schema_placeholder',
 ]) requireText(text.hubTests, paths.hubTests, phrase);
 requireText(
   text.requestOutboundFormatExtraTests,
@@ -397,28 +418,96 @@ for (const phrase of [
   '$.request.client_metadata',
   '"metadata" | "client_metadata" | "prompt_cache_key" | "store" | "text"',
 ]) requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, phrase);
-forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s, /"effort",\s*verbosity\.clone\(\)/s]);
+forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_request_to_anthropic`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /responses_reasoning_effort_as_anthropic_budget/, /responses_reasoning_policy_as_anthropic_system_marker/, /<routecodex_reasoning_request/, /unwrap_or_else\(\|\|\s*\{?\s*responses_reasoning_effort_as_anthropic_budget/s]);
 forbid(text.anthropicCodec, `${paths.anthropicCodec}::registered_anthropic_system_extension`, [/anthropic_entry_system/]);
-for (const phrase of ['responses_metadata_as_anthropic_metadata', 'pub(super) fn validate_responses_cache_and_store_for_anthropic(', 'pub(super) fn reject_responses_reasoning_summary_for_anthropic(', 'pub(super) fn project_responses_text_as_anthropic_output_config(', 'extension.get("prompt_cache_key")', 'extension.get("store")', 'Some(false) => {}', 'Some(true) => {', '.filter(|key| key.as_str() != "user_id")', '$.request.text.output_config.verbosity']) requireText(text.anthropicRequestFieldProjection, paths.anthropicRequestFieldProjection, phrase);
+for (const phrase of ['responses_metadata_as_anthropic_metadata', 'pub(super) fn validate_responses_cache_and_store_for_anthropic(', 'pub(super) fn reject_responses_reasoning_summary_for_anthropic(', 'pub(super) fn project_responses_text_as_anthropic_output_config(', 'extension.get("prompt_cache_key")', 'extension.get("store")', 'Some(false) => {}', 'Some(true) => {', 'matches!(value, "auto" | "concise" | "detailed")']) requireText(text.anthropicRequestFieldProjection, paths.anthropicRequestFieldProjection, phrase);
 for (const phrase of [
   'pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(',
-  'field: "tool_call.arguments"',
-  'field: "function_call.arguments"',
+  'serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))',
+  'Ok(serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw})))',
 ]) requireText(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::malformed_chat_tool_arguments`, phrase);
-requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_chat_tool_arguments`, 'chat_malformed_tool_call_arguments_fail_before_anthropic_wire');
-forbid(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::malformed_chat_tool_arguments`, [/serde_json::from_str\(raw\)\.unwrap_or_else\(\|_\| json!\(\{\}\)\)/]);
+for (const phrase of [
+  'responses_custom_tool_as_anthropic_compatibility_tool',
+  'v3.custom_tool.anthropic_string_input_wrapper.v1',
+  'input_schema',
+  '"additionalProperties":false',
+]) requireText(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::anthropic_custom_declaration_projection`, phrase);
+requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_chat_tool_arguments`, 'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input');
+requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::malformed_responses_function_arguments`, 'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input');
+for (const phrase of [
+  'responses_custom_tool_call_missing_input_fails_without_empty_object_repair',
+  'responses_custom_tool_call_non_string_input_fails_without_relabel_or_repair',
+  'responses_valid_function_arguments_use_native_anthropic_object_input',
+]) requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::registered_compatibility_shapes`, phrase);
+requireText(text.requestFieldProjectionDesign, paths.requestFieldProjectionDesign, 'v3.function_call.anthropic_raw_argument_wrapper.v1');
+requireText(text.requestFieldProjectionManifest, paths.requestFieldProjectionManifest, 'v3.function_call.anthropic_raw_argument_wrapper.v1');
+requireText(text.fieldMatrix, paths.fieldMatrix, 'v3.function_call.anthropic_raw_argument_wrapper.v1');
+requireText(text.requestOutboundToolProjection, `${paths.requestOutboundToolProjection}::responses_web_search_projection`, 'pub(super) fn project_openai_chat_provider_tools(');
+requireText(text.requestOutboundToolProjection, `${paths.requestOutboundToolProjection}::responses_tool_search_projection`, 'fn normalize_openai_chat_tool_search(');
+const openaiChatCustomToolProjection = functionSlice(
+  text.requestOutboundToolProjection,
+  paths.requestOutboundToolProjection,
+  'fn normalize_openai_chat_custom_tool(',
+  'fn normalize_openai_chat_tool_search(',
+);
+for (const phrase of [
+  '("type".to_string(), Value::String("custom".to_string()))',
+  '("custom".to_string(), Value::Object(custom))',
+  'serde_json::json!({"type":"text"})',
+  'serde_json::json!({"type":"grammar","grammar":{"syntax":syntax,"definition":definition}})',
+]) requireText(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, phrase);
+forbid(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, [/"function"/, /parameters/, /arguments/]);
+requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_web_search_projection`, 'openai_chat_wire_projects_responses_web_search_tool_to_options');
+for (const testName of [
+  'openai_chat_wire_projects_complete_codex_tool_declaration_matrix',
+  'openai_chat_wire_projects_custom_grammar_to_native_chat_custom_tool',
+  'openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade',
+]) requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::native_openai_chat_custom_tool_tests`, testName);
+for (const testName of [
+  'responses_custom_tool_projects_registered_anthropic_wrapper',
+  'responses_named_custom_tool_choice_projects_registered_anthropic_tool_choice',
+  'responses_named_custom_tool_choice_without_name_fails',
+  'anthropic_registered_custom_wrapper_restores_exact_responses_raw_input',
+  'anthropic_unregistered_input_wrapper_is_not_unwrapped_as_custom',
+  'anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair',
+]) requireText(text.anthropicCodecTests, `${paths.anthropicCodecTests}::anthropic_custom_wrapper_tests`, testName);
+for (const phrase of [
+  'if object.get("type").and_then(Value::as_str) == Some("custom")',
+  '.get("custom")',
+  'custom_tool_names.contains(name)',
+  '.get("input")',
+  '"type":"custom_tool_call"',
+]) requireText(text.responsesRuntime, `${paths.responsesRuntime}::native_openai_chat_custom_tool_response`, phrase);
+forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
+requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'target_protocol_unmapped_field_fails_without_provider_switch_or_transport');
+requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'let req_compat = try_before_resp03!(');
+forbid(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, [/provider_compat_error_is_target_protocol_incompatible/, /target_protocol_incompatible_candidates/, /last_target_protocol_incompatible_error/]);
+requireText(text.anthropicCodec, `${paths.anthropicCodec}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
+for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicCodec, `${paths.anthropicCodec}::anthropic_custom_reverse_guard`, phrase);
+requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');
+requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::responses_metadata_projection_context`, 'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak');
+forbid(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::malformed_chat_tool_arguments`, [/field: "tool_call[.]arguments"/, /field: "function_call[.]arguments"/]);
+requireText(text.requestFieldProjectionModules, `${paths.requestFieldProjectionModules}::anthropic_codec_owner`, paths.responsesToAnthropicCodec);
+requireText(text.requestFieldProjectionModules, `${paths.requestFieldProjectionModules}::shared_client_metadata_owner`, paths.clientMetadataProjection);
 forbid(text.anthropicRequestFieldProjection, `${paths.anthropicRequestFieldProjection}::no_invented_anthropic_fields`, [/output\.insert\("cache_control"/, /ANTHROPIC_USER_ID_SOURCE_PRIORITY/]);
-requireText(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_reasoning_summary_unmapped`, 'reject_responses_reasoning_summary_for_anthropic(object)?;');
+forbid(responsesRequestToAnthropic, `${paths.anthropicCodec}::responses_reasoning_summary_consumed`, [/consume_responses_reasoning_summary_for_anthropic_response_projection/]);
 forbid(text.anthropicRequestFieldProjection, `${paths.anthropicRequestFieldProjection}::compatible_fields_only`, [/MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /"effort",\s*verbosity\.clone\(\)/s]);
-requireText(text.providerReqCompat, `${paths.providerReqCompat}::client_metadata_unmapped`, 'responses_registered_client_metadata_fails_at_anthropic_target_codec');
-requireText(text.providerReqCompat, `${paths.providerReqCompat}::prompt_cache_key_unmapped`, 'responses_prompt_cache_key_fails_when_anthropic_has_no_equivalent');
-requireText(text.providerReqCompat, `${paths.providerReqCompat}::supported_verbosity_unmapped`, 'responses_supported_verbosity_fails_when_anthropic_cannot_preserve_semantics');
+requireText(text.providerReqCompat, `${paths.providerReqCompat}::client_metadata_local_context`, 'responses_registered_client_metadata_is_local_context_at_anthropic_target_codec');
+requireText(text.providerReqCompat, `${paths.providerReqCompat}::prompt_cache_key_local_hint`, 'responses_prompt_cache_key_is_registered_local_cache_hint_for_anthropic');
+requireText(text.providerReqCompat, `${paths.providerReqCompat}::supported_verbosity_local_hint`, 'responses_supported_verbosity_is_registered_local_style_hint_for_anthropic');
 requireText(text.providerReqCompat, `${paths.providerReqCompat}::store_true_unmapped`, 'responses_store_true_fails_when_anthropic_cannot_preserve_remote_storage_semantics');
 requireText(text.providerReqCompat, `${paths.providerReqCompat}::verbosity_value_domain`, 'responses_unsupported_verbosity_fails_at_anthropic_adjacent_codec');
 requireText(text.providerReqCompat, `${paths.providerReqCompat}::exact_anthropic_fields`, 'responses_exact_client_user_id_and_json_schema_project_to_anthropic_wire');
-requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_unmapped`, 'responses_relay_rejects_codex_client_metadata_at_anthropic_codec_boundary');
+requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_local_context`, 'responses_relay_consumes_registered_codex_client_metadata_before_provider_wire');
+forbid(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_provider_wire_leak`, [/assert_eq!\(headers\["x-claude-code-session-id"\]/, /assert_eq!\(headers\["x-codex-turn-metadata"\]/]);
 requireText(text.anthropicTests, `${paths.anthropicTests}::structured_system_unmapped`, 'anthropic_structured_system_extension_is_not_silently_flattened_for_responses');
-requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::registered_extension_unmapped`, '.map(|key| format!("$.request.{key}"))');
+const openaiChatExtensionProjection = functionSlice(
+  text.requestOutboundFormat,
+  paths.requestOutboundFormat,
+  'fn project_responses_request_chat_extension_to_openai_chat',
+  'fn project_responses_text_format_to_openai_chat_response_format',
+);
+requireText(openaiChatExtensionProjection, `${paths.requestOutboundFormat}::registered_extension_unmapped`, '.map(|key| format!("$.request.{key}"))');
 
 const providerReqCompat = functionSlice(
   text.providerReqCompat,
@@ -519,9 +608,9 @@ for (const [owner, body, phrases] of [
   ]],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, [
     'responses_relay_reasoning_effort_projects_anthropic_output_config_effort',
-    'responses_relay_reasoning_summary_fails_before_anthropic_wire',
+    'responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
-    'responses_relay_anthropic_provider_rejects_unmappable_metadata',
+    'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak',
     'must not synthesize thinking budget from Responses effort',
     'reasoning_summary_policy',
     '"type":"thinking"',
@@ -790,6 +879,14 @@ if (!(parityVerification?.required_blackbox ?? []).some(
 )) {
   failures.push(`${paths.verificationMap}: unpaired malformed-arguments runtime test must be registered under required_blackbox`);
 }
+for (const testSymbol of [
+  'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input',
+  'chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input',
+]) {
+  if (!(parityVerification?.required_blackbox ?? []).some((entry) => String(entry).includes(testSymbol))) {
+    failures.push(`${paths.verificationMap}: Anthropic malformed-arguments runtime test ${testSymbol} must be registered under required_blackbox`);
+  }
+}
 if (!(parityVerification?.required_blackbox ?? []).some(
   (entry) => String(entry).includes('responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history'),
 )) {
@@ -836,7 +933,7 @@ for (const phrase of [
   'Source field inventory',
   'Canonical textual truth for the field-matrix audit',
   'Audited status legend and counts',
-  '`extension_declared` | 223',
+  '`extension_declared` | 221',
   '`semantic_declared` | 50',
   '`source_inventory_only` | 0',
   '`shape_branch_gap` | 18',

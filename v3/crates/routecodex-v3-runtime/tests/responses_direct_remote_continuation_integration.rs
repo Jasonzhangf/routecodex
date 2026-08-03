@@ -294,89 +294,29 @@ async fn direct_json_stopless_metadata_center_projects_noop_and_continues_on_rem
     let V3ClientBody::Json(first_body) = &first.client_payload.body else {
         panic!("first direct stopless response must be JSON: {first:#?}");
     };
-    assert_eq!(first_body["status"], "requires_action", "{first_body}");
+    assert_eq!(first_body["status"], "completed", "{first_body}");
     let first_serialized = serde_json::to_string(first_body).unwrap();
     assert!(first_serialized.contains("partial direct answer without summary"));
-    assert!(first_serialized.contains("call_stopless_reasoning"));
-    assert!(first_serialized.contains("routecodex hook run reasoningStop"));
+    assert!(!first_serialized.contains("call_stopless_reasoning"));
+    assert!(!first_serialized.contains("routecodex hook run reasoningStop"));
     assert_eq!(
         state.len().unwrap(),
-        1,
-        "active Direct stopless must commit a Direct remote locator for the native response id"
+        0,
+        "Direct pass-through must not commit a local bridge continuation"
     );
     assert_eq!(
         stopless.len().unwrap(),
         1,
-        "active Direct stopless must store Direct-scoped MetadataCenter control state"
+        "Direct pass-through may retain scoped StoplessCenter control without exposing it in payload"
     );
-
-    let second =
-        execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
-            &state,
-            &stopless,
-            &manifest,
-            build_v3_server_03_http_request_raw(
-                "s".into(),
-                "req-direct-stopless-active-2".into(),
-                "exec-direct-stopless-active-2".into(),
-                "POST".into(),
-                "/v1/responses".into(),
-                json!({
-                    "model":"gpt-5.5",
-                    "previous_response_id":"resp_direct_stopless_1",
-                    "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}]
-                }),
-            ),
-            scope,
-            register_responses_direct_hooks(),
-            &transport,
-            2_000,
-        )
-        .await;
-    assert_eq!(second.client_payload.status, 200, "{second:#?}");
-    assert!(second
-        .node_trace
-        .contains(&"V3HubReqContinuation03Classified"));
-    assert!(second
-        .node_trace
-        .contains(&"V3DirectStoplessReq02NoopCliConsumed"));
-    assert_eq!(
-        state.len().unwrap(),
-        0,
-        "terminal summary releases Direct locator"
-    );
-    assert_eq!(
-        stopless.len().unwrap(),
-        0,
-        "terminal summary clears Direct stopless control"
-    );
-    let V3ClientBody::Json(second_body) = &second.client_payload.body else {
-        panic!("second direct stopless response must be JSON: {second:#?}");
-    };
-    assert_eq!(second_body["status"], "completed", "{second_body}");
-    assert!(serde_json::to_string(second_body)
-        .unwrap()
-        .contains("Completed after direct stopless continuation."));
 
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 1);
     let first_request = serde_json::to_string(&requests[0]).unwrap();
     assert_eq!(
         first_request.matches("\"name\":\"reasoningStop\"").count(),
-        1,
-        "Direct request must inject exactly one provider-visible reasoningStop tool: {first_request}"
-    );
-    let second_request = serde_json::to_string(&requests[1]).unwrap();
-    assert_eq!(
-        requests[1]["previous_response_id"],
-        "resp_direct_stopless_1"
-    );
-    assert!(second_request.contains("继续当前目标"));
-    assert!(!second_request.contains("call_stopless_reasoning"));
-    assert_eq!(
-        second_request.matches("\"name\":\"reasoningStop\"").count(),
-        1,
-        "Direct continuation request must re-inject exactly one reasoningStop tool: {second_request}"
+        0,
+        "Direct request must not inject provider-visible stopless tools: {first_request}"
     );
 }
 
@@ -422,66 +362,17 @@ async fn direct_json_stopless_noop_continuation_uses_native_reasoning_stop_call_
         panic!("first direct stopless response must be JSON: {first:#?}");
     };
     assert_eq!(first_body["id"], "resp_direct_native_reasoning_stop_1");
-    assert_eq!(first_body["status"], "requires_action", "{first_body}");
+    assert_eq!(first_body["status"], "completed", "{first_body}");
     let first_serialized = serde_json::to_string(first_body).unwrap();
-    assert!(first_serialized.contains("call_stopless_reasoning"));
+    assert!(!first_serialized.contains("call_stopless_reasoning"));
     assert!(!first_serialized.contains("call_provider_native_reasoning_stop"));
     assert_eq!(state.len().unwrap(), 1);
     assert_eq!(stopless.len().unwrap(), 1);
 
-    let second = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
-        &state,
-        &stopless,
-        &manifest,
-        build_v3_server_03_http_request_raw(
-            "s".into(),
-            "req-direct-stopless-native-2".into(),
-            "exec-direct-stopless-native-2".into(),
-            "POST".into(),
-            "/v1/responses".into(),
-            json!({
-                "model":"gpt-5.5",
-                "previous_response_id":"resp_direct_native_reasoning_stop_1",
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}]
-            }),
-        ),
-        scope,
-        register_responses_direct_hooks(),
-        &transport,
-        2_000,
-    )
-    .await;
-    assert_eq!(second.client_payload.status, 200, "{second:#?}");
-    assert!(second
-        .node_trace
-        .contains(&"V3DirectStoplessReq02NoopCliConsumed"));
-    assert_eq!(state.len().unwrap(), 0);
-    assert_eq!(stopless.len().unwrap(), 0);
-
     let requests = transport.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    let second_request = serde_json::to_string(&requests[1]).unwrap();
-    assert_eq!(
-        requests[1]["previous_response_id"],
-        "resp_direct_native_reasoning_stop_1"
-    );
-    assert!(
-        second_request.contains("call_provider_native_reasoning_stop"),
-        "Direct second turn must acknowledge upstream native reasoningStop call id, not the local CLI bridge id: {second_request}"
-    );
-    assert!(
-        !second_request.contains("call_stopless_reasoning"),
-        "Direct second turn must not leak local no-op call id upstream: {second_request}"
-    );
-    assert!(
-        second_request.contains("继续当前目标"),
-        "Direct second turn must still carry continuation guidance: {second_request}"
-    );
-    assert_eq!(
-        second_request.matches("\"name\":\"reasoningStop\"").count(),
-        1,
-        "Direct second turn must still inject exactly one current-turn reasoningStop tool: {second_request}"
-    );
+    assert_eq!(requests.len(), 1);
+    let first_request = serde_json::to_string(&requests[0]).unwrap();
+    assert!(!first_request.contains("call_stopless_reasoning"));
 }
 
 #[tokio::test]
@@ -582,8 +473,8 @@ async fn direct_stopless_real_user_turn_after_stale_noop_resets_guard_count() {
     };
     let serialized = serde_json::to_string(body).unwrap();
     assert!(
-        serialized.contains("call_stopless_reasoning"),
-        "real user turn must reset stale guard count before current activation: {serialized}"
+        !serialized.contains("call_stopless_reasoning"),
+        "direct real user turn must not synthesize a local stopless bridge: {serialized}"
     );
     assert_eq!(stopless.len().unwrap(), 1);
 }
@@ -644,24 +535,24 @@ async fn direct_stopless_fifth_activation_guards_clears_and_next_request_reactiv
             panic!("Direct stopless guard response must be JSON: {output:#?}");
         };
         let serialized = serde_json::to_string(body).unwrap();
-        if round < 5 {
-            assert_eq!(body["status"], "requires_action", "{body}");
-            assert!(serialized.contains("call_stopless_reasoning"), "{body}");
-            assert_eq!(stopless.len().unwrap(), 1);
-        } else {
-            assert_eq!(body["status"], "completed", "{body}");
-            assert!(!serialized.contains("call_stopless_reasoning"), "{body}");
-            assert!(
-                !serialized.contains("routecodex hook run reasoningStop"),
-                "{body}"
-            );
-            assert!(
-                !serialized.contains("call_provider_reasoning_continue_5"),
-                "{body}"
-            );
-            assert!(stopless.is_empty().unwrap());
-            assert_eq!(state.len().unwrap(), 0);
-        }
+        assert_eq!(body["status"], "completed", "{body}");
+        assert!(!serialized.contains("call_stopless_reasoning"), "{body}");
+        assert!(
+            !serialized.contains("routecodex hook run reasoningStop"),
+            "{body}"
+        );
+        assert!(
+            !serialized.contains("call_provider_reasoning_continue_5"),
+            "{body}"
+        );
+        assert!(
+            stopless.len().unwrap() <= 1,
+            "Direct StoplessCenter control must remain scoped to one active entry"
+        );
+        assert!(
+            state.len().unwrap() <= 1,
+            "Direct remote continuation locator must not grow beyond one active entry"
+        );
     }
 
     let fresh = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
@@ -691,8 +582,8 @@ async fn direct_stopless_fifth_activation_guards_clears_and_next_request_reactiv
         panic!("Direct post-guard response must be JSON: {fresh:#?}");
     };
     let serialized = serde_json::to_string(body).unwrap();
-    assert_eq!(body["status"], "requires_action", "{body}");
-    assert!(serialized.contains("call_stopless_reasoning"), "{body}");
+    assert_eq!(body["status"], "completed", "{body}");
+    assert!(!serialized.contains("call_stopless_reasoning"), "{body}");
     assert_eq!(stopless.len().unwrap(), 1);
 }
 
@@ -735,10 +626,10 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
     assert!(first_body.contains("response.completed"), "{first_body}");
     assert!(first_body.contains("response.done"), "{first_body}");
     assert!(first_body.contains("partial direct SSE answer without summary"));
-    assert!(first_body.contains("call_stopless_reasoning"));
-    assert!(first_body.contains("routecodex hook run reasoningStop"));
+    assert!(!first_body.contains("call_stopless_reasoning"));
+    assert!(!first_body.contains("routecodex hook run reasoningStop"));
     assert!(first_body.contains("data: [DONE]"));
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 0);
     assert_eq!(stopless.len().unwrap(), 1);
 
     let requests = transport.requests.lock().unwrap();
@@ -746,8 +637,8 @@ async fn direct_sse_stopless_metadata_center_projects_terminal_frames_without_ss
     let provider_request = serde_json::to_string(&requests[0]).unwrap();
     assert_eq!(
         provider_request.matches("\"name\":\"reasoningStop\"").count(),
-        1,
-        "Direct SSE provider request must inject exactly one reasoningStop tool: {provider_request}"
+        0,
+        "Direct SSE provider request must not inject provider-visible stopless tools: {provider_request}"
     );
 }
 

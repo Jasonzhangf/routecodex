@@ -56,14 +56,6 @@ struct ApplyPatchSseTransport {
     captures: Mutex<Vec<Value>>,
 }
 
-fn stopless_projected_call(body: &Value) -> &Value {
-    body["output"]
-        .as_array()
-        .expect("stopless response output array")
-        .iter()
-        .find(|item| item["call_id"] == json!("call_stopless_reasoning"))
-        .expect("projected stopless exec_command call")
-}
 fn provider_tool_names(body: &Value) -> Vec<String> {
     let mut names = Vec::new();
     collect_tool_names_from_array(body.get("tools"), &mut names);
@@ -80,37 +72,6 @@ fn provider_tool_names(body: &Value) -> Vec<String> {
     names
 }
 
-fn provider_reasoning_stop_tool(body: &Value) -> &Value {
-    let mut matches = Vec::new();
-    collect_reasoning_stop_tools_from_array(body.get("tools"), &mut matches);
-    for item in body
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_reasoning_stop_tools_from_array(item.get("tools"), &mut matches);
-        }
-    }
-    assert_eq!(
-        matches.len(),
-        1,
-        "provider request must expose exactly one internal reasoningStop tool across original tool JSON paths: {body}"
-    );
-    matches[0]
-}
-
-fn collect_reasoning_stop_tools_from_array<'a>(value: Option<&'a Value>, out: &mut Vec<&'a Value>) {
-    if let Some(tools) = value.and_then(Value::as_array) {
-        out.extend(
-            tools
-                .iter()
-                .filter(|tool| tool_name(tool) == Some("reasoningStop")),
-        );
-    }
-}
-
 fn collect_tool_names_from_array(value: Option<&Value>, names: &mut Vec<String>) {
     if let Some(tools) = value.and_then(Value::as_array) {
         names.extend(
@@ -123,6 +84,7 @@ fn collect_tool_names_from_array(value: Option<&Value>, names: &mut Vec<String>)
 
 fn tool_name(tool: &Value) -> Option<&str> {
     tool.get("name")
+        .or_else(|| tool.get("custom").and_then(|custom| custom.get("name")))
         .or_else(|| {
             tool.get("function")
                 .and_then(|function| function.get("name"))
@@ -137,23 +99,15 @@ fn assert_provider_stopless_guidance(body: &Value) {
             .iter()
             .filter(|name| name.as_str() == "reasoningStop")
             .count(),
-        1,
-        "provider request must expose exactly one internal reasoningStop tool at the original tool JSON path, got {names:?}"
+        0,
+        "provider request must not expose internal reasoningStop tools, got {names:?}"
     );
-    let reasoning_stop_tool = provider_reasoning_stop_tool(body);
-    let reasoning_stop_description = reasoning_stop_tool["description"]
-        .as_str()
-        .expect("reasoningStop tool description");
-    for required in ["0=完成", "1=阻塞", "2=继续", "evidence", "reason"] {
-        assert!(
-            reasoning_stop_description.contains(required),
-            "reasoningStop tool description missing StoplessCenter token {required}: {reasoning_stop_description}"
-        );
-    }
-    let instructions = provider_stopless_guidance_text(body)
-        .expect("stopless provider request must carry full guidance instructions");
-    assert_full_stopless_system_guidance(instructions);
+    let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
+        "当前轮推进准则",
+        "reasoningStop",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
         "<rcc_stop_schema>",
         "schemaFeedback",
         "repeatCount",
@@ -163,22 +117,10 @@ fn assert_provider_stopless_guidance(body: &Value) {
         "stop schema",
     ] {
         assert!(
-            !instructions.contains(forbidden),
-            "provider instructions kept old stopless schema/control token {forbidden}: {instructions}"
+            !serialized.contains(forbidden),
+            "provider request leaked stopless control token {forbidden}: {serialized}"
         );
     }
-}
-
-fn provider_stopless_guidance_text(body: &Value) -> Option<&str> {
-    body.get("instructions")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            body.get("input")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .find_map(provider_system_input_text)
-        })
 }
 
 fn provider_system_input_text(item: &Value) -> Option<&str> {
@@ -201,41 +143,11 @@ fn provider_logical_input_without_stopless_system_prefix(input: &Value) -> Vec<V
         .as_array()
         .expect("provider input must be array for logical input assertion");
     let skip = items.first().is_some_and(|item| {
-        provider_system_input_text(item).is_some_and(|text| text.contains("当前轮推进准则"))
+        provider_system_input_text(item).is_some_and(|text| {
+            text.contains("当前轮推进准则") || text.contains("[Codex Tool Guidance]")
+        })
     });
     items.iter().skip(usize::from(skip)).cloned().collect()
-}
-
-fn assert_full_stopless_system_guidance(instructions: &str) {
-    for required in [
-        "当前轮推进准则",
-        "当前轮",
-        "继续当前目标",
-        "基于已有上下文",
-        "继续执行",
-        "本轮必须调用最相关工具",
-        "完成证据",
-        "阻塞证据",
-        "reasoningStop",
-        "不要只输出分析",
-    ] {
-        assert!(
-            instructions.contains(required),
-            "provider system guidance missing full stopless guideline token {required}: {instructions}"
-        );
-    }
-    for forbidden in [
-        "no-op",
-        "CLI",
-        "client tool round",
-        "客户端工具轮",
-        "routecodex hook run reasoningStop",
-    ] {
-        assert!(
-            !instructions.contains(forbidden),
-            "provider-visible system guidance leaked black-box bridge mechanism {forbidden}: {instructions}"
-        );
-    }
 }
 
 fn assert_full_stopless_continuation_prompt(prompt: &str) {
@@ -297,39 +209,6 @@ fn assert_full_stopless_continuation_item(item: &Value) {
     assert_full_stopless_continuation_prompt(&content);
 }
 
-fn count_stopless_continuation_items(input: &[Value]) -> usize {
-    input
-        .iter()
-        .filter(|item| item.get("role").and_then(Value::as_str) == Some("user"))
-        .filter_map(|item| {
-            item.get("content").and_then(|content| {
-                content.as_str().map(str::to_string).or_else(|| {
-                    content.as_array().map(|parts| {
-                        parts
-                            .iter()
-                            .filter_map(|part| {
-                                part.get("text")
-                                    .or_else(|| part.get("content"))
-                                    .and_then(Value::as_str)
-                            })
-                            .collect::<Vec<_>>()
-                            .join(
-                                "
-",
-                            )
-                    })
-                })
-            })
-        })
-        .filter(|content| {
-            content.contains("继续当前目标")
-                && content.contains("上一轮明确写出的下一步")
-                && content.contains("reasoningStop")
-                && content.contains("needs_user_input")
-        })
-        .count()
-}
-
 fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Value]) {
     let tools = body
         .get("tools")
@@ -337,8 +216,8 @@ fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Valu
         .expect("original request path $.tools must still exist before provider send");
     assert_eq!(
         tools.len(),
-        expected_original_tools.len() + 1,
-        "original request path $.tools must preserve original tools and append exactly one internal reasoningStop tool: {tools:?}"
+        expected_original_tools.len(),
+        "original request path $.tools must preserve only original tools; stopless control tools are side-channel-only: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
         assert_eq!(
@@ -346,18 +225,6 @@ fn assert_original_tools_preserved(body: &Value, expected_original_tools: &[Valu
             "original $.tools[{index}] changed before provider send"
         );
     }
-    assert_eq!(
-        tools[expected_original_tools.len()]
-            .get("name")
-            .or_else(|| {
-                tools[expected_original_tools.len()]
-                    .get("function")
-                    .and_then(|function| function.get("name"))
-            })
-            .and_then(Value::as_str),
-        Some("reasoningStop"),
-        "provider request must append reasoningStop after original $.tools entries: {tools:?}"
-    );
 }
 
 fn strip_generated_responses_item_ids(mut items: Vec<Value>) -> Vec<Value> {
@@ -411,8 +278,8 @@ fn assert_additional_tools_preserved_without_shape_rebuild(
         .expect("ReqInbound Chat normalization projects additional_tools onto the Chat/top-level tool surface");
     assert_eq!(
         tools.len(),
-        expected_original_tools.len() + 1,
-        "provider request tools must preserve original declarations plus one appended reasoningStop: {tools:?}"
+        expected_original_tools.len(),
+        "provider request tools must preserve original declarations without appending stopless control tools: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
         let mut actual = tools[index].clone();
@@ -440,18 +307,6 @@ fn assert_additional_tools_preserved_without_shape_rebuild(
             "original tool declaration {index} changed before provider send"
         );
     }
-    assert_eq!(
-        tools[expected_original_tools.len()]
-            .get("name")
-            .or_else(|| {
-                tools[expected_original_tools.len()]
-                    .get("function")
-                    .and_then(|function| function.get("name"))
-            })
-            .and_then(Value::as_str),
-        Some("reasoningStop"),
-        "provider request must append reasoningStop after original tool entries: {tools:?}"
-    );
 }
 fn is_structured_stopless_shell_artifact(item: &Value) -> bool {
     if item.get("call_id").and_then(Value::as_str) == Some("call_stopless_reasoning") {
@@ -534,8 +389,8 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
     let names: Vec<_> = tools.iter().filter_map(tool_name).collect();
     assert_eq!(
         names,
-        vec!["exec", "wait", "request_user_input", "reasoningStop"],
-        "OpenAI Chat provider tools must preserve original tools and append exactly one reasoningStop: {tools:?}"
+        vec!["exec", "wait", "request_user_input"],
+        "OpenAI Chat provider tools must preserve original tools without appending stopless control tools: {tools:?}"
     );
     let exec_tool = tools
         .iter()
@@ -543,60 +398,29 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
         .expect("exec tool");
     assert_eq!(
         exec_tool.get("type").and_then(Value::as_str),
-        Some("function"),
-        "Responses custom exec must be exposed to OpenAI Chat providers as a callable function tool: {exec_tool}"
+        Some("custom"),
+        "Responses custom exec must remain a native OpenAI Chat custom tool: {exec_tool}"
     );
     assert_eq!(
-        exec_tool.pointer("/function/parameters/properties/input/type"),
-        Some(&json!("string")),
-        "Responses custom exec must preserve freeform input through function.arguments.input: {exec_tool}"
+        exec_tool.pointer("/custom/format/type"),
+        Some(&json!("grammar")),
+        "Responses custom exec grammar format must remain target-native: {exec_tool}"
     );
     let exec_description = exec_tool
-        .pointer("/function/description")
+        .pointer("/custom/description")
         .and_then(Value::as_str)
         .expect("OpenAI Chat exec description");
-    for required in [
-        "Execute freeform script",
-        "Original Responses custom tool format",
-        "\"syntax\":\"lark\"",
-        "raw tool input string",
-    ] {
-        assert!(
-            exec_description.contains(required),
-            "OpenAI Chat custom-tool projection lost Responses custom tool guidance {required}: {exec_description}"
-        );
-    }
-    let reasoning_stop_tool = tools
-        .iter()
-        .find(|tool| tool_name(tool) == Some("reasoningStop"))
-        .expect("reasoningStop tool");
-    let reasoning_stop_description = reasoning_stop_tool["function"]["description"]
-        .as_str()
-        .or_else(|| reasoning_stop_tool["description"].as_str())
-        .expect("reasoningStop description");
-    for required in ["0=完成", "1=阻塞", "2=继续", "evidence", "reason"] {
-        assert!(
-            reasoning_stop_description.contains(required),
-            "reasoningStop OpenAI Chat tool description missing StoplessCenter token {required}: {reasoning_stop_description}"
-        );
-    }
-    let messages = body
-        .get("messages")
-        .and_then(Value::as_array)
-        .expect("OpenAI Chat provider body must expose messages");
-    let system = messages
-        .iter()
-        .find(|message| {
-            matches!(
-                message.get("role").and_then(Value::as_str),
-                Some("system" | "developer")
-            )
-        })
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
-        .expect("OpenAI Chat provider body must carry full StoplessCenter guidance in provider-visible system/developer message");
-    assert_full_stopless_system_guidance(system);
+    assert!(exec_description.contains("Execute freeform script"));
+    assert_eq!(
+        exec_tool.pointer("/custom/format/grammar/syntax"),
+        Some(&json!("lark"))
+    );
+    let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
+        "当前轮推进准则",
+        "reasoningStop",
+        "call_stopless_reasoning",
+        "routecodex hook run reasoningStop",
         "<rcc_stop_schema>",
         "schemaFeedback",
         "repeatCount",
@@ -606,8 +430,8 @@ fn assert_provider_chat_stopless_guidance(body: &Value) {
         "stop schema",
     ] {
         assert!(
-            !system.contains(forbidden),
-            "OpenAI Chat system guidance kept old stopless schema/control token {forbidden}: {system}"
+            !serialized.contains(forbidden),
+            "OpenAI Chat provider body leaked stopless control token {forbidden}: {serialized}"
         );
     }
 }
@@ -622,8 +446,8 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
         .expect("OpenAI Chat provider body must expose provider-wire top-level tools");
     assert_eq!(
         tools.len(),
-        expected_original_tools.len() + 1,
-        "OpenAI Chat provider tools must only add the internal reasoningStop tool: {tools:?}"
+        expected_original_tools.len(),
+        "OpenAI Chat provider tools must preserve original tools without adding stopless control tools: {tools:?}"
     );
     for (index, expected) in expected_original_tools.iter().enumerate() {
         let actual = &tools[index];
@@ -632,11 +456,11 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
             expected.get("name").and_then(Value::as_str),
             "OpenAI Chat tool[{index}] name changed: actual={actual} expected={expected}"
         );
-        let function = actual
-            .get("function")
-            .and_then(Value::as_object)
-            .expect("OpenAI Chat provider tool must be a function wrapper");
         if expected.get("type").and_then(Value::as_str) == Some("function") {
+            let function = actual
+                .get("function")
+                .and_then(Value::as_object)
+                .expect("OpenAI Chat function tool wrapper");
             assert_eq!(
                 function.get("description"),
                 expected.get("description"),
@@ -653,7 +477,12 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
                 "OpenAI Chat function tool[{index}] strict flag changed: actual={actual} expected={expected}"
             );
         } else {
-            let description = function
+            assert_eq!(actual.get("type").and_then(Value::as_str), Some("custom"));
+            let custom = actual
+                .get("custom")
+                .and_then(Value::as_object)
+                .expect("OpenAI Chat custom tool wrapper");
+            let description = custom
                 .get("description")
                 .and_then(Value::as_str)
                 .expect("custom tool description");
@@ -665,24 +494,42 @@ fn assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
                 description.contains(expected_description),
                 "OpenAI Chat custom tool[{index}] must preserve original description: actual={actual} expected={expected}"
             );
-            let format = serde_json::to_string(expected.get("format").unwrap())
-                .expect("custom tool format must serialize");
-            assert!(
-                description.contains(&format),
-                "OpenAI Chat custom tool[{index}] must carry original Responses format in provider protocol description: actual={actual} expected_format={format}"
-            );
+            let expected_format = expected
+                .get("format")
+                .and_then(Value::as_object)
+                .expect("Responses custom format");
             assert_eq!(
-                actual.pointer("/function/parameters/properties/input/type"),
-                Some(&json!("string")),
-                "OpenAI Chat custom tool[{index}] must expose raw custom input string: actual={actual}"
+                custom
+                    .get("format")
+                    .and_then(Value::as_object)
+                    .and_then(|format| format.get("type")),
+                expected_format.get("type"),
+                "custom format type changed: actual={actual} expected={expected}"
             );
+            if expected_format.get("type").and_then(Value::as_str) == Some("grammar") {
+                assert_eq!(
+                    custom
+                        .get("format")
+                        .and_then(Value::as_object)
+                        .and_then(|format| format.get("grammar"))
+                        .and_then(Value::as_object)
+                        .and_then(|grammar| grammar.get("syntax")),
+                    expected_format.get("syntax"),
+                    "custom grammar syntax changed: actual={actual} expected={expected}"
+                );
+                assert_eq!(
+                    custom
+                        .get("format")
+                        .and_then(Value::as_object)
+                        .and_then(|format| format.get("grammar"))
+                        .and_then(Value::as_object)
+                        .and_then(|grammar| grammar.get("definition")),
+                    expected_format.get("definition"),
+                    "custom grammar definition changed: actual={actual} expected={expected}"
+                );
+            }
         }
     }
-    assert_eq!(
-        tool_name(&tools[expected_original_tools.len()]),
-        Some("reasoningStop"),
-        "OpenAI Chat provider tools must append internal reasoningStop after original tools: {tools:?}"
-    );
 }
 
 #[async_trait]
@@ -1007,16 +854,12 @@ async fn json_stopless_center_persists_without_local_continuation_store() {
 
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "requires_action");
-            let arguments = stopless_projected_call(&body)["arguments"]
-                .as_str()
-                .expect("projected stopless command arguments");
-            assert!(arguments.contains("routecodex hook run reasoningStop"));
-            assert!(
-                !arguments.contains("--input-json"),
-                "client no-op CLI must be no-input: {arguments}"
-            );
+            assert_eq!(body["status"], "completed");
+            let serialized = serde_json::to_string(&body).unwrap();
             for forbidden in [
+                "call_stopless_reasoning",
+                "routecodex hook run reasoningStop",
+                "--input-json",
                 "session-stopless-center-metadata-only",
                 "conversation-stopless-center-metadata-only",
                 "repeatCount",
@@ -1024,8 +867,8 @@ async fn json_stopless_center_persists_without_local_continuation_store() {
                 "runtime_control",
             ] {
                 assert!(
-                    !arguments.contains(forbidden),
-                    "client no-op CLI carried StoplessCenter scope/state {forbidden}: {arguments}"
+                    !serialized.contains(forbidden),
+                    "client response leaked StoplessCenter state {forbidden}: {serialized}"
                 );
             }
         }
@@ -1213,93 +1056,36 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_provider_tools() {
     .unwrap();
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "requires_action");
-            let call = stopless_projected_call(&body);
-            assert_eq!(call["name"], "exec_command");
-            let arguments = call["arguments"].as_str().unwrap();
-            assert!(arguments.contains("routecodex hook run reasoningStop"));
-            assert!(
-                !arguments.contains("--input-json"),
-                "client no-op CLI must be no-input and must not carry an input envelope: {arguments}"
-            );
+            assert_eq!(body["status"], "completed");
+            let serialized = serde_json::to_string(&body).unwrap();
             for forbidden in [
+                "call_stopless_reasoning",
+                "routecodex hook run reasoningStop",
+                "--input-json",
                 "repeatCount",
                 "schemaFeedback",
                 "next_step",
                 "<rcc_stop_schema>",
             ] {
                 assert!(
-                    !arguments.contains(forbidden),
-                    "client no-op CLI leaked old state {forbidden}: {arguments}"
+                    !serialized.contains(forbidden),
+                    "client response leaked old stopless state {forbidden}: {serialized}"
                 );
             }
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 0);
     assert_eq!(stopless_control.len().unwrap(), 1);
 
-    let second = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
-        &manifest(),
-        V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-stopless-center-2".into(),
-            payload: json!({
-                "model":"gpt-5.5",
-                "previous_response_id":"resp_stopless_center_1",
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
-                "stream":false
-            }),
-        },
-        &transport,
-        &provider_health,
-        V3ResponsesRelayLocalStoplessControlInput::new(
-            &state,
-            stopless_control.as_ref(),
-            scope,
-            31_000,
-        ),
-    )
-    .await
-    .unwrap();
-    match second.client_body {
-        V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "completed");
-            let serialized = serde_json::to_string(&body).unwrap();
-            assert!(serialized.contains("runtime completed"));
-            assert!(!serialized.contains("call_stopless_reasoning"));
-            assert!(!serialized.contains("reasoningStop"));
-        }
-        V3ResponsesRelayClientBody::Sse(_) => panic!("second stopless turn must be JSON"),
-    }
-    assert!(state.is_empty().unwrap());
-    assert!(stopless_control.is_empty().unwrap());
-
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 2);
+    assert_eq!(captures.len(), 1);
     for capture in captures.iter() {
         assert_provider_stopless_guidance(capture);
         assert_original_tools_preserved(capture, original_tools.as_array().unwrap());
         assert_no_stopless_shell_artifacts(capture);
         assert_no_structured_stopless_control_fields(capture, "$provider");
     }
-    let second_input = provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
-    assert_eq!(second_input.len(), 3);
-    assert_eq!(
-        second_input[0],
-        json!({
-            "type":"message",
-            "role":"user",
-            "content":[{"type":"input_text","text":"Trigger stopless center"}]
-        })
-    );
-    assert_full_stopless_continuation_item(&second_input[2]);
 }
 
 #[tokio::test]
@@ -1376,73 +1162,24 @@ async fn json_stopless_center_noop_cli_roundtrip_preserves_additional_tools_surf
     .unwrap();
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "requires_action");
-            let call = stopless_projected_call(&body);
-            assert_eq!(call["name"], "exec_command");
+            assert_eq!(body["status"], "completed");
+            let serialized = serde_json::to_string(&body).unwrap();
+            assert!(!serialized.contains("call_stopless_reasoning"));
+            assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 0);
     assert_eq!(stopless_control.len().unwrap(), 1);
 
-    let second = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
-        &manifest(),
-        V3ResponsesRelayRuntimeInput {
-            server_id: "controlled".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-stopless-additional-tools-2".into(),
-            payload: json!({
-                "model":"gpt-5.5",
-                "previous_response_id":"resp_stopless_additional_tools_1",
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
-                "stream":false
-            }),
-        },
-        &transport,
-        &provider_health,
-        V3ResponsesRelayLocalStoplessControlInput::new(
-            &state,
-            stopless_control.as_ref(),
-            scope,
-            33_000,
-        ),
-    )
-    .await
-    .unwrap();
-    match second.client_body {
-        V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "requires_action");
-            let serialized = serde_json::to_string(&body).unwrap();
-            assert!(serialized.contains("call_exec_after_stopless"));
-            assert!(!serialized.contains("call_stopless_reasoning"));
-        }
-        V3ResponsesRelayClientBody::Sse(_) => panic!("second stopless turn must be JSON"),
-    }
-
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 2);
+    assert_eq!(captures.len(), 1);
     assert_additional_tools_preserved_without_shape_rebuild(
         &captures[0],
         original_tools.as_array().unwrap(),
     );
-    assert_additional_tools_preserved_without_shape_rebuild(
-        &captures[1],
-        original_tools.as_array().unwrap(),
-    );
-    assert_no_stopless_shell_artifacts(&captures[1]);
-    let second_input = provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
-    assert_eq!(second_input.len(), 3);
-    assert_eq!(
-        second_input[0].get("type").and_then(Value::as_str),
-        Some("message"),
-        "ReqInbound normalization keeps restored provider context in Responses message form while tools live in $.tools: {second_input:?}"
-    );
-    assert_full_stopless_continuation_item(&second_input[2]);
+    assert_no_stopless_shell_artifacts(&captures[0]);
+    assert_no_structured_stopless_control_fields(&captures[0], "$provider");
 }
 
 #[tokio::test]
@@ -1497,14 +1234,14 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
     .unwrap();
     match first.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "requires_action");
-            assert!(serde_json::to_string(&body)
-                .unwrap()
-                .contains("routecodex hook run reasoningStop"));
+            assert_eq!(body["status"], "completed");
+            let serialized = serde_json::to_string(&body).unwrap();
+            assert!(!serialized.contains("call_stopless_reasoning"));
+            assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first cleanup turn must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 0);
     assert_eq!(stopless_control.len().unwrap(), 1);
 
     let target_exhaustion_manifest = manifest_with_unsupported_provider_wire_target();
@@ -1522,8 +1259,7 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
             request_id: "req-stopless-error-cleanup-2".into(),
             payload: json!({
                 "model":"gpt-5.5",
-                "previous_response_id":"resp_stopless_error_cleanup_1",
-                "input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],
+                "input":[{"role":"user","content":"continue after cleanup stop"}],
                 "stream":false
             }),
         },
@@ -1553,9 +1289,10 @@ async fn json_stopless_center_route_terminal_error_clears_consumed_noop_state() 
         1,
         "terminal target selection error must occur before a second provider send"
     );
-    assert!(
-        stopless_control.is_empty().unwrap(),
-        "terminal route/provider error after consuming no-op must clear StoplessCenter; stale CliNoopProjected state would make the next client retry re-enter an invalid stopless loop"
+    assert_eq!(
+        stopless_control.len().unwrap(),
+        1,
+        "target selection failed before any stopless no-op submit was consumed, so the existing side-channel state must remain untouched"
     );
 }
 
@@ -1583,11 +1320,7 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
     );
 
     for round in 1..=4 {
-        let body = if round == 1 {
-            json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard"}],"stream":false})
-        } else {
-            json!({"model":"gpt-5.5","previous_response_id":format!("resp_guard_{}", round - 1),"input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
-        };
+        let body = json!({"model":"gpt-5.5","input":[{"role":"user","content":format!("guard round {round}")}],"stream":false});
         let out = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
             &manifest(),
             V3ResponsesRelayRuntimeInput {
@@ -1613,7 +1346,7 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         .await
         .unwrap();
         match out.client_body {
-            V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
+            V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
             V3ResponsesRelayClientBody::Sse(_) => panic!("guard round must be JSON"),
         }
     }
@@ -1629,7 +1362,7 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
             )
             .expect("test provider failure session scope"),
             request_id: "req-stopless-guard-5".into(),
-            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_4","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+            payload: json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard round 5"}],"stream":false}),
         },
         &transport,
         &provider_health,
@@ -1651,15 +1384,18 @@ async fn json_stopless_center_natural_stop_guard_passes_cleaned_original_respons
         V3ResponsesRelayClientBody::Sse(_) => panic!("guard terminal must be JSON"),
     }
     let captures = transport.captures.lock().unwrap();
-    let fifth_input = captures[4]["input"]
-        .as_array()
-        .expect("fifth guard provider input");
-    assert_eq!(
-        count_stopless_continuation_items(fifth_input),
-        1,
-        "stopless continuation guideline is a current-turn prompt and must not accumulate in restored provider history: {fifth_input:?}"
-    );
-    assert!(stopless_control.is_empty().unwrap());
+    let fifth_request = serde_json::to_string(&captures[4]).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "reasoningStop",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !fifth_request.contains(forbidden),
+            "stopless control must stay out of provider payload on guard terminal: {fifth_request}"
+        );
+    }
+    assert_eq!(stopless_control.len().unwrap(), 1);
 }
 
 #[tokio::test]
@@ -1717,7 +1453,7 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("first dry-run readonly turn must be JSON"),
     };
-    assert_eq!(first_body["status"], "requires_action");
+    assert_eq!(first_body["status"], "completed");
     let stored_before = stopless_control
         .load_for_scope(&stopless_scope)
         .unwrap()
@@ -1728,14 +1464,9 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
         V3StoplessCenterPhase::CliNoopProjected
     );
 
-    let submit_payload = json!({
+    let dry_run_payload = json!({
         "model":"gpt-5.5",
-        "previous_response_id": first_body["id"].as_str().unwrap(),
-        "input":[{
-            "type":"function_call_output",
-            "call_id":"call_stopless_reasoning",
-            "output":""
-        }],
+        "input":[{"role":"user","content":"dry-run readonly follow-up without continuation"}],
         "stream":false
     });
 
@@ -1751,7 +1482,7 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
                 )
                 .expect("test provider failure session scope"),
                 request_id: "req-stopless-control-dryrun-readonly-2".into(),
-                payload: submit_payload.clone(),
+                payload: dry_run_payload.clone(),
             },
             &state,
             &stopless_control,
@@ -1797,7 +1528,7 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
                 )
                 .expect("test provider failure session scope"),
                 request_id: "req-stopless-control-dryrun-readonly-3".into(),
-                payload: submit_payload,
+                payload: dry_run_payload,
             },
             &state,
             &stopless_control,
@@ -1810,6 +1541,17 @@ async fn provider_request_dry_run_with_stopless_control_is_read_only() {
         .body
         .get("providerRequest")
         .expect("first dry-run provider request");
+    let first_provider_request_serialized = serde_json::to_string(first_provider_request).unwrap();
+    for forbidden in [
+        "call_stopless_reasoning",
+        "reasoningStop",
+        "routecodex hook run reasoningStop",
+    ] {
+        assert!(
+            !first_provider_request_serialized.contains(forbidden),
+            "provider-request dry-run leaked stopless control token {forbidden}: {first_provider_request_serialized}"
+        );
+    }
     let second_provider_request = second_dry_run
         .body
         .get("providerRequest")
@@ -1853,11 +1595,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
     );
 
     for round in 1..=4 {
-        let body = if round == 1 {
-            json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard pass through"}],"stream":false})
-        } else {
-            json!({"model":"gpt-5.5","previous_response_id":format!("resp_guard_diag_{}", round - 1),"input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false})
-        };
+        let body = json!({"model":"gpt-5.5","input":[{"role":"user","content":format!("guard pass through round {round}")}],"stream":false});
         let out = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
             &manifest(),
             V3ResponsesRelayRuntimeInput {
@@ -1883,7 +1621,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
         .await
         .unwrap();
         match out.client_body {
-            V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
+            V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
             V3ResponsesRelayClientBody::Sse(_) => panic!("guard pass-through round must be JSON"),
         }
     }
@@ -1899,7 +1637,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
             )
             .expect("test provider failure session scope"),
             request_id: "req-stopless-guard-pass-through-5".into(),
-            payload: json!({"model":"gpt-5.5","previous_response_id":"resp_guard_diag_4","input":[{"type":"function_call_output","call_id":"call_stopless_reasoning","output":""}],"stream":false}),
+            payload: json!({"model":"gpt-5.5","input":[{"role":"user","content":"guard pass through round 5"}],"stream":false}),
         },
         &transport,
         &provider_health,
@@ -1942,7 +1680,7 @@ async fn json_stopless_center_guard_passes_through_stop_without_internal_diagnos
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("guard pass-through terminal must be JSON"),
     }
-    assert!(stopless_control.is_empty().unwrap());
+    assert_eq!(stopless_control.len().unwrap(), 1);
 }
 
 #[tokio::test]
@@ -1996,11 +1734,11 @@ async fn sse_runtime_runs_stopless_center_through_json_hub_pipeline_before_clien
                 "Responses client SSE must not use response.requires_action as terminal stream event: {text}"
             );
             assert!(
-                text.contains("\"status\":\"requires_action\""),
-                "Responses client SSE terminal response must preserve stopless requires_action status: {text}"
+                text.contains("\"status\":\"completed\""),
+                "Responses client SSE terminal response must preserve completed status without stopless bridge: {text}"
             );
-            assert!(text.contains("call_stopless_reasoning"));
-            assert!(text.contains("routecodex hook run reasoningStop"));
+            assert!(!text.contains("call_stopless_reasoning"));
+            assert!(!text.contains("routecodex hook run reasoningStop"));
             let completed = text
                 .find("event: response.completed")
                 .expect("response completed event");
@@ -2101,8 +1839,7 @@ async fn json_runtime_preserves_responses_reasoning_and_visible_text_fields_to_c
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1);
-    assert_no_original_tools_injects_single_top_level_reasoning_stop(&captures[0]);
-    assert_provider_stopless_guidance(&captures[0]);
+    assert!(captures[0].get("tools").is_none());
     assert_no_stopless_shell_artifacts(&captures[0]);
 }
 
@@ -2112,15 +1849,13 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         captures: Mutex::new(Vec::new()),
         responses: Mutex::new(VecDeque::from([json!({
             "id":"resp_stopless_dry_run_preserve_tools_1",
-            "status":"completed",
-            "finish_reason":"stop",
+            "status":"requires_action",
+            "finish_reason":"tool_calls",
             "output":[{
-                "type":"message",
-                "role":"assistant",
-                "content":[{
-                    "type":"output_text",
-                    "text":"{\"stopreason\":2,\"reason\":\"round one\",\"next_step\":\"continue and keep tools\"}"
-                }]
+                "type":"function_call",
+                "call_id":"call_dry_run_exec",
+                "name":"exec_command",
+                "arguments":"{}"
             }]
         })])),
     };
@@ -2183,8 +1918,8 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         "previous_response_id": first_body["id"].as_str().unwrap(),
         "input":[{
             "type":"function_call_output",
-            "call_id":"call_stopless_reasoning",
-            "output":""
+            "call_id":"call_dry_run_exec",
+            "output":"ok"
         }],
         "stream":false
     });
@@ -2235,17 +1970,21 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         .or_else(|| provider_request.get("payload"))
         .unwrap_or(provider_request);
     let input = provider_logical_input_without_stopless_system_prefix(&body["input"]);
-    assert_eq!(input.len(), 2);
+    assert_eq!(input.len(), 3);
     assert_eq!(
         input[0]["content"][0]["text"],
         "Trigger stopless with tools"
     );
-    assert_full_stopless_continuation_item(&input[1]);
+    assert_eq!(input[1]["type"], "function_call");
+    assert_eq!(input[1]["call_id"], "call_dry_run_exec");
+    assert_eq!(input[1]["name"], "exec_command");
+    assert_eq!(input[2]["type"], "function_call_output");
+    assert_eq!(input[2]["call_id"], "call_dry_run_exec");
+    assert_eq!(input[2]["output"], "ok");
     assert_additional_tools_preserved_without_shape_rebuild(
         body,
         original_tools.as_array().unwrap(),
     );
-    assert_provider_stopless_guidance(body);
     assert_no_stopless_shell_artifacts(body);
     assert_eq!(
         state.len().unwrap(),
@@ -2289,7 +2028,6 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         second_body,
         original_tools.as_array().unwrap(),
     );
-    assert_provider_stopless_guidance(second_body);
     assert_no_stopless_shell_artifacts(second_body);
     assert_eq!(
         state.len().unwrap(),
@@ -3237,69 +2975,21 @@ async fn responses_openai_chat_natural_stopless_submit_restores_additional_tools
         V3ResponsesRelayClientBody::Json(body) => body,
         V3ResponsesRelayClientBody::Sse(_) => panic!("OpenAI Chat provider test must be JSON"),
     };
-    assert_eq!(first_body["status"], "requires_action");
-    assert_eq!(
-        stopless_projected_call(&first_body)["call_id"],
-        "call_stopless_reasoning"
-    );
+    assert_eq!(first_body["status"], "completed");
+    let first_serialized = serde_json::to_string(&first_body).unwrap();
+    assert!(!first_serialized.contains("call_stopless_reasoning"));
+    assert!(!first_serialized.contains("routecodex hook run reasoningStop"));
     assert_eq!(stopless_control.len().unwrap(), 1);
 
-    let second = execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
-        &manifest_openai_chat_wire(),
-        V3ResponsesRelayRuntimeInput {
-            server_id: "chatwire".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-openai-chat-natural-stopless-submit-tools-2".into(),
-            payload: json!({
-                "model":"gpt-5.5",
-                "previous_response_id": first_body["id"].as_str().unwrap(),
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":""
-                }],
-                "stream":false
-            }),
-        },
-        &transport,
-        &provider_health,
-        V3ResponsesRelayLocalStoplessControlInput::new(
-            &state,
-            &stopless_control,
-            scope,
-            12_400,
-        ),
-    )
-    .await
-    .expect("natural stopless no-op submit must restore original tool surface before provider send");
-    match second.client_body {
-        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
-        V3ResponsesRelayClientBody::Sse(_) => panic!("OpenAI Chat provider test must be JSON"),
-    }
-
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 2, "both provider sends must be captured");
-    for (index, projection) in captures.iter().enumerate() {
-        let body = provider_projection_body(projection);
-        assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
-            body,
-            original_tools.as_array().unwrap(),
-        );
-        assert_provider_chat_stopless_guidance(body);
-        assert_no_structured_stopless_control_fields(body, "provider.chat.natural-stopless.submit");
-        if index == 1 {
-            let serialized = serde_json::to_string(body).unwrap();
-            assert!(
-                serialized.contains("reasoningStop"),
-                "second provider request must restore tools rather than relying on visible filler only: {serialized}"
-            );
-        }
-    }
+    assert_eq!(captures.len(), 1, "provider send must be captured once");
+    let body = provider_projection_body(&captures[0]);
+    assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
+        body,
+        original_tools.as_array().unwrap(),
+    );
+    assert_provider_chat_stopless_guidance(body);
+    assert_no_structured_stopless_control_fields(body, "provider.chat.natural-stopless.submit");
 }
 
 #[tokio::test]
@@ -3496,10 +3186,10 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
                     "content":"",
                     "tool_calls":[{
                         "id":"call_exec_1",
-                        "type":"function",
-                        "function":{
+                        "type":"custom",
+                        "custom":{
                             "name":"exec",
-                            "arguments":"{\"input\":\"text('hello from custom exec')\"}"
+                            "input":"text('hello from custom exec')"
                         }
                     }]
                 },
@@ -3548,11 +3238,16 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
     let body = provider_projection_body(&captures[0]);
-    assert_provider_chat_stopless_guidance(body);
-    assert_openai_chat_wire_tools_semantically_preserve_responses_tools(
-        body,
-        original_tools.as_array().unwrap(),
+    let tools = body["tools"].as_array().expect("provider custom tools");
+    assert_eq!(
+        tools.len(),
+        original_tools.as_array().unwrap().len(),
+        "{tools:?}"
     );
+    assert_eq!(tools[0]["type"], "custom");
+    assert_eq!(tools[0]["custom"]["name"], "exec");
+    assert_eq!(tools[0]["custom"]["format"]["type"], "grammar");
+    assert!(tools[0].get("function").is_none(), "{tools:?}");
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
             assert_eq!(body["status"], "requires_action", "{body}");
@@ -3593,10 +3288,10 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
                     "content":"",
                     "tool_calls":[{
                         "id":"call_exec_unescaped",
-                        "type":"function",
-                        "function":{
+                        "type":"custom",
+                        "custom":{
                             "name":"exec",
-                            "arguments": format!("{{\"input\":\"{}\"}}", raw_script)
+                            "input": raw_script
                         }
                     }]
                 },
@@ -4400,11 +4095,7 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 1, "provider send cutpoint must be captured");
     let body = provider_projection_body(&captures[0]);
-    assert_eq!(
-        body["tool_choice"],
-        json!("required"),
-        "stopless provider wire must require a tool decision; live auto tool_choice allowed repeated natural stops"
-    );
+    assert_eq!(body["tool_choice"], json!("auto"));
     let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
         "call_stopless_reasoning",
@@ -4421,52 +4112,12 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
             "OpenAI Chat provider wire leaked replayed stopless no-op CLI artifact {forbidden}: {serialized}"
         );
     }
-    let tools = body
-        .get("tools")
-        .and_then(Value::as_array)
-        .expect("stopless request hook must inject provider-visible reasoningStop tool");
-    let reasoning_stop_count = tools
-        .iter()
-        .filter(|tool| tool_name(tool) == Some("reasoningStop"))
-        .count();
-    assert_eq!(
-        reasoning_stop_count, 1,
-        "provider wire must expose exactly one reasoningStop tool: {tools:?}"
-    );
-    let system = body["messages"]
-        .as_array()
-        .expect("provider messages")
-        .iter()
-        .find(|message| {
-            matches!(
-                message.get("role").and_then(Value::as_str),
-                Some("system" | "developer")
-            )
-        })
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_str)
-        .expect("provider system/developer guidance");
-    assert_full_stopless_system_guidance(system);
-    let messages = body["messages"].as_array().expect("provider messages");
-    let continuation_prompt = messages
-        .iter()
-        .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
-        .filter_map(|message| message.get("content").and_then(Value::as_str))
-        .find(|content| {
-            content.contains("继续当前目标") && content.contains("上一轮明确写出的下一步")
-        })
-        .expect("provider wire must receive one transparent ordinary continuation user prompt");
-    assert_full_stopless_continuation_prompt(continuation_prompt);
     match result.client_body {
         V3ResponsesRelayClientBody::Json(body) => {
-            assert_eq!(body["status"], "requires_action");
-            let arguments = stopless_projected_call(&body)["arguments"]
-                .as_str()
-                .expect("projected stopless arguments");
-            assert!(
-                !arguments.contains("--input-json"),
-                "replayed stopless shell cleanup must not regress into an input-envelope CLI projection: {arguments}"
-            );
+            assert_eq!(body["status"], "completed");
+            let serialized = serde_json::to_string(&body).unwrap();
+            assert!(!serialized.contains("call_stopless_reasoning"));
+            assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("test response must be JSON"),
     }

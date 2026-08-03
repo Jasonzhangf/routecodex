@@ -30,6 +30,7 @@ pub(crate) use provider_compat_shared::{
 };
 mod responses_openai_codec;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
+mod client_metadata_projection;
 mod request_outbound_builtin_tool_projection;
 mod request_outbound_format;
 mod request_outbound_metadata;
@@ -75,7 +76,7 @@ pub use resp_chat_process_03_governed::*;
 mod resp_continuation_04_committed;
 pub use resp_continuation_04_committed::{
     build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03,
-    V3HubRespContinuation04Committed,
+    V3HubRespContinuation04Committed, V3HubRespContinuation04Outcome,
 };
 pub(crate) use resp_continuation_04_committed::{
     build_v3_relay_local_continuation_context_at_resp04,

@@ -123,7 +123,7 @@ fn relay_sse_keeps_one_canonical_payload_without_materializing_stream() {
     assert_eq!(resp04.canonical_context_count(), 1);
     assert!(resp04.canonical_context_shares_finalized_payload());
 
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     assert_eq!(resp06.transport_intent(), V3HubTransportIntent::Sse);
     assert_eq!(

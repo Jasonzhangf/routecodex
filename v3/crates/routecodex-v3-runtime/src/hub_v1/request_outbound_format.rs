@@ -2,7 +2,7 @@ use super::V3HubEntryProtocol;
 use serde_json::{json, Map, Value};
 
 use super::request_outbound_builtin_tool_projection::{
-    normalize_json_schema_redaction_placeholders, normalize_openai_chat_provider_tool,
+    normalize_json_schema_redaction_placeholders, project_openai_chat_provider_tools,
 };
 use super::request_outbound_metadata::{
     project_openai_client_metadata_to_metadata,
@@ -414,6 +414,16 @@ fn project_responses_request_chat_extension_to_openai_chat(
                     .join(",")
             ));
         }
+    }
+    if !extension.is_empty() {
+        return Err(format!(
+            "UnmappedOutboundFields target_protocol=openai_chat paths={}",
+            extension
+                .keys()
+                .map(|key| format!("$.request.{key}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
     }
     Ok(())
 }
@@ -1357,14 +1367,7 @@ fn normalize_openai_chat_messages_payload(payload: &Value) -> Result<Value, Stri
             *content = Value::Array(normalized_parts);
         }
     }
-    if let Some(tools) = normalized.get_mut("tools").and_then(Value::as_array_mut) {
-        let normalized_tools = tools
-            .iter()
-            .enumerate()
-            .map(|(index, tool)| normalize_openai_chat_provider_tool(tool, index))
-            .collect::<Result<Vec<_>, String>>()?;
-        *tools = normalized_tools;
-    }
+    project_openai_chat_provider_tools(&mut normalized)?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
 }

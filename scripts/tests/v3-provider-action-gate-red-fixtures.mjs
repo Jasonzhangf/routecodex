@@ -617,13 +617,13 @@ const cases = [
     diagnostic: /duplicate edge IDs: v3-provider-action-gate-06/u,
   },
   {
-    name: 'Responses Relay compat failure bypasses typed provider failure handling',
+    name: 'Responses Relay target projection error bypasses request-local fail-fast',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     mutate: (source) => source.replace(
-      'handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(',
-      'bypass_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(',
+      'let req_compat = try_before_resp03!(\n            build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)\n        );',
+      'let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();',
     ),
-    diagnostic: /ProviderReqCompat06ProviderCompat failure branch must enter handle_provider_request_failure/u,
+    diagnostic: /ProviderReqCompat06ProviderCompat request-local fail-fast branch is missing/u,
   },
   {
     name: 'Responses Relay wire encoding failure bypasses typed provider failure handling',

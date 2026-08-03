@@ -213,6 +213,9 @@ fn build_v3_router_request_facts_for_entry_with_control(
     if active_turn.has_current_turn_tool_output {
         capabilities.insert("tool_outputs".to_string());
     }
+    if request_declares_v3_client_tool_surface(body) {
+        capabilities.insert("tools".to_string());
+    }
     routecodex_v3_virtual_router::V3RouterRequestFacts {
         entry_protocol: entry_protocol.to_string(),
         client_model: body
@@ -225,6 +228,42 @@ fn build_v3_router_request_facts_for_entry_with_control(
         input_tokens,
         route_classification,
     }
+}
+
+fn request_declares_v3_client_tool_surface(body: &Value) -> bool {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| tools.iter().any(is_v3_client_tool_declaration))
+        || body
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("additional_tools")
+                        && item
+                            .get("tools")
+                            .and_then(Value::as_array)
+                            .is_some_and(|tools| tools.iter().any(is_v3_client_tool_declaration))
+                })
+            })
+}
+
+fn is_v3_client_tool_declaration(tool: &Value) -> bool {
+    let kind = tool
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(kind.as_str(), "web_search" | "web_search_preview") {
+        return false;
+    }
+    let name = tool
+        .pointer("/function/name")
+        .or_else(|| tool.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    !name.is_empty() && matches!(kind.as_str(), "function" | "custom" | "")
 }
 
 fn has_v3_protocol_image_attachment(body: &Value) -> bool {
@@ -741,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_ignore_declared_codex_tool_surface() {
+    fn v3_routing_facts_mark_declared_codex_tool_surface_for_tools_pool() {
         let request = json!({
             "model": "gpt-5.5",
             "input": [
@@ -766,18 +805,35 @@ mod tests {
 
         assert_eq!(facts.route_classification.route_name, "thinking");
         assert!(!facts.capabilities.contains("thinking"));
-        assert!(!facts.capabilities.contains("tools"));
+        assert!(facts.capabilities.contains("tools"));
         assert!(!facts.capabilities.contains("coding"));
         assert!(!facts.capabilities.contains("search"));
     }
 
     #[test]
-    fn v3_routing_facts_ignore_declared_web_search_tool_surface() {
+    fn v3_routing_facts_ignore_stringified_tool_surface_text() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": "[{\"role\":\"developer\",\"type\":\"additional_tools\",\"tools\":[{\"type\":\"function\",\"name\":\"exec_command\"}]}]",
+            "messages": [{"role":"user","content":"继续实现并验证"}]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+        );
+
+        assert!(!facts.capabilities.contains("tools"));
+    }
+
+    #[test]
+    fn v3_routing_facts_ignore_declared_web_search_builtin_surface() {
         let request = json!({
             "model": "gpt-5.5",
             "tools": [
-                {"type":"function","name":"web_search"},
-                {"type":"function","name":"lookup"}
+                {"type":"web_search"},
+                {"type":"web_search_preview"}
             ],
             "input": [{"role":"user","content":"continue the implementation"}]
         });

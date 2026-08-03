@@ -343,6 +343,8 @@ features:
       - Resp02 normalizes provider response kind and must not harvest tools decide terminality or save continuation
       - Resp03 owns provider-neutral tool harvest servertool response action and terminal/non-terminal classification
       - Resp04 derives continuation commit from Resp03 finalized semantic truth and saves at most one local canonical context
+      - Resp03 and Resp04 data nodes contain no StoplessCenter state; typed outcome carriers return the control transition independently to the runtime control owner
+      - Resp05 consumes only V3HubRespContinuation04Outcome.into_data and cannot read or reconstruct the control transition
       - Resp05 Server SSE handler and store transport do not save restore repair or infer continuation semantics
       - JSON and SSE share the sole V3ServerRespOutbound06ClientFrame response exit
       - response payload ownership is Arc-backed and does not deep-copy full provider response/body/context for governance or continuation
@@ -1424,27 +1426,37 @@ features:
       - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking fields.
       - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
       - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents `thinking.budget_tokens`.
-      - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat, Anthropic, and Gemini outbound reject summary policy as unmapped because none has an equivalent target field.
+      - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat and Gemini reject them when the target has no equivalent request policy, while Anthropic consumes a valid summary policy only as a registered local response-shaping hint with no provider-wire field. A response reasoning field never authorizes reconstructing the source request policy.
       - Anthropic thinking.budget_tokens and Gemini thinkingBudget share the numeric budget extension only after target constraint validation; OpenAI targets reject numeric budget rather than compressing it into qualitative effort.
       - Anthropic thinking.display, Gemini includeThoughts, and OpenAI reasoning.summary remain separate source-roundtrip semantics and are never reconstructed from each other.
-      - Responses metadata and client_metadata remain distinct registered Chat request fields through inbound, Chat canonicalization, and Responses outbound. Public metadata retains 16-pair/64-key/512-value validation; client_metadata does not inherit those limits. Anthropic outbound projects exact client_metadata.user_id, rejects every other client_metadata key, rejects valid and malformed prompt_cache_key because no reversible target field exists, rejects verbosity and incompatible format, consumes store:false only where the target semantics remain equivalent, and rejects store:true without MetadataCenter/SSE/handler reconstruction.
+      - Responses metadata and client_metadata remain distinct registered Chat request fields through inbound, Chat canonicalization, and Responses outbound. Public metadata retains 16-pair/64-key/512-value validation; client_metadata does not inherit those limits. OpenAI Chat and Anthropic outbound project exact client_metadata.user_id, consume registered Codex client-local keys only at provider-wire build, and reject unknown keys. Arbitrary public Responses metadata remains in a typed same-request response projection context, stays absent from Anthropic wire, and is restored before RespChatProcess/continuation save without MetadataCenter, headers, or outbound repair.
+      - Responses text.verbosity remains output verbosity. Anthropic consumes valid low/medium/high values only as a registered local style hint; it never maps them to output_config.effort because that field is reasoning effort, not verbosity.
+      - Responses custom tool declarations map exactly to native OpenAI Chat custom tools. Anthropic uses the registered `v3.custom_tool.anthropic_string_input_wrapper.v1` compatibility projection: exact raw input becomes `tool_use.input={"input":raw}`, declaration description/schema carries free-form or exact grammar information without claiming native enforcement, and reverse projection requires governed custom declaration identity plus the exact wrapper shape. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image content requests fail. Client-executed tool_search uses its separately audited function compatibility transform and projects back to Responses tool_search_call.
+      - Malformed function-call arguments use the separate registered `v3.function_call.anthropic_raw_argument_wrapper.v1` compatibility projection. It preserves exact raw argument text in `tool_use.input={"input":raw}` without relabeling the call as custom; valid JSON arguments remain on the native object path, and missing/non-string arguments fail without `{}` repair, result deletion, provider failure classification, or provider switch.
       - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening block-local cache semantics.
       - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before Stopless governance.
       - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
       - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
       - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
       - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
-      - OpenAI Chat outbound maps only exact client_metadata.user_id to public metadata.user_id, rejects every other client_metadata key, rejects valid reasoning-summary policy as unmapped, and rejects unknown or malformed fields before provider send.
+      - OpenAI Chat outbound maps exact client_metadata.user_id to public metadata.user_id, consumes registered Codex client-local keys before provider send, and rejects unknown client_metadata keys plus reasoning-summary policy before provider send.
       - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat messages.
       - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production nodes.
     required_blackbox:
       - Source-level controlled runtime tests capture provider wire and client projection for the three supported paths.
       - responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect
       - responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
+      - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
+      - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
+      - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
+      - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
+      - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
+      - openai_chat_wire_projects_responses_web_search_tool_to_options
       - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
-      - openai_chat_wire_rejects_registered_codex_client_metadata_without_target_equivalent
+      - openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context
       - openai_chat_wire_rejects_unknown_client_metadata
-      - openai_chat_wire_rejects_unmapped_reasoning_summary_policy
+      - responses_supported_verbosity_is_registered_local_style_hint_for_anthropic
+      - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
       - openai_chat_wire_rejects_invalid_reasoning_summary_policy
       - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action` after the complete typed node chain.
       - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
@@ -1919,7 +1931,7 @@ features:
       - docs/architecture/v3-verification-map.yml
       - docs/architecture/v3-mainline-call-map.yml
     required_unit:
-      - natural stop projects client-visible no-op exec_command before continuation commit
+      - natural stop preserves client business payload while typed control transition is committed only to runtime_control
       - assistant text/fenced schema is visible text only and is not a StoplessCenter state source
       - reasoningStop tool-call arguments are the only model-originated stop state
       - terminal reasoningStop with evidence returns cleaned visible terminal text and no CLI

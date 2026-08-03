@@ -109,7 +109,7 @@ const cases = [
     mutate: function(source) {
       return source.replace(/\n  - feature_id: v3\.config_interpreter_contract[\s\S]*?(?=\n  - feature_id: |\n?$)/u, '\n');
     },
-    diagnostic: /chain\[1\] v3\.config\.compile: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-function-map\.yml/u,
+    diagnostic: /v3\.config\.compile(?: edge\[\d+\] v3-cfg-\d+)?: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-function-map\.yml/u,
   },
   {
     name: 'edge owner missing from function map',
@@ -127,7 +127,7 @@ const cases = [
     mutate: function(source) {
       return source.replace(/\n  - feature_id: v3\.config_interpreter_contract[\s\S]*?(?=\n  - feature_id: |\n?$)/u, '\n');
     },
-    diagnostic: /chain\[1\] v3\.config\.compile: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-verification-map\.yml/u,
+    diagnostic: /v3\.config\.compile(?: edge\[\d+\] v3-cfg-\d+)?: owner_feature_id v3\.config_interpreter_contract is not declared in docs\/architecture\/v3-verification-map\.yml/u,
   },
   {
     name: 'same node edge',

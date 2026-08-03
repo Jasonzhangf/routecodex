@@ -1,3 +1,4 @@
+use super::anthropic_codec::{V3AnthropicCodecError, V3AnthropicResponsesProjectionContext};
 use serde_json::{json, Map, Value};
 
 pub(super) fn anthropic_tool_as_responses_function_tool(tool: &Map<String, Value>) -> Value {
@@ -29,4 +30,55 @@ pub(super) fn anthropic_tool_choice_as_responses_tool_choice(value: &Value) -> V
         }
     }
     value.to_owned()
+}
+
+pub(super) fn anthropic_tool_use_as_responses_call(
+    part: &Value,
+    context: &V3AnthropicResponsesProjectionContext,
+) -> Result<Value, V3AnthropicCodecError> {
+    let call_id = part
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "tool_use.id",
+        })?;
+    let name = part
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "tool_use.name",
+        })?;
+    let input = part
+        .get("input")
+        .ok_or(V3AnthropicCodecError::MalformedField {
+            field: "tool_use.input",
+        })?;
+    if context.is_governed_custom_tool(name) {
+        let wrapper = input
+            .as_object()
+            .filter(|wrapper| wrapper.len() == 1)
+            .ok_or(V3AnthropicCodecError::MalformedField {
+                field: "custom tool_use.input wrapper",
+            })?;
+        let raw = wrapper.get("input").and_then(Value::as_str).ok_or(
+            V3AnthropicCodecError::MalformedField {
+                field: "custom tool_use.input.input",
+            },
+        )?;
+        return Ok(json!({
+            "type":"custom_tool_call",
+            "call_id":call_id,
+            "name":name,
+            "input":raw
+        }));
+    }
+    Ok(json!({
+        "type":"function_call",
+        "call_id":call_id,
+        "name":name,
+        "arguments":serde_json::to_string(input)
+            .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use.input" })?
+    }))
 }

@@ -242,7 +242,7 @@ fn outbound_projection_rejects_control_fields_with_precise_path() {
 }
 
 #[test]
-fn openai_chat_wire_rejects_codex_client_metadata_without_exact_target_field() {
+fn openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
@@ -252,18 +252,14 @@ fn openai_chat_wire_rejects_codex_client_metadata_without_exact_target_field() {
         }
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("Codex client metadata must not be reclassified as public metadata");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("registered Codex client metadata is local request context");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
     assert!(
-        error.contains("$.request.client_metadata.session_id"),
-        "{error}"
+        request.get("client_metadata").is_none(),
+        "OpenAI Chat wire must not forward client_metadata: {request}"
     );
-    assert!(
-        error.contains("$.request.client_metadata.x-codex-turn-metadata"),
-        "{error}"
-    );
+    assert!(request.get("metadata").is_none(), "{request}");
 }
 
 #[test]
@@ -358,6 +354,180 @@ fn openai_chat_wire_maps_responses_text_json_schema_to_chat_response_format() {
 }
 
 #[test]
+fn openai_chat_wire_projects_responses_web_search_tool_to_options() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "function",
+                "name": "read_file",
+                "description": "Read one file",
+                "parameters": {"type":"object","properties":{}}
+            },
+            {
+                "type": "web_search_preview",
+                "search_context_size": "medium",
+                "user_location": {
+                    "type": "approximate",
+                    "country": "CN",
+                    "city": "Shanghai"
+                }
+            },
+            {
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Search deferred tools",
+                "parameters": {
+                    "type":"object",
+                    "properties":{"query":{"type":"string"}},
+                    "required":["query"],
+                    "additionalProperties":false
+                }
+            }
+        ]
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Responses web search must project to Chat web_search_options");
+
+    assert_eq!(request["tools"].as_array().map(Vec::len), Some(2));
+    assert_eq!(request["tools"][0]["function"]["name"], json!("read_file"));
+    assert_eq!(
+        request["tools"][1]["function"]["name"],
+        json!("tool_search")
+    );
+    assert_eq!(
+        request["web_search_options"],
+        json!({
+            "search_context_size":"medium",
+            "user_location": {
+                "type":"approximate",
+                "country":"CN",
+                "city":"Shanghai"
+            }
+        })
+    );
+}
+
+#[test]
+fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "patch then search"}],
+        "tools": [
+            {
+                "type": "function",
+                "name": "exec_command",
+                "description": "Run a command",
+                "parameters": {"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}
+            },
+            {
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Apply a patch",
+                "format": {"type":"text"}
+            },
+            {
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Search deferred tools",
+                "parameters": {"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}
+            },
+            {
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text"],
+                "search_context_size": "medium"
+            }
+        ]
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("every Codex tool declaration must reach legal OpenAI Chat wire");
+
+    let tools = request["tools"].as_array().expect("Chat tools array");
+    assert_eq!(tools.len(), 3);
+    assert_eq!(tools[0]["function"]["name"], "exec_command");
+    assert_eq!(tools[1]["type"], "custom");
+    assert_eq!(tools[1]["custom"]["name"], "apply_patch");
+    assert_eq!(tools[1]["custom"]["description"], "Apply a patch");
+    assert_eq!(tools[1]["custom"]["format"], json!({"type":"text"}));
+    assert!(tools[1].get("function").is_none(), "{tools:?}");
+    assert_eq!(tools[2]["function"]["name"], "tool_search");
+    assert_eq!(
+        request["web_search_options"]["search_context_size"],
+        "medium"
+    );
+    assert!(request.to_string().contains("\"type\":\"custom\""));
+}
+
+#[test]
+fn openai_chat_wire_rejects_unknown_web_search_content_type() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [{
+            "type": "web_search",
+            "external_web_access": true,
+            "search_content_types": ["video"]
+        }]
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("unknown search content type must fail before provider send");
+
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(error.contains("$.tools[0].search_content_types"), "{error}");
+}
+
+#[test]
+fn openai_chat_wire_projects_custom_grammar_to_native_chat_custom_tool() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "patch"}],
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
+        }]
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("custom grammar must use the native OpenAI Chat custom tool shape");
+
+    assert_eq!(request["tools"][0]["type"], "custom");
+    assert_eq!(request["tools"][0]["custom"]["name"], "apply_patch");
+    assert_eq!(
+        request["tools"][0]["custom"]["format"],
+        json!({
+            "type":"grammar",
+            "grammar":{"syntax":"lark","definition":"start: patch"}
+        })
+    );
+    assert!(request["tools"][0].get("function").is_none(), "{request}");
+}
+
+#[test]
+fn openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "patch"}],
+        "tools": [{
+            "type": "custom",
+            "name": "apply_patch",
+            "format": {"type":"binary"}
+        }]
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("unknown custom format must fail instead of becoming a function tool");
+
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(error.contains("$.tools[0].format.type"), "{error}");
+}
+
+#[test]
 fn openai_chat_wire_rejects_raw_responses_text_json_schema_shape() {
     let payload = json!({
         "model": "gpt-test",
@@ -391,10 +561,32 @@ fn openai_chat_wire_rejects_unmapped_reasoning_summary_policy() {
     });
 
     let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("OpenAI Chat cannot preserve Responses reasoning summary policy");
+        .expect_err("OpenAI Chat has no equivalent reasoning summary policy");
 
     assert!(error.contains("UnmappedOutboundFields"), "{error}");
     assert!(error.contains("reasoning_summary_policy"), "{error}");
+}
+
+#[test]
+fn openai_chat_wire_rejects_extension_reasoning_summary_policy() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "reasoning_summary_policy": "detailed"
+            }
+        }
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("Responses summary policy extension must not disappear on Chat wire");
+
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(
+        error.contains("$.request.reasoning_summary_policy"),
+        "{error}"
+    );
 }
 
 #[test]

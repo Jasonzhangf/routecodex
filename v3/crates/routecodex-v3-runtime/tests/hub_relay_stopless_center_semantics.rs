@@ -50,29 +50,6 @@ fn scope() -> V3HubContinuationScope {
     )
 }
 
-fn stopless_call(payload: &Value) -> &Value {
-    payload
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .find(|item| item.get("call_id").and_then(Value::as_str) == Some("call_stopless_reasoning"))
-        .expect("stopless no-op call")
-}
-
-fn stopless_cmd(payload: &Value) -> String {
-    let arguments = stopless_call(payload)
-        .get("arguments")
-        .and_then(Value::as_str)
-        .expect("stopless call arguments");
-    serde_json::from_str::<Value>(arguments)
-        .expect("stopless arguments JSON")
-        .get("cmd")
-        .and_then(Value::as_str)
-        .expect("stopless cmd")
-        .to_string()
-}
-
 fn active_stopless_response_profile(
     consecutive_stop_count: u32,
     request_id: &'static str,
@@ -106,92 +83,6 @@ fn reasoning_summary_texts(payload: &Value) -> Vec<String> {
         .filter_map(|entry| entry.get("text").and_then(Value::as_str))
         .map(str::to_string)
         .collect()
-}
-
-fn assert_full_stopless_continuation_prompt(prompt: &str) {
-    for required in [
-        "继续当前目标",
-        "基于已经恢复的完整上下文",
-        "上一轮明确写出的下一步",
-        "已有结论",
-        "未完成事项",
-        "继续执行",
-        "本轮必须调用最相关工具",
-        "不要只总结",
-        "目标确实完成并有证据",
-        "reasoningStop",
-        "阻塞",
-        "needs_user_input",
-        "既未完成也未阻塞，继续工作",
-    ] {
-        assert!(
-            prompt.contains(required),
-            "stopless continuation prompt missing transparent guideline token {required}: {prompt}"
-        );
-    }
-    for forbidden in [
-        "no-op",
-        "CLI",
-        "client tool round",
-        "客户端工具轮",
-        "routecodex hook run reasoningStop",
-        "上一轮 reasoningStop CLI",
-        "不是工具结果",
-        "finish_reason=stop",
-        "RouteCodex stopless continuation",
-    ] {
-        assert!(
-            !prompt.contains(forbidden),
-            "provider-visible continuation prompt leaked black-box bridge mechanism {forbidden}: {prompt}"
-        );
-    }
-}
-
-fn continuation_prompt_for_state(state: V3StoplessCenterState) -> String {
-    let restored_context = json!({
-        "input": [
-            {"role":"user","content":"完成当前目标"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"上一轮可见文本"}]},
-            {
-                "type":"function_call",
-                "call_id":"call_stopless_reasoning",
-                "name":"exec_command",
-                "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
-            }
-        ],
-        "output": [{
-            "type":"function_call",
-            "call_id":"call_stopless_reasoning",
-            "name":"exec_command",
-            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
-        }]
-    });
-    let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-policy"), scope())
-        .with_local_context("ctx-stopless-policy", scope(), restored_context);
-    let outcome = compile_v3_hub_relay_request_hooks()
-        .run(
-            raw_request(json!({
-                "model":"gpt-5.5",
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":"ignored stdout"
-                }]
-            })),
-            &lookup,
-            &V3HubServertoolRequestProfile::stopless_reasoning_stop()
-                .with_stopless_center_state(state)
-                .with_stopless_transition_context("req-stopless-policy", 55_555),
-        )
-        .unwrap();
-    outcome.payload()["input"]
-        .as_array()
-        .expect("provider input")
-        .last()
-        .and_then(|item| item.get("content"))
-        .and_then(Value::as_str)
-        .expect("provider continuation prompt")
-        .to_string()
 }
 
 #[test]
@@ -358,70 +249,25 @@ fn stopless_center_state_machine_locks_normal_and_abnormal_transitions() {
 }
 
 #[test]
-fn request_guidance_changes_by_state_without_exposing_internal_status() {
-    let default_prompt = continuation_prompt_for_state(V3StoplessCenterState::new(
-        1,
-        3,
-        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-    ));
-    let stronger_prompt = continuation_prompt_for_state(V3StoplessCenterState::new(
-        2,
-        3,
-        V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-    ));
-    let evidence_prompt = continuation_prompt_for_state(V3StoplessCenterState::new(
-        1,
-        3,
-        V3StoplessCenterSteering::ReasoningStopNeedsEvidence,
-    ));
-    let blocked_prompt = continuation_prompt_for_state(V3StoplessCenterState::new(
-        1,
-        3,
-        V3StoplessCenterSteering::Blocked,
-    ));
-
-    assert_full_stopless_continuation_prompt(&default_prompt);
-    assert_full_stopless_continuation_prompt(&stronger_prompt);
-    assert_full_stopless_continuation_prompt(&evidence_prompt);
-    assert!(
-        stronger_prompt.contains("最小可验证工具动作"),
-        "second consecutive stop policy must strengthen task-progress guidance: {stronger_prompt}"
-    );
-    assert!(
-        evidence_prompt.contains("证据不足"),
-        "needs-evidence policy must ask for completion/blocked evidence without exposing internals: {evidence_prompt}"
-    );
-    assert!(
-        blocked_prompt.contains("等待下一条真实用户输入"),
-        "blocked/wait-user policy must avoid another continuation loop: {blocked_prompt}"
-    );
-    assert_ne!(default_prompt, stronger_prompt);
-    assert_ne!(default_prompt, evidence_prompt);
-    assert_ne!(stronger_prompt, evidence_prompt);
-    for prompt in [
-        default_prompt.as_str(),
-        stronger_prompt.as_str(),
-        evidence_prompt.as_str(),
-        blocked_prompt.as_str(),
+fn stopless_center_request_state_stays_control_only_without_provider_guidance() {
+    for state in [
+        V3StoplessCenterState::new(
+            1,
+            3,
+            V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+        ),
+        V3StoplessCenterState::new(
+            2,
+            3,
+            V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
+        ),
+        V3StoplessCenterState::new(1, 3, V3StoplessCenterSteering::ReasoningStopNeedsEvidence),
+        V3StoplessCenterState::new(1, 3, V3StoplessCenterSteering::Blocked),
     ] {
-        for forbidden in [
-            "no-op",
-            "CLI",
-            "client tool round",
-            "routecodex hook run reasoningStop",
-            "finish_reason=stop",
-            "连续 stop 次数",
-            "续轮上限",
-            "guard",
-            "budget",
-            "这是连续第",
-            "最多",
-        ] {
-            assert!(
-                !prompt.contains(forbidden),
-                "state-specific provider prompt leaked internal status {forbidden}: {prompt}"
-            );
-        }
+        assert!(
+            !format!("{state:?}").contains("routecodex hook run reasoningStop"),
+            "StoplessCenter control state must not encode provider-visible CLI guidance"
+        );
     }
 }
 
@@ -450,11 +296,13 @@ fn natural_stop_projects_noop_cli_without_cli_state_json() {
     let resp04 = hooks.commit(resp03).unwrap();
     let payload = resp04.finalized_payload();
     let state = resp04
-        .stopless_center_state()
+        .control_transition()
         .expect("natural stop must update StoplessCenter");
 
-    assert_eq!(payload["status"], "requires_action");
-    assert_eq!(stopless_cmd(payload), "routecodex hook run reasoningStop");
+    assert_eq!(payload["status"], "completed");
+    assert!(!serde_json::to_string(payload)
+        .unwrap()
+        .contains("call_stopless_reasoning"));
     assert_eq!(state.phase(), V3StoplessCenterPhase::CliNoopProjected);
     assert_eq!(state.consecutive_stop_count(), 1);
     assert_eq!(state.natural_stop_count(), 1);
@@ -526,7 +374,7 @@ fn inactive_schema_guidance_stop_passes_without_cli_projection_or_state_write() 
 
     assert_eq!(payload["status"], "completed");
     assert_eq!(payload["finish_reason"], "stop");
-    assert!(resp04.stopless_center_state().is_none());
+    assert!(resp04.control_transition().is_none());
     assert!(serialized.contains("inactive stop must pass through"));
     assert!(!serialized.contains("call_stopless_reasoning"));
     assert!(!serialized.contains("routecodex hook run reasoningStop"));
@@ -574,7 +422,7 @@ fn natural_stop_with_canonical_reasoning_summary_passes_without_stopless_project
     assert_eq!(payload["status"], "completed");
     assert_eq!(payload["finish_reason"], "stop");
     assert!(
-        resp04.stopless_center_state().is_none(),
+        resp04.control_transition().is_none(),
         "canonical summary must classify the stop as complete before StoplessCenter counting"
     );
     assert!(
@@ -635,7 +483,7 @@ fn third_consecutive_natural_stop_with_summary_passes_without_incrementing_stopl
 
     assert_eq!(payload["status"], "completed");
     assert!(
-        resp04.stopless_center_state().is_none(),
+        resp04.control_transition().is_none(),
         "summary-complete third stop must pass through and clear/supersede stopless state instead of counting"
     );
     assert!(
@@ -685,11 +533,10 @@ fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04
     let resp04 = hooks.commit(resp03).unwrap();
     let payload = resp04.finalized_payload();
     let state = resp04
-        .stopless_center_state()
+        .control_transition()
         .expect("unfinished summary stop_schema must continue through StoplessCenter");
 
-    assert_eq!(payload["status"], "requires_action");
-    assert_eq!(stopless_cmd(payload), "routecodex hook run reasoningStop");
+    assert_eq!(payload["status"], "completed");
     assert_eq!(state.steering(), V3StoplessCenterSteering::Continue);
     assert_eq!(
         state.next_step_prompt(),
@@ -700,12 +547,6 @@ fn natural_stop_with_summary_stop_schema_next_step_projects_noop_and_seeds_req04
         Some("summary_stop_schema_next_step_cli_projected")
     );
 
-    let prompt = continuation_prompt_for_state(state.clone());
-    assert_full_stopless_continuation_prompt(&prompt);
-    assert!(
-        prompt.contains("Run cargo test for the new summary/schema stopless gate."),
-        "Req04 continuation prompt must carry the canonical stop_schema nextStep: {prompt}"
-    );
     let serialized = serde_json::to_string(payload).unwrap();
     assert!(
         !serialized.contains("stop_schema"),
@@ -751,7 +592,7 @@ fn natural_stop_with_summary_stop_schema_blocked_reason_passes_and_augments_summ
 
     assert_eq!(payload["status"], "completed");
     assert!(
-        resp04.stopless_center_state().is_none(),
+        resp04.control_transition().is_none(),
         "blocked summary stop_schema must pass through without counting or projecting no-op"
     );
     assert!(
@@ -799,11 +640,12 @@ fn anthropic_end_turn_text_stop_schema_is_natural_stop_for_stopless() {
         .unwrap();
     let resp04 = hooks.commit(resp03).unwrap();
 
-    assert_eq!(resp04.finalized_payload()["status"], "requires_action");
-    assert_eq!(
-        stopless_cmd(resp04.finalized_payload()),
-        "routecodex hook run reasoningStop",
-        "Anthropic end_turn is a natural-stop finish reason in stopless relay"
+    assert_eq!(resp04.finalized_payload()["status"], "completed");
+    assert!(
+        !serde_json::to_string(resp04.finalized_payload())
+            .unwrap()
+            .contains("call_stopless_reasoning"),
+        "Anthropic end_turn stopless transition must stay out of business payload"
     );
 }
 
@@ -836,34 +678,29 @@ fn assistant_text_stop_schema_fence_is_not_a_stopless_state_source() {
 
     assert_eq!(
         resp04.finalized_payload()["status"],
-        "requires_action",
+        "completed",
         "assistant text/fence must be treated as natural stop unless reasoningStop updated StoplessCenter"
     );
-    assert_eq!(
-        stopless_cmd(resp04.finalized_payload()),
-        "routecodex hook run reasoningStop"
-    );
+    assert!(!serde_json::to_string(resp04.finalized_payload())
+        .unwrap()
+        .contains("call_stopless_reasoning"));
 }
 
 #[test]
 fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
     let restored_context = json!({
-        "input": [
+        "messages": [
             {"role":"user","content":"完成当前目标"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"自然停下的可见文本"}]},
+            {"role":"assistant","content":"自然停下的可见文本"},
             {
-                "type":"function_call",
-                "call_id":"call_stopless_reasoning",
-                "name":"exec_command",
-                "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                "role":"assistant",
+                "tool_calls":[{
+                    "id":"call_stopless_reasoning",
+                    "type":"function",
+                    "function":{"name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"}
+                }]
             }
-        ],
-        "output": [{
-            "type":"function_call",
-            "call_id":"call_stopless_reasoning",
-            "name":"exec_command",
-            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
-        }]
+        ]
     });
     let lookup = V3HubContinuationLookup::new(Some("ctx-stopless-center"), scope())
         .with_local_context("ctx-stopless-center", scope(), restored_context);
@@ -871,10 +708,10 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
         .run(
             raw_request(json!({
                 "model":"gpt-5.5",
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_stopless_reasoning",
-                    "output":""
+                "messages":[{
+                    "role":"tool",
+                    "tool_call_id":"call_stopless_reasoning",
+                    "content":""
                 }]
             })),
             &lookup,
@@ -893,22 +730,16 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
         .stopless_state()
         .expect("Req04 must keep StoplessCenter state active for the provider turn");
 
-    let input = payload["input"].as_array().expect("provider input");
-    assert_eq!(input.len(), 2);
-    assert_eq!(input[0], json!({"role":"user","content":"完成当前目标"}));
-    assert_eq!(input[1].get("role").and_then(Value::as_str), Some("user"));
-    assert_full_stopless_continuation_prompt(
-        input[1]
-            .get("content")
-            .and_then(Value::as_str)
-            .expect("stopless continuation prompt"),
+    let messages = payload["messages"].as_array().expect("provider messages");
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0], json!({"role":"user","content":"完成当前目标"}));
+    assert_eq!(
+        messages[1],
+        json!({"role":"assistant","content":"自然停下的可见文本"})
     );
     assert!(
-        payload["instructions"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("当前轮推进准则"),
-        "StoplessCenter steering must be a full provider-facing transparent guideline in instructions: {serialized}"
+        payload.get("instructions").is_none(),
+        "StoplessCenter control must not inject provider-facing guidance: {serialized}"
     );
     assert_eq!(state.phase(), V3StoplessCenterPhase::ProviderTurnInFlight);
     assert_eq!(state.consecutive_stop_count(), 1);
@@ -933,18 +764,15 @@ fn request_consumes_noop_cli_and_uses_runtime_control_not_stdout() {
     let events = outcome.hook_events();
     assert!(
         events
-            .windows(7)
+            .windows(4)
             .any(|window| window
                 == [
                     V3HubRelayRequestHookEvent::Req04LocalContextRestored,
                     V3HubRelayRequestHookEvent::Req04StoplessControlLoaded,
                     V3HubRelayRequestHookEvent::Req04StoplessCliNoopObserved,
                     V3HubRelayRequestHookEvent::Req04StoplessResultParsed,
-                    V3HubRelayRequestHookEvent::Req04StoplessTextRewritten,
-                    V3HubRelayRequestHookEvent::Req04StoplessGuidancePrepared,
-                    V3HubRelayRequestHookEvent::Req04StoplessToolInjected,
                 ]),
-        "Req04 stopless edge order must be restore -> control load -> no-op observed -> strip/rewrite -> guidance prepared -> tool inject: {events:?}"
+        "Req04 stopless edge order must be restore -> control load -> no-op observed -> parsed: {events:?}"
     );
     for forbidden in [
         "call_stopless_reasoning",
@@ -1167,8 +995,8 @@ async fn omitted_stopless_center_compiles_true_and_injects_guidance_and_projects
         panic!("omitted stopless test expects JSON body");
     };
     assert_eq!(
-        body["status"], "requires_action",
-        "omitted feature default true must project stopless no-op: {body}"
+        body["status"], "completed",
+        "omitted feature default true must keep stopless control out of client payload: {body}"
     );
     let provider_body = transport.captures.lock().unwrap().first().unwrap().clone();
     let serialized = serde_json::to_string(&provider_body).unwrap();
@@ -1180,18 +1008,20 @@ async fn omitted_stopless_center_compiles_true_and_injects_guidance_and_projects
         .filter(|tool| tool.get("name").and_then(Value::as_str) == Some("reasoningStop"))
         .count();
     assert_eq!(
-        stopless_tool_count, 1,
-        "omitted feature default true must inject exactly one reasoningStop tool: {provider_body}"
+        stopless_tool_count, 0,
+        "omitted feature default true must not inject reasoningStop into provider payload: {provider_body}"
     );
     assert!(
-        serialized.contains("reasoningStop"),
-        "omitted feature default true must inject stopless reasoningStop tool: {serialized}"
+        !serialized.contains("reasoningStop"),
+        "omitted feature default true must not inject stopless reasoningStop tool: {serialized}"
     );
     assert!(
-        serialized.contains("当前轮推进准则"),
-        "omitted feature default true must inject stopless guidance: {serialized}"
+        !serialized.contains("当前轮推进准则"),
+        "omitted feature default true must not inject stopless guidance: {serialized}"
     );
-    assert_eq!(stopless_cmd(&body), "routecodex hook run reasoningStop");
+    assert!(!serde_json::to_string(&body)
+        .unwrap()
+        .contains("call_stopless_reasoning"));
 }
 
 #[tokio::test]
@@ -1373,9 +1203,9 @@ async fn server_override_precedence_applies_after_compiled_global_default() {
     let V3ResponsesRelayClientBody::Json(enabled_body) = enabled_output.client_body else {
         panic!("server-enabled stopless test expects JSON body");
     };
-    assert_eq!(enabled_body["status"], "requires_action");
+    assert_eq!(enabled_body["status"], "completed");
     assert!(
-        serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap())
+        !serde_json::to_string(enabled_transport.captures.lock().unwrap().first().unwrap())
             .unwrap()
             .contains("reasoningStop")
     );

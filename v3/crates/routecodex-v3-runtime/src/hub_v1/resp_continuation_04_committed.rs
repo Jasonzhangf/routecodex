@@ -4,6 +4,7 @@ use crate::{
     V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
 };
 use serde_json::{json, Map, Value};
+use std::ops::Deref;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +13,6 @@ pub struct V3HubRespContinuation04Committed {
     pub(crate) action: V3HubContinuationCommit,
     pub(crate) finalized_payload: Arc<Value>,
     pub(crate) canonical_context: Option<V3HubRelayCanonicalResponseContext>,
-    pub(crate) stopless_center_state: Option<V3StoplessCenterState>,
 }
 
 pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
@@ -35,7 +35,6 @@ pub fn build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
         action,
         finalized_payload,
         canonical_context,
-        stopless_center_state: None,
     }
 }
 
@@ -82,19 +81,44 @@ impl V3HubRespContinuation04Committed {
     pub fn finalized_payload(&self) -> &Value {
         self.finalized_payload.as_ref()
     }
+}
 
-    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
-        self.stopless_center_state.as_ref()
+#[derive(Debug, Clone, PartialEq)]
+pub struct V3HubRespContinuation04Outcome {
+    data: V3HubRespContinuation04Committed,
+    control_transition: Option<V3StoplessCenterState>,
+}
+
+impl V3HubRespContinuation04Outcome {
+    pub fn control_transition(&self) -> Option<&V3StoplessCenterState> {
+        self.control_transition.as_ref()
+    }
+
+    pub fn into_data(self) -> V3HubRespContinuation04Committed {
+        self.data
+    }
+}
+
+impl Deref for V3HubRespContinuation04Outcome {
+    type Target = V3HubRespContinuation04Committed;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
 }
 
 pub(crate) fn commit_v3_hub_relay_response(
-    input: V3HubRespChatProcess03Governed,
-) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
+    input: V3HubRespChatProcess03Outcome,
+) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError> {
+    let (input, control_transition) = input.into_parts();
     let finalized_payload = input.previous.provider_payload().clone();
-    let stopless_center_state = input.stopless_center_state.clone();
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
+        V3HubResponseTerminality::NonTerminal
+            if input.tool_calls.is_empty() && control_transition.is_some() =>
+        {
+            (V3HubContinuationCommit::None, None)
+        }
         V3HubResponseTerminality::NonTerminal => (
             V3HubContinuationCommit::LocalContext,
             Some(V3HubRelayCanonicalResponseContext {
@@ -105,12 +129,14 @@ pub(crate) fn commit_v3_hub_relay_response(
             }),
         ),
     };
-    Ok(V3HubRespContinuation04Committed {
-        previous: input,
-        action,
-        finalized_payload,
-        canonical_context,
-        stopless_center_state,
+    Ok(V3HubRespContinuation04Outcome {
+        data: V3HubRespContinuation04Committed {
+            previous: input,
+            action,
+            finalized_payload,
+            canonical_context,
+        },
+        control_transition,
     })
 }
 

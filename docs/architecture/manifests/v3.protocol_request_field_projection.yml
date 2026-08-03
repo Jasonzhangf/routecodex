@@ -4,6 +4,11 @@ runtime_conformance: pending
 owner_feature_id: v3.protocol_conversion_field_parity
 canonical_doc: docs/design/v3-protocol-request-field-projection.md
 resource_id: v3.protocol_conversion.field_parity_contract
+projection_classes:
+  - mapped_exact
+  - mapped_compatible_registered
+  - source_roundtrip_only
+  - unsupported
 nodes:
   - id: ProtocolField01SourceWire
     owner: adjacent_inbound_codec
@@ -48,6 +53,9 @@ payload_semantics:
   - request.reasoning_include_thoughts
   - request.reasoning_display_policy
   - request.reasoning_thinking_mode
+  - request.tools.custom_declaration
+  - request.tool_choice.named_custom
+  - request.messages.tool_calls.custom
 semantic_registry:
   - semantic_id: request.metadata
     chat_storage: routecodex_chat_extension.responses_request.metadata
@@ -55,7 +63,7 @@ semantic_registry:
     projections:
       responses: metadata_openai_limits
       openai_chat: metadata_openai_limits
-      anthropic: metadata_user_id_only
+      anthropic: user_id_to_provider_wire_other_keys_to_response_projection_context
       gemini: unmapped
   - semantic_id: request.client_metadata
     chat_storage: routecodex_chat_extension.responses_request.client_metadata
@@ -166,6 +174,103 @@ semantic_registry:
       openai_chat: unmapped
       anthropic: thinking.type
       gemini: unmapped
+  - semantic_id: request.tools.custom_declaration
+    chat_storage: tools[].type_custom
+    type: custom_tool_name_description_and_text_or_grammar_format
+    projections:
+      responses: mapped_exact
+      openai_chat: mapped_exact_native_custom
+      anthropic: mapped_compatible_registered:v3.custom_tool.anthropic_string_input_wrapper.v1
+      gemini: unsupported
+  - semantic_id: request.tool_choice.named_custom
+    chat_storage: tool_choice.type_custom_and_exact_name
+    type: governed_custom_tool_name_selection
+    projections:
+      responses: mapped_exact
+      openai_chat: mapped_exact_native_custom
+      anthropic: mapped_compatible_registered:v3.custom_tool.anthropic_string_input_wrapper.v1
+      gemini: unsupported
+  - semantic_id: request.messages.tool_calls.custom
+    chat_storage: messages[].tool_calls[].custom
+    type: custom_call_id_name_raw_string_input
+    projections:
+      responses: mapped_exact
+      openai_chat: mapped_exact_native_custom
+      anthropic: mapped_compatible_registered:v3.custom_tool.anthropic_string_input_wrapper.v1
+      gemini: unsupported
+compatibility_registry:
+  - compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
+    status: design
+    source_semantics:
+      - request.tools.custom_declaration
+      - request.tool_choice.named_custom
+      - request.messages.tool_calls.custom
+    target_protocol: anthropic
+    target_declaration:
+      name: exact_source_name
+      description: source_description_plus_deterministic_compatibility_note
+      input_schema:
+        type: object
+        properties:
+          input:
+            type: string
+            description: exact_free_form_or_grammar_constraint
+        required: [input]
+        additionalProperties: false
+    target_call_wrapper:
+      input: exact_raw_string
+    target_tool_choice:
+      type: tool
+      name: exact_source_name
+    semantic_delta: grammar_or_free_form_constraint_is_described_to_anthropic_but_not_claimed_as_natively_enforced
+    reverse_guard:
+      - active_governed_declaration_identifies_exact_tool_name_as_custom
+      - fresh_provider_tool_use_id_is_bound_after_custom_branch_selection
+      - historical_replay_and_tool_result_require_exact_bound_call_identity
+      - tool_use_input_contains_only_registered_string_input
+    forbidden:
+      - infer_custom_from_arbitrary_tool_use_shape
+      - silent_relabel
+      - wrapper_leak_to_responses_or_openai_chat_client
+      - empty_object_repair
+      - double_stringify
+      - paired_tool_result_deletion
+      - provider_switch_on_wrapper_error
+    required_tests:
+      - responses_custom_tool_projects_registered_anthropic_wrapper
+      - responses_named_custom_tool_choice_projects_registered_anthropic_tool_choice
+      - responses_named_custom_tool_choice_without_name_fails
+      - anthropic_registered_custom_wrapper_restores_exact_responses_raw_input
+      - anthropic_unregistered_input_wrapper_is_not_unwrapped_as_custom
+      - anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair
+  - compatibility_id: v3.function_call.anthropic_raw_argument_wrapper.v1
+    status: design
+    source_semantics:
+      - request.messages.tool_calls.function.arguments_malformed_raw_string
+    target_protocol: anthropic
+    branch_predicate:
+      - governed_call_is_function_not_custom
+      - source_arguments_is_string_and_invalid_json
+    target_call_wrapper:
+      input: exact_malformed_raw_argument_string
+    semantic_delta: malformed_function_argument_text_is_preserved_in_a_target_valid_object_without_claiming_valid_json_arguments
+    reverse_guard:
+      - governed_function_call_branch_matches
+      - exact_bound_call_identity_matches_for_replay_or_tool_result_pairing
+      - tool_use_input_contains_only_registered_string_input
+    forbidden:
+      - relabel_function_call_as_custom
+      - wrap_valid_function_argument_object
+      - empty_object_repair
+      - double_stringify
+      - paired_tool_result_deletion
+      - provider_failure_classification
+      - provider_switch_on_wrapper_error
+    required_tests:
+      - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
+      - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
+      - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
+      - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
 forbidden_carriers:
   - MetadataCenter
   - routing

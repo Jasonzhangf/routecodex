@@ -780,6 +780,7 @@ features:
     resource_bindings:
       - v3.request.normal_payload
       - v3.request.provider_semantic
+      - v3.request.response_projection_context
       - v3.hub.provider_wire_payload
       - v3.hub.response_semantic
       - v3.response.client_payload
@@ -896,6 +897,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
@@ -1094,10 +1096,17 @@ features:
       - V3HubRelayResponseHookRegistry::normalize
       - V3HubRelayResponseHookRegistry::govern
       - V3HubRelayResponseHookRegistry::commit
+      - V3HubRespChatProcess03Outcome::into_parts
+      - V3HubRespContinuation04Outcome::control_transition
+      - V3HubRespContinuation04Outcome::into_data
       - V3HubRespInbound02Normalized::normalized_kind
       - V3HubRespChatProcess03Governed::terminality
       - V3HubRespChatProcess03Governed::servertool_action
       - V3HubRespContinuation04Committed::canonical_context_shares_finalized_payload
+    control_boundary:
+      - V3HubRespChatProcess03Governed and V3HubRespContinuation04Committed contain response data only
+      - StoplessCenter transition leaves Resp03 through V3HubRespChatProcess03Outcome and bypasses Resp04 data
+      - Runtime consumes V3HubRespContinuation04Outcome.control_transition before passing only into_data to Resp05
     source_nodes:
       - V3ProviderRespInbound01Raw
       - V3HubRespInbound02Normalized
@@ -1362,6 +1371,7 @@ features:
       - characterize_v3_anthropic_hub_response_semantic_to_client_projection
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
@@ -1966,6 +1976,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
@@ -1996,18 +2007,24 @@ features:
       - project_v3_responses_arguments_to_openai_chat_wire
       - build_v3_openai_chat_standard_request_from_chat_canonical
       - project_openai_client_metadata_to_metadata
+      - unsupported_client_metadata_paths
       - validate_openai_metadata
       - reject_openai_chat_unmapped_reasoning_summary_policy
+      - project_openai_chat_provider_tools
       - build_provider_req_compat_06_from_v3_hub_req_outbound_07
       - execute_v3_responses_relay_runtime_inner
       - build_v3_responses_provider_response_from_openai_chat_payload
       - encode_v3_anthropic_request_as_responses_semantic
       - encode_v3_responses_semantic_as_anthropic_request
       - project_v3_responses_json_as_anthropic_message
+      - V3AnthropicResponsesProjectionContext::from_chat_canonical_request
+      - project_v3_anthropic_message_as_responses_response_with_context
       - responses_openai_chat_field_parity_request_matrix
       - responses_openai_chat_field_parity_response_matrix
       - responses_relay_reasoning_effort_projects_anthropic_output_config_effort
-      - responses_relay_reasoning_summary_fails_without_anthropic_equivalent
+      - responses_relay_reasoning_summary_is_rejected_before_anthropic_wire
+      - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
+      - openai_chat_wire_projects_responses_web_search_tool_to_options
       - responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning
       - anthropic_responses_field_parity_request_matrix
       - anthropic_responses_field_parity_response_matrix
@@ -2019,17 +2036,20 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
       - v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs
+      - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
       - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
       - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
       - docs/goals/v3-protocol-conversion-field-parity-test-design.md
@@ -2824,7 +2844,7 @@ features:
     status: controlled_runtime_slice_verified
     change_risk: critical
     owner_kind: rust_project_v3_runtime_chat_process_hook
-    owner_scope: "V3 StoplessCenter lifecycle inside Rust Chat Process only: request hook runs in Req04 after local continuation/context restore, injects legal schema guidance, and transitions scoped StoplessCenter MetadataCenter state machine to same-turn `schema_guidance_active` before request tool output governance; response hook runs in Resp03 before Resp04 continuation commit and may intercept only stop/end_turn responses while that scoped state is active. StoplessCenter is a Metadata Center control-signal state machine for the Stopless feature. CLI is a no-input no-op client roundtrip and carries no scope/state/parameters. StoplessCenter state is MetadataCenter/runtime_control side-channel state, not continuation context, CLI args/stdout, debug snapshot metadata, provider body, client body, or normal payload."
+    owner_scope: "V3 StoplessCenter lifecycle inside Rust Chat Process only: request hook runs in Req04 after local continuation/context restore and transitions the scoped Metadata Center control-signal state machine without injecting guidance, tools, prompts, or CLI aliases into provider payload; response hook runs in Resp03 before Resp04 continuation commit, strips historical stop-schema/control artifacts, and emits continuation decisions only through the typed data/control outcome. The legacy schema_guidance_active marker may be read only as same-turn activation state; inactive state passes business payload unchanged. StoplessCenter state is MetadataCenter/runtime_control side-channel state, not continuation context, CLI args/stdout, debug/snapshot metadata, provider body, client body, or normal payload."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
@@ -2878,7 +2898,7 @@ features:
       - build_v3_relay_local_continuation_context_at_resp04
       - merge_v3_relay_restored_local_context_at_req04
       - req04_rejects_responses_shaped_continuation_instead_of_rebuilding_chat
-      - natural_stop_projects_noop_cli_without_cli_state_json
+      - natural_stop_preserves_business_payload_and_emits_typed_control_transition
       - request_consumes_noop_cli_and_uses_runtime_control_not_stdout
       - json_stopless_center_persists_without_local_continuation_store
       - json_stopless_center_missing_client_session_scope_passes_stop_without_control_write

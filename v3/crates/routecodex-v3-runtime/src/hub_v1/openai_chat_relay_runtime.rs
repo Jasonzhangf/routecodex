@@ -567,7 +567,7 @@ fn project_json_response(
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
     let client = resp04.finalized_payload().clone();
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
     trace.push("V3HubRespOutbound05ClientSemantic");
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");

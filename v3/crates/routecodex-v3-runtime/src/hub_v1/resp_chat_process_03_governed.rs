@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
+use std::ops::Deref;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -9,7 +10,6 @@ pub struct V3HubRespChatProcess03Governed {
     pub(crate) terminality: V3HubResponseTerminality,
     pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
     pub(crate) servertool_action: V3HubServertoolResponseAction,
-    pub(crate) stopless_center_state: Option<V3StoplessCenterState>,
 }
 
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
@@ -20,7 +20,6 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
         terminality: V3HubResponseTerminality::Terminal,
         tool_calls: Vec::new(),
         servertool_action: V3HubServertoolResponseAction::None,
-        stopless_center_state: None,
     }
 }
 
@@ -37,15 +36,36 @@ impl V3HubRespChatProcess03Governed {
         self.servertool_action
     }
 
-    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
-        self.stopless_center_state.as_ref()
-    }
-
     pub fn tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
         self.tool_calls
             .iter()
             .map(|tool_call| tool_call.kind)
             .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct V3HubRespChatProcess03Outcome {
+    data: V3HubRespChatProcess03Governed,
+    control_transition: Option<V3StoplessCenterState>,
+}
+
+impl V3HubRespChatProcess03Outcome {
+    pub fn into_parts(
+        self,
+    ) -> (
+        V3HubRespChatProcess03Governed,
+        Option<V3StoplessCenterState>,
+    ) {
+        (self.data, self.control_transition)
+    }
+}
+
+impl Deref for V3HubRespChatProcess03Outcome {
+    type Target = V3HubRespChatProcess03Governed;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
     }
 }
 
@@ -158,10 +178,10 @@ pub struct V3HubRelayResponseHookRegistry {
     govern: fn(
         V3HubRespInbound02Normalized,
         &V3HubRelayResponseHookProfile,
-    ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError>,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>,
     commit: fn(
-        V3HubRespChatProcess03Governed,
-    ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError>,
+        V3HubRespChatProcess03Outcome,
+    ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError>,
 }
 
 impl V3HubRelayResponseHookRegistry {
@@ -176,14 +196,14 @@ impl V3HubRelayResponseHookRegistry {
         &self,
         input: V3HubRespInbound02Normalized,
         profile: &V3HubRelayResponseHookProfile,
-    ) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
         (self.govern)(input, profile)
     }
 
     pub fn commit(
         &self,
-        input: V3HubRespChatProcess03Governed,
-    ) -> Result<V3HubRespContinuation04Committed, V3HubRelayResponseError> {
+        input: V3HubRespChatProcess03Outcome,
+    ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError> {
         (self.commit)(input)
     }
 }
@@ -222,7 +242,7 @@ fn normalize_v3_hub_relay_response(
 fn govern_v3_hub_relay_response(
     input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
-) -> Result<V3HubRespChatProcess03Governed, V3HubRelayResponseError> {
+) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
     let input = harvest_v3_think_blocks_at_resp03(input);
     let input = complete_or_repair_v3_resp03_tool_frames(input);
     let governance = build_v3_resp03_protocol_governance(&input)?;
@@ -248,26 +268,31 @@ fn govern_v3_hub_relay_response(
         }
         V3Resp03FinishReasonBranch::Other => (input, governance),
     };
-    let terminality = if governance.tool_calls.is_empty() {
-        governance.status_terminality
-    } else {
-        V3HubResponseTerminality::NonTerminal
-    };
-    let servertool_action = if governance
+    let servertool_tool_call_followup = governance
         .tool_calls
         .iter()
-        .any(|tool_call| profile.servertool_names.contains(&tool_call.name))
-    {
+        .any(|tool_call| profile.servertool_names.contains(&tool_call.name));
+    let stopless_control_followup = stopless_center_state
+        .as_ref()
+        .is_some_and(V3StoplessCenterState::need_continue);
+    let servertool_action = if servertool_tool_call_followup || stopless_control_followup {
         V3HubServertoolResponseAction::FollowupRequired
     } else {
         V3HubServertoolResponseAction::None
     };
-    Ok(V3HubRespChatProcess03Governed {
-        previous: input,
-        terminality,
-        tool_calls: governance.tool_calls,
-        servertool_action,
-        stopless_center_state,
+    let terminality = if governance.tool_calls.is_empty() && !stopless_control_followup {
+        governance.status_terminality
+    } else {
+        V3HubResponseTerminality::NonTerminal
+    };
+    Ok(V3HubRespChatProcess03Outcome {
+        data: V3HubRespChatProcess03Governed {
+            previous: input,
+            terminality,
+            tool_calls: governance.tool_calls,
+            servertool_action,
+        },
+        control_transition: stopless_center_state,
     })
 }
 

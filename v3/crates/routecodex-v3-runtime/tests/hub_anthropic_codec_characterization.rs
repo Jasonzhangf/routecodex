@@ -6,8 +6,10 @@ use routecodex_v3_runtime::{
     collect_v3_anthropic_request_shape_branch_semantics,
     encode_v3_anthropic_request_as_responses_semantic,
     encode_v3_responses_semantic_as_anthropic_request,
-    project_v3_anthropic_message_as_responses_response, V3AnthropicChatShapeBranchSemantic,
-    V3AnthropicCodecError, V3AnthropicCodecStage, V3HubEntryProtocol, V3HubProviderWireProtocol,
+    project_v3_anthropic_message_as_responses_response,
+    project_v3_anthropic_message_as_responses_response_with_context,
+    V3AnthropicChatShapeBranchSemantic, V3AnthropicCodecError, V3AnthropicCodecStage,
+    V3AnthropicResponsesProjectionContext, V3HubEntryProtocol, V3HubProviderWireProtocol,
     V3HubTransportIntent,
 };
 use serde_json::json;
@@ -231,24 +233,209 @@ fn responses_custom_tool_call_raw_input_encodes_as_anthropic_tool_use_object() {
 }
 
 #[test]
-fn responses_reasoning_summary_policy_fails_before_anthropic_wire() {
+fn responses_custom_tool_projects_registered_anthropic_wrapper() {
+    let raw_patch = "*** Begin Patch\n*** End Patch";
+    let grammar = "start: patch\npatch: /[\\s\\S]+/";
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "tools":[{
+            "type":"custom",
+            "name":"apply_patch",
+            "description":"Apply a patch",
+            "format":{"type":"grammar","syntax":"lark","definition":grammar}
+        }],
+        "input":[
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"patch"}]},
+            {"type":"custom_tool_call","call_id":"call_patch","name":"apply_patch","input":raw_patch},
+            {"type":"custom_tool_call_output","call_id":"call_patch","output":"done"}
+        ]
+    }))
+    .expect("registered custom tool must project to Anthropic compatibility wrapper");
+
+    let tool = &provider_request["tools"][0];
+    assert_eq!(tool["name"], "apply_patch");
+    assert_eq!(
+        tool["input_schema"]["properties"]["input"]["type"],
+        "string"
+    );
+    assert_eq!(tool["input_schema"]["required"], json!(["input"]));
+    assert_eq!(tool["input_schema"]["additionalProperties"], false);
+    let description = tool["description"].as_str().expect("tool description");
+    assert!(description.contains("Apply a patch"), "{description}");
+    assert!(
+        description.contains("v3.custom_tool.anthropic_string_input_wrapper.v1"),
+        "{description}"
+    );
+    assert!(description.contains("syntax=\"lark\""), "{description}");
+    assert!(
+        description.contains(&serde_json::to_string(grammar).unwrap()),
+        "{description}"
+    );
+    assert!(
+        description.contains("does not natively enforce"),
+        "{description}"
+    );
+    assert_eq!(
+        provider_request["messages"][1]["content"][0]["input"],
+        json!({"input":raw_patch})
+    );
+}
+
+#[test]
+fn anthropic_registered_custom_wrapper_restores_exact_responses_raw_input() {
+    let raw = "*** Begin Patch\n*** Update File: a.txt\n*** End Patch";
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+        "tools":[{
+            "type":"custom",
+            "name":"apply_patch",
+            "format":{"type":"text"}
+        }]
+    }))
+    .expect("governed custom declaration context");
+    let response = project_v3_anthropic_message_as_responses_response_with_context(
+        &json!({
+            "id":"msg_custom",
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":"toolu_provider_generated",
+                "name":"apply_patch",
+                "input":{"input":raw}
+            }],
+            "stop_reason":"tool_use"
+        }),
+        &context,
+    )
+    .expect("registered wrapper must restore the custom call");
+
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["call_id"], "toolu_provider_generated");
+    assert_eq!(response["output"][0]["name"], "apply_patch");
+    assert_eq!(response["output"][0]["input"], raw);
+}
+
+#[test]
+fn anthropic_unregistered_input_wrapper_is_not_unwrapped_as_custom() {
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+        "tools":[{
+            "type":"function",
+            "name":"exec_command",
+            "parameters":{"type":"object"}
+        }]
+    }))
+    .expect("function declaration context");
+    let response = project_v3_anthropic_message_as_responses_response_with_context(
+        &json!({
+            "id":"msg_function",
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":"toolu_function",
+                "name":"exec_command",
+                "input":{"input":"pwd"}
+            }],
+            "stop_reason":"tool_use"
+        }),
+        &context,
+    )
+    .expect("unregistered wrapper shape remains a function call");
+
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["arguments"], "{\"input\":\"pwd\"}");
+}
+
+#[test]
+fn anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair() {
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+        "tools":[{
+            "type":"custom",
+            "name":"apply_patch",
+            "format":{"type":"text"}
+        }]
+    }))
+    .expect("custom declaration context");
+    for malformed in [
+        json!({"input":"raw","extra":true}),
+        json!({"input":{"patch":"raw"}}),
+    ] {
+        let error = project_v3_anthropic_message_as_responses_response_with_context(
+            &json!({
+                "id":"msg_malformed_custom",
+                "role":"assistant",
+                "content":[{
+                    "type":"tool_use",
+                    "id":"toolu_malformed",
+                    "name":"apply_patch",
+                    "input":malformed
+                }],
+                "stop_reason":"tool_use"
+            }),
+            &context,
+        )
+        .expect_err("malformed registered wrapper must fail without repair");
+        assert!(
+            error.to_string().contains("custom tool_use.input"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn responses_custom_tool_call_missing_input_fails_without_empty_object_repair() {
     let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[
+            {"type":"custom_tool_call","call_id":"call_missing","name":"apply_patch"},
+            {"type":"custom_tool_call_output","call_id":"call_missing","output":"done"}
+        ]
+    }))
+    .expect_err("custom tool input is required for the registered wrapper");
+    assert!(format!("{error:?}").contains("custom_tool_call.input"));
+}
+
+#[test]
+fn responses_custom_tool_call_non_string_input_fails_without_relabel_or_repair() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[
+            {"type":"custom_tool_call","call_id":"call_object","name":"apply_patch","input":{"patch":"raw"}},
+            {"type":"custom_tool_call_output","call_id":"call_object","output":"done"}
+        ]
+    }))
+    .expect_err("custom wrapper accepts only the exact raw string input");
+    assert!(format!("{error:?}").contains("custom_tool_call.input"));
+}
+
+#[test]
+fn responses_valid_function_arguments_use_native_anthropic_object_input() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "input":[
+            {"type":"function_call","call_id":"call_valid","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},
+            {"type":"function_call_output","call_id":"call_valid","output":"/tmp"}
+        ]
+    }))
+    .expect("valid function arguments use native object input");
+    assert_eq!(
+        provider_request["messages"][0]["content"][0]["input"],
+        json!({"cmd":"pwd"})
+    );
+}
+
+#[test]
+fn responses_reasoning_summary_policy_is_local_hint_for_anthropic() {
+    let wire = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": true,
         "reasoning_effort":"medium",
         "reasoning_summary_policy":"detailed",
         "messages":[{"role":"user","content":"keep reasoning enabled"}]
     }))
-    .expect_err("Anthropic cannot preserve Responses reasoning summary policy");
+    .expect("valid reasoning summary policy is consumed as local response-shaping context");
 
-    assert!(
-        error.to_string().contains("UnmappedOutboundFields"),
-        "{error}"
-    );
-    assert!(
-        error.to_string().contains("reasoning_summary_policy"),
-        "{error}"
-    );
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("reasoning_summary_policy"));
 }
 
 #[test]
@@ -782,6 +969,54 @@ fn responses_object_tool_choice_preserves_anthropic_disable_parallel_without_top
 }
 
 #[test]
+fn responses_named_custom_tool_choice_projects_registered_anthropic_tool_choice() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": false,
+        "tool_choice": {"type":"custom","name":"shell_raw"},
+        "input": "Call the custom tool.",
+        "tools": [{
+            "type":"custom",
+            "name":"shell_raw",
+            "description":"Execute raw input.",
+            "format":{"type":"text"}
+        }]
+    }))
+    .expect("named custom choice must use the registered Anthropic tool declaration");
+
+    assert_eq!(
+        provider_request["tool_choice"],
+        json!({"type":"tool","name":"shell_raw"})
+    );
+    assert_eq!(provider_request["tools"][0]["name"], json!("shell_raw"));
+    assert_eq!(
+        provider_request["tools"][0]["input_schema"]["properties"]["input"]["type"],
+        json!("string")
+    );
+}
+
+#[test]
+fn responses_named_custom_tool_choice_without_name_fails() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream": false,
+        "tool_choice": {"type":"custom"},
+        "input": "Call the custom tool.",
+        "tools": [{
+            "type":"custom",
+            "name":"shell_raw",
+            "format":{"type":"text"}
+        }]
+    }))
+    .expect_err("custom choice without an exact name must fail");
+
+    assert_eq!(
+        error.to_string(),
+        "Anthropic codec malformed tool_choice.name"
+    );
+}
+
+#[test]
 fn responses_additional_tools_input_item_projects_to_anthropic_tool_surface() {
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
@@ -927,11 +1162,16 @@ fn responses_consecutive_tool_calls_group_before_results_for_anthropic_order() {
 }
 
 #[test]
-fn responses_malformed_function_call_arguments_fail_before_anthropic_wire() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "stream": true,
         "input": [
+            {
+                "type":"message",
+                "role":"user",
+                "content":[{"type":"input_text","text":"continue the task"}]
+            },
             {
                 "type":"function_call",
                 "call_id":"call_unpaired_bad_args",
@@ -945,18 +1185,35 @@ fn responses_malformed_function_call_arguments_fail_before_anthropic_wire() {
             }
         ]
     }))
-    .expect_err("malformed Responses arguments cannot be reversibly projected to Anthropic");
+    .expect("malformed historical Responses arguments must keep the feedback pair");
     assert_eq!(
-        error.to_string(),
-        "Anthropic codec malformed function_call.arguments"
+        provider_request["messages"][1]["content"][0]["type"],
+        json!("tool_use")
+    );
+    assert_eq!(
+        provider_request["messages"][1]["content"][0]["id"],
+        json!("call_unpaired_bad_args")
+    );
+    assert_eq!(
+        provider_request["messages"][1]["content"][0]["input"],
+        json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
+    );
+    assert_eq!(
+        provider_request["messages"][2]["content"][0]["type"],
+        json!("tool_result")
+    );
+    assert_eq!(
+        provider_request["messages"][2]["content"][0]["tool_use_id"],
+        json!("call_unpaired_bad_args")
     );
 }
 
 #[test]
-fn chat_malformed_tool_call_arguments_fail_before_anthropic_wire() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input() {
+    let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "messages":[
+            {"role":"user","content":"continue the task"},
             {"role":"assistant","content":"","tool_calls":[{
                 "id":"call_malformed_chat",
                 "type":"function",
@@ -968,10 +1225,26 @@ fn chat_malformed_tool_call_arguments_fail_before_anthropic_wire() {
             {"role":"tool","tool_call_id":"call_malformed_chat","content":"failed to parse function arguments"}
         ]
     }))
-    .expect_err("malformed Chat arguments cannot be reversibly projected to Anthropic");
+    .expect("malformed historical Chat arguments must keep the feedback pair");
     assert_eq!(
-        error.to_string(),
-        "Anthropic codec malformed tool_call.arguments"
+        provider_request["messages"][1]["content"][1]["type"],
+        json!("tool_use")
+    );
+    assert_eq!(
+        provider_request["messages"][1]["content"][1]["id"],
+        json!("call_malformed_chat")
+    );
+    assert_eq!(
+        provider_request["messages"][1]["content"][1]["input"],
+        json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
+    );
+    assert_eq!(
+        provider_request["messages"][2]["content"][0]["type"],
+        json!("tool_result")
+    );
+    assert_eq!(
+        provider_request["messages"][2]["content"][0]["tool_use_id"],
+        json!("call_malformed_chat")
     );
 }
 
@@ -1704,7 +1977,8 @@ fn anthropic_thinking_fields_require_valid_exact_shape() {
 }
 
 #[test]
-fn anthropic_client_metadata_projects_only_exact_user_id() {
+fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_and_rejects_unknown(
+) {
     let mut exact = base_chat_for_field_projection();
     exact["routecodex_chat_extension"] = json!({
         "responses_request":{"client_metadata":{"user_id":"opaque-user"}}
@@ -1716,9 +1990,9 @@ fn anthropic_client_metadata_projects_only_exact_user_id() {
     let mut session = base_chat_for_field_projection();
     session["routecodex_chat_extension"] =
         json!({"responses_request":{"client_metadata":{"session_id":"session"}}});
-    let error = encode_v3_responses_semantic_as_anthropic_request(session)
-        .expect_err("session_id has no exact Anthropic metadata field");
-    assert!(error.to_string().contains("client_metadata.session_id"));
+    let wire = encode_v3_responses_semantic_as_anthropic_request(session)
+        .expect("registered Codex session identity is consumed as local context");
+    assert!(wire.get("metadata").is_none(), "{wire}");
 
     let mut unsupported = base_chat_for_field_projection();
     unsupported["routecodex_chat_extension"] =
@@ -1729,24 +2003,42 @@ fn anthropic_client_metadata_projects_only_exact_user_id() {
 }
 
 #[test]
-fn anthropic_rejects_responses_cache_key_store_and_verbosity_without_equivalents() {
+fn anthropic_public_metadata_projects_user_id_and_consumes_response_context() {
+    let mut exact = base_chat_for_field_projection();
+    exact["routecodex_chat_extension"] = json!({
+        "responses_request":{"metadata":{"user_id":"public-user"}}
+    });
+    let wire = encode_v3_responses_semantic_as_anthropic_request(exact)
+        .expect("exact public metadata.user_id must project");
+    assert_eq!(wire["metadata"], json!({"user_id":"public-user"}));
+
+    let mut unsupported = base_chat_for_field_projection();
+    unsupported["routecodex_chat_extension"] = json!({
+        "responses_request":{"metadata":{"tenant":"tenant-1"}}
+    });
+    let wire = encode_v3_responses_semantic_as_anthropic_request(unsupported)
+        .expect("public metadata without an Anthropic slot stays response projection context");
+    assert!(wire.get("metadata").is_none(), "{wire}");
+}
+
+#[test]
+fn anthropic_consumes_registered_responses_cache_verbosity_store_false_and_rejects_invalid() {
     let mut cache_key = base_chat_for_field_projection();
     cache_key["routecodex_chat_extension"] = json!({"responses_request":{
         "prompt_cache_key":"session-1",
     }});
-    let error = encode_v3_responses_semantic_as_anthropic_request(cache_key)
-        .expect_err("valid prompt_cache_key has no reversible Anthropic field");
-    assert!(
-        error.to_string().contains("$.request.prompt_cache_key"),
-        "{error}"
-    );
+    let wire = encode_v3_responses_semantic_as_anthropic_request(cache_key)
+        .expect("valid prompt_cache_key is consumed as local cache hint");
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("prompt_cache_key"));
 
     let mut verbosity = base_chat_for_field_projection();
     verbosity["routecodex_chat_extension"] =
         json!({"responses_request":{"text":{"verbosity":"high"}}});
-    let error = encode_v3_responses_semantic_as_anthropic_request(verbosity)
-        .expect_err("Responses verbosity has no reversible Anthropic projection");
-    assert!(error.to_string().contains("verbosity"), "{error}");
+    let wire = encode_v3_responses_semantic_as_anthropic_request(verbosity)
+        .expect("Responses verbosity is consumed as local style hint");
+    assert!(!serde_json::to_string(&wire).unwrap().contains("verbosity"));
 
     let mut not_stored = base_chat_for_field_projection();
     not_stored["routecodex_chat_extension"] = json!({"responses_request":{"store":false}});
@@ -1773,6 +2065,44 @@ fn anthropic_rejects_responses_cache_key_store_and_verbosity_without_equivalents
     let error = encode_v3_responses_semantic_as_anthropic_request(malformed_verbosity)
         .expect_err("unknown verbosity must fail target validation");
     assert!(error.to_string().contains("verbosity"), "{error}");
+}
+
+#[test]
+fn anthropic_consumes_arbitrary_responses_metadata_without_provider_wire_leak() {
+    let mut request = base_chat_for_field_projection();
+    request["routecodex_chat_extension"] = json!({
+        "responses_request": {
+            "metadata": {
+                "client_owned": "audit-20260803",
+                "trace_label": "client-data"
+            }
+        }
+    });
+
+    let wire = encode_v3_responses_semantic_as_anthropic_request(request.clone())
+        .expect("Responses metadata must remain response-owned data-plane context");
+
+    assert!(wire.get("metadata").is_none(), "{wire}");
+    let serialized = serde_json::to_string(&wire).unwrap();
+    assert!(!serialized.contains("client_owned"), "{wire}");
+    assert!(!serialized.contains("trace_label"), "{wire}");
+
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request)
+        .expect("Responses metadata projection context");
+    let response = project_v3_anthropic_message_as_responses_response_with_context(
+        &json!({
+            "id":"msg_metadata",
+            "role":"assistant",
+            "content":[{"type":"text","text":"ok"}],
+            "stop_reason":"end_turn"
+        }),
+        &context,
+    )
+    .expect("Anthropic response must restore Responses metadata before RespChatProcess");
+    assert_eq!(
+        response["metadata"],
+        json!({"client_owned":"audit-20260803","trace_label":"client-data"})
+    );
 }
 
 #[test]

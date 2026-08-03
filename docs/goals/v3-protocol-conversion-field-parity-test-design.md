@@ -71,7 +71,7 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 ## Data-plane / control-plane rule
 
 - `metadata` and `client_metadata` in client protocol bodies are distinct data-plane fields. `client_metadata` first becomes the registered Chat payload extension `request.client_metadata`; it is not a raw wire shortcut and must retain its source identity through Req02.
-- Public OpenAI `metadata` requires at most 16 string pairs, key length at most 64, and value length at most 512. Codex `client_metadata` remains distinct through Responses inbound, Chat canonicalization, and Responses outbound, so it never inherits public `metadata` limits. OpenAI Chat and Anthropic may project an exact non-empty `user_id`; every other key fails as `UnmappedOutboundFields` because those targets have no reversible field.
+- Public OpenAI `metadata` requires at most 16 string pairs, key length at most 64, and value length at most 512. Codex `client_metadata` remains distinct through Responses inbound, Chat canonicalization, and Responses outbound, so it never inherits public `metadata` limits. OpenAI Chat and Anthropic may project an exact non-empty `user_id`; registered Codex client-local keys (`session_id`, `thread_id`, `turn_id`, `forked_from_thread_id`, and `x-codex-*` identity headers) are consumed only at provider-wire build as local request context; unknown keys fail as `UnmappedOutboundFields`.
 - RouteCodex-created control fields (`metadata_center`, `routeHint`, `stoplessCenter`, `requestCapabilities`, etc.) must fail before provider/client normal payload.
 - Unsupported target-protocol fields must not be silently dropped or prompt-encoded. This slice either maps an exact target semantic or fails with the canonical Chat semantic path.
 
@@ -84,9 +84,10 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 | `model` | preserved until Provider08/12 overwrites to selected wire model | request matrix |
 | `instructions` | system/developer message; no top-level `instructions` in Chat wire | request matrix |
 | `input[].message` text/image | `messages[]` role/content | request matrix |
-| `input[].function_call/tool_call/custom_tool_call` | assistant `tool_calls[]` with stable id/name/arguments | request matrix + custom malformed negative |
+| `input[].function_call/tool_call` | assistant function `tool_calls[]` with stable id/name/arguments | request matrix + malformed negative |
+| `input[].custom_tool_call` | assistant native custom `tool_calls[]` with stable id/name/raw input | native custom-call request/response matrix |
 | `input[].*_output/tool_result` | tool role message with `tool_call_id` and content | request matrix |
-| `tools` and `additional_tools` | top-level Chat `tools`; custom tools become function-wrapper with raw `input` schema | request matrix |
+| `tools` and `additional_tools` | top-level Chat `tools`; function and native custom tool declarations retain their target-native type and complete schema/format | request matrix |
 | `tool_choice` | preserved | request matrix |
 | `parallel_tool_calls` | preserved | request matrix |
 | `user` | preserved | request matrix |
@@ -153,9 +154,30 @@ tests exist and pass.
 | Responses field | OpenAI Chat provider wire | Required test |
 | --- | --- | --- |
 | `reasoning.effort` | top-level `reasoning_effort`; Responses `reasoning` object must not leak to provider wire | `responses_openai_chat_field_parity_request_matrix` |
-| `reasoning.summary` | valid registered policy fails as unmapped at the adjacent OpenAI Chat codec; invalid values fail as malformed before provider send | `openai_chat_wire_rejects_unmapped_reasoning_summary_policy` / `openai_chat_wire_rejects_invalid_reasoning_summary_policy` |
+| `reasoning.summary` | `UnmappedOutboundFields`; a target response's reasoning content does not prove the target accepted the source request policy | `openai_chat_wire_rejects_unmapped_reasoning_summary_policy` / `openai_chat_wire_rejects_invalid_reasoning_summary_policy` |
 | `include` | rejected from OpenAI Chat provider wire; preserved on Responses wire only | `responses_openai_chat_field_parity_include_is_elided_from_chat_wire` |
 | Historical malformed `function_call.arguments`, with or without matching `function_call_output` parse-failure truth | adjacent OpenAI Chat argument projector preserves the exact string value, keeps parse-failure tool output paired, sends the selected OpenAI Chat target exactly once, and records no provider failure or Error05 reselect; forbid deletion, empty-object repair, JSON-string rewrapping, provider switch, MetadataCenter reconstruction, or continuation mutation | `responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect` / `responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect` |
+
+### Responses request -> OpenAI Chat built-in tools
+
+| Responses field | OpenAI Chat provider wire | Required test |
+| --- | --- | --- |
+| `tools[].type=web_search|web_search_preview` | project supported options to top-level `web_search_options`; `search_content_types=["text"]` may consume to the Chat text-only default after validation, while any request containing `image` fails as unmapped; preserve ordinary function tools | mixed-tool positive projection plus image-content negative test |
+| `tools[].type=tool_search` with `execution=client` | adjacent shape transform to an OpenAI Chat function tool named `tool_search`; the existing response codec projects a matching provider call back to Responses `tool_search_call` | mixed-tool request projection plus response round-trip test |
+| unknown web-search option or malformed built-in shape | explicit adjacent codec error before provider send | negative field/path test |
+
+### Codex tool declaration input/output matrix
+
+| Responses declaration | OpenAI Chat provider wire | Responses client projection | Required test |
+| --- | --- | --- | --- |
+| `type=function` | ordinary Chat function tool with the complete schema | matching provider call returns `function_call` | `openai_chat_wire_projects_complete_codex_tool_declaration_matrix` |
+| `type=custom`, free-form text | native Chat `type=custom` with `custom.format.type=text`; no function wrapper | native Chat custom call is restored as `custom_tool_call` with exact raw `input` | `openai_chat_wire_projects_complete_codex_tool_declaration_matrix` / native custom-call round-trip test |
+| `type=custom`, grammar | native Chat `type=custom` with `custom.format.type=grammar` and exact `syntax`/`definition`, gated by selected-model capability; unsupported models fail before provider send | native Chat custom call is restored as `custom_tool_call` with exact raw `input` | grammar positive projection plus unsupported-capability negative test |
+| `type=tool_search`, `execution=client` | Chat function tool named `tool_search` | matching provider call returns `tool_search_call` | `openai_chat_wire_projects_complete_codex_tool_declaration_matrix` plus the existing tool-search response test |
+| `type=web_search|web_search_preview`, with `search_content_types=["text"]` | top-level Chat `web_search_options`; the text-only declaration matches the Chat target default and is consumed after validation | hosted search response follows the existing Responses web-search projection | mixed declaration request plus existing web-search response tests |
+| `type=web_search|web_search_preview`, with `search_content_types` containing `image` | no compatible Chat field | provider send is forbidden | explicit `UnmappedOutboundFields` negative test |
+
+The matrix is required as one mixed request, not only one test per field. This locks declaration coexistence and proves that no valid Codex tool family is dropped merely because the selected relay target uses another protocol. A target-native custom tool must remain custom; reconstructing the Responses response from a remembered source declaration does not compensate for sending a lossy function declaration to the provider.
 
 ### OpenAI Chat provider response -> Responses projection
 
@@ -178,17 +200,22 @@ tests exist and pass.
 
 | Responses field | Anthropic provider wire | Required test |
 | --- | --- | --- |
+| `metadata` arbitrary string map | retained as Responses data-plane response context and restored on the Responses response before `RespChatProcess`; only exact `user_id` may also project to Anthropic `metadata.user_id`; arbitrary keys never enter Anthropic wire, MetadataCenter, headers, or provider failure policy | request-wire absence plus response metadata equality and malformed metadata negatives |
 | `reasoning.effort=low/medium/high/xhigh/max` | `output_config.effort` with identical value | positive effort intersection matrix |
 | `reasoning.effort=none/minimal` | `UnmappedOutboundFields` at Anthropic outbound codec | negative effort value-domain matrix |
-| `reasoning.summary` | registered Chat extension, then rejected as unmapped at Anthropic outbound; never system text or provider wire | source-roundtrip and Anthropic fail-fast tests |
+| `reasoning.summary` | registered Chat extension, then a local response-shaping hint for Anthropic; invalid values fail and Anthropic thinking response projection does not reconstruct the source request policy | source-roundtrip plus provider-wire absence and invalid-value rejection tests |
 | `reasoning.context/mode` | registered Chat extensions, then `UnmappedOutboundFields`; never system text | paired source-roundtrip and Anthropic rejection tests |
 | `reasoning.budget_tokens` / `reasoning.thinking` | not declared by the audited OpenAI Responses `Reasoning` schema; Responses inbound rejects them rather than treating Anthropic fields as OpenAI extensions | malformed source-schema negative tests |
 | exactly one non-empty `client_metadata.user_id` | registered `request.client_metadata`, then exact projection to Anthropic `metadata.user_id` | positive exact projection test |
-| registered Codex `client_metadata` keys without `user_id` | `UnmappedOutboundFields` before Anthropic wire with canonical Chat paths | negative target-equivalence tests |
-| `prompt_cache_key` | valid non-empty value fails as unmapped; malformed value fails validation; it never creates Anthropic cache control | paired cache validation tests |
+| registered Codex `client_metadata` keys without `user_id` | consumed before Anthropic wire as local request context; never enters Anthropic body, MetadataCenter, headers, or response payload | positive wire-absence tests plus unknown-key negative tests |
+| `prompt_cache_key` | valid non-empty value is consumed as a local cache hint; malformed value fails validation; it never creates Anthropic cache control | paired cache validation tests |
 | `store=false` / `store=true` | `false` is explicitly consumed before wire; `true` fails | paired storage semantic tests |
-| `text.verbosity` | `UnmappedOutboundFields`; never maps to Anthropic reasoning effort | paired verbosity rejection tests |
+| `text.verbosity=low/medium/high` | consumed before Anthropic wire as a local style hint; invalid values fail; output verbosity is never projected to reasoning effort | positive wire-absence plus invalid-value rejection tests |
 | `text.format` | text default is consumed; compatible strict JSON schema maps to `output_config.format`; incompatible schema policy fails | paired output config tests |
+| custom tool declaration, free-form | Anthropic tool declaration with exact name, source description, required string `input` schema, and deterministic compatibility note | declaration wrapper positive test plus unregistered-wrapper negative test |
+| custom tool declaration, grammar | same registered string-input schema; exact grammar syntax/definition is carried in the Anthropic-visible compatibility description, with an explicit non-native-enforcement semantic delta | grammar preservation and no-native-enforcement characterization test |
+| `custom_tool_call` raw input | Anthropic `tool_use.input={"input": raw}` bound to the governed custom declaration | exact raw round-trip, wrapper-shape rejection, no `{}` repair, no double-stringify, no provider-switch tests |
+| Historical malformed `function_call.arguments`, with or without matching tool result | registered compatibility `v3.function_call.anthropic_raw_argument_wrapper.v1`: preserve the exact source text reversibly inside Anthropic `tool_use.input.input` without relabeling the call as custom; never fabricate `{}`, delete the paired result, or classify the local projection as provider failure | paired Responses/Chat malformed argument tests plus valid-function negative wrapper test |
 | governed Chat semantic after Req04 | preserved through `ProviderReqCompat06ProviderCompat`; original Responses raw body is unavailable | Req02/Req04/Req07/Compat06 node snapshot assertions |
 | Anthropic provider `thinking` JSON response | Responses `output[].type=reasoning` with `summary` / `encrypted_content` before Stopless | `responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning` |
 | Anthropic request history `thinking/signature` and `redacted_thinking/data` | ordered Responses `reasoning.summary/encrypted_content`; malformed blocks fail before Hub semantic | `anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasoning`, `anthropic_malformed_thinking_history_fails_instead_of_disappearing` |
@@ -227,7 +254,7 @@ OpenAI metadata projection requires at most 16 string pairs, keys no longer than
 | `output[].reasoning.summary[]` | ordered `thinking` blocks | response matrix |
 | `output[].output_text` and `output[].message.content[].output_text` | ordered `text` blocks | response matrix |
 | `output[].function_call` | `tool_use` block with parsed JSON input | response matrix |
-| `output[].custom_tool_call` | `tool_use` block preserving raw input | response matrix |
+| `output[].custom_tool_call` | registered `tool_use` compatibility block with `input={"input": raw}`; Anthropic client sees the wrapper, while the reverse Responses/OpenAI projector restores exact raw input from governed declaration identity | wrapper and reverse round-trip response matrix |
 | `usage.input_tokens/output_tokens` | Anthropic `usage.input_tokens/output_tokens` | response matrix |
 | `finish_reason` / `status` | `stop_reason` (`tool_use`, `end_turn`, `max_tokens`, `stop_sequence`) | response matrix |
 | malformed JSON function arguments | exact string preservation at the adjacent codec, not JSON-string rewrapping, empty-object fallback, MetadataCenter reconstruction, or provider switch | negative/positive paired tests |
@@ -263,8 +290,8 @@ Required closeout after source green: V3 fmt, protocol characterization gates, r
 | OpenAI `medium` -> Chat effort -> Anthropic `output_config.effort=medium` | OpenAI `minimal` -> Anthropic fails; no invented `thinking` budget |
 | Anthropic `output_config.effort=xhigh` -> Chat effort -> Responses `reasoning.effort=xhigh` | Unsupported target-model effort fails before transport |
 | Anthropic numeric budget -> Chat budget -> valid Gemini `thinkingBudget` | Numeric budget never becomes OpenAI qualitative effort |
-| Exact `client_metadata.user_id` -> Anthropic `metadata.user_id`; registered Codex ids are consumed without provider-wire projection | Unknown or malformed client metadata fails without MetadataCenter copy |
-| Exact structured format -> Anthropic `output_config.format` | `store=false` is consumed as semantically equivalent; valid or malformed `prompt_cache_key`, `store=true`, and unsupported verbosity fail at the adjacent codec |
+| Exact `client_metadata.user_id` -> Anthropic `metadata.user_id`; registered Codex client-local keys are consumed before provider wire | Unknown client metadata keys fail without MetadataCenter copy or silent consumption |
+| Exact structured format -> Anthropic `output_config.format` | `store=false`, valid `prompt_cache_key`, and valid verbosity are consumed only by registered compatibility contracts; malformed prompt cache, `store=true`, and invalid verbosity fail at the adjacent codec |
 | Codex `client_metadata["x-codex-turn-metadata"]` longer than 512 survives Responses inbound, Chat canonicalization, and Responses outbound unchanged | Public `metadata` still enforces its 512-character value limit; malformed non-object `client_metadata` fails at inbound |
-| Responses summary/context/mode round-trip back to Responses | Anthropic projection fails and no system marker is emitted |
+| Responses summary round-trips to Responses; valid Anthropic request summary policy is consumed only as a registered local response-shaping hint | OpenAI Chat targets reject it; invalid values fail; no system marker or provider-wire field is emitted |
 | Gemini includeThoughts round-trips to Gemini | It never becomes Anthropic display or OpenAI summary |

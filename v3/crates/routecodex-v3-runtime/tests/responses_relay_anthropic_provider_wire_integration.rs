@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS;
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -347,7 +346,7 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
+async fn responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -375,24 +374,34 @@ async fn responses_relay_anthropic_provider_rejects_unmappable_metadata() {
     .await
     .unwrap();
 
-    assert_eq!(output.status, 502);
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
     let observability = output.observability.as_ref().expect("observability");
-    assert!(observability.provider_failure_events.iter().all(|failure| {
-        failure.error_type.as_deref() == Some("provider_request_compat_error")
-            && failure.message.contains("$.request.metadata.client")
-    }), "unmappable Responses metadata must be projected through the provider error chain: {observability:?}");
-    assert!(transport.captured_body.lock().unwrap().is_none());
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "{observability:?}"
+    );
+    let provider_body = transport
+        .captured_body
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Anthropic provider request");
+    assert!(provider_body.get("metadata").is_none(), "{provider_body}");
+    let client = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    assert_eq!(
+        client["metadata"],
+        json!({"client":"not-anthropic-wire-compatible"})
+    );
 }
 
 #[tokio::test]
-async fn responses_relay_rejects_codex_client_metadata_at_anthropic_codec_boundary() {
-    let transport = AnthropicProviderJsonTransport {
-        captured_url: Mutex::new(None),
-        captured_body: Mutex::new(None),
+async fn responses_relay_consumes_registered_codex_client_metadata_before_provider_wire() {
+    let transport = AnthropicProviderProjectionTransport {
+        captured_projection: Mutex::new(None),
     };
     let output = execute_v3_responses_relay_runtime(
         &manifest(),
@@ -416,31 +425,26 @@ async fn responses_relay_rejects_codex_client_metadata_at_anthropic_codec_bounda
                     "x-codex-turn-metadata":"{\"request_kind\":\"turn\"}",
                     "x-codex-window-id":"window-1"
                 },
-                "prompt_cache_key":"session-1",
                 "store":false,
-                "text":{"verbosity":"high"},
-                "reasoning":{"effort":"medium","summary":"detailed"},
                 "stream":false
             }),
         },
         &transport,
     )
     .await
-    .unwrap();
+    .expect("registered Codex client metadata is local request context");
 
-    assert_eq!(output.status, 502, "runtime output: {output:?}");
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    assert_eq!(output.status, 200, "{output:?}");
+    let captured = transport
+        .captured_projection
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Anthropic provider projection");
+    assert!(
+        captured["body"].get("client_metadata").is_none(),
+        "client_metadata must remain local request context, not Anthropic wire: {captured}"
     );
-    let observability = output.observability.as_ref().expect("observability");
-    assert!(observability.provider_failure_events.iter().all(|failure| {
-        failure.error_type.as_deref() == Some("provider_request_compat_error")
-            && failure
-                .message
-                .contains("$.request.client_metadata.session_id")
-    }));
-    assert!(transport.captured_body.lock().unwrap().is_none());
 }
 
 #[tokio::test]
@@ -584,7 +588,7 @@ async fn responses_relay_reasoning_effort_projects_anthropic_output_config_effor
 }
 
 #[tokio::test]
-async fn responses_relay_reasoning_summary_fails_before_anthropic_wire() {
+async fn responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
@@ -599,7 +603,7 @@ async fn responses_relay_reasoning_summary_fails_before_anthropic_wire() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-responses-reasoning-summary-unmapped".into(),
+            request_id: "req-responses-reasoning-summary-consumed".into(),
             payload: json!({
                 "model":"MiniMax-M3",
                 "input":"Use reasoning before answering this string-input request",
@@ -610,17 +614,20 @@ async fn responses_relay_reasoning_summary_fails_before_anthropic_wire() {
         &transport,
     )
     .await
-    .expect("codec rejection must project through the explicit error chain");
+    .expect("Responses reasoning summary policy is a local response-shaping hint");
 
-    assert_eq!(output.status, 502);
-    let body = match output.client_body {
-        V3ResponsesRelayClientBody::Json(body) => body,
-        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON error projection"),
-    };
-    let message = body["error"]["message"].as_str().unwrap_or_default();
-    assert!(message.contains("UnmappedOutboundFields"), "{body}");
-    assert!(message.contains("reasoning_summary_policy"), "{body}");
-    assert!(transport.captured_body.lock().unwrap().is_none());
+    assert_eq!(output.status, 200, "{output:?}");
+    let captured = transport
+        .captured_body
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Anthropic provider request");
+    assert!(
+        captured.get("reasoning_summary_policy").is_none(),
+        "request summary policy must not leak to Anthropic wire: {captured}"
+    );
+    assert!(captured.get("reasoning").is_none(), "{captured}");
 }
 
 struct AnthropicProviderJsonReasoningTransport;

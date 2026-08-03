@@ -30,12 +30,16 @@ audit_truth_contract:
     edge_only: Transport or request/response edge state; it must not become business semantic payload truth.
     semantic_declared: The OpenAI Chat native field or protocol-neutral extension has a manual semantic owner and transform
       rule, but runtime conversion closeout is not claimed.
+  projection_status_legend:
+    mapped_exact: Source and target preserve the same semantics, possibly through a validated field rename or value intersection.
+    mapped_compatible_registered: Target uses a registered wrapper with an explicit semantic delta and a required reverse projection.
+    unsupported: No exact or registered compatible projection preserves the required behavior; adjacent outbound codec fails explicitly.
   audited_status_counts:
     covered: 160
     covered_but_target_dependent: 0
-    runtime_conformance_pending: 1
-    partial: 112
-    extension_declared: 223
+    runtime_conformance_pending: 5
+    partial: 111
+    extension_declared: 220
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
@@ -46,8 +50,8 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - runtime_conformance_pending
-      affected_count: 1
-      evidence: OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only an exact client_metadata.user_id mapping is allowed and all other keys must fail.
+      affected_count: 5
+      evidence: OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only exact client_metadata.user_id may map to provider metadata. Registered Codex client-local keys may be consumed before provider wire as request-local context; unknown keys must fail.
       required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
       closeout_status: runtime_conformance_pending
       closeout_rule: Keep target-dependent provider-wire behavior explicit in the adjacent outbound codec; never use MetadataCenter, generic silent strip, or fallback.
@@ -55,7 +59,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - extension_declared
-      affected_count: 223
+      affected_count: 220
       evidence: Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime
         conversion completion claim.
       required_owner: v3 protocol codec owner selected per field family
@@ -77,7 +81,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 112
+      affected_count: 111
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -1345,7 +1349,8 @@ chat_semantic_translation_groups:
     direction: request
     standard_semantic_meaning: Serialized JSON arguments for one model-emitted function call.
     chat_shape_rule: Chat function.arguments is the argument payload only. It must not be mapped to id/name/tool
-      declaration; malformed JSON is fail-fast at codec owner.
+      declaration. Valid JSON projects as native target input; malformed raw text may use only the named Anthropic
+      compatibility wrapper and must remain function-call semantics.
     protocol_mappings:
       responses:
         request_fields:
@@ -1358,13 +1363,42 @@ chat_semantic_translation_groups:
           - request.messages[].content[].tool_use.input
         response_fields:
           - response.content[].input
-        transform: Anthropic tool_use.input object serializes to Chat function.arguments.
+        transform: Valid Chat function.arguments JSON maps exactly to Anthropic tool_use.input. Malformed raw argument text uses compatibility id v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the exact raw text on reverse projection.
       gemini:
         request_fields:
           - request.contents[].parts[].functionCall.args
         response_fields: []
         transform: Gemini functionCall.args maps to Chat function.arguments.
     chat_extension_fields: []
+    shape_branch_cases:
+      positive:
+        - source_condition: function.arguments is valid JSON object input
+          target_semantic: native Anthropic tool_use.input object
+          projection_class: mapped_exact
+        - source_condition: governed function call has a string argument value that is invalid JSON
+          target_semantic: Anthropic tool_use.input containing only the exact raw string under input
+          projection_class: mapped_compatible_registered
+          compatibility_id: v3.function_call.anthropic_raw_argument_wrapper.v1
+      negative:
+        - forbidden_source: missing or non-string function arguments
+          required_result: explicit codec error without empty-object repair
+        - forbidden_source: valid function arguments sent through the malformed raw wrapper
+          required_result: native object projection, never compatibility wrapping
+    compatibility_projection:
+      compatibility_id: v3.function_call.anthropic_raw_argument_wrapper.v1
+      request_wrapper: '{"input": <exact malformed raw argument string>}'
+      reverse_guard: Governed function-call branch and exact bound call identity must match; wrapper contains only the registered string input field.
+      forbidden:
+        - relabel malformed function call as custom
+        - fabricate empty object
+        - double stringify raw arguments
+        - delete paired tool result
+        - classify local wrapper error as provider failure
+        - switch provider because wrapper parsing failed
+      required_tests:
+        - responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input
+        - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
+        - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
     current_impl: covered
     gap: none
   - group_id: tool.custom.name
@@ -1384,14 +1418,19 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no native custom raw-input call separate from tool_use in current inventory.
+        transform: Conditional branch is owned by compatibility id v3.custom_tool.anthropic_string_input_wrapper.v1; only a governed custom declaration selects custom semantics from the otherwise function-shaped tool_use fields.
       gemini:
         request_fields: []
         response_fields: []
         transform: Gemini has no custom raw-input call separate from functionCall/toolCall in current inventory.
     chat_extension_fields: []
-    current_impl: extension_declared
-    gap: custom tool cross-protocol support is extension-only
+    projection_status:
+      responses: mapped_exact
+      openai_chat: mapped_exact
+      anthropic: mapped_compatible_registered
+      gemini: unsupported
+    current_impl: runtime_conformance_pending
+    gap: OpenAI Chat has a native custom tool shape; the adjacent outbound codec must project it directly and gate selected-model support.
   - group_id: tool.custom.input
     standard_chat_field: request.messages[].tool_calls[].custom.input
     chat_fields:
@@ -1409,14 +1448,47 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic has no native raw custom input separate from tool_use.input in this inventory.
+        transform: Conditional branch is owned by compatibility id v3.custom_tool.anthropic_string_input_wrapper.v1; raw tool_use.input remains function arguments unless governed custom declaration identity selects the exact wrapper branch.
       gemini:
         request_fields: []
         response_fields: []
         transform: Gemini has no native raw custom input separate from functionCall/toolCall args in this inventory.
     chat_extension_fields: []
-    current_impl: partial
-    gap: custom raw input is only covered for Responses/OpenAI Chat
+    projection_status:
+      responses: mapped_exact
+      openai_chat: mapped_exact
+      anthropic: mapped_compatible_registered
+      gemini: unsupported
+    compatibility_projection:
+      compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
+      source_paths:
+        request:
+          - request.messages[].content[].tool_use.name
+          - request.messages[].content[].tool_use.input
+        response:
+          - response.content[].name
+          - response.content[].input
+      branch_predicate: For a fresh provider response, the active governed declaration and exact tool name select the custom branch; the provider-generated tool_use.id is then bound as current call identity. Historical replay and tool_result pairing require that bound call identity to match exactly. Otherwise the same Anthropic tool_use fields remain function-call semantics.
+      declaration_projection: Preserve exact name and source description; emit required string input_schema and a deterministic compatibility description carrying free-form or exact grammar syntax/definition.
+      request_wrapper: '{"input": <exact raw string>}'
+      semantic_delta: Anthropic receives the constraint description but does not natively enforce OpenAI custom grammar.
+      reverse_guard: Governed declaration must identify the exact tool as custom; wrapper must contain only the registered string input field.
+      forbidden:
+        - infer custom semantics from arbitrary tool_use input shape
+        - drop grammar or free-form declaration semantics
+        - claim Anthropic native grammar enforcement
+        - leak wrapper to Responses or OpenAI Chat client projection
+        - fabricate empty object
+        - double stringify raw input
+        - delete paired tool result
+        - switch provider because wrapper parsing failed
+      required_tests:
+        - responses_custom_tool_projects_registered_anthropic_wrapper
+        - anthropic_registered_custom_wrapper_restores_exact_responses_raw_input
+        - anthropic_unregistered_input_wrapper_is_not_unwrapped_as_custom
+        - anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair
+    current_impl: runtime_conformance_pending
+    gap: custom raw input and grammar require native Chat custom-tool projection and response round-trip evidence; function-wrapper conversion is not equivalent.
   - group_id: tool.result.call_id
     standard_chat_field: request.messages[].tool_call_id
     chat_fields:
@@ -1586,8 +1658,8 @@ chat_semantic_translation_groups:
         transform: No direct equivalent in the audited Gemini request inventory.
     chat_extension_fields:
       - request.reasoning_summary_policy
-    current_impl: extension_declared
-    gap: Responses round-trips the field; OpenAI Chat, Anthropic, and Gemini outbound report request.reasoning_summary_policy as unmapped because none has an equivalent summary-policy field.
+    current_impl: runtime_conformance_pending
+    gap: Responses is source-roundtrip only. OpenAI Chat, Anthropic, and Gemini have no equivalent request policy; outbound must reject the semantic path. A target response reasoning field does not authorize consuming the request policy.
   - group_id: reasoning.request_context_policy
     standard_chat_field: request.reasoning_context_policy
     chat_fields:
@@ -4021,6 +4093,12 @@ semantic_correspondence:
     canonical_path: chat.tools.custom_raw_input
     chat_extension: protocol_specific_chat_extension
     current_impl: partial
+    projection_status:
+      responses: mapped_exact
+      openai_chat: mapped_exact
+      anthropic: mapped_compatible_registered
+      gemini: unsupported
+    compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
     paths:
       responses:
         - request.input[].custom_tool_call.call_id
@@ -5207,7 +5285,13 @@ extended_openai_chat_semantic_superset:
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
       current_impl: partial
-      gap: runtime mapping partial or extension-only gap
+      gap: Anthropic runtime must lock registered string-input wrapper and exact reverse projection.
+      projection_status:
+        responses: mapped_exact
+        openai_chat: mapped_exact
+        anthropic: mapped_compatible_registered
+        gemini: unsupported
+      compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
       equivalent_fields:
         responses:
           - request.input[].custom_tool_call.input
@@ -5223,7 +5307,13 @@ extended_openai_chat_semantic_superset:
       mapping_status: mapped
       semantic_owner: chat.canonical_semantics
       current_impl: extension_declared
-      gap: runtime mapping partial or extension-only gap
+      gap: Anthropic runtime must bind tool_use name to the governed custom declaration before reverse projection.
+      projection_status:
+        responses: mapped_exact
+        openai_chat: mapped_exact
+        anthropic: mapped_compatible_registered
+        gemini: unsupported
+      compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
       equivalent_fields:
         responses:
           - request.input[].custom_tool_call.name
@@ -5240,6 +5330,11 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.canonical_semantics
       current_impl: covered
       gap: none
+      conditional_compatibility:
+        target_protocol: anthropic
+        source_condition: invalid_json_raw_string
+        projection_class: mapped_compatible_registered
+        compatibility_id: v3.function_call.anthropic_raw_argument_wrapper.v1
       equivalent_fields:
         responses:
           - request.input[].function_call.arguments
@@ -5555,8 +5650,8 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
-      current_impl: extension_declared
-      gap: Responses summary policy is source-roundtrip only; other targets must reject it as unmapped.
+      current_impl: runtime_conformance_pending
+      gap: Responses source-roundtrip only; OpenAI Chat, Anthropic, and Gemini reject because no equivalent request policy is declared.
       equivalent_fields: &a1
         responses:
           - request.reasoning.summary
@@ -9005,9 +9100,9 @@ canonical_extension_registry:
     direction: request
     stratum: request_payload
     owner: chat.extension_semantics
-    current_impl: extension_declared
+    current_impl: runtime_conformance_pending
     source_fields: *a1
-    projection_rule: Responses source-roundtrip; OpenAI Chat and Anthropic consume before wire; Gemini must report this semantic path as unmapped.
+    projection_rule: Responses source-roundtrip; OpenAI Chat, Anthropic, and Gemini must report this semantic path as unmapped before provider send.
   - field: request.reasoning_context_policy
     semantic_id: request.reasoning_context_policy
     direction: request
@@ -10416,12 +10511,18 @@ outbound_projection_contract:
     openai_chat_and_responses: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     anthropic: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
     gemini: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs
-  statuses:
+  legacy_outbound_consumption_statuses:
     mapped: Source field is emitted under an equivalent target field.
     transformed: Source field is emitted through an adjacent codec shape conversion.
     consumed_by_transform: Source field is read only to produce another emitted target field and must not be forwarded raw.
     target_unsupported: Source field has no equivalent in the target protocol and must raise UnmappedOutboundFields before provider send.
     control_forbidden: RouteCodex-owned internal control fields must raise ControlFieldLeak with exact JSON paths before provider send; payload-owned underscore fields such as `_id` remain data-plane.
+  projection_class_bridge:
+    mapped: mapped_exact
+    transformed: Every transformed field must separately declare mapped_exact or mapped_compatible_registered; shape conversion alone never proves compatibility and never authorizes silent consumption.
+    consumed_by_transform: mapped_compatible_registered only when a named target-default or compatibility contract records the consumed source value, semantic delta, and tests; otherwise unsupported.
+    target_unsupported: unsupported
+    control_forbidden: outside_projection_classes_control_field_leak
   fail_fast_errors:
     unmapped: UnmappedOutboundFields
     control: ControlFieldLeak
@@ -10447,16 +10548,26 @@ outbound_projection_contract:
       target_protocol: openai_chat
       status: transformed
       fields:
-        - request.client_metadata -> request.metadata -> OpenAI Chat target metadata validation
+        - request.client_metadata.user_id -> request.metadata.user_id -> OpenAI Chat target metadata validation
         - request.prompt_cache_key -> request.prompt_cache_key
         - request.store -> request.store
         - request.text.verbosity -> request.verbosity
         - request.text.format -> request.response_format
+        - request.tools[].type[custom] -> request.tools[].type[custom] with exact free-form/grammar format -> response.output[].custom_tool_call
+        - request.tools[].type[web_search|web_search_preview] + request.tools[].search_content_types[text] -> request.web_search_options
+        - request.tools[].type[tool_search] -> request.tools[].type[function,name=tool_search]
     - source_protocol: responses
       target_protocol: openai_chat
       status: consumed_by_transform
       fields:
+        - request.client_metadata[session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+    - source_protocol: responses
+      target_protocol: openai_chat
+      status: target_unsupported
+      fields:
         - request.reasoning.summary[auto|concise|detailed]
+        - request.client_metadata[unknown_keys]
+        - request.tools[].type[web_search|web_search_preview].search_content_types[image]
     - source_protocol: openai_chat
       target_protocol: responses
       status: target_unsupported
@@ -10471,7 +10582,7 @@ outbound_projection_contract:
       target_protocol: responses
       status: transformed
       fields:
-        - request.client_metadata -> request.metadata
+        - request.metadata -> request.metadata
         - request.prompt_cache_key -> request.prompt_cache_key
         - request.store -> request.store
         - request.reasoning_effort -> request.reasoning.effort
@@ -10494,23 +10605,23 @@ outbound_projection_contract:
       target_protocol: anthropic
       status: consumed_by_transform
       fields:
-        - request.reasoning.summary
-        - request.reasoning.generate_summary
-        - request.client_metadata[session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id]
+        - request.metadata[non_user_id] -> response.metadata before RespChatProcess
+        - request.client_metadata[session_id|thread_id|turn_id|x-codex-installation-id|x-codex-turn-metadata|x-codex-window-id] -> local request context only
+        - request.prompt_cache_key[non_empty_string] -> local cache hint only
+        - request.reasoning.summary[auto|concise|detailed] -> local response-shaping policy only
+        - request.reasoning.generate_summary[auto|concise|detailed] -> local response-shaping policy only
         - request.store[false]
-        - request.text.verbosity[low|medium|high]
+        - request.text.verbosity[low|medium|high] -> local style hint only
     - source_protocol: responses
       target_protocol: anthropic
       status: target_unsupported
       fields:
-        - request.prompt_cache_key[non_empty_string]
         - request.reasoning.effort[none|minimal]
         - request.reasoning.context
         - request.reasoning.mode
         - request.client_metadata[unknown_keys]
         - request.prompt_cache_key[malformed]
         - request.store[true]
-        - request.text.verbosity[unsupported]
         - request.text.format.strict=false
     - source_protocol: gemini
       target_protocol: any_cross_protocol_outbound

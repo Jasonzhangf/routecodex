@@ -2,7 +2,7 @@ lifecycle_id: v3.servertool_hook_skeleton_lifecycle
 owner_feature_id: v3.servertool_hook_skeleton_lifecycle
 summary: "V3 StoplessCenter first built-in servertool hook. StoplessCenter is a Metadata Center control-signal state machine for the Stopless feature. Stopless runs only inside declared Chat Process SOP nodes: Req04 injects legal schema guidance and transitions StoplessCenter MetadataCenter state machine to same-turn schema_guidance_active; Resp03 may intercept only stop/end_turn responses while that scoped state is active, then accepts canonical summary or accepted stop_schema evidence, otherwise projects no-input no-op CLI before continuation commit; Req04 consumes no-op CLI as current-turn evidence and reads StoplessCenter from runtime_control before request tool governance."
 guidance_rewrite:
-  node_id: V3StoplessReq03GuidanceToolInjected
+  node_id: V3StoplessReq03ControlTransitioned
   prompt_kind: complete_non_persistent_current_turn_guideline
   terse_continue_prompt: forbidden
   history_persistence: forbidden
@@ -52,7 +52,7 @@ activation_contract:
   relay_stopless_center_write: relay_only
   direct_stopless_center_write: direct_scoped_only
   owner_nodes:
-    request_activation: V3StoplessReq03GuidanceToolInjected
+    request_activation: V3StoplessReq03ControlTransitioned
     response_intercept: V3StoplessResp01ReasoningStopInspected
     state_update: V3StoplessResp02RuntimeControlUpdated
 state_machine:
@@ -150,7 +150,7 @@ node_ids:
   - V3HubReqChatProcess04Governed
   - V3StoplessReq01RuntimeControlLoaded
   - V3StoplessReq02NoopCliConsumed
-  - V3StoplessReq03GuidanceToolInjected
+  - V3StoplessReq03ControlTransitioned
   - V3HubRespChatProcess03Governed
   - V3StoplessResp01ReasoningStopInspected
   - V3StoplessResp02RuntimeControlUpdated
@@ -160,7 +160,7 @@ edges:
   - { step_id: v3-servertool-stopless-req-01, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
   - { step_id: v3-servertool-stopless-req-02, from_node: V3HubReqChatProcess04Governed, to_node: V3StoplessReq01RuntimeControlLoaded, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
   - { step_id: v3-servertool-stopless-req-03, from_node: V3StoplessReq01RuntimeControlLoaded, to_node: V3StoplessReq02NoopCliConsumed, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
-  - { step_id: v3-servertool-stopless-req-04, from_node: V3StoplessReq02NoopCliConsumed, to_node: V3StoplessReq03GuidanceToolInjected, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
+  - { step_id: v3-servertool-stopless-req-04, from_node: V3StoplessReq02NoopCliConsumed, to_node: V3StoplessReq03ControlTransitioned, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
   - { step_id: v3-servertool-stopless-resp-01, from_node: V3HubRespChatProcess03Governed, to_node: V3StoplessResp01ReasoningStopInspected, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
   - { step_id: v3-servertool-stopless-resp-02, from_node: V3StoplessResp01ReasoningStopInspected, to_node: V3StoplessResp02RuntimeControlUpdated, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }
   - { step_id: v3-servertool-stopless-resp-03, from_node: V3StoplessResp02RuntimeControlUpdated, to_node: V3StoplessResp03NoopCliOrTerminalProjected, status: anchored, owner_feature_id: v3.servertool_hook_skeleton_lifecycle }

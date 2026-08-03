@@ -21,9 +21,10 @@ const copied = [
   'scripts/tests/v3-stopless-resource-control-red-fixtures.mjs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs',
@@ -45,6 +46,21 @@ function edge(document, stepId) {
 }
 
 const cases = [
+
+  {
+    name: 'Resp03 data node carries StoplessCenter control state',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+    marker: '    pub(crate) servertool_action: V3HubServertoolResponseAction,\n',
+    replacement: '    pub(crate) servertool_action: V3HubServertoolResponseAction,\n    pub(crate) leaked_control: Option<V3StoplessCenterState>,\n',
+    diagnostic: /Resp03 data node must not carry StoplessCenter control state/u,
+  },
+  {
+    name: 'Resp04 data node carries StoplessCenter control state',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+    marker: '    pub(crate) canonical_context: Option<V3HubRelayCanonicalResponseContext>,\n',
+    replacement: '    pub(crate) canonical_context: Option<V3HubRelayCanonicalResponseContext>,\n    pub(crate) leaked_control: Option<V3StoplessCenterState>,\n',
+    diagnostic: /Resp04 continuation data node must not carry StoplessCenter control state/u,
+  },
 
   {
     name: 'activation contract stops requiring same-turn schema guidance',
@@ -273,61 +289,18 @@ const cases = [
     diagnostic: /Direct stopless control must not reference Relay StoplessCenter handle/u,
   },
   {
-    name: 'no-op CLI carries session scope',
+    name: 'response hook revives stopless client CLI projection',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    mutate(source) {
-      return source.replace(
-        /"routecodex hook run reasoningStop(?: --input-json '\{\}')?"/u,
-        '"routecodex hook run reasoningStop --sessionId session-1"',
-      );
-    },
-    diagnostic: /reasoningStop CLI must not carry sessionId/u,
+    marker: 'pub fn apply_v3_tool_call_servertool_hook_at_resp03(\n',
+    replacement: 'fn build_stopless_cli_projection_payload() {}\n\npub fn apply_v3_tool_call_servertool_hook_at_resp03(\n',
+    diagnostic: /stopless control CLI projection must not enter client business payload/u,
   },
   {
-    name: 'no-op CLI revives empty input-json envelope',
+    name: 'request hook revives stopless payload guidance injection',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    mutate(source) {
-      return source.replace(
-        /"routecodex hook run reasoningStop(?: --input-json '\{\}')?"/u,
-        '"routecodex hook run reasoningStop --input-json \'{\\"repeatCount\\":1}\'"',
-      );
-    },
-    diagnostic: /reasoningStop CLI must be no-input and must not include --input-json/u,
-  },
-  {
-    name: 'no-op CLI parses stdout state',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: 'fn build_stopless_cli_command() -> String {\n',
-    replacement: 'fn build_stopless_cli_command() -> String {\n    let _parsed_stdout = serde_json::from_str::<Value>("{}");\n',
-    diagnostic: /reasoningStop CLI must not parse stdout\/state JSON/u,
-  },
-  {
-    name: 'request-side continuation guideline collapses to terse continue',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: '请基于已经恢复的完整上下文继续执行，不要只复盘，不要只总结：',
-    replacement: '继续。',
-    diagnostic: /full transparent stopless continuation guideline missing 基于已经恢复的完整上下文/u,
-  },
-  {
-    name: 'provider-visible guideline leaks RouteCodex bridge label',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: '继续当前目标。\n\n请基于已经恢复的完整上下文继续执行，不要只复盘，不要只总结：',
-    replacement: '继续当前目标。\nRouteCodex stopless continuation。\n\n请基于已经恢复的完整上下文继续执行，不要只复盘，不要只总结：',
-    diagnostic: /provider-visible stopless guideline must not contain RouteCodex stopless continuation/u,
-  },
-  {
-    name: 'provider-visible guideline leaks no-op CLI mechanism',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: '继续当前目标。\n\n请基于已经恢复的完整上下文继续执行，不要只复盘，不要只总结：',
-    replacement: '继续当前目标。\n上一轮 reasoningStop CLI no-op 只表示客户端工具轮已经闭合。\n\n请基于已经恢复的完整上下文继续执行，不要只复盘，不要只总结：',
-    diagnostic: /provider-visible stopless guideline must not contain 上一轮 reasoningStop CLI|provider-visible stopless guideline must not contain no-op/u,
-  },
-  {
-    name: 'provider-visible guideline leaks internal counter budget',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks/stopless_injection.rs',
-    marker: '上一轮仍未给出明确完成或阻塞证据；更严格地推进，本轮必须先执行一个最小可验证工具动作，不要只写分析、计划或总结。',
-    replacement: '这是连续第 2 次需要继续推进（最多 3 次）。上一轮仍未给出明确完成或阻塞证据；更严格地推进，本轮必须先执行一个最小可验证工具动作，不要只写分析、计划或总结。',
-    diagnostic: /provider-visible stopless guideline must not contain 这是连续第|provider-visible stopless guideline must not contain 最多/u,
+    marker: 'pub fn apply_v3_stopless_request_hook_at_req04(\n',
+    replacement: 'fn inject_stopless_guidance() {}\n\npub fn apply_v3_stopless_request_hook_at_req04(\n',
+    diagnostic: /stopless control guidance\/tool\/prompt must not enter business payload/u,
   },
   {
     name: 'manifest revives no-op lifecycle explanation',

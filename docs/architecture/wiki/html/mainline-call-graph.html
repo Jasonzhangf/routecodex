@@ -135,6 +135,25 @@
           <li><code>partial</code> = edge is bound, but only part of the transition is concretely anchored</li>
           <li><code>binding pending</code> = edge intentionally left unresolved until code audit pins the real bridge</li>
         </ul>
+        <h2>architecture.repository_filesystem.mainline</h2>
+        <p>Repository authoring policy is verified by the required repo-sanity build and CI gate without entering runtime paths.</p>
+        <p>Entry contract: <code>RepoFilesystemAuthoring01Policy</code> via <code>docs/architecture/function-map.yml</code></p>
+        <pre class="mermaid">flowchart LR
+          RepoFilesystemVerify02Gate[&quot;RepoFilesystemVerify02Gate&quot;]
+          RepoFilesystemAuthoring01Policy[&quot;RepoFilesystemAuthoring01Policy&quot;]
+          RepoFilesystemAuthoring01Policy --&gt;|repo-filesystem-01| RepoFilesystemVerify02Gate
+          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
+          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
+          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
+          class RepoFilesystemAuthoring01Policy anchored;
+          class RepoFilesystemVerify02Gate anchored;</pre>
+        <table>
+        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
+        <tbody>
+        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>repo-filesystem-01</td><td><code>RepoFilesystemAuthoring01Policy -&gt; RepoFilesystemVerify02Gate</code></td><td>anchored</td><td><code>checkRepositoryFilesystemGovernance -&gt; verifyRepositoryFilesystemGovernance</code></td><td></td><td><code>architecture.repository_filesystem_governance</code>&lt;br/&gt;repository root, generated output, tracked residue, and critical source ignore governance</td></tr>
+        </tbody>
+        </table>
         <h2>config.user_config_materialization.mainline</h2>
         <p>RouteCodex runtime config loading flows from the public TS shell into the native Rust loader, then into Rust path/provider/materialization owners before returning LoadedRouteCodexConfig.</p>
         <p>Entry contract: <code>ConfigLoad01PublicShell</code> via <code>docs/architecture/function-map.yml</code></p>
@@ -1174,6 +1193,7 @@
         <p>Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at governed terminal or Direct SSE clean EOF, and exposes a read-only Server projection.</p>
         <p>Entry contract: <code>V3RuntimeTimingStart</code> via <code>docs/architecture/function-map.yml</code></p>
         <pre class="mermaid">flowchart LR
+          V3RuntimeTimingProtocolHandoff[&quot;V3RuntimeTimingProtocolHandoff&quot;]
           V3RuntimeTimingObservability[&quot;V3RuntimeTimingObservability&quot;]
           V3RuntimeTimingServerProjection[&quot;V3RuntimeTimingServerProjection&quot;]
           V3RuntimeTimingStreamObservation[&quot;V3RuntimeTimingStreamObservation&quot;]
@@ -1193,6 +1213,8 @@
           V3RuntimeTimingExternalAttempt --&gt;|v3-runtime-timing-10| V3RuntimeTimingExternalComplete
           V3RuntimeTimingExternalComplete --&gt;|v3-runtime-timing-11| V3RuntimeTimingTerminal
           V3RuntimeTimingTerminal --&gt;|v3-runtime-timing-12| V3RuntimeTimingStreamObservation
+          V3RuntimeTimingExternalComplete --&gt;|v3-runtime-timing-13| V3RuntimeTimingProtocolHandoff
+          V3RuntimeTimingProtocolHandoff --&gt;|v3-runtime-timing-14| V3RuntimeTimingExternalAttempt
           classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
           classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
           classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
@@ -1202,7 +1224,8 @@
           class V3RuntimeTimingTerminal anchored;
           class V3RuntimeTimingStreamObservation anchored;
           class V3RuntimeTimingServerProjection anchored;
-          class V3RuntimeTimingObservability anchored;</pre>
+          class V3RuntimeTimingObservability anchored;
+          class V3RuntimeTimingProtocolHandoff anchored;</pre>
         <table>
         <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
         <tbody>
@@ -1219,6 +1242,8 @@
         <tr><td>v3-runtime-timing-10</td><td><code>V3RuntimeTimingExternalAttempt -&gt; V3RuntimeTimingExternalComplete</code></td><td>anchored</td><td><code>wrap_direct_sse_provider_event_json_observation_stream -&gt; finish_external</code></td><td></td><td><code>v3.runtime_timing_observability</code>&lt;br/&gt;Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection.</td></tr>
         <tr><td>v3-runtime-timing-11</td><td><code>V3RuntimeTimingExternalComplete -&gt; V3RuntimeTimingTerminal</code></td><td>anchored</td><td><code>wrap_direct_sse_provider_outcome_stream -&gt; finish_runtime</code></td><td></td><td><code>v3.runtime_timing_observability</code>&lt;br/&gt;Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection.</td></tr>
         <tr><td>v3-runtime-timing-12</td><td><code>V3RuntimeTimingTerminal -&gt; V3RuntimeTimingStreamObservation</code></td><td>anchored</td><td><code>wrap_direct_sse_provider_outcome_stream -&gt; record_timing</code></td><td></td><td><code>v3.runtime_timing_observability</code>&lt;br/&gt;Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection.</td></tr>
+        <tr><td>v3-runtime-timing-13</td><td><code>V3RuntimeTimingExternalComplete -&gt; V3RuntimeTimingProtocolHandoff</code></td><td>anchored</td><td><code>execute_v3_responses_direct_runtime_kernel_core -&gt; with_additional_attempts</code></td><td></td><td><code>v3.runtime_timing_observability</code>&lt;br/&gt;Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection.</td></tr>
+        <tr><td>v3-runtime-timing-14</td><td><code>V3RuntimeTimingProtocolHandoff -&gt; V3RuntimeTimingExternalAttempt</code></td><td>anchored</td><td><code>execute_responses_direct_server_outcome -&gt; execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target</code></td><td></td><td><code>v3.runtime_timing_observability</code>&lt;br/&gt;Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection.</td></tr>
         </tbody>
         </table>
         <h2>v3.codex_sample_retention_snap_scope</h2>
@@ -1297,7 +1322,7 @@
         <tr><td>debug.hub_chain_equivalence_sanitized_payload</td><td><code>sanitizePayload</code></td><td><code>debug.hub_chain_equivalence_payload_copy_budget</code>&lt;br/&gt;Hub chain equivalence diagnostic sanitization removes debug-only fields without deep-cloning complete protocol payloads</td><td>Debug equivalence block: removes debug-only comparison fields with path-local owners while borrowing unchanged nested protocol payload branches.</td></tr>
         <tr><td>debug.lmstudio_compat_tools_projection</td><td><code>applyLMStudioCompatibility</code></td><td><code>debug.lmstudio_compat_tools_payload_copy_budget</code>&lt;br/&gt;LM Studio compatibility debug projection owns only rewritten request parameters and tool wrappers</td><td>Debug compatibility block: creates a top-level/parameters projection and normalized tool wrappers while borrowing unchanged nested request branches.</td></tr>
         <tr><td>debug.anthropic_response_regression_projection</td><td><code>buildAnthropicRegressionProjectionWithNative</code></td><td><code>debug.anthropic_response_regression_payload_copy_budget</code>&lt;br/&gt;Anthropic response regression binds the Rust native projection owner without cloning the sample payload</td><td>Debug regression block: serializes the tracked Anthropic sample once into the Rust native projection owner and validates the returned Hub shape without cloning the source graph.</td></tr>
-        <tr><td>debug.v2_consistency_summary_projection</td><td><code>runAllTests</code></td><td><code>debug.v2_consistency_payload_copy_budget</code>&lt;br/&gt;V2 comprehensive consistency reporting reuses one authoritative summary without JSON round-trip clones</td><td>Debug reporting block: owns one generated consistency summary and borrows it for persistence/display without JSON round-trip clones.</td></tr>
+        <tr><td>debug.v2_consistency_summary_projection</td><td><code>runAllTests</code></td><td><code>debug.v2_consistency_payload_copy_budget</code>&lt;br/&gt;Retired V2 comprehensive consistency reporting preserved under deprecated/v2</td><td>Retired debug reporting block preserved under deprecated/v2; it is not an active V3 mainline or package surface.</td></tr>
         <tr><td>debug.provider_golden_capture_config_projection</td><td><code>buildDerivedConfig</code></td><td><code>debug.provider_golden_capture_payload_copy_budget</code>&lt;br/&gt;Provider golden capture derives temporary configs with path-local owners instead of deep-cloning complete config graphs</td><td>Debug capture block: creates path-local temporary config owners while borrowing unchanged nested provider and config branches until artifact serialization.</td></tr>
         <tr><td>debug.outbound_regression_execution_copy</td><td><code>cloneOutboundRegressionExecutionPayload</code></td><td><code>debug.outbound_regression_payload_copy_budget</code>&lt;br/&gt;Outbound provider regression keeps exactly one structured-clone execution graph without fallback cloning</td><td>Debug script block: creates the single provider-mutation isolation graph for one outbound regression attempt; JSON and original-object fallback paths are forbidden.</td></tr>
         <tr><td>error.err_04_router_policy_applied</td><td><code>report_provider_error</code></td><td><code>error.pipeline_contract</code>&lt;br/&gt;ErrorErr01-06 provider/runtime error chain contract and architecture gate</td><td>Router policy applied between ErrorErr03 and ErrorErr05; Rust provider runtime ingress normalizes provider error events into ErrorErr04 policy truth.</td></tr>

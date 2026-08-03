@@ -1,7 +1,7 @@
 use serde_json::{json, Map, Value};
 
 use super::anthropic_codec::V3AnthropicCodecError;
-
+use super::client_metadata_projection::unsupported_client_metadata_paths;
 pub(super) fn responses_metadata_as_anthropic_metadata(
     responses_request_extension: Option<&Map<String, Value>>,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
@@ -36,9 +36,6 @@ pub(super) fn validate_responses_cache_and_store_for_anthropic(
                 field: "routecodex_chat_extension.responses_request.prompt_cache_key",
             });
         }
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: "$.request.prompt_cache_key".to_string(),
-        });
     }
     if let Some(store) = extension.get("store") {
         match store.as_bool() {
@@ -121,10 +118,15 @@ pub(super) fn project_responses_text_as_anthropic_output_config(
             }
         }
     }
-    if text.contains_key("verbosity") {
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: "$.request.text.output_config.verbosity".to_string(),
-        });
+    if let Some(verbosity) = text.get("verbosity") {
+        if !verbosity
+            .as_str()
+            .is_some_and(|value| matches!(value, "low" | "medium" | "high"))
+        {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "routecodex_chat_extension.responses_request.text.verbosity",
+            });
+        }
     }
     if !output_config.is_empty() {
         output.insert("output_config".to_string(), Value::Object(output_config));
@@ -153,17 +155,15 @@ pub(super) fn reject_responses_reasoning_summary_for_anthropic(
     let Some(summary) = request.get("reasoning_summary_policy") else {
         return Ok(());
     };
-    if summary
+    if !summary
         .as_str()
         .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed"))
     {
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: "$.request.reasoning_summary_policy".to_string(),
+        return Err(V3AnthropicCodecError::MalformedField {
+            field: "reasoning_summary_policy",
         });
     }
-    Err(V3AnthropicCodecError::MalformedField {
-        field: "reasoning_summary_policy",
-    })
+    Ok(())
 }
 
 fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError> {
@@ -204,20 +204,12 @@ fn responses_public_metadata_user_id(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "routecodex_chat_extension.responses_request.metadata",
         })?;
-    let unsupported_paths = metadata
-        .keys()
-        .filter(|key| key.as_str() != "user_id")
-        .map(|key| format!("$.request.metadata.{key}"))
-        .collect::<Vec<_>>();
-    if !unsupported_paths.is_empty() {
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: unsupported_paths.join(","),
-        });
-    }
+    // Arbitrary public Responses metadata is not provider-wire metadata for Anthropic.
+    // V3AnthropicResponsesProjectionContext carries it on the adjacent response projection
+    // and restores it before Resp03/continuation save; this helper extracts only the
+    // exact Anthropic metadata.user_id intersection.
     let Some(user_id) = metadata.get("user_id") else {
-        return Err(V3AnthropicCodecError::UnmappedOutboundFields {
-            paths: "$.request.metadata".to_string(),
-        });
+        return Ok(None);
     };
     let user_id = user_id
         .as_str()
@@ -241,11 +233,7 @@ fn responses_client_user_id(
             .ok_or(V3AnthropicCodecError::MalformedField {
                 field: "routecodex_chat_extension.responses_request.client_metadata",
             })?;
-    let unsupported = client_metadata
-        .keys()
-        .filter(|key| key.as_str() != "user_id")
-        .map(|key| format!("$.request.client_metadata.{key}"))
-        .collect::<Vec<_>>();
+    let unsupported = unsupported_client_metadata_paths(client_metadata);
     if !unsupported.is_empty() {
         return Err(V3AnthropicCodecError::UnmappedOutboundFields {
             paths: unsupported.join(","),

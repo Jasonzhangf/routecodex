@@ -297,6 +297,33 @@ fn matched_pool_and_default_floor_are_captured_before_one_hit() {
 }
 
 #[test]
+fn tools_capability_without_current_tool_output_selects_tools_pool() {
+    let router = V3VirtualRouter::default();
+    let manifest = manifest(V3SelectionStrategy::Priority);
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["tools".into()]),
+                input_tokens: 10,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+    assert_eq!(hit.pool_id, "tools");
+    assert_eq!(hit.target_plan[0].pool_id, "tools");
+}
+
+#[test]
 fn no_match_uses_default_and_only_equal_best_precedence_is_ambiguous() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);

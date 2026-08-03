@@ -1,5 +1,7 @@
 use serde_json::{Map, Value};
 
+use super::client_metadata_projection::unsupported_client_metadata_paths;
+
 pub(super) fn project_openai_client_metadata_to_metadata(
     projected: &mut Value,
     target_protocol: &str,
@@ -13,11 +15,7 @@ pub(super) fn project_openai_client_metadata_to_metadata(
     let client_metadata = client_metadata.as_object().ok_or_else(|| {
         format!("MalformedOutboundField target_protocol={target_protocol} path=$.client_metadata")
     })?;
-    let unsupported = client_metadata
-        .keys()
-        .filter(|key| key.as_str() != "user_id")
-        .map(|key| format!("$.request.client_metadata.{key}"))
-        .collect::<Vec<_>>();
+    let unsupported = unsupported_client_metadata_paths(client_metadata);
     if !unsupported.is_empty() {
         return Err(format!(
             "UnmappedOutboundFields target_protocol={target_protocol} paths={}",
@@ -82,22 +80,22 @@ pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy(
     projected: &mut Value,
 ) -> Result<(), String> {
     let Some(summary) = projected
-        .as_object_mut()
-        .and_then(|row| row.remove("reasoning_summary_policy"))
+        .as_object()
+        .and_then(|row| row.get("reasoning_summary_policy"))
     else {
         return Ok(());
     };
-    if summary
+    if !summary
         .as_str()
         .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed"))
     {
         return Err(
-            "UnmappedOutboundFields target_protocol=openai_chat paths=$.request.reasoning_summary_policy"
+            "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_summary_policy"
                 .to_string(),
         );
     }
     Err(
-        "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_summary_policy"
+        "UnmappedOutboundFields target_protocol=openai_chat paths=$.request.reasoning_summary_policy"
             .to_string(),
     )
 }

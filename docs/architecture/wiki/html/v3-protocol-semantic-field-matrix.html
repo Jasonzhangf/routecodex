@@ -255,17 +255,17 @@
   </tr>
 <tr>
     <td><span class="badge runtime_conformance_pending">runtime_conformance_pending</span></td>
-    <td><code>1</code></td>
+    <td><code>5</code></td>
     <td>Design and owner are fixed, but positive/negative runtime and live evidence have not passed.</td>
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>112</code></td>
+    <td><code>111</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
     <td><span class="badge extension_declared">extension_declared</span></td>
-    <td><code>223</code></td>
+    <td><code>220</code></td>
     <td>The OpenAI Chat extension field and semantic owner are declared, but runtime conversion closeout is not claimed.</td>
   </tr>
 <tr>
@@ -300,14 +300,14 @@
     <tbody><tr>
     <td><code>gap.client_metadata.target_dependent</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>runtime_conformance_pending</code></li></ul><div>count: <code>1</code></div></td>
-    <td>OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only an exact client_metadata.user_id mapping is allowed and all other keys must fail.</td>
+    <td><ul class="field-list"><li><code>runtime_conformance_pending</code></li></ul><div>count: <code>5</code></div></td>
+    <td>OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only exact client_metadata.user_id may map to provider metadata. Registered Codex client-local keys may be consumed before provider wire as request-local context; unknown keys must fail.</td>
     <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Keep target-dependent provider-wire behavior explicit in the adjacent outbound codec; never use MetadataCenter, generic silent strip, or fallback.</span></td>
   </tr>
 <tr>
     <td><code>gap.runtime_extension_declared</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>223</code></div></td>
+    <td><ul class="field-list"><li><code>extension_declared</code></li></ul><div>count: <code>220</code></div></td>
     <td>Long-tail semantics now have protocol-neutral OpenAI Chat extension fields and owners, but no runtime conversion completion claim.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add red fixture, implement adjacent codec/Chat Process owner, add source/blackbox/live evidence before changing status to covered or partial.</span></td>
   </tr>
@@ -321,7 +321,7 @@
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>112</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>111</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -1242,8 +1242,13 @@
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
       <div>Serialized JSON arguments for one model-emitted function call.</div>
-      <details><summary>Chat shape / value rule</summary><div>Chat function.arguments is the argument payload only. It must not be mapped to id/name/tool declaration; malformed JSON is fail-fast at codec owner.</div></details>
-
+      <details><summary>Chat shape / value rule</summary><div>Chat function.arguments is the argument payload only. It must not be mapped to id/name/tool declaration. Valid JSON projects as native target input; malformed raw text may use only the named Anthropic compatibility wrapper and must remain function-call semantics.</div></details>
+      <details><summary>shape branch cases</summary>
+    <h4>positive branches</h4>
+    <ul class="field-list"><li><span class="badge positive">positive</span> <code>missing</code> function.arguments is valid JSON object input → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li><li><span class="badge positive">positive</span> <code>missing</code> governed function call has a string argument value that is invalid JSON → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li></ul>
+    <h4>negative branches</h4>
+    <ul class="field-list"><li><span class="badge negative">negative</span> <code>missing</code> missing or non-string function arguments → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li><li><span class="badge negative">negative</span> <code>missing</code> valid function arguments sent through the malformed raw wrapper → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li></ul>
+  </details>
     </td>
     <td><span class="badge request">request</span><br><span class="badge covered">covered</span><br><span class="muted">none</span></td>
     <td><div class="equiv-cell">
@@ -1261,7 +1266,7 @@
     <h4>response fields</h4>
     <ul class="field-list"><li><code>response.content[].input</code></li></ul>
     <h4>transform</h4>
-    <div>Anthropic tool_use.input object serializes to Chat function.arguments.</div>
+    <div>Valid Chat function.arguments JSON maps exactly to Anthropic tool_use.input. Malformed raw argument text uses compatibility id v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the exact raw text on reverse projection.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1287,7 +1292,7 @@
       <details><summary>Chat shape / value rule</summary><div>Custom name is distinct from call_id and raw input.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">custom tool cross-protocol support is extension-only</span></td>
+    <td><span class="badge request">request</span><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">OpenAI Chat has a native custom tool shape; the adjacent outbound codec must project it directly and gate selected-model support.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.input[].custom_tool_call.name</code></li></ul>
@@ -1303,7 +1308,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic has no native custom raw-input call separate from tool_use in current inventory.</div>
+    <div>Conditional branch is owned by compatibility id v3.custom_tool.anthropic_string_input_wrapper.v1; only a governed custom declaration selects custom semantics from the otherwise function-shaped tool_use fields.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1329,7 +1334,7 @@
       <details><summary>Chat shape / value rule</summary><div>Custom input is payload, not id/name. It must not be parsed into `{}` fallback.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">custom raw input is only covered for Responses/OpenAI Chat</span></td>
+    <td><span class="badge request">request</span><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">custom raw input and grammar require native Chat custom-tool projection and response round-trip evidence; function-wrapper conversion is not equivalent.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.input[].custom_tool_call.input</code></li></ul>
@@ -1345,7 +1350,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic has no native raw custom input separate from tool_use.input in this inventory.</div>
+    <div>Conditional branch is owned by compatibility id v3.custom_tool.anthropic_string_input_wrapper.v1; raw tool_use.input remains function arguments unless governed custom declaration identity selects the exact wrapper branch.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -1581,7 +1586,7 @@
       <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized thinking; otherwise the field remains decision-required.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses round-trips the field; OpenAI Chat, Anthropic, and Gemini outbound report request.reasoning_summary_policy as unmapped because none has an equivalent summary-policy field.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Responses is source-roundtrip only. OpenAI Chat, Anthropic, and Gemini have no equivalent request policy; outbound must reject the semantic path. A target response reasoning field does not authorize consuming the request policy.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>
@@ -3749,7 +3754,7 @@
     <td><ul class="field-list"><li><code>request.messages[].tool_calls[].custom.input</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Anthropic runtime must lock registered string-input wrapper and exact reverse projection.</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.messages[].tool_calls[].custom.name</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3759,7 +3764,7 @@
     <td><ul class="field-list"><li><code>request.messages[].tool_calls[].custom.name</code></li></ul></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.canonical_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">runtime mapping partial or extension-only gap</span></td>
+    <td><code>chat.canonical_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Anthropic runtime must bind tool_use name to the governed custom declaration before reverse projection.</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.messages[].tool_calls[].function.arguments</code><br><span class="muted">native exact OpenAI Chat field</span></td>
@@ -3949,7 +3954,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses summary policy is source-roundtrip only; other targets must reject it as unmapped.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Responses source-roundtrip only; OpenAI Chat, Anthropic, and Gemini reject because no equivalent request policy is declared.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_context_policy</code><br><span class="muted">added Chat extension field</span></td>

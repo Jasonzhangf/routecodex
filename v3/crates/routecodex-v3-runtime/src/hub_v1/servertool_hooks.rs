@@ -5,29 +5,11 @@ use super::{
 };
 use serde_json::{json, Map, Value};
 use servertool_core::stop_visible_text::{
-    build_stop_message_terminal_visible_payload, extract_current_assistant_stop_text,
-    strip_stop_schema_control_text, StopMessageTerminalVisiblePayloadInput,
+    build_stop_message_terminal_visible_payload, StopMessageTerminalVisiblePayloadInput,
 };
 use std::sync::Arc;
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
-const STOPLESS_BASE_INSTRUCTION: &str = r#"当前轮推进准则（当前轮继续推进准则，仅用于当前轮，不改变原用户目标或系统指令优先级）：
-- 继续当前目标，基于已有上下文，保留并遵守已经恢复的完整上下文、系统指令、开发者指令、用户目标、工具规则和安全约束；本段只是当前轮执行补充。
-- 先复核当前目标，定位已有结论、未完成事项、上一轮明确写出的下一步，以及完成证据/阻塞证据还缺什么。
-- 如果目标未完成且存在可用工具能推进，需要继续推理并按需调用可用工具（读文件、查日志、改代码、测试、重放、检索、等待、查看状态等），本轮必须调用最相关工具执行下一步；不要只输出分析、计划、总结或“继续”。
-- 如果上一轮已经写出“下一步/继续推进/先做”的动作，本轮直接执行该动作；不要再次把该动作改写成文字承诺。
-- 只有当前证据已经证明目标完成时，才调用 reasoningStop，设置 stopreason=0 并填写 evidence。
-- 只有确实无法继续、需要用户输入或外部条件时，才调用 reasoningStop，设置 stopreason=1，并填写 reason、evidence、needs_user_input。
-- 不要把“还需要继续”、自然停止、空泛复盘或没有工具动作的长思考当作本轮终点；证据不足就继续执行能推进的工具动作。"#;
-const STOPLESS_NOOP_CONTINUATION_GUIDELINE: &str = r#"继续当前目标。
-
-请基于已经恢复的完整上下文继续执行，不要只复盘，不要只总结：
-1. 先找出上一轮明确写出的下一步、当前目标的缺口、已有结论、未完成事项，以及能验证进展的最小动作。
-2. 如果有可用工具能推进（读文件、查日志、改代码、测试、重放、检索、等待、查看状态等），本轮必须调用最相关工具执行该动作。
-3. 如果上一轮只输出了分析/计划/“继续推进”但没有工具动作，本轮优先把其中第一个可执行动作落到工具调用。
-4. 只有目标确实完成并有证据时，调用 reasoningStop 设置 stopreason=0 并提供 evidence。
-5. 只有真实阻塞且需要用户或外部状态时，调用 reasoningStop 设置 stopreason=1，并提供 reason、evidence、needs_user_input。
-6. 不要把“还需要继续”或自然停止作为最终响应；既未完成也未阻塞，继续工作并执行工具动作。"#;
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }
@@ -89,7 +71,8 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
                         intercepted: true,
                     });
                 }
-                let projected = build_stopless_cli_projection_payload(input.provider_payload());
+                let projected =
+                    build_stopless_guard_passthrough_visible_payload(input.provider_payload());
                 *input.provider_payload_mut() = Arc::new(projected);
                 Ok(V3StoplessResponseHookOutcome {
                     input,
@@ -119,7 +102,8 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
                         intercepted: true,
                     });
                 }
-                let projected = build_stopless_cli_projection_payload(input.provider_payload());
+                let projected =
+                    build_stopless_guard_passthrough_visible_payload(input.provider_payload());
                 *input.provider_payload_mut() = Arc::new(projected);
                 Ok(V3StoplessResponseHookOutcome {
                     input,
@@ -235,17 +219,15 @@ fn project_stopless_noop_for_stop_candidate(
 ) -> Result<V3StoplessResponseHookOutcome, V3HubRelayResponseError> {
     let natural_stop_count = next_stopless_consecutive_stop_count(profile);
     let max_natural_stops = stopless_max_natural_stops(profile);
+    let cleaned = build_stopless_passthrough_visible_payload(input.provider_payload());
+    *input.provider_payload_mut() = Arc::new(cleaned);
     if natural_stop_count > max_natural_stops {
-        let projected = build_stopless_guard_passthrough_visible_payload(input.provider_payload());
-        *input.provider_payload_mut() = Arc::new(projected);
         return Ok(V3StoplessResponseHookOutcome {
             input,
             center_state: None,
-            intercepted: true,
+            intercepted: false,
         });
     }
-    let projected = build_stopless_cli_projection_payload(input.provider_payload());
-    *input.provider_payload_mut() = Arc::new(projected);
     Ok(V3StoplessResponseHookOutcome {
         center_state: Some(
             V3StoplessCenterState::new(natural_stop_count, max_natural_stops, steering)
@@ -256,7 +238,7 @@ fn project_stopless_noop_for_stop_candidate(
                 .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0)),
         ),
         input,
-        intercepted: true,
+        intercepted: false,
     })
 }
 
@@ -279,8 +261,6 @@ pub fn apply_v3_stopless_request_hook_at_req04(
         );
     }
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
-        inject_stopless_guidance(payload, None)?;
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(initial_stopless_provider_turn_state(
             restored_stopless_center_state,
             transition_request_id,
@@ -290,8 +270,6 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     let Some((index, _output)) = active_stopless_cli_output(input) else {
         strip_stopless_cli_artifacts(input);
         strip_stopless_generated_system_guidance_items(input);
-        inject_stopless_guidance(payload, None)?;
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(initial_stopless_provider_turn_state(
             restored_stopless_center_state,
             transition_request_id,
@@ -317,17 +295,7 @@ pub fn apply_v3_stopless_request_hook_at_req04(
     }
     strip_active_stopless_pair_and_stale(input, index);
     strip_stopless_generated_system_guidance_items(input);
-    let state = state.map(|state| {
-        state.continuation_guidance_prepared(transition_request_id, transition_updated_at)
-    });
-    append_stopless_noop_continuation(input, state.as_ref());
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
-    events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
-    if state.is_some() {
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessGuidancePrepared);
-    }
-    inject_stopless_guidance(payload, state.as_ref())?;
-    events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
     Ok(state
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
 }
@@ -340,8 +308,6 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
     transition_updated_at: Option<u64>,
 ) -> Result<Option<V3StoplessCenterState>, V3HubRelayRequestError> {
     let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
-        inject_stopless_guidance(payload, None)?;
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(initial_stopless_provider_turn_state(
             restored_stopless_center_state,
             transition_request_id,
@@ -351,8 +317,6 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
     let Some(index) = active_stopless_chat_cli_output(messages) else {
         strip_stopless_chat_cli_artifacts(messages);
         strip_stopless_generated_system_guidance_items(messages);
-        inject_stopless_guidance(payload, None)?;
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
         return Ok(initial_stopless_provider_turn_state(
             restored_stopless_center_state,
             transition_request_id,
@@ -378,20 +342,7 @@ fn apply_v3_stopless_chat_request_hook_at_req04(
     }
     strip_active_stopless_chat_pair_and_stale(messages, index);
     strip_stopless_generated_system_guidance_items(messages);
-    let state = state.map(|state| {
-        state.continuation_guidance_prepared(transition_request_id, transition_updated_at)
-    });
-    messages.push(json!({
-        "role": "user",
-        "content": stopless_continuation_prompt_for_state(state.as_ref())
-    }));
     events.push(V3HubRelayRequestHookEvent::Req04StoplessResultParsed);
-    events.push(V3HubRelayRequestHookEvent::Req04StoplessTextRewritten);
-    if state.is_some() {
-        events.push(V3HubRelayRequestHookEvent::Req04StoplessGuidancePrepared);
-    }
-    inject_stopless_guidance(payload, state.as_ref())?;
-    events.push(V3HubRelayRequestHookEvent::Req04StoplessToolInjected);
     Ok(state
         .map(|state| state.provider_turn_in_flight(transition_request_id, transition_updated_at)))
 }
@@ -414,27 +365,6 @@ fn initial_stopless_provider_turn_state(
         )
         .provider_turn_in_flight(Some(request_id), transition_updated_at),
     )
-}
-
-fn output_item_text(item: &Value) -> Option<&str> {
-    match item.get("type").and_then(Value::as_str) {
-        Some("output_text") => item.get("text").and_then(Value::as_str),
-        Some("message") => item
-            .get("text")
-            .and_then(Value::as_str)
-            .or_else(|| first_message_content_text(item.get("content"))),
-        _ => None,
-    }
-}
-
-fn first_message_content_text(content: Option<&Value>) -> Option<&str> {
-    content?
-        .as_array()?
-        .iter()
-        .find_map(|part| match part.get("type").and_then(Value::as_str) {
-            Some("output_text" | "text") => part.get("text").and_then(Value::as_str),
-            _ => None,
-        })
 }
 
 struct V3ReasoningStopToolCall<'a> {
@@ -1004,79 +934,6 @@ fn value_has_non_empty_text(value: &Value) -> bool {
         .is_some_and(|text| !text.is_empty())
 }
 
-fn build_stopless_cli_projection_payload(payload: &Value) -> Value {
-    let id = payload
-        .as_object()
-        .and_then(|object| object.get("id"))
-        .cloned()
-        .unwrap_or_else(|| json!("resp_stopless_projected"));
-    let visible_payload = build_stopless_passthrough_visible_payload(payload);
-    let mut output = Vec::new();
-    if let Some(items) = visible_payload.get("output").and_then(Value::as_array) {
-        for item in items {
-            if !is_provider_tool_call_item(item) {
-                output.push(item.clone());
-            }
-        }
-    }
-    let assistant_stop_text = extract_current_assistant_stop_text(payload);
-    let mut output =
-        build_stopless_client_visible_projection_output(output, assistant_stop_text.as_str());
-    output.push(json!({
-        "type": "function_call",
-        "call_id": STOPLESS_CALL_ID,
-        "name": "exec_command",
-        "arguments": json!({"cmd": build_stopless_cli_command()}).to_string()
-    }));
-    json!({
-        "id": id,
-        "status": "requires_action",
-        "output": output
-    })
-}
-
-fn build_stopless_client_visible_projection_output(
-    items: Vec<Value>,
-    assistant_stop_text: &str,
-) -> Vec<Value> {
-    let Some(visible_text) = first_non_empty_stopless_visible_text(&items).or_else(|| {
-        let text = strip_stop_schema_control_text(assistant_stop_text);
-        let text = text.trim().to_string();
-        (!text.is_empty()).then_some(text)
-    }) else {
-        return Vec::new();
-    };
-    vec![json!({
-        "type": "message",
-        "role": "assistant",
-        "status": "completed",
-        "content": [{
-            "type": "output_text",
-            "text": visible_text
-        }]
-    })]
-}
-
-fn first_non_empty_stopless_visible_text(items: &[Value]) -> Option<String> {
-    items
-        .iter()
-        .filter_map(output_item_text)
-        .map(strip_stop_schema_control_text)
-        .map(|text| text.trim().to_string())
-        .find(|text| !text.is_empty())
-}
-
-fn is_provider_tool_call_item(item: &Value) -> bool {
-    matches!(
-        item.get("type").and_then(Value::as_str),
-        Some("function_call" | "custom_tool_call" | "tool_call")
-    )
-}
-
-fn build_stopless_cli_command() -> String {
-    "routecodex hook run reasoningStop".to_string()
-}
-
 fn is_stopless_cli_output(item: &Value) -> bool {
     matches!(
         item.get("type").and_then(Value::as_str),
@@ -1345,29 +1202,6 @@ fn stopless_generated_guidance_item_is_empty(object: &Map<String, Value>) -> boo
     })
 }
 
-fn append_stopless_noop_continuation(
-    input: &mut Vec<Value>,
-    state: Option<&V3StoplessCenterState>,
-) {
-    input.push(json!({
-        "role": "user",
-        "content": stopless_continuation_prompt_for_state(state)
-    }));
-}
-
-fn stopless_continuation_prompt_for_state(state: Option<&V3StoplessCenterState>) -> String {
-    let mut prompt = STOPLESS_NOOP_CONTINUATION_GUIDELINE.to_string();
-    if let Some(state) = state {
-        if let Some(next_step) = state.next_step_prompt() {
-            prompt.push_str("\n\n上一轮给出的下一步：");
-            prompt.push_str(next_step);
-        }
-        prompt.push_str("\n\n");
-        prompt.push_str(stopless_instruction_for_state(state));
-    }
-    prompt
-}
-
 fn is_stopless_cli_artifact(item: &Value) -> bool {
     is_stopless_cli_call(item) || is_stopless_cli_output(item)
 }
@@ -1422,4 +1256,26 @@ fn is_stopless_cli_call(item: &Value) -> bool {
             .is_some_and(|value| value.contains("routecodex hook run reasoningStop")))
 }
 
-include!("servertool_hooks/stopless_injection.rs");
+fn strip_legacy_stopless_instruction(existing: &str) -> String {
+    let mut cleaned = existing.to_string();
+    for marker in [
+        "当前轮推进准则",
+        "当前轮继续推进准则",
+        "请基于已经恢复的完整上下文继续推理",
+        "正常执行当前任务，不要因为 stop schema 合同",
+        "上一轮 stop 响应缺少 stop schema",
+        "继续完成当前目标；基于现有上下文推理并按需调用工具。停止时调用 reasoningStop",
+        "继续推进当前目标；不要把 no-op 工具轮当作完成。",
+        "RouteCodex stopless guideline",
+        "RouteCodex stopless continuation",
+        "上一轮 reasoningStop CLI no-op",
+        "继续完成当前目标；如果认为已完成或阻塞，必须调用 reasoningStop",
+        "如果确实阻塞，调用 reasoningStop",
+        "<rcc_stop_schema>",
+    ] {
+        if let Some(index) = cleaned.find(marker) {
+            cleaned.truncate(index);
+        }
+    }
+    cleaned.trim_end().to_string()
+}

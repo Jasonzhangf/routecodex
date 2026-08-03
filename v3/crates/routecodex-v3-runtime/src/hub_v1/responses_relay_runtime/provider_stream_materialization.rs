@@ -62,6 +62,21 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
+    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+        provider_protocol,
+        provider,
+        observation,
+        &V3AnthropicResponsesProjectionContext::default(),
+    )
+    .await
+}
+
+pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+    provider_protocol: V3HubProviderWireProtocol,
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+    anthropic_context: &V3AnthropicResponsesProjectionContext,
+) -> Result<Value, V3ResponsesRelayRuntimeError> {
     match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
@@ -78,9 +93,10 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
             .await
         }
         V3HubProviderWireProtocol::Anthropic => {
-            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
                 provider,
                 observation,
+                anthropic_context,
             )
             .await
         }
@@ -111,9 +127,10 @@ pub(super) struct V3AnthropicProviderStreamState {
     message_stop_seen: bool,
 }
 
-pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
+    anthropic_context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     use futures_util::StreamExt;
 
@@ -186,9 +203,11 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         ));
     }
     let anthropic_message = build_v3_anthropic_message_from_provider_stream_state(state)?;
-    let response = project_v3_anthropic_message_as_responses_response(&anthropic_message).map_err(
-        |error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()),
-    )?;
+    let response = project_v3_anthropic_message_as_responses_response_with_context(
+        &anthropic_message,
+        anthropic_context,
+    )
+    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
     observation
         .record_provider_event_json(&response)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
