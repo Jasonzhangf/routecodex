@@ -1,6 +1,7 @@
 # V2 Pipeline Architecture Design
 
-> **Status**: This blueprint is frozen. Current implementation follows AGENTS.md principles (single execution path, no bypasses). This doc is retained for historical reference only; do not use as current architecture guidance.
+> **Status**: Archived under `deprecated/v2`. This blueprint is frozen and is
+> not current RouteCodex architecture guidance. Active work belongs in `v3/`.
 
 ## 🎯 Design Objectives
 

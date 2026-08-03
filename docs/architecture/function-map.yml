@@ -4903,11 +4903,11 @@ owners:
       - "This diagnostic projection cannot write live payload, routing, metadata, provider configuration, config.toml, or ~/.rcc truth."
 
   - feature_id: debug.v2_consistency_payload_copy_budget
-    status: active
-    summary: "V2 comprehensive consistency reporting reuses one authoritative summary without JSON round-trip clones"
+    status: retired
+    summary: "Retired V2 comprehensive consistency reporting preserved under deprecated/v2"
     owner_kind: ts_debug_script
-    owner_scope: "debug-only V2 consistency summary generation, persistence, and display"
-    owner_module: scripts/v2-consistency/comprehensive-consistency-test.mjs
+    owner_scope: "archived debug-only V2 consistency summary generation, persistence, and display"
+    owner_module: deprecated/v2/consistency/comprehensive-consistency-test.mjs
     resource_bindings:
       writes:
         - debug.v2_consistency_summary_projection@DebugObs07ReplayedOrInspected
@@ -4923,9 +4923,9 @@ owners:
     canonical_builders:
       - runAllTests
     allowed_paths:
-      - scripts/v2-consistency/comprehensive-consistency-test.mjs
-      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
-      - docs/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+      - deprecated/v2/consistency/comprehensive-consistency-test.mjs
+      - deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+      - deprecated/v2/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
       - docs/design/payload-copy-hotspot-inventory.md
       - docs/architecture
     forbidden_paths:
@@ -4937,8 +4937,8 @@ owners:
       - config.toml
       - ~/.rcc
     required_tests:
-      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
-      - docs/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+      - deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+      - deprecated/v2/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
     required_gates:
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
@@ -4947,7 +4947,8 @@ owners:
     notes:
       - "runAllTests writes the generated summary once into this.testResults.summary; report persistence and display borrow that same diagnostic owner."
       - "JSON.stringify remains only at the report file IO boundary and no parse/stringify comparison or clone loop remains."
-      - "This debug reporting utility cannot write provider/client payload truth, route selection truth, MetadataCenter, provider configuration, or live runtime state."
+      - "This retired utility is archive-only and cannot be restored as an active V3 runtime, package, or default test surface."
+      - "V3-owned config.v2.toml compatibility remains active inside v3 and is not part of this retirement."
 
   - feature_id: debug.provider_golden_capture_payload_copy_budget
     status: active

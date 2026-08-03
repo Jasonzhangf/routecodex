@@ -2740,25 +2740,25 @@ verification:
   - feature_id: debug.v2_consistency_payload_copy_budget
     change_risk: low
     unit:
-      - scripts/v2-consistency/comprehensive-consistency-test.mjs
-      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+      - deprecated/v2/consistency/comprehensive-consistency-test.mjs
+      - deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts
     contract:
-      - docs/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+      - deprecated/v2/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
       - docs/design/payload-copy-hotspot-inventory.md
     integration:
-      - scripts/v2-consistency/run-consistency-test.mjs
-      - scripts/v2-consistency/README.md
+      - deprecated/v2/consistency/run-consistency-test.mjs
+      - deprecated/v2/consistency/README.md
     smoke:
       - npm run verify:resource-operation-map
       - npm run verify:function-map-compile-gate
       - npm run verify:architecture-mainline-call-map
     build:
-      - node --check scripts/v2-consistency/comprehensive-consistency-test.mjs
+      - node --check deprecated/v2/consistency/comprehensive-consistency-test.mjs
       - npx tsc --noEmit --pretty false --skipLibCheck
     notes:
       - "Positive evidence proves generated summary ownership is stored once and borrowed by report/display paths."
       - "Negative evidence rejects JSON round-trip and generic clone helpers in the comprehensive consistency script."
-      - "This is debug script evidence, not live provider/client or installed-runtime RSS evidence."
+      - "This is archived source evidence, not an active V3 gate, live provider/client, or installed-runtime RSS evidence."
 
   - feature_id: debug.provider_golden_capture_payload_copy_budget
     change_risk: low

@@ -1,5 +1,8 @@
 # V2 Architecture Module
 
+> **Status**: Archived under `deprecated/v2`; no active runtime source lives
+> here. New implementation belongs to the registered V3 Rust owner.
+
 ## Overview
 
 V2 architecture module documents legacy migration concepts only. New Hub Pipeline

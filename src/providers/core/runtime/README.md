@@ -31,4 +31,4 @@ Base class providing:- Common request/response handling- Error classification
 - Implement tool logic or routing decisions
 - Modify user payload semanticsBypass Hub Pipeline## Related Documentation
 - `src/client/` - Protocol client implementations
-- `docs/v2-architecture/ README. md` - V2 architecture overview
+- `deprecated/v2/architecture/README.md` - Archived V2 architecture reference

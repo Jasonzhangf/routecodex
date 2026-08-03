@@ -65,4 +65,4 @@ const body = client.buildRequestBody(request);
 
 ## Related Documentation
 - `src/providers/core/runtime/` - Provider runtime that uses protocol clients
-- `docs/v2-architecture/ README.md` - V2 architecture overview
+- `deprecated/v2/architecture/README.md` - Archived V2 architecture reference

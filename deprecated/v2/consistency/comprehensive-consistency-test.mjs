@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..', '..');
+const projectRoot = path.join(__dirname, '..', '..', '..');
 
 class ComprehensiveConsistencyTest {
   constructor() {
@@ -88,7 +88,7 @@ class ComprehensiveConsistencyTest {
    */
   async runToolProcessingTest() {
     try {
-      const { V2ToolProcessingTest } = await import(path.join(projectRoot, 'tests/v2/src/tool-processing-test.js'));
+      const { V2ToolProcessingTest } = await import(path.join(projectRoot, 'deprecated/v2/tests/src/tool-processing-test.js'));
       const test = new V2ToolProcessingTest();
       
       return new Promise((resolve, reject) => {
@@ -122,7 +122,7 @@ class ComprehensiveConsistencyTest {
    */
   async runProtocolConversionTest() {
     try {
-      const { V2ProtocolConversionTest } = await import(path.join(projectRoot, 'tests/v2/src/protocol-conversion-test.js'));
+      const { V2ProtocolConversionTest } = await import(path.join(projectRoot, 'deprecated/v2/tests/src/protocol-conversion-test.js'));
       const test = new V2ProtocolConversionTest();
       
       return new Promise((resolve, reject) => {
@@ -156,7 +156,7 @@ class ComprehensiveConsistencyTest {
    */
   async runV1V2AlignmentTest(maxTestCases) {
     try {
-      const { V1V2ConsistencyTest } = await import(path.join(projectRoot, 'tests/v2/src/consistency/v1v2-consistency-test.js'));
+      const { V1V2ConsistencyTest } = await import(path.join(projectRoot, 'deprecated/v2/tests/src/consistency/v1v2-consistency-test.js'));
       const test = new V1V2ConsistencyTest({
         maxTestCases,
         outputDir: path.join(projectRoot, 'test-results')

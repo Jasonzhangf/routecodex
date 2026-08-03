@@ -1,15 +1,31 @@
-# routecodex & rcc
+# RouteCodex V3
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-RouteCodex 项目提供两个 CLI 工具：
+V3 是当前主力实现，生产 CLI 和构建产物统一为 **`rccv3`**。V3 的
+Rust workspace、独立使用入口和边界说明见 [`v3/README.md`](v3/README.md)。
+
+```bash
+npm run verify:v3-architecture-ci
+npm run test:v3-workspace
+npm run install:v3
+rccv3 --help
+```
+
+根目录 Node/TypeScript 工具继续承担构建、安装、验证和必要的兼容壳；新的
+runtime、routing、protocol、provider 和 lifecycle 语义只进入 V3 owner。
+旧 V2 authoring material 已迁入 [`deprecated/v2/`](deprecated/v2/README.md)，
+不得恢复为活跃源码或默认测试入口。
+
+兼容安装面仍保留两个历史 CLI：
 
 - **`routecodex`** (dev mode) - Development build with local `llmswitch-core` symlink
 - **`rcc`** (release mode) - Production build from local source release install
 
 Both provide a **unified gateway for AI providers**, handling **routing + protocol conversion + tool call governance** across different upstream protocols.
 
-> **Note**: This README covers both tools. For CLI-specific usage, see `docs/INSTALLATION_AND_QUICKSTART.md`.
+> **Note**: `routecodex` / `rcc` 只保留既有兼容和聚合运维入口；主力开发、
+> 构建和独立运行请使用 `rccv3`。
 
 ## 最新更新 (2026-02-23)
 
@@ -377,8 +393,9 @@ curl http://127.0.0.1:5555/v1/messages \
 ### 架构与设计
 - **架构总览**：`docs/ARCHITECTURE.md`
 - **配置架构**：`docs/CONFIG_ARCHITECTURE.md`
-- **V2 架构（历史参考）**：`docs/v2-architecture/README.md`
+- **V3 主力实现与独立使用**：`v3/README.md`
 - **V3 入出站设计**：`docs/V3_INBOUND_OUTBOUND_DESIGN.md`
+- **V2 归档（历史参考）**：`deprecated/v2/README.md`
 
 ### 错误处理与调试
 - **错误处理 V2**：`docs/error-handling-v2.md`

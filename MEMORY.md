@@ -5180,3 +5180,9 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Provider-request tests must include the required session and conversation scope headers. Without them, session admission fails before the protocol boundary and can hide stale trace assertions.
 - When Relay is not allowed for a cross-protocol target, the request fails before provider send through the typed Error01-06 chain. The dry-run projection is HTTP 503 with `providerNetworkSend=false`; Server must not preplan from the source payload to recover an older protocol-specific error code.
 - Verified baseline is `0.90.4078`, installed SHA256 `31699e01e9840a7b3bbd364afb962b8fa155257216d8bbe932c67fc450e2ad34`, architecture CI `32/32`, healthy aggregate ports 10000/5520/5555, a live 5520 HTTP 200 tool call with exact `{"query":"routecodex"}`, and a live Anthropic provider-request dry run with no network send.
+
+## 2026-08-03 - V3 is primary and explicit V2 authoring surfaces are archived
+- `v3/` and `rccv3` are the primary implementation and standalone distribution surface. New runtime, routing, protocol, provider, lifecycle, and architecture work belongs to registered V3 owners.
+- Explicit V2 authoring trees moved to `deprecated/v2/`: architecture documents, V1/V2 consistency utilities, dry-run monitoring, ad-hoc provider smoke, source notes, and V2 test sources. The active root paths `docs/v2-architecture`, `scripts/v2-consistency`, `src/v2`, and `tests/v2` are forbidden from reappearing.
+- V3-owned compatibility input remains active: `v3/crates/routecodex-v3-config/src/v2_compat.rs`, `config.v2.toml`, and their V3 contract tests are not part of the archive.
+- Repository filesystem governance and red fixtures lock the archive boundary; legacy V2 package test commands are removed from the active package surface.

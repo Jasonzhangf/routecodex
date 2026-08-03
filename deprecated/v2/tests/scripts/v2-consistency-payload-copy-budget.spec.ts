@@ -5,7 +5,7 @@ import { describe, expect, test } from '@jest/globals';
 
 const scriptPath = path.join(
   process.cwd(),
-  'scripts/v2-consistency/comprehensive-consistency-test.mjs'
+  'deprecated/v2/consistency/comprehensive-consistency-test.mjs'
 );
 
 describe('feature_id: debug.v2_consistency_payload_copy_budget', () => {

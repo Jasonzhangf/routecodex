@@ -11,12 +11,12 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..', '..');
+const projectRoot = path.join(__dirname, '..', '..', '..');
 
 // 导入测试类
-const { SnapshotLoader } = await import(path.join(projectRoot, 'tests/v2/src/utils/snapshot-loader.js'));
-const { ConsistencyValidator } = await import(path.join(projectRoot, 'tests/v2/src/utils/consistency-validator.js'));
-const { V1V2ConsistencyTest } = await import(path.join(projectRoot, 'tests/v2/src/consistency/v1v2-consistency-test.js'));
+const { SnapshotLoader } = await import(path.join(projectRoot, 'deprecated/v2/tests/src/utils/snapshot-loader.js'));
+const { ConsistencyValidator } = await import(path.join(projectRoot, 'deprecated/v2/tests/src/utils/consistency-validator.js'));
+const { V1V2ConsistencyTest } = await import(path.join(projectRoot, 'deprecated/v2/tests/src/consistency/v1v2-consistency-test.js'));
 
 async function main() {
   const args = process.argv.slice(2);

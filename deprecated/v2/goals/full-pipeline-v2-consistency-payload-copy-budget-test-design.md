@@ -1,9 +1,12 @@
-# V2 Consistency Payload Copy Budget Test Design
+# Archived V2 Consistency Payload Copy Budget Test Design
+
+> **Status**: Retired with the V2 consistency tooling under `deprecated/v2`.
+> This is historical source-level evidence, not an active V3 verification gate.
 
 ## Feature
 
 - `feature_id`: `debug.v2_consistency_payload_copy_budget`
-- Owner: `scripts/v2-consistency/comprehensive-consistency-test.mjs`
+- Owner: `deprecated/v2/consistency/comprehensive-consistency-test.mjs`
 - Resource: `debug.v2_consistency_summary_projection`
 
 ## Risk
@@ -12,7 +15,7 @@ The comprehensive V2 consistency script retained one summary object but repeated
 
 ## Positive Tests
 
-- `tests/scripts/v2-consistency-payload-copy-budget.spec.ts` proves `runAllTests` writes the generated summary into `this.testResults.summary`.
+- `deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts` proves `runAllTests` writes the generated summary into `this.testResults.summary`.
 - The same test proves report/display paths borrow the authoritative summary instead of cloning it.
 - The script remains parseable through `node --check`.
 
@@ -23,8 +26,8 @@ The comprehensive V2 consistency script retained one summary object but repeated
 
 ## Verification
 
-- `pnpm jest tests/scripts/v2-consistency-payload-copy-budget.spec.ts --runInBand`
-- `node --check scripts/v2-consistency/comprehensive-consistency-test.mjs`
+- `pnpm jest deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts --runInBand`
+- `node --check deprecated/v2/consistency/comprehensive-consistency-test.mjs`
 - `npm run verify:resource-operation-map`
 - `npm run verify:function-map-compile-gate`
 - `npm run verify:architecture-mainline-call-map`

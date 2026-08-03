@@ -25,4 +25,4 @@ HTTP server module contains the Express-based HTTP server implementation for Rou
 - Bypass Hub Pipeline to call providers directly
 - Implement tool governance logic## Related Documentation
 - `src/server/handlers/` - Request handlers for each endpoint
-- `docs/v2-architecture/README. md` - V2 architecture overview
+- `deprecated/v2/architecture/README.md` - Archived V2 architecture reference

@@ -81,6 +81,7 @@ function checkRootLayout() {
     'README.md',
     'config',
     'configsamples',
+    'deprecated',
     'docs',
     'eslint.config.js',
     'jest.config.js',

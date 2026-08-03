@@ -9,6 +9,8 @@ modules:
       - scripts/architecture/verify-repository-filesystem-governance.mjs
       - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
       - scripts/start-verify.mjs
+      - v3/README.md
+      - deprecated/v2
       - .agents/skills/rcc-dev-skills/SKILL.md
       - .agents/skills/rcc-dev-skills/references
       - .agents/skills/rcc-v3-architecture/SKILL.md

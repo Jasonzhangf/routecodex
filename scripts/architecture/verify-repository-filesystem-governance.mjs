@@ -22,6 +22,12 @@ function verifyRepositoryFilesystemGovernance() {
   const failures = [];
   const rootEntries = fs.readdirSync(repoRoot);
   const forbiddenRootNames = new Set(['.reasonix', 'note.md.d', 'vendor']);
+  const forbiddenActiveV2Directories = [
+    'docs/v2-architecture',
+    'scripts/v2-consistency',
+    'src/v2',
+    'tests/v2',
+  ];
   let moduleOwner;
   const moduleRegistryPath = path.join(
     repoRoot,
@@ -41,6 +47,8 @@ function verifyRepositoryFilesystemGovernance() {
       'scripts/architecture/verify-repository-filesystem-governance.mjs',
       'scripts/tests/repository-filesystem-governance-red-fixtures.mjs',
       'scripts/start-verify.mjs',
+      'v3/README.md',
+      'deprecated/v2',
     ];
     if (registry?.status !== 'active') failures.push('repository filesystem module registry must be active');
     if (!moduleOwner) failures.push('repository filesystem module owner is missing');
@@ -60,12 +68,31 @@ function verifyRepositoryFilesystemGovernance() {
     if (name.startsWith('install:')) failures.push(`forbidden malformed install root: ${JSON.stringify(name)}`);
   }
 
+  for (const relativePath of forbiddenActiveV2Directories) {
+    if (fs.existsSync(path.join(repoRoot, relativePath))) {
+      failures.push(`active V2 directory must be archived: ${relativePath}`);
+    }
+  }
+
+  const deprecatedRoot = path.join(repoRoot, 'deprecated');
+  if (fs.existsSync(deprecatedRoot)) {
+    for (const entry of fs.readdirSync(deprecatedRoot)) {
+      if (entry !== 'v2') failures.push(`unsupported deprecated root child: deprecated/${entry}`);
+    }
+    if (!fs.existsSync(path.join(deprecatedRoot, 'v2/README.md'))) {
+      failures.push('deprecated V2 archive must have deprecated/v2/README.md');
+    }
+  }
+
   const tracked = lines(git(['ls-files']));
   for (const trackedPath of tracked) {
     if (trackedPath.startsWith('dist/')) failures.push(`tracked generated output: ${trackedPath}`);
     if (trackedPath.startsWith('.reasonix/')) failures.push(`tracked deprecated tool state: ${trackedPath}`);
     if (trackedPath.startsWith('samples/mock-provider/_archive/')) failures.push(`tracked deprecated sample archive: ${trackedPath}`);
     if (trackedPath.startsWith('docs/architecture/backups/')) failures.push(`tracked architecture backup: ${trackedPath}`);
+    if (forbiddenActiveV2Directories.some((relativePath) => trackedPath === relativePath || trackedPath.startsWith(`${relativePath}/`))) {
+      failures.push(`tracked active V2 path must be archived: ${trackedPath}`);
+    }
   }
 
   const governedTrackedPaths = tracked.filter((trackedPath) =>

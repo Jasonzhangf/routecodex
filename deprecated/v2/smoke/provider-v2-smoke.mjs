@@ -38,15 +38,15 @@ const url = `${baseUrl.replace(/\/$/,'')}/chat/completions`;
 const payload = { model, messages: [{ role:'user', content:'ping' }], stream: false };
 
 const { execFileSync } = await import('node:child_process');
-const cfg = path.join(os.tmpdir(),'prov_v2_curl.cfg');
-fs.writeFileSync(cfg, `url = "${url}"
+const curlConfigPath = path.join(os.tmpdir(),'prov_v2_curl.cfg');
+fs.writeFileSync(curlConfigPath, `url = "${url}"
 header = "Authorization: Bearer ${apiKey}"
 header = "Content-Type: application/json"
 `);
 
 let httpCode='000';
 try{
-  const out = execFileSync('curl',['-sS','-X','POST','-K',cfg,'--data',JSON.stringify(payload),'-w','\nHTTP_STATUS:%{http_code}\n'],{encoding:'utf-8'});
+  const out = execFileSync('curl',['-sS','-X','POST','-K',curlConfigPath,'--data',JSON.stringify(payload),'-w','\nHTTP_STATUS:%{http_code}\n'],{encoding:'utf-8'});
   const lines = out.trim().split(/\n/);
   httpCode = (lines[lines.length-1].match(/HTTP_STATUS:(\d+)/)||[])[1]||'000';
   console.log(JSON.stringify({ ok: httpCode==='200', httpCode, snippet: lines[0]?.slice(0,160) || '' }, null, 2));

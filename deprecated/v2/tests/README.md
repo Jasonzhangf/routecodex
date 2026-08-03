@@ -1,5 +1,8 @@
 # V2 工具与协议回归测试说明
 
+> **Status**: Archived under `deprecated/v2`. These files are historical test
+> sources, not part of the active V3 verification surface.
+
 本目录下的测试（尤其是 `src/tool-processing-test.ts`）遵循一个原则：
 
 > 「工具收割 / 文本治理 / finish_reason 处理」在生产和测试中只保留一套实现，由
@@ -19,7 +22,7 @@
 
 ## 二、回归测试架构（复用同一条链路）
 
-`tests/v2/src/tool-processing-test.ts` 已作为旧 V2 工具处理入口删除；新的回归入口必须落在 Rust/native owner 对应的 root `tests/sharedmodule/*`、HTTP 黑盒测试，或 `sharedmodule/llmswitch-core/scripts/tests/*` 中。
+`deprecated/v2/tests/src/tool-processing-test.ts` 已作为旧 V2 工具处理入口删除；新的回归入口必须落在 Rust/native owner 对应的 root `tests/sharedmodule/*`、HTTP 黑盒测试，或 `sharedmodule/llmswitch-core/scripts/tests/*` 中。
 
 样本回归应当：
 

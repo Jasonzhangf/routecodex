@@ -1,5 +1,8 @@
 # V1/V2功能对齐测试工具
 
+> **Status**: Archived under `deprecated/v2`. These scripts are not exposed by
+> active package commands and must not be used as V3 verification evidence.
+
 ## 概述
 
 这套工具用于验证RouteCodex V1和V2架构的功能一致性，确保两个版本在处理相同输入时产生一致的输出。

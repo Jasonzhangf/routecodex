@@ -14,6 +14,11 @@ const cases = [
   ['tracked dist output', 'dist/debug/snapshot/writer.js', 'tracked generated output'],
   ['tracked reasonix state', '.reasonix/truncated-results/output.txt', 'forbidden root entry'],
   ['tracked sample archive', 'samples/mock-provider/_archive/request.json', 'tracked deprecated sample archive'],
+  ['active V2 architecture directory', 'docs/v2-architecture/README.md', 'active V2 directory must be archived'],
+  ['active V2 consistency directory', 'scripts/v2-consistency/README.md', 'active V2 directory must be archived'],
+  ['active V2 source directory', 'src/v2/README.md', 'active V2 directory must be archived'],
+  ['active V2 test directory', 'tests/v2/README.md', 'active V2 directory must be archived'],
+  ['unsupported deprecated root child', 'deprecated/v1/README.md', 'unsupported deprecated root child'],
 ];
 
 function run(root, args) {

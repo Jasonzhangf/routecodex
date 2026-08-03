@@ -4,7 +4,7 @@
  * V2 干运行监控分析脚本
  *
  * 使用方法:
- * node scripts/v2-monitoring-analysis.mjs
+ * node deprecated/v2/monitoring/v2-monitoring-analysis.mjs
  *
  * 功能:
  * - 分析V2模拟运行状态
@@ -19,7 +19,7 @@ import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..');
+const projectRoot = path.join(__dirname, '..', '..', '..');
 
 // 配置
 const LOG_DIRS = [

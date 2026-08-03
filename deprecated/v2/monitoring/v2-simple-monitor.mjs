@@ -11,7 +11,7 @@ import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.join(__dirname, '..');
+const projectRoot = path.join(__dirname, '..', '..', '..');
 
 console.log('🚀 V2干运行状态检查');
 console.log('='.repeat(40));

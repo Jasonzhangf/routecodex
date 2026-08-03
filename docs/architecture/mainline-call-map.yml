@@ -4189,11 +4189,11 @@ shared_multi_reference_functions:
 - function_id: debug.v2_consistency_summary_projection
   binding_status: confirmed
   symbol: runAllTests
-  file: scripts/v2-consistency/comprehensive-consistency-test.mjs
+  file: deprecated/v2/consistency/comprehensive-consistency-test.mjs
   owner_feature_id: debug.v2_consistency_payload_copy_budget
   reused_by_chains:
   - debug.unified_surface.mainline
-  note: 'Debug reporting block: owns one generated consistency summary and borrows it for persistence/display without JSON round-trip clones.'
+  note: 'Retired debug reporting block preserved under deprecated/v2; it is not an active V3 mainline or package surface.'
 - function_id: debug.provider_golden_capture_config_projection
   binding_status: confirmed
   symbol: buildDerivedConfig
