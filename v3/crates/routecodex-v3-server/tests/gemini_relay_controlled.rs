@@ -36,6 +36,17 @@ async fn controlled_gemini_upstream(
     uri: Uri,
     Json(body): Json<Value>,
 ) -> Response<Body> {
+    if !matches!(
+        uri.path(),
+        "/v1beta/models/gemini-wire:generateContent"
+            | "/v1beta/models/gemini-wire:streamGenerateContent"
+    ) {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap();
+    }
+
     state
         .captures
         .send(ProviderCapture {
