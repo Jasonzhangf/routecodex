@@ -2677,6 +2677,103 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
 }
 
 #[tokio::test]
+async fn previous_response_id_tool_output_restores_response_context_not_call_id() {
+    let transport = SequentialJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        responses: Mutex::new(VecDeque::from([
+            json!({
+                "id":"resp_local_previous_1",
+                "status":"requires_action",
+                "output":[{
+                    "type":"function_call",
+                    "call_id":"call_saved_previous",
+                    "name":"lookup",
+                    "arguments":"{}"
+                }]
+            }),
+            json!({
+                "id":"resp_local_previous_2",
+                "status":"completed",
+                "output":[{"type":"output_text","text":"restored"}]
+            }),
+        ])),
+    };
+    let state = V3ResponsesRelayLocalContinuationState::default();
+    let scope = V3ResponsesRelayLocalContinuationScope::responses(
+        "/v1/responses",
+        "session-previous",
+        "conversation-previous",
+        5555,
+        "controlled",
+    );
+    execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-previous-1".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "input":"save previous context",
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope.clone(),
+        10_000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(state.len().unwrap(), 1);
+
+    let second = execute_v3_responses_relay_runtime_with_local_continuation(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-previous-2".into(),
+            payload: json!({
+                "model":"gpt-5.5",
+                "previous_response_id":"resp_local_previous_1",
+                "input":[{
+                    "type":"function_call_output",
+                    "call_id":"call_saved_previous",
+                    "output":"ok"
+                }],
+                "stream":false
+            }),
+        },
+        &transport,
+        &state,
+        scope,
+        11_000,
+    )
+    .await
+    .expect("previous_response_id must restore the saved response context, not call_id");
+    match second.client_body {
+        V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "completed"),
+        V3ResponsesRelayClientBody::Sse(_) => panic!("second turn must be JSON"),
+    }
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    let logical_input =
+        provider_logical_input_without_stopless_system_prefix(&captures[1]["input"]);
+    assert_eq!(logical_input[1]["call_id"], "call_saved_previous");
+    assert_eq!(logical_input[2]["call_id"], "call_saved_previous");
+}
+
+#[tokio::test]
 async fn full_history_paired_tool_output_does_not_require_local_restore() {
     let transport = SequentialJsonTransport {
         captures: Mutex::new(Vec::new()),
@@ -4075,8 +4172,8 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
                 "input":[
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"完成当前目标"}]},
                     {"type":"message","role":"assistant","content":[{"type":"output_text","text":"上一轮自然 stop 的可见正文"}]},
-                    {"type":"function_call","call_id":"call_stopless_reasoning","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"},
-                    {"type":"function_call_output","call_id":"call_stopless_reasoning","output":"Chunk ID: 46b4b1\nWall time: 0.1266 seconds\nProcess exited with code 1\nOriginal token count: 15\nOutput:\nerror: required option '--input-json <json>' not specified\n"}
+                    {"type":"function_call","call_id":"call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"},
+                    {"type":"function_call_output","call_id":"call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15","output":"Chunk ID: 3f919d\nWall time: 0.0000 seconds\nProcess exited with code 2\nOriginal token count: 25\nOutput:\nerror: unrecognized subcommand 'hook'\n\nUsage: rccv3 <COMMAND>\n\nFor more information, try '--help'.\n"}
                 ]
             }),
         },
@@ -4099,9 +4196,10 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
     let serialized = serde_json::to_string(body).unwrap();
     for forbidden in [
         "call_stopless_reasoning",
+        "call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15",
         "routecodex hook run reasoningStop",
         "Chunk ID",
-        "required option '--input-json",
+        "unrecognized subcommand 'hook'",
         "__routecodex_stopless_center",
         "stoplessCenter",
         "runtime_control",
@@ -4117,6 +4215,7 @@ async fn responses_relay_openai_chat_provider_wire_strips_replayed_stopless_noop
             assert_eq!(body["status"], "completed");
             let serialized = serde_json::to_string(&body).unwrap();
             assert!(!serialized.contains("call_stopless_reasoning"));
+            assert!(!serialized.contains("call-f0aa5f2d-b09f-4565-a4cc-cb78855d2e36-15"));
             assert!(!serialized.contains("routecodex hook run reasoningStop"));
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("test response must be JSON"),

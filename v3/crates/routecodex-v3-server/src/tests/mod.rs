@@ -1273,6 +1273,42 @@ fn provider_failure_scope_rejects_missing_existing_session_header() {
 }
 
 #[test]
+fn responses_continuation_scope_reads_codex_turn_metadata_header() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-codex-turn-metadata",
+        HeaderValue::from_static(
+            r#"{"session_id":"codex-session","thread_id":"codex-thread","turn_id":"turn-1"}"#,
+        ),
+    );
+
+    let (session_id, conversation_id) =
+        responses_control_scope_headers(&headers).expect("codex turn metadata header");
+
+    assert_eq!(session_id.as_deref(), Some("codex-session"));
+    assert_eq!(conversation_id.as_deref(), Some("codex-thread"));
+}
+
+#[test]
+fn responses_continuation_scope_prefers_explicit_headers_over_codex_turn_metadata() {
+    let mut headers = HeaderMap::new();
+    headers.insert("session-id", HeaderValue::from_static("explicit-session"));
+    headers.insert("thread-id", HeaderValue::from_static("explicit-thread"));
+    headers.insert(
+        "x-codex-turn-metadata",
+        HeaderValue::from_static(
+            r#"{"session_id":"codex-session","thread_id":"codex-thread","turn_id":"turn-1"}"#,
+        ),
+    );
+
+    let (session_id, conversation_id) =
+        responses_control_scope_headers(&headers).expect("explicit continuation headers");
+
+    assert_eq!(session_id.as_deref(), Some("explicit-session"));
+    assert_eq!(conversation_id.as_deref(), Some("explicit-thread"));
+}
+
+#[test]
 fn v3_console_v2_provider_target_uses_auth_alias_and_wire_model() {
     let observability = V3RuntimeObservability {
         provider_id: Some("test".to_string()),

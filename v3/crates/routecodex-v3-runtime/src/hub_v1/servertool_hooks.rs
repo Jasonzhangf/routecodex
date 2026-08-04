@@ -10,6 +10,7 @@ use servertool_core::stop_visible_text::{
 use std::sync::Arc;
 
 const STOPLESS_CALL_ID: &str = "call_stopless_reasoning";
+const STOPLESS_CLI_COMMAND: &str = "routecodex hook run reasoningStop";
 pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
     call_id == STOPLESS_CALL_ID
 }
@@ -944,12 +945,79 @@ fn is_stopless_cli_output(item: &Value) -> bool {
         .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
 }
 
+fn stopless_cli_call_id(item: &Value) -> Option<&str> {
+    if !is_stopless_cli_call(item) {
+        return None;
+    }
+    item.get("call_id")
+        .or_else(|| item.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|call_id| !call_id.is_empty())
+}
+
+fn argument_is_exact_stopless_cli_command(arguments: &str) -> bool {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(arguments.trim()) else {
+        return false;
+    };
+    object.len() == 1
+        && object
+            .get("cmd")
+            .and_then(Value::as_str)
+            .is_some_and(|cmd| cmd.trim() == STOPLESS_CLI_COMMAND)
+}
+
+fn tool_name_is_exec_command(value: Option<&str>) -> bool {
+    value
+        .map(str::trim)
+        .is_some_and(|name| name == "exec_command")
+}
+
+fn item_is_exact_stopless_cli_command_call(item: &Value) -> bool {
+    tool_name_is_exec_command(item.get("name").and_then(Value::as_str))
+        && item
+            .get("arguments")
+            .or_else(|| item.get("input"))
+            .and_then(Value::as_str)
+            .is_some_and(argument_is_exact_stopless_cli_command)
+}
+
+fn tool_output_call_id(item: &Value) -> Option<&str> {
+    if !matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call_output" | "tool_call_output")
+    ) {
+        return None;
+    }
+    item.get("call_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|call_id| !call_id.is_empty())
+}
+
+fn output_pairs_immediately_after_stopless_cli_call(
+    output: &Value,
+    previous: Option<&Value>,
+) -> bool {
+    let Some(output_call_id) = tool_output_call_id(output) else {
+        return false;
+    };
+    previous
+        .and_then(stopless_cli_call_id)
+        .is_some_and(|call_id| call_id == output_call_id)
+}
+
 fn active_stopless_cli_output(input: &[Value]) -> Option<(usize, &Value)> {
     let mut index = input.len();
     while index > 0 {
         index -= 1;
         let item = &input[index];
-        if is_stopless_cli_output(item) {
+        if is_stopless_cli_output(item)
+            || output_pairs_immediately_after_stopless_cli_call(
+                item,
+                index.checked_sub(1).and_then(|index| input.get(index)),
+            )
+        {
             return Some((index, item));
         }
         if is_stopless_cli_call(item) {
@@ -967,7 +1035,12 @@ fn active_stopless_chat_cli_output(messages: &[Value]) -> Option<usize> {
     while index > 0 {
         index -= 1;
         let item = &messages[index];
-        if is_stopless_chat_cli_output(item) {
+        if is_stopless_chat_cli_output(item)
+            || chat_output_pairs_immediately_after_stopless_cli_call(
+                item,
+                index.checked_sub(1).and_then(|index| messages.get(index)),
+            )
+        {
             return Some(index);
         }
         if is_stopless_chat_cli_call(item) {
@@ -989,26 +1062,69 @@ fn is_stopless_chat_cli_output(item: &Value) -> bool {
             .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
 }
 
+fn stopless_chat_cli_call_id(item: &Value) -> Option<&str> {
+    if item.get("role").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    item.get("tool_calls")
+        .and_then(Value::as_array)?
+        .iter()
+        .find_map(|call| {
+            let call_id = call
+                .get("id")
+                .or_else(|| call.get("call_id"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|call_id| !call_id.is_empty())?;
+            chat_tool_call_is_stopless_cli(call).then_some(call_id)
+        })
+}
+
+fn chat_tool_output_call_id(item: &Value) -> Option<&str> {
+    if item.get("role").and_then(Value::as_str) != Some("tool") {
+        return None;
+    }
+    item.get("tool_call_id")
+        .or_else(|| item.get("call_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|call_id| !call_id.is_empty())
+}
+
+fn chat_output_pairs_immediately_after_stopless_cli_call(
+    output: &Value,
+    previous: Option<&Value>,
+) -> bool {
+    let Some(output_call_id) = chat_tool_output_call_id(output) else {
+        return false;
+    };
+    previous
+        .and_then(stopless_chat_cli_call_id)
+        .is_some_and(|call_id| call_id == output_call_id)
+}
+
 fn is_stopless_chat_cli_call(item: &Value) -> bool {
     item.get("role").and_then(Value::as_str) == Some("assistant")
         && item
             .get("tool_calls")
             .and_then(Value::as_array)
-            .is_some_and(|calls| {
-                calls.iter().any(|call| {
-                    call.get("id")
-                        .or_else(|| call.get("call_id"))
-                        .and_then(Value::as_str)
-                        .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
-                        || call
-                            .pointer("/function/arguments")
-                            .or_else(|| call.get("arguments"))
-                            .and_then(Value::as_str)
-                            .is_some_and(|value| {
-                                value.contains("routecodex hook run reasoningStop")
-                            })
-                })
-            })
+            .is_some_and(|calls| calls.iter().any(chat_tool_call_is_stopless_cli))
+}
+
+fn chat_tool_call_is_stopless_cli(call: &Value) -> bool {
+    call.get("id")
+        .or_else(|| call.get("call_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
+        || (tool_name_is_exec_command(
+            call.pointer("/function/name")
+                .or_else(|| call.get("name"))
+                .and_then(Value::as_str),
+        ) && call
+            .pointer("/function/arguments")
+            .or_else(|| call.get("arguments"))
+            .and_then(Value::as_str)
+            .is_some_and(argument_is_exact_stopless_cli_command))
 }
 
 fn chat_message_is_stopless_reset_boundary(item: &Value) -> bool {
@@ -1058,6 +1174,12 @@ fn strip_active_stopless_pair_and_stale(input: &mut Vec<Value>, output_index: us
         if index == output_index {
             continue;
         }
+        if output_pairs_immediately_after_stopless_cli_call(
+            item,
+            index.checked_sub(1).and_then(|index| original.get(index)),
+        ) {
+            continue;
+        }
         if is_stopless_cli_artifact(item) {
             continue;
         }
@@ -1078,6 +1200,12 @@ fn strip_active_stopless_chat_pair_and_stale(messages: &mut Vec<Value>, output_i
         if Some(index) == call_index || index == output_index {
             continue;
         }
+        if chat_output_pairs_immediately_after_stopless_cli_call(
+            item,
+            index.checked_sub(1).and_then(|index| original.get(index)),
+        ) {
+            continue;
+        }
         if is_stopless_chat_cli_call(item) || is_stopless_chat_cli_output(item) {
             continue;
         }
@@ -1095,6 +1223,12 @@ fn strip_stopless_cli_artifacts(input: &mut Vec<Value>) {
         {
             continue;
         }
+        if output_pairs_immediately_after_stopless_cli_call(
+            item,
+            index.checked_sub(1).and_then(|index| original.get(index)),
+        ) {
+            continue;
+        }
         if is_stopless_cli_artifact(item) {
             continue;
         }
@@ -1107,14 +1241,20 @@ fn strip_stopless_cli_artifacts(input: &mut Vec<Value>) {
 
 fn strip_stopless_chat_cli_artifacts(messages: &mut Vec<Value>) {
     let original = std::mem::take(messages);
-    for item in original {
+    for (index, item) in original.iter().enumerate() {
+        if chat_output_pairs_immediately_after_stopless_cli_call(
+            item,
+            index.checked_sub(1).and_then(|index| original.get(index)),
+        ) {
+            continue;
+        }
         if is_stopless_chat_cli_call(&item) || is_stopless_chat_cli_output(&item) {
             continue;
         }
         if is_stopless_generated_continuation_item(&item) {
             continue;
         }
-        messages.push(item);
+        messages.push(item.clone());
     }
 }
 
@@ -1249,11 +1389,7 @@ fn is_stopless_cli_call(item: &Value) -> bool {
         .get("call_id")
         .and_then(Value::as_str)
         .is_some_and(|call_id| call_id == STOPLESS_CALL_ID)
-        || item
-            .get("arguments")
-            .or_else(|| item.get("input"))
-            .and_then(Value::as_str)
-            .is_some_and(|value| value.contains("routecodex hook run reasoningStop")))
+        || item_is_exact_stopless_cli_command_call(item))
 }
 
 fn strip_legacy_stopless_instruction(existing: &str) -> String {
@@ -1278,4 +1414,82 @@ fn strip_legacy_stopless_instruction(existing: &str) -> String {
         }
     }
     cleaned.trim_end().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CMD_ARGS: &str = "{\"cmd\":\"routecodex hook run reasoningStop\"}";
+
+    fn response_call(id: &str, args: &str) -> Value {
+        json!({"type":"function_call","call_id":id,"name":"exec_command","arguments":args})
+    }
+
+    fn response_output(id: &str) -> Value {
+        json!({"type":"function_call_output","call_id":id,"output":"error"})
+    }
+
+    fn chat_call(id: &str, args: &str) -> Value {
+        json!({"role":"assistant","tool_calls":[{"id":id,"type":"function","function":{"name":"exec_command","arguments":args}}]})
+    }
+
+    fn chat_output(id: &str) -> Value {
+        json!({"role":"tool","tool_call_id":id,"content":"error"})
+    }
+
+    #[test]
+    fn dynamic_stopless_cli_pairs_are_exact_json_cmd_only() {
+        let call = response_call("call-dynamic", CMD_ARGS);
+        assert!(output_pairs_immediately_after_stopless_cli_call(
+            &response_output("call-dynamic"),
+            Some(&call)
+        ));
+        let call = chat_call("chat-dynamic", CMD_ARGS);
+        assert!(chat_output_pairs_immediately_after_stopless_cli_call(
+            &chat_output("chat-dynamic"),
+            Some(&call)
+        ));
+        for arguments in [
+            "{\"cmd\":\"echo routecodex hook run reasoningStop\"}",
+            "routecodex hook run reasoningStop",
+            "{\"cmd\":\"routecodex hook run reasoningStop\",\"workdir\":\"/tmp\"}",
+        ] {
+            assert_eq!(stopless_cli_call_id(&response_call("bad", arguments)), None);
+            assert_eq!(
+                stopless_chat_cli_call_id(&chat_call("bad-chat", arguments)),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn active_strip_removes_stale_dynamic_stopless_outputs() {
+        let mut input = vec![
+            json!({"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]}),
+            response_call("call-old", CMD_ARGS),
+            response_output("call-old"),
+            response_call("call-new", CMD_ARGS),
+            response_output("call-new"),
+        ];
+        let index = active_stopless_cli_output(&input).unwrap().0;
+        strip_active_stopless_pair_and_stale(&mut input, index);
+        let serialized = serde_json::to_string(&input).unwrap();
+        assert!(!serialized.contains("call-old"));
+        assert!(!serialized.contains("call-new"));
+        assert!(!serialized.contains(STOPLESS_CLI_COMMAND));
+        let mut messages = vec![
+            json!({"role":"user","content":"go"}),
+            chat_call("chat-old", CMD_ARGS),
+            chat_output("chat-old"),
+            chat_call("chat-new", CMD_ARGS),
+            chat_output("chat-new"),
+        ];
+        let index = active_stopless_chat_cli_output(&messages).unwrap();
+        strip_active_stopless_chat_pair_and_stale(&mut messages, index);
+        let serialized = serde_json::to_string(&messages).unwrap();
+        assert!(!serialized.contains("chat-old"));
+        assert!(!serialized.contains("chat-new"));
+        assert!(!serialized.contains(STOPLESS_CLI_COMMAND));
+    }
 }

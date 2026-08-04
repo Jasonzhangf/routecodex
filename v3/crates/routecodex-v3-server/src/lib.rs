@@ -6212,7 +6212,7 @@ fn request_local_continuation_scope(
 fn responses_control_scope_headers(
     headers: &HeaderMap,
 ) -> Result<(Option<String>, Option<String>), String> {
-    let session_id = first_header_text(
+    let direct_session_id = first_header_text(
         headers,
         &[
             "session-id",
@@ -6221,7 +6221,7 @@ fn responses_control_scope_headers(
             "x-rcc-session-id",
         ],
     )?;
-    let conversation_id = first_header_text(
+    let direct_conversation_id = first_header_text(
         headers,
         &[
             "thread-id",
@@ -6231,6 +6231,15 @@ fn responses_control_scope_headers(
             "x-conversation-id",
         ],
     )?;
+    if direct_session_id.is_some() && direct_conversation_id.is_some() {
+        return Ok((direct_session_id, direct_conversation_id));
+    }
+    let turn_metadata = parse_codex_turn_metadata(headers)?;
+    let session_id = direct_session_id
+        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS));
+    let conversation_id = direct_conversation_id.or_else(|| {
+        read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS)
+    });
     Ok((session_id, conversation_id))
 }
 
