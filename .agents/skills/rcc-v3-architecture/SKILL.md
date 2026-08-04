@@ -1,9 +1,18 @@
 ---
 name: rcc-v3-architecture
-description: Use before RouteCodex V3 architecture, debug, or development work involving Hub Pipeline, Direct/Relay, Virtual Router, Stopless/servertool, provider/runtime boundaries, continuation, or V3 flow diagrams; requires edge-generated architecture review surfaces before code changes.
+description: Use before any RouteCodex V3 architecture/debug/development work; agents must read maps before coding, keep control semantics out of payload, preserve Direct same-protocol and Relay per-stage shapes, avoid silent strip/fallback/script bulk edits, and verify owner/gates before review.
 ---
 
 # RCC V3 Architecture
+
+## Summary Hard Rules
+
+- Use this skill before any V3 work involving Hub Pipeline, Direct/Relay, Virtual Router, provider/runtime boundaries, continuation, Stopless/servertool, protocol projection, response projection, routing, or Error resources.
+- Before code, bind the task to `v3-resource-operation-map.yml`, `v3-function-map.yml`, `v3-mainline-call-map.yml`, module registry, and `v3-verification-map.yml`; if the unique owner or adjacent edge is not clear, update the contract first instead of editing implementation.
+- Control semantics must stay in typed side-channels / MetadataCenter control resources / Error chain. They must never enter provider/client normal payload, protocol `metadata`, request/response reconstruction, SSE frames, handler cleanup, outbound strip, or provider transport patches.
+- Direct preserves the entry protocol end-to-end. Relay normalizes inbound to Chat/OpenAI Chat semantics and projects outbound to the selected target protocol only through adjacent codecs. Chat Process governs semantics but must not carry source wire, target wire, or provider-specific payload patches.
+- Protocol conversion is static and registered: exact mapping or named compatible mapping with tests; otherwise explicit unmapped/unsupported at the adjacent codec. No dynamic probing, silent drop, approximate marker, MetadataCenter rebuild, or provider switch to hide bad projection.
+- No semantic bulk replacement scripts. Read each target file, verify context, and patch manually with reviewable hunks.
 
 ## P0 架构阻断（先于任何路由）
 

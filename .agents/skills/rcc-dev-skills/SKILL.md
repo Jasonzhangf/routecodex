@@ -1,9 +1,18 @@
 ---
 name: rcc-dev-skills
-description: RouteCodex 调试与架构路由入口
+description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 架构 skill、resource/function/mainline/verification maps，禁止控制语义进业务 payload、禁止脚本批量替换、禁止不查 owner 直接改代码。
 ---
 
 # RCC Dev Skills
+
+## 概要硬规则（Agent 列表阶段也必须看到）
+
+- 任何 RouteCodex 开发/调试/审计任务，先读本 skill 和 `.agents/skills/rcc-v3-architecture/SKILL.md`；不要只靠 grep、记忆或聊天摘要改代码。
+- 写代码前必须查 `v3-resource-operation-map.yml`、`v3-function-map.yml`、`v3-mainline-call-map.yml`、module registry、`v3-verification-map.yml`，锁定唯一 owner、允许路径、禁止路径、相邻边和必跑 gate。
+- 控制语义与业务 payload 物理隔离：routing/switching/continuation/retry/provider selection/health/debug/snapshot/error/scope/stopless/servertool 只能走 typed side-channel / MetadataCenter 控制资源 / Error 链，绝不能写入 provider/client normal payload 或协议 `metadata`。
+- 每个阶段必须保持协议形态：Direct 同协议直连；Relay 只在相邻 inbound/outbound codec 做静态投影；Chat Process 不决定 provider wire shape。
+- 禁止静默丢弃、请求侧 cleanup、handler/SSE/outbound 补偿、fallback/降级、未登记近似投影；错误回唯一 owner 修。
+- 绝对禁止脚本批量替换；跨文件或同文件多位置语义修改只能逐文件读取后用明确、可审查的手工 hunk 修改。
 
 ## P0 架构阻断（先于任何路由）
 
