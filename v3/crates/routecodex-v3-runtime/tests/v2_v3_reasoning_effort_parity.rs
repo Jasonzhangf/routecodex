@@ -17,7 +17,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime_with_local_continuation, V3ResponsesRelayClientBody,
+    execute_v3_responses_relay_runtime_with_local_continuation,
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayRuntimeInput,
 };
@@ -143,7 +143,7 @@ async fn v3_parity_responses_reasoning_effort_medium_reaches_openai_chat_wire() 
         "chatwire",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let _result = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -201,7 +201,7 @@ async fn v3_parity_responses_reasoning_effort_low_reaches_openai_chat_wire() {
         "chatwire",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let _result = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -258,7 +258,7 @@ async fn v3_parity_no_reasoning_config_omits_reasoning_effort_from_wire() {
         "chatwire",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let _result = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -295,9 +295,8 @@ async fn v3_parity_no_reasoning_config_omits_reasoning_effort_from_wire() {
     );
 }
 
-/// Parity test: reasoning.summary alone must NOT produce reasoning_effort on wire.
-/// V2 equivalent: router-direct-pipeline.spec.ts:377 (router not covering, no transformation)
-/// and hub-pipeline-stage-residue-audit.spec.ts:2423 (ts restores in client response).
+/// OpenAI Chat target test: reasoning.summary alone has no OpenAI Chat request slot.
+/// It must fail before provider send instead of silently dropping the request policy.
 #[tokio::test]
 async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
     let transport = ProviderProjectionJsonTransport {
@@ -313,7 +312,7 @@ async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
         "chatwire",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let error = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest_openai_chat_wire(),
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -337,17 +336,18 @@ async fn v3_parity_reasoning_summary_only_omits_reasoning_effort_from_wire() {
         12_000,
     )
     .await
-    .expect("Responses relay runtime with reasoning.summary only must execute");
+    .expect_err("OpenAI Chat target must reject Responses reasoning.summary before provider send");
 
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 1, "provider send must be captured once");
-    let body = provider_projection_body(&captures[0]);
-
-    // Parity assertion: reasoning.summary alone must NOT produce reasoning_effort.
-    // V2: summary is client-side output projection, not provider wire input.
     assert!(
-        body.get("reasoning_effort").is_none(),
-        "V3 OpenAI Chat wire must not produce reasoning_effort from reasoning.summary alone (V2 parity)"
+        captures.is_empty(),
+        "provider send must not occur: {captures:?}"
+    );
+    let error = error.to_string();
+    assert!(error.contains("UnmappedOutboundFields"), "{error}");
+    assert!(
+        error.contains("$.request.reasoning_summary_policy"),
+        "{error}"
     );
 }
 

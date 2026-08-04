@@ -1,10 +1,9 @@
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_06_client_projected_from_v3_error_05, V3Error05ExecutionDecision,
-    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
-    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
-    V3ExternalErrorLink, V3ProviderFailureSessionScope,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
@@ -62,11 +61,7 @@ pub(crate) fn project_v3_client_disconnect(
         false,
         None,
     );
-    build_v3_error_06_client_projected_from_v3_error_05(
-        decision
-            .try_into_terminal()
-            .expect("ClientDisconnected Error05 must be terminal"),
-    )
+    V3ErrorHandlingCenter::project_terminal(decision)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -970,7 +965,7 @@ fn terminal_projection_for(
         .clone()
         .try_into_terminal()
         .ok()
-        .map(build_v3_error_06_client_projected_from_v3_error_05)
+        .map(V3ErrorHandlingCenter::project_terminal_decision)
 }
 
 fn build_v3_relay_provider_error_05_decision(

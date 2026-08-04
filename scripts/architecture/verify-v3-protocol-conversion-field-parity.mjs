@@ -27,6 +27,7 @@ const paths = {
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
@@ -121,7 +122,7 @@ if (requestFieldProjectionModules?.status !== 'design_feature_scope' || requestF
   failures.push(`${paths.requestFieldProjectionModules}: feature module registry must remain design/pending until runtime verification`);
 }
 const scopedOwnedPaths = (requestFieldProjectionModules?.modules ?? []).flatMap((module) => module.owned_paths ?? []);
-for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.anthropicRequestFieldProjection, paths.geminiCodec, paths.providerReqCompat]) {
+for (const path of [paths.responsesOpenaiCodec, paths.requestOutboundFormat, paths.anthropicCodec, paths.anthropicProjectionContext, paths.anthropicRequestFieldProjection, paths.geminiCodec, paths.providerReqCompat]) {
   if (scopedOwnedPaths.filter((ownedPath) => ownedPath === path).length !== 1) failures.push(`${paths.requestFieldProjectionModules}: ${path} must have exactly one feature-scoped module owner`);
 }
 for (const [from, to, direction] of [
@@ -479,11 +480,8 @@ for (const phrase of [
   '"type":"custom_tool_call"',
 ]) requireText(text.responsesRuntime, `${paths.responsesRuntime}::native_openai_chat_custom_tool_response`, phrase);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
-requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'target_protocol_unmapped_field_fails_without_provider_switch_or_transport');
-requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'let req_compat = try_before_resp03!(');
-forbid(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, [/provider_compat_error_is_target_protocol_incompatible/, /target_protocol_incompatible_candidates/, /last_target_protocol_incompatible_error/]);
-requireText(text.anthropicCodec, `${paths.anthropicCodec}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
-for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicCodec, `${paths.anthropicCodec}::anthropic_custom_reverse_guard`, phrase);
+requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
+for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');
 requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::responses_metadata_projection_context`, 'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak');
 forbid(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::malformed_chat_tool_arguments`, [/field: "tool_call[.]arguments"/, /field: "function_call[.]arguments"/]);

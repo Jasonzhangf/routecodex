@@ -506,10 +506,15 @@ fn build_v3_gemini_transport_09(
         V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
         V3HubTransportIntent::Sse => V3ResponsesStreamIntent::Sse,
     };
+    let endpoint = match stream_intent {
+        V3ResponsesStreamIntent::Json => "generateContent",
+        V3ResponsesStreamIntent::Sse => "streamGenerateContent",
+    };
     let url_text = format!(
-        "{}/models/{}/generateContent",
+        "{}/models/{}/{}",
         target.base_url.trim_end_matches('/'),
-        target.wire_model
+        target.wire_model,
+        endpoint
     );
     build_v3_transport_13_responses_http_request_from_parts(
         request_id,
@@ -1053,7 +1058,11 @@ fn gemini_model_from_endpoint_path(
 ) -> Result<String, V3GeminiRelayRuntimeError> {
     let model = endpoint_path
         .strip_prefix("/v1beta/models/")
-        .and_then(|value| value.strip_suffix("/generateContent"))
+        .and_then(|value| {
+            value
+                .strip_suffix("/generateContent")
+                .or_else(|| value.strip_suffix("/streamGenerateContent"))
+        })
         .filter(|value| !value.is_empty() && !value.contains('/'))
         .ok_or_else(|| V3GeminiRelayRuntimeError::EndpointPath(endpoint_path.to_string()))?;
     Ok(model.to_string())

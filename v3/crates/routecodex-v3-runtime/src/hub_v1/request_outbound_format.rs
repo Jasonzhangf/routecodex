@@ -347,7 +347,25 @@ fn apply_outbound_projection_transforms(
             validate_openai_metadata(projected, "openai_chat")?;
             reject_openai_chat_unmapped_reasoning_summary_policy(projected)?;
         }
-        V3OutboundTargetProtocol::Anthropic | V3OutboundTargetProtocol::Gemini => {}
+        V3OutboundTargetProtocol::Anthropic => {}
+        V3OutboundTargetProtocol::Gemini => {
+            consume_gemini_transport_intent(projected)?;
+        }
+    }
+    Ok(())
+}
+
+fn consume_gemini_transport_intent(projected: &mut Value) -> Result<(), String> {
+    let Some(row) = projected.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(stream) = row.remove("stream") else {
+        return Ok(());
+    };
+    if stream.as_bool().is_none() {
+        return Err(
+            "MalformedOutboundField target_protocol=gemini path=$.request.stream".to_string(),
+        );
     }
     Ok(())
 }
@@ -932,6 +950,7 @@ fn allowed_top_level_outbound_fields(
             "safetySettings",
             "cachedContent",
             "labels",
+            "stream",
         ],
     };
     fields.iter().copied().collect()

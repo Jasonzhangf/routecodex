@@ -1187,7 +1187,7 @@ async fn exact_pin_unavailable_output(
         }
     }
     projected_error_output(
-        build_v3_error_06_client_projected_from_v3_error_05(terminal),
+        V3ErrorHandlingCenter::project_terminal_decision(terminal),
         node_trace,
     )
 }
@@ -1198,13 +1198,7 @@ fn error_output(
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
     let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
-    let terminal = decision.try_into_terminal().unwrap_or_else(|decision| {
-        panic!(
-            "nonterminal {:?} Error05 reached generic Direct error projection",
-            decision.action
-        )
-    });
-    let projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
     projected_error_output(projected, node_trace)
 }
 

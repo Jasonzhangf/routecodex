@@ -12,10 +12,12 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
+mod projection_context;
 mod responses_to_anthropic;
+pub use projection_context::V3AnthropicResponsesProjectionContext;
 pub(crate) use responses_to_anthropic::project_v3_responses_reasoning_item_as_anthropic_content;
 use responses_to_anthropic::{
     anthropic_usage_as_responses_usage, chat_messages_as_anthropic_messages,
@@ -106,69 +108,6 @@ pub enum V3AnthropicCodecError {
     MalformedField { field: &'static str },
     #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
     UnmappedOutboundFields { paths: String },
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct V3AnthropicResponsesProjectionContext {
-    metadata: Option<Value>,
-    custom_tool_names: BTreeSet<String>,
-}
-
-impl V3AnthropicResponsesProjectionContext {
-    pub fn from_chat_canonical_request(request: &Value) -> Result<Self, V3AnthropicCodecError> {
-        let metadata = request
-            .pointer("/routecodex_chat_extension/responses_request/metadata")
-            .cloned();
-        if metadata.as_ref().is_some_and(|value| !value.is_object()) {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "routecodex_chat_extension.responses_request.metadata",
-            });
-        }
-        Ok(Self {
-            metadata,
-            custom_tool_names: governed_custom_tool_names(request)?,
-        })
-    }
-
-    pub(super) fn is_governed_custom_tool(&self, name: &str) -> bool {
-        self.custom_tool_names.contains(name)
-    }
-}
-
-fn governed_custom_tool_names(request: &Value) -> Result<BTreeSet<String>, V3AnthropicCodecError> {
-    let mut names = BTreeSet::new();
-    collect_governed_custom_tool_names(request.get("tools"), &mut names)?;
-    for item in request
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_governed_custom_tool_names(item.get("tools"), &mut names)?;
-        }
-    }
-    Ok(names)
-}
-
-fn collect_governed_custom_tool_names(
-    tools: Option<&Value>,
-    names: &mut BTreeSet<String>,
-) -> Result<(), V3AnthropicCodecError> {
-    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        if tool.get("type").and_then(Value::as_str) != Some("custom") {
-            continue;
-        }
-        let name = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .filter(|name| !name.trim().is_empty())
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "tools[].name",
-            })?;
-        names.insert(name.to_string());
-    }
-    Ok(())
 }
 
 pub fn validate_v3_anthropic_client_input_payload(
@@ -870,7 +809,10 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                 }));
             }
             Some("thinking" | "redacted_thinking") => {
-                output_items.push(anthropic_reasoning_part_as_responses_reasoning(part)?);
+                output_items.push(anthropic_reasoning_part_as_responses_reasoning(
+                    part,
+                    context.reasoning_summary_policy(),
+                )?);
             }
             Some("tool_use") => {
                 output_items.push(anthropic_tool_use_as_responses_call(part, context)?);
@@ -923,7 +865,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     if let Some(stop_reason) = object.get("stop_reason") {
         response.insert("finish_reason".to_string(), stop_reason.clone());
     }
-    if let Some(metadata) = context.metadata.as_ref() {
+    if let Some(metadata) = context.metadata() {
         response.insert("metadata".to_string(), metadata.clone());
     }
     Ok(Value::Object(response))
@@ -931,6 +873,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
 
 fn anthropic_reasoning_part_as_responses_reasoning(
     part: &Value,
+    summary_policy: Option<&str>,
 ) -> Result<Value, V3AnthropicCodecError> {
     let object = part
         .as_object()
@@ -941,9 +884,11 @@ fn anthropic_reasoning_part_as_responses_reasoning(
         Some("thinking") => {
             validate_anthropic_reasoning_object_keys(object, &["type", "thinking", "signature"])?;
             let thinking = require_nonempty_reasoning_string(object.get("thinking"))?;
+            let summary_text =
+                responses_reasoning_summary_text_for_policy(thinking, summary_policy);
             let mut item = json!({
                 "type":"reasoning",
-                "summary":[{"type":"summary_text","text":thinking}]
+                "summary":[{"type":"summary_text","text":summary_text}]
             });
             if let Some(signature) = optional_nonempty_reasoning_string(object, "signature")? {
                 item["encrypted_content"] = Value::String(signature.to_string());
@@ -976,6 +921,14 @@ fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3An
         });
     }
     Ok(value)
+}
+
+fn responses_reasoning_summary_text_for_policy<'a>(
+    thinking: &'a str,
+    summary_policy: Option<&str>,
+) -> &'a str {
+    let _ = summary_policy;
+    thinking
 }
 
 fn optional_nonempty_reasoning_string<'a>(
@@ -1322,7 +1275,8 @@ fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(anthropic_reasoning_part_as_responses_reasoning(part)?);
+                            encoded
+                                .push(anthropic_reasoning_part_as_responses_reasoning(part, None)?);
                         }
                         Some("reasoning") => {
                             return Err(V3AnthropicCodecError::MalformedField {

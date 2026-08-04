@@ -37,8 +37,8 @@ audit_truth_contract:
   audited_status_counts:
     covered: 160
     covered_but_target_dependent: 0
-    runtime_conformance_pending: 5
-    partial: 111
+    runtime_conformance_pending: 3
+    partial: 113
     extension_declared: 220
     source_inventory_only: 0
     shape_branch_gap: 18
@@ -50,7 +50,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - runtime_conformance_pending
-      affected_count: 5
+      affected_count: 3
       evidence: OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only exact client_metadata.user_id may map to provider metadata. Registered Codex client-local keys may be consumed before provider wire as request-local context; unknown keys must fail.
       required_owner: docs/goals/v3-protocol-conversion-field-parity-test-design.md
       closeout_status: runtime_conformance_pending
@@ -81,7 +81,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 111
+      affected_count: 113
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -1638,8 +1638,8 @@ chat_semantic_translation_groups:
     standard_semantic_meaning: Request policy asking a compatible target to produce reasoning summaries; not the summary
       text itself and not reasoning effort.
     chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning
-      content or native reasoning_effort. Compatible outbound mappings require a target field that can request
-      visible/summarized thinking; otherwise the field remains decision-required.
+      content or native reasoning_effort. Compatible outbound mappings require a registered target-local request
+      policy consumer; otherwise the field remains unmapped before provider send.
     protocol_mappings:
       responses:
         request_fields:
@@ -1650,16 +1650,18 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: Anthropic thinking.display controls summarized versus omitted visibility and is not equivalent to OpenAI
-          auto/concise/detailed summary policy.
+        transform: No Anthropic provider-wire field is emitted. Valid auto/concise/detailed values are consumed only
+          as a registered local response-shaping hint; invalid values fail before provider send.
       gemini:
         request_fields: []
         response_fields: []
         transform: No direct equivalent in the audited Gemini request inventory.
     chat_extension_fields:
       - request.reasoning_summary_policy
-    current_impl: runtime_conformance_pending
-    gap: Responses is source-roundtrip only. OpenAI Chat, Anthropic, and Gemini have no equivalent request policy; outbound must reject the semantic path. A target response reasoning field does not authorize consuming the request policy.
+    current_impl: partial
+    gap: Responses round-trips the policy. OpenAI Chat and Gemini have no equivalent request policy and must reject
+      the semantic path. Anthropic consumes valid values only as a registered local response-shaping hint with no
+      provider-wire field. A target response reasoning field does not authorize reconstructing the source request policy.
   - group_id: reasoning.request_context_policy
     standard_chat_field: request.reasoning_context_policy
     chat_fields:
@@ -5650,8 +5652,9 @@ extended_openai_chat_semantic_superset:
       direction: request
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
-      current_impl: runtime_conformance_pending
-      gap: Responses source-roundtrip only; OpenAI Chat, Anthropic, and Gemini reject because no equivalent request policy is declared.
+      current_impl: partial
+      gap: Responses round-trips the policy; OpenAI Chat and Gemini reject because no equivalent request policy is
+        declared; Anthropic consumes valid values only as a registered local response-shaping hint with no provider-wire field.
       equivalent_fields: &a1
         responses:
           - request.reasoning.summary
@@ -9100,9 +9103,11 @@ canonical_extension_registry:
     direction: request
     stratum: request_payload
     owner: chat.extension_semantics
-    current_impl: runtime_conformance_pending
+    current_impl: partial
     source_fields: *a1
-    projection_rule: Responses source-roundtrip; OpenAI Chat, Anthropic, and Gemini must report this semantic path as unmapped before provider send.
+    projection_rule: Responses source-roundtrip; OpenAI Chat and Gemini must report this semantic path as unmapped
+      before provider send; Anthropic consumes valid values only as a registered local response-shaping hint and emits
+      no provider-wire field.
   - field: request.reasoning_context_policy
     semantic_id: request.reasoning_context_policy
     direction: request

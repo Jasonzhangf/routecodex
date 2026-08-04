@@ -439,6 +439,41 @@ fn responses_reasoning_summary_policy_is_local_hint_for_anthropic() {
 }
 
 #[test]
+fn anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape() {
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+        "reasoning_summary_policy":"concise",
+        "messages":[{"role":"user","content":"shape reasoning"}]
+    }))
+    .expect("valid summary policy must enter response projection context");
+    let response = project_v3_anthropic_message_as_responses_response_with_context(
+        &json!({
+            "id":"msg_reasoning_policy",
+            "role":"assistant",
+            "model":"claude-fable-5",
+            "content":[{
+                "type":"thinking",
+                "thinking":"First concise line\nSecond detailed line",
+                "signature":"sig_reasoning_policy"
+            }],
+            "stop_reason":"end_turn"
+        }),
+        &context,
+    )
+    .expect("Anthropic response projection must consume the local summary policy");
+
+    assert_eq!(
+        response["output"][0]["summary"][0]["text"],
+        "First concise line\nSecond detailed line"
+    );
+    assert!(
+        !serde_json::to_string(&response)
+            .unwrap()
+            .contains("reasoning_summary_policy"),
+        "local policy must not leak into client payload: {response}"
+    );
+}
+
+#[test]
 fn responses_claude_provider_request_replaces_system_with_claude_code_prompt_blocks() {
     let provider_request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"claude-fable-5",

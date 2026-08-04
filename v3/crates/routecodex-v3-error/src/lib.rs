@@ -843,6 +843,22 @@ pub struct V3ErrorHandlingCenterInput {
 pub struct V3ErrorHandlingCenter;
 
 impl V3ErrorHandlingCenter {
+    pub fn project_terminal_decision(
+        terminal: V3Error05TerminalDecision,
+    ) -> V3Error06ClientProjected {
+        build_v3_error_06_client_projected_from_v3_error_05(terminal)
+    }
+
+    pub fn project_terminal(decision: V3Error05ExecutionDecision) -> V3Error06ClientProjected {
+        let terminal = decision.try_into_terminal().unwrap_or_else(|decision| {
+            panic!(
+                "nonterminal {:?} Error05 cannot enter V3Error06ClientProjected",
+                decision.action
+            )
+        });
+        Self::project_terminal_decision(terminal)
+    }
+
     pub fn decide_provider(
         input: V3ErrorHandlingCenterInput,
         default_pool_available: bool,
@@ -871,13 +887,7 @@ impl V3ErrorHandlingCenter {
         );
         let source_status = input.source_status;
         let execution = Self::decide_provider(input, false, false, None);
-        let terminal = execution.try_into_terminal().unwrap_or_else(|decision| {
-            panic!(
-                "nonterminal {:?} Error05 cannot enter V3Error06ClientProjected",
-                decision.action
-            )
-        });
-        let mut projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
+        let mut projected = Self::project_terminal(execution);
         let linked_status = projected
             .body
             .pointer("/error/external_error/status")
@@ -1021,7 +1031,7 @@ pub fn project_v3_post_commit_sse_source(
         let terminal = decision
             .try_into_terminal()
             .expect("post-commit provider SSE source must project terminal Error05");
-        let mut projected = build_v3_error_06_client_projected_from_v3_error_05(terminal);
+        let mut projected = V3ErrorHandlingCenter::project_terminal_decision(terminal);
         projected.status = status;
         projected
     } else {

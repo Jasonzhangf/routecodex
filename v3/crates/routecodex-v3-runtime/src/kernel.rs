@@ -32,11 +32,10 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    build_v3_error_06_client_projected_from_v3_error_05, V3Error01SourceRaised,
-    V3Error05ExecutionAction, V3Error05ExecutionDecision, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
-    V3_ERROR_CHAIN_NODE_IDS,
+    V3Error01SourceRaised, V3Error05ExecutionAction, V3Error05ExecutionDecision,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
@@ -792,12 +791,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     if previous_response_id.is_some() {
                         trace.push("V3HubRespContinuation04Committed");
                     }
-                    let terminal = policy_result
-                        .decision
-                        .try_into_terminal()
-                        .expect("ProjectTerminal Error05 must be terminal");
                     return projected_error_output_with_observability(
-                        build_v3_error_06_client_projected_from_v3_error_05(terminal),
+                        V3ErrorHandlingCenter::project_terminal(policy_result.decision),
                         trace,
                         None,
                     );
@@ -1042,12 +1037,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             false,
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        let terminal = policy_result
-                            .decision
-                            .try_into_terminal()
-                            .expect("ProjectTerminal Error05 must be terminal");
                         let projected =
-                            build_v3_error_06_client_projected_from_v3_error_05(terminal);
+                            V3ErrorHandlingCenter::project_terminal(policy_result.decision);
                         return projected_error_output_with_observability(
                             projected,
                             trace,
@@ -1055,12 +1046,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         );
                     }
                     V3Error05ExecutionAction::ClientDisconnected => {
-                        let terminal = policy_result
-                            .decision
-                            .try_into_terminal()
-                            .expect("ClientDisconnected Error05 must be terminal");
                         return projected_error_output_with_observability(
-                            build_v3_error_06_client_projected_from_v3_error_05(terminal),
+                            V3ErrorHandlingCenter::project_terminal(policy_result.decision),
                             trace,
                             None,
                         );
@@ -1192,12 +1179,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             );
                             observability.attempts =
                                 Some(total_attempts(&accumulator, send_attempts));
-                            let terminal = policy_result
-                                .decision
-                                .try_into_terminal()
-                                .expect("ProjectTerminal Error05 must be terminal");
                             let projected =
-                                build_v3_error_06_client_projected_from_v3_error_05(terminal);
+                                V3ErrorHandlingCenter::project_terminal(policy_result.decision);
                             return projected_error_output_with_observability(
                                 projected,
                                 trace,
@@ -1205,12 +1188,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             );
                         }
                         V3Error05ExecutionAction::ClientDisconnected => {
-                            let terminal = policy_result
-                                .decision
-                                .try_into_terminal()
-                                .expect("ClientDisconnected Error05 must be terminal");
                             return projected_error_output_with_observability(
-                                build_v3_error_06_client_projected_from_v3_error_05(terminal),
+                                V3ErrorHandlingCenter::project_terminal(policy_result.decision),
                                 trace,
                                 None,
                             );

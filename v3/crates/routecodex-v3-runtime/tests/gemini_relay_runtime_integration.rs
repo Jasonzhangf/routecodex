@@ -111,6 +111,10 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     let mut expected_provider_payload = payload;
     expected_provider_payload["model"] = json!("gemini-wire");
+    expected_provider_payload
+        .as_object_mut()
+        .expect("Gemini provider payload must be object")
+        .remove("stream");
     assert_eq!(captured, expected_provider_payload);
     assert!(captured.get("metadata_center").is_none());
     assert_eq!(output.status, 200);

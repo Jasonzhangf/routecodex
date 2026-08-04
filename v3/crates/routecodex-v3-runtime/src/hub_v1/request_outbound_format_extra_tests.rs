@@ -962,3 +962,47 @@ fn relay_responses_wire_preserves_non_continuation_provider_fields() {
         json!({"include_obfuscation":false})
     );
 }
+
+#[test]
+fn gemini_wire_consumes_stream_as_transport_intent() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "generationConfig": {
+            "thinkingConfig": {
+                "includeThoughts": true,
+                "thinkingBudget": 4096
+            }
+        },
+        "stream": false
+    });
+
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect("Gemini outbound must consume stream as transport intent");
+
+    assert!(request.get("stream").is_none(), "{request}");
+    assert_eq!(
+        request.pointer("/generationConfig/thinkingConfig/includeThoughts"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        request.pointer("/generationConfig/thinkingConfig/thinkingBudget"),
+        Some(&json!(4096))
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_malformed_stream_transport_intent() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "stream": "false"
+    });
+
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("Gemini stream transport intent must remain boolean");
+
+    assert!(error.contains("$.request.stream"), "{error}");
+}
