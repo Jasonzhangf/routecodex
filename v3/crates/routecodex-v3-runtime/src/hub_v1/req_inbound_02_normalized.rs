@@ -41,31 +41,23 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         });
     }
     if input.entry_protocol == V3HubEntryProtocol::Anthropic {
-        let mut responses_semantic = if input
-            .payload
-            .0
+        let source_payload = std::mem::take(&mut input.payload.0);
+        let mut responses_semantic = if source_payload
             .get("input")
             .and_then(serde_json::Value::as_array)
             .is_some()
         {
-            input.payload.0.clone()
+            source_payload
         } else {
-            encode_v3_anthropic_request_as_responses_semantic(input.payload.0.clone())
+            encode_v3_anthropic_request_as_responses_semantic(source_payload)
                 .map_err(|error| format!("Anthropic inbound semantic projection failed: {error}"))?
         };
-        let anthropic_reasoning_effort = responses_semantic
-            .as_object_mut()
-            .and_then(|object| object.remove("reasoning_effort"));
-        let anthropic_request_extension = responses_semantic
-            .as_object_mut()
-            .and_then(|object| object.remove("routecodex_chat_extension"));
-        let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
-            &responses_semantic,
-        )
-        .map_err(|error| format!("Anthropic inbound Chat canonicalization failed: {error}"))?;
-        if let (Some(canonical_object), Some(semantic_object)) =
-            (canonical.as_object_mut(), responses_semantic.as_object())
-        {
+        let mut anthropic_preserved_fields = Vec::new();
+        let mut anthropic_reasoning_effort = None;
+        let mut anthropic_request_extension = None;
+        if let Some(object) = responses_semantic.as_object_mut() {
+            anthropic_reasoning_effort = object.remove("reasoning_effort");
+            anthropic_request_extension = object.remove("routecodex_chat_extension");
             for key in [
                 "context_management",
                 "output_config",
@@ -73,12 +65,21 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
                 "reasoning_display_policy",
                 "reasoning_thinking_mode",
             ] {
-                if let Some(value) = semantic_object.get(key) {
-                    canonical_object.insert(key.to_string(), value.clone());
+                if let Some(value) = object.remove(key) {
+                    anthropic_preserved_fields.push((key.to_string(), value));
                 }
             }
-            if let Some(value) = anthropic_reasoning_effort.as_ref() {
-                canonical_object.insert("reasoning_effort".to_string(), value.clone());
+        }
+        let mut canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
+            &responses_semantic,
+        )
+        .map_err(|error| format!("Anthropic inbound Chat canonicalization failed: {error}"))?;
+        if let Some(canonical_object) = canonical.as_object_mut() {
+            for (key, value) in anthropic_preserved_fields {
+                canonical_object.insert(key, value);
+            }
+            if let Some(value) = anthropic_reasoning_effort {
+                canonical_object.insert("reasoning_effort".to_string(), value);
             }
             if let Some(value) = anthropic_request_extension {
                 if canonical_object.contains_key("routecodex_chat_extension") {

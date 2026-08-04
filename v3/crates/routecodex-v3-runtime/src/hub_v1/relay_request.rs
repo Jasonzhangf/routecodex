@@ -267,7 +267,6 @@ pub enum V3HubRelayRequestHookEvent {
     Req04LocalContextRestored,
     Req04ToolGoverned,
     Req04ProtocolToolIdentityGoverned,
-    Req04ApplyPatchGuidanceGoverned,
     Req04HistoryGoverned,
     Req04ServertoolGoverned,
     Req04StoplessControlLoaded,
@@ -323,6 +322,8 @@ pub enum V3HubRelayRequestError {
         index: usize,
         reason: &'static str,
     },
+    #[error("internal apply_patch guidance leaked into request payload field {field}")]
+    ApplyPatchGuidancePayloadLeak { field: &'static str },
 }
 
 #[derive(Debug)]
@@ -481,12 +482,7 @@ impl V3HubRelayRequestHooks {
         } else {
             None
         };
-        if govern_apply_patch_guidance_at_req04(
-            classified.previous.previous.entry_protocol,
-            &mut classified.previous.previous.payload.0,
-        ) {
-            events.push(V3HubRelayRequestHookEvent::Req04ApplyPatchGuidanceGoverned);
-        }
+        reject_apply_patch_guidance_payload_leak_at_req04(&classified.previous.previous.payload.0)?;
         if govern_protocol_tool_identity_at_req04(
             classified.previous.previous.entry_protocol,
             &classified.previous.previous.payload.0,
@@ -776,64 +772,51 @@ fn govern_gemini_tool_identity_at_req04(contents: &[Value]) -> Result<(), V3HubR
 }
 
 const V3_APPLY_PATCH_GUIDANCE_MARKER: &str = "[Codex Tool Guidance]";
-const V3_APPLY_PATCH_GUIDANCE_TEXT: &str = "[Codex Tool Guidance]\napply_patch: send exactly one raw patch string using canonical *** Begin Patch / *** End Patch grammar. Use *** Add File:, *** Update File:, or *** Delete File: headers with workspace-relative paths. Do not use absolute paths. Do not include GNU diff headers, Markdown fences, shell heredocs, or prose inside the patch. If apply_patch fails, reread the target file and retry with a smaller unique context. Do not switch to exec_command or shell writes for file edits.";
 
-fn govern_apply_patch_guidance_at_req04(
-    entry_protocol: V3HubEntryProtocol,
-    payload: &mut Value,
-) -> bool {
-    if entry_protocol != V3HubEntryProtocol::Responses || !declares_apply_patch_tool(payload) {
-        return false;
-    }
-    let Some(root) = payload.as_object_mut() else {
-        return false;
-    };
-    match root.get_mut("instructions") {
-        Some(Value::String(existing)) => {
-            if existing.contains(V3_APPLY_PATCH_GUIDANCE_MARKER) {
-                false
-            } else if existing.trim().is_empty() {
-                *existing = V3_APPLY_PATCH_GUIDANCE_TEXT.to_string();
-                true
-            } else {
-                existing.push_str("\n\n");
-                existing.push_str(V3_APPLY_PATCH_GUIDANCE_TEXT);
-                true
-            }
-        }
-        Some(_) => false,
-        None => {
-            root.insert(
-                "instructions".to_string(),
-                Value::String(V3_APPLY_PATCH_GUIDANCE_TEXT.to_string()),
-            );
-            true
-        }
-    }
-}
-
-fn declares_apply_patch_tool(payload: &Value) -> bool {
-    payload
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| tools.iter().any(is_apply_patch_tool))
-}
-
-fn is_apply_patch_tool(tool: &Value) -> bool {
-    let Some(row) = tool.as_object() else {
-        return false;
-    };
-    let name = row
-        .get("name")
+fn reject_apply_patch_guidance_payload_leak_at_req04(
+    payload: &Value,
+) -> Result<(), V3HubRelayRequestError> {
+    if payload
+        .get("instructions")
         .and_then(Value::as_str)
-        .or_else(|| {
-            row.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
+        .is_some_and(|instructions| instructions.contains(V3_APPLY_PATCH_GUIDANCE_MARKER))
+    {
+        return Err(V3HubRelayRequestError::ApplyPatchGuidancePayloadLeak {
+            field: "instructions",
+        });
+    }
+    if payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(message_contains_apply_patch_guidance_marker)
+    {
+        return Err(V3HubRelayRequestError::ApplyPatchGuidancePayloadLeak {
+            field: "messages[].content",
+        });
+    }
+    Ok(())
+}
+
+fn message_contains_apply_patch_guidance_marker(message: &Value) -> bool {
+    if message
+        .get("content")
+        .and_then(Value::as_str)
+        .is_some_and(|content| content.contains(V3_APPLY_PATCH_GUIDANCE_MARKER))
+    {
+        return true;
+    }
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|part| {
+            part.get("text")
                 .and_then(Value::as_str)
+                .is_some_and(|text| text.contains(V3_APPLY_PATCH_GUIDANCE_MARKER))
         })
-        .map(str::trim);
-    name.is_some_and(|name| name.eq_ignore_ascii_case("apply_patch"))
 }
 
 fn govern_tool_outputs_at_req04(

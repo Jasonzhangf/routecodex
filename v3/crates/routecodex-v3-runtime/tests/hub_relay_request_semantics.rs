@@ -332,7 +332,7 @@ fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
 }
 
 #[test]
-fn apply_patch_guidance_is_injected_once_at_req04_for_responses_requests() {
+fn apply_patch_guidance_is_not_injected_into_payload_at_req04() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks
         .run(
@@ -350,21 +350,14 @@ fn apply_patch_guidance_is_injected_once_at_req04_for_responses_requests() {
         )
         .unwrap();
 
-    let instructions = governed.payload()["instructions"].as_str().unwrap();
-    assert_eq!(instructions.matches("[Codex Tool Guidance]").count(), 1);
-    assert!(instructions.contains("apply_patch"));
-    assert!(instructions.contains("*** Begin Patch"));
-    assert!(instructions.contains("*** End Patch"));
-    assert!(instructions.contains("workspace-relative"));
-    assert!(instructions.contains("Do not use absolute paths"));
-    assert!(instructions.contains("Do not switch to exec_command or shell writes"));
+    assert!(governed.payload().get("instructions").is_none());
 }
 
 #[test]
-fn apply_patch_guidance_is_idempotent_and_skips_requests_without_apply_patch_tool() {
+fn apply_patch_guidance_payload_leak_fails_at_req04() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let governed = hooks
-        .run(
+    assert!(matches!(
+        hooks.run(
             raw(json!({
                 "model":"client-responses",
                 "instructions":"Existing\n\n[Codex Tool Guidance]\nUse apply_patch.",
@@ -373,10 +366,11 @@ fn apply_patch_guidance_is_idempotent_and_skips_requests_without_apply_patch_too
             })),
             &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
-        )
-        .unwrap();
-    let instructions = governed.payload()["instructions"].as_str().unwrap();
-    assert_eq!(instructions.matches("[Codex Tool Guidance]").count(), 1);
+        ),
+        Err(V3HubRelayRequestError::ApplyPatchGuidancePayloadLeak {
+            field: "messages[].content"
+        })
+    ));
 
     let without_apply_patch = hooks
         .run(

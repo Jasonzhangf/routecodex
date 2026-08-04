@@ -2547,23 +2547,23 @@ features:
     status: live_verified
     change_risk: high
     owner_kind: rust_v3_req04_chatprocess
-    owner_scope: "Responses Req04 injects minimal Codex apply_patch guidance only when the request declares apply_patch; provider transport must not map apply_patch schema or reshape protocol payloads."
+    owner_scope: "Responses Req04 rejects leaked internal Codex apply_patch guidance in normal payload; provider transport must not map apply_patch schema or reshape protocol payloads."
     owner_files:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
     resource_bindings:
       - v3.request.normal_payload
-      - v3.hub.tool_governance_truth
     mainline_bindings:
-      - binding pending
+      - v3-apply-patch-guidance-01
     entry_symbols:
-      - govern_apply_patch_guidance_at_req04
-      - declares_apply_patch_tool
-      - apply_patch_guidance_is_injected_once_at_req04_for_responses_requests
-      - apply_patch_guidance_is_idempotent_and_skips_requests_without_apply_patch_tool
+      - reject_apply_patch_guidance_payload_leak_at_req04
+      - apply_patch_guidance_is_not_injected_into_payload_at_req04
+      - apply_patch_guidance_payload_leak_fails_at_req04
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
       - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/manifests/v3.apply_patch_guidance_provider_compat.mainline.yml
       - docs/architecture/v3-function-map.yml
       - docs/architecture/v3-verification-map.yml
       - .agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md

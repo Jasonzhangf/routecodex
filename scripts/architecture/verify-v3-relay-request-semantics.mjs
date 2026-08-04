@@ -48,7 +48,7 @@ function filesBelow(relative) {
   return files;
 }
 
-const req02 = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01');
+const req02 = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01');
 const req03 = functionBody(request, 'fn classify_continuation');
 const req04 = functionBody(request, 'fn run_from_normalized_with_events');
 const restore = functionBody(request, 'fn restore_local_context_at_req04');
