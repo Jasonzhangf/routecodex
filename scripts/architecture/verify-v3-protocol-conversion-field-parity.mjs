@@ -480,6 +480,8 @@ for (const phrase of [
   '"type":"custom_tool_call"',
 ]) requireText(text.responsesRuntime, `${paths.responsesRuntime}::native_openai_chat_custom_tool_response`, phrase);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
+requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'target_protocol_unmapped_field_fails_without_provider_switch_or_transport');
+requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'target protocol projection failure must not switch provider or enter transport');
 requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
 for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');

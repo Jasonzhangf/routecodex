@@ -29,6 +29,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
@@ -597,7 +598,7 @@ const cases = [
   },
   {
     name: 'Anthropic Responses metadata projection context owner removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
     from: 'pub struct V3AnthropicResponsesProjectionContext',
     to: 'pub struct RemovedAnthropicResponsesProjectionContext',
     diagnostic: /responses_metadata_projection_context|V3AnthropicResponsesProjectionContext/u,
