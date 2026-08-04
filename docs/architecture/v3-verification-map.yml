@@ -1505,7 +1505,7 @@ features:
       - malformed provider error body projects an explicit provider_error_body_malformed error without fallback
       - request and response internal side-channel fields fail before provider send or client success
     required_blackbox:
-      - loopback upstream receives exactly one POST /v1beta/models/gemini-wire/generateContent per valid request
+      - loopback upstream receives exactly one POST /v1beta/models/gemini-wire:generateContent per valid request
       - Server JSON response preserves controlled Gemini candidates and usage metadata
       - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
       - Server 429 response exposes Error01-06 and does not wrap success
