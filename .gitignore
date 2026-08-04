@@ -22,6 +22,8 @@ tests/**/fixtures/
 sharedmodule/**/test/fixtures/
 sharedmodule/**/tests/fixtures/
 **/fixtures/
+!v3/fixtures/
+!v3/fixtures/**
 scripts/tools-dev/responses-debug-client/logs/
 logs/
 tmp/

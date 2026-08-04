@@ -3,6 +3,9 @@
 This directory contains retired V2 authoring material preserved for historical
 reference. It is not an active runtime, build, package, or default test surface.
 
+Retirement metadata is recorded in `retirement-manifest.yml`. Active resource,
+function, mainline, and verification maps must not bind files from this archive.
+
 Archived content:
 
 - `architecture/`: retired V2 design and migration documents.

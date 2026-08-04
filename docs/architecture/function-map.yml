@@ -29,8 +29,12 @@ owners:
       - docs/architecture/mainline-call-map.yml
       - docs/architecture/resource-operation-map.yml
       - docs/architecture/verification-map.yml
+      - docs/architecture/wiki/mainline-call-graph.md
+      - docs/architecture/wiki/html/mainline-call-graph.html
+      - docs/design/payload-copy-hotspot-inventory.md
       - docs/goals/root-generated-artifacts-governance-plan.md
       - docs/goals/root-generated-artifacts-governance-execution-prompt.md
+      - v3/fixtures
       - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
       - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
       - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md
@@ -4901,54 +4905,6 @@ owners:
       - "The script serializes the tracked sample once at the required JS/Rust boundary and never deep-clones its object graph."
       - "Anthropic response semantics remain owned by buildOpenAIChatFromAnthropicMessageFullWithNative; the script only validates the native result."
       - "This diagnostic projection cannot write live payload, routing, metadata, provider configuration, config.toml, or ~/.rcc truth."
-
-  - feature_id: debug.v2_consistency_payload_copy_budget
-    status: retired
-    summary: "Retired V2 comprehensive consistency reporting preserved under deprecated/v2"
-    owner_kind: ts_debug_script
-    owner_scope: "archived debug-only V2 consistency summary generation, persistence, and display"
-    owner_module: deprecated/v2/consistency/comprehensive-consistency-test.mjs
-    resource_bindings:
-      writes:
-        - debug.v2_consistency_summary_projection@DebugObs07ReplayedOrInspected
-      reads:
-        - debug.v2_consistency_summary_projection@DebugObs07ReplayedOrInspected
-      forbidden:
-        - provider.wire_payload@ProviderReqOutbound06WirePayload
-        - response.client_payload@HubRespOutbound04ClientSemantic
-        - route.selection@VrRoute04SelectedTarget
-        - metadata.request_truth@MetaReq02TruthMaterialized
-    canonical_types:
-      - v2-consistency-summary-projection
-    canonical_builders:
-      - runAllTests
-    allowed_paths:
-      - deprecated/v2/consistency/comprehensive-consistency-test.mjs
-      - deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts
-      - deprecated/v2/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
-      - docs/design/payload-copy-hotspot-inventory.md
-      - docs/architecture
-    forbidden_paths:
-      - src/providers
-      - src/client
-      - src/server/runtime/http-server
-      - sharedmodule/llmswitch-core/rust-core
-      - provider configuration
-      - config.toml
-      - ~/.rcc
-    required_tests:
-      - deprecated/v2/tests/scripts/v2-consistency-payload-copy-budget.spec.ts
-      - deprecated/v2/goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
-    required_gates:
-      - npm run verify:resource-operation-map
-      - npm run verify:function-map-compile-gate
-      - npm run verify:architecture-mainline-call-map
-    migration_target: ts
-    notes:
-      - "runAllTests writes the generated summary once into this.testResults.summary; report persistence and display borrow that same diagnostic owner."
-      - "JSON.stringify remains only at the report file IO boundary and no parse/stringify comparison or clone loop remains."
-      - "This retired utility is archive-only and cannot be restored as an active V3 runtime, package, or default test surface."
-      - "V3-owned config.v2.toml compatibility remains active inside v3 and is not part of this retirement."
 
   - feature_id: debug.provider_golden_capture_payload_copy_budget
     status: active

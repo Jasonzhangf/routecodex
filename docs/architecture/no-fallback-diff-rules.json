@@ -65,6 +65,11 @@
       "pathContains": "scripts/verify-servertool-rust-only.mjs"
     },
     {
+      "ruleId": "fallback-keyword",
+      "pathContains": "scripts/architecture/verify-repository-filesystem-governance.mjs",
+      "textContains": "no-fallback-diff-rules.json"
+    },
+    {
       "ruleId": "degrade-keyword",
       "pathContains": "src/types/debug-types.ts"
     },
@@ -858,11 +863,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "deprecated/v2/monitoring/v2-monitoring-analysis.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/verify-apply-patch-regressions.mjs",
       "textContains": ""
     },
@@ -1193,11 +1193,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "deprecated/v2/consistency/comprehensive-consistency-test.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/verify-tool-arguments.mjs",
       "textContains": ""
     },
@@ -1520,10 +1515,6 @@
       "ruleId": "empty-default-operator",
       "pathContains": "scripts/",
       "textContains": "|| []"
-    },
-    {
-      "ruleId": "degrade-keyword",
-      "pathContains": "deprecated/v2/monitoring/v2-monitoring-analysis.mjs"
     },
     {
       "ruleId": "degrade-keyword",

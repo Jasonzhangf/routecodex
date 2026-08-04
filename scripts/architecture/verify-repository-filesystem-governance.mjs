@@ -21,12 +21,19 @@ function lines(value) {
 function verifyRepositoryFilesystemGovernance() {
   const failures = [];
   const rootEntries = fs.readdirSync(repoRoot);
-  const forbiddenRootNames = new Set(['.reasonix', 'note.md.d', 'vendor']);
+  const forbiddenRootNames = new Set(['--version', '.reasonix', 'note.md.d', 'vendor']);
   const forbiddenActiveV2Directories = [
     'docs/v2-architecture',
     'scripts/v2-consistency',
     'src/v2',
     'tests/v2',
+  ];
+  const activeMachineMaps = [
+    'docs/architecture/resource-operation-map.yml',
+    'docs/architecture/function-map.yml',
+    'docs/architecture/mainline-call-map.yml',
+    'docs/architecture/verification-map.yml',
+    'docs/architecture/no-fallback-diff-rules.json',
   ];
   let moduleOwner;
   const moduleRegistryPath = path.join(
@@ -48,6 +55,7 @@ function verifyRepositoryFilesystemGovernance() {
       'scripts/tests/repository-filesystem-governance-red-fixtures.mjs',
       'scripts/start-verify.mjs',
       'v3/README.md',
+      'v3/fixtures',
       'deprecated/v2',
     ];
     if (registry?.status !== 'active') failures.push('repository filesystem module registry must be active');
@@ -74,6 +82,14 @@ function verifyRepositoryFilesystemGovernance() {
     }
   }
 
+  for (const relativePath of activeMachineMaps) {
+    const absolutePath = path.join(repoRoot, relativePath);
+    if (!fs.existsSync(absolutePath)) continue;
+    if (fs.readFileSync(absolutePath, 'utf8').includes('deprecated/v2/')) {
+      failures.push(`active machine map must not bind retired V2 archive: ${relativePath}`);
+    }
+  }
+
   const deprecatedRoot = path.join(repoRoot, 'deprecated');
   if (fs.existsSync(deprecatedRoot)) {
     for (const entry of fs.readdirSync(deprecatedRoot)) {
@@ -85,6 +101,12 @@ function verifyRepositoryFilesystemGovernance() {
   }
 
   const tracked = lines(git(['ls-files']));
+  const requiredTrackedPaths = [
+    'v3/fixtures/config.p2.toml',
+  ];
+  for (const requiredPath of requiredTrackedPaths) {
+    if (!tracked.includes(requiredPath)) failures.push(`required governed source is not tracked: ${requiredPath}`);
+  }
   for (const trackedPath of tracked) {
     if (trackedPath.startsWith('dist/')) failures.push(`tracked generated output: ${trackedPath}`);
     if (trackedPath.startsWith('.reasonix/')) failures.push(`tracked deprecated tool state: ${trackedPath}`);

@@ -1,0 +1,33 @@
+version: 1
+status: retired
+retirement_id: routecodex.v2.authoring
+replacement: routecodex.v3
+active_runtime: false
+active_build_input: false
+active_test_input: false
+active_machine_map_binding: false
+archived_surfaces:
+  - architecture
+  - consistency
+  - goals
+  - monitoring
+  - smoke
+  - src
+  - tests
+retired_features:
+  - feature_id: debug.v2_consistency_payload_copy_budget
+    resource_id: debug.v2_consistency_summary_projection
+    function_id: debug.v2_consistency_summary_projection
+    historical_owner: consistency/comprehensive-consistency-test.mjs
+    historical_tests:
+      - tests/scripts/v2-consistency-payload-copy-budget.spec.ts
+      - goals/full-pipeline-v2-consistency-payload-copy-budget-test-design.md
+    replacement_owner: none
+    reason: Retired V1/V2 comparison reporting has no V3 runtime, build, or default verification role.
+active_compatibility_exclusions:
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - src/config/provider-v2-loader.ts
+  - config.v2.toml
+notes:
+  - Paths under this archive must not be referenced by active resource, function, mainline, or verification maps.
+  - V3-owned compatibility readers remain active and are not part of this archive.

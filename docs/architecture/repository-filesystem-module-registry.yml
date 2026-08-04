@@ -10,6 +10,7 @@ modules:
       - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
       - scripts/start-verify.mjs
       - v3/README.md
+      - v3/fixtures
       - deprecated/v2
       - .agents/skills/rcc-dev-skills/SKILL.md
       - .agents/skills/rcc-dev-skills/references
@@ -22,6 +23,10 @@ modules:
       - docs/architecture/mainline-call-map.yml
       - docs/architecture/resource-operation-map.yml
       - docs/architecture/verification-map.yml
+      - docs/architecture/wiki/mainline-call-graph.md
+      - docs/architecture/wiki/html/mainline-call-graph.html
+      - docs/design/payload-copy-hotspot-inventory.md
+      - deprecated/v2/retirement-manifest.yml
       - scripts/architecture/verify-agent-p0-payload-control-guard.mjs
       - scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs
       - docs/architecture/reviews/agent-worker-p0-architecture-guard-audit.md

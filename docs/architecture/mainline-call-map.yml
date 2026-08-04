@@ -4186,14 +4186,6 @@ shared_multi_reference_functions:
   reused_by_chains:
   - debug.unified_surface.mainline
   note: 'Debug regression block: serializes the tracked Anthropic sample once into the Rust native projection owner and validates the returned Hub shape without cloning the source graph.'
-- function_id: debug.v2_consistency_summary_projection
-  binding_status: confirmed
-  symbol: runAllTests
-  file: deprecated/v2/consistency/comprehensive-consistency-test.mjs
-  owner_feature_id: debug.v2_consistency_payload_copy_budget
-  reused_by_chains:
-  - debug.unified_surface.mainline
-  note: 'Retired debug reporting block preserved under deprecated/v2; it is not an active V3 mainline or package surface.'
 - function_id: debug.provider_golden_capture_config_projection
   binding_status: confirmed
   symbol: buildDerivedConfig

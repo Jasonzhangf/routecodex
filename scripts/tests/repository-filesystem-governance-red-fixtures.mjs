@@ -7,6 +7,7 @@ const repoRoot = process.cwd();
 const verifier = path.join(repoRoot, 'scripts/architecture/verify-repository-filesystem-governance.mjs');
 
 const cases = [
+  ['misparsed CLI option root', '--version/_/h', 'forbidden root entry'],
   ['root fwd marker', 'fwd.v3.invalid', 'forbidden root marker'],
   ['malformed install root', 'install:v3\n', 'forbidden malformed install root'],
   ['deprecated screenshot root', 'note.md.d/image.png', 'forbidden root entry'],
@@ -19,6 +20,36 @@ const cases = [
   ['active V2 source directory', 'src/v2/README.md', 'active V2 directory must be archived'],
   ['active V2 test directory', 'tests/v2/README.md', 'active V2 directory must be archived'],
   ['unsupported deprecated root child', 'deprecated/v1/README.md', 'unsupported deprecated root child'],
+  [
+    'retired V2 active resource binding',
+    'docs/architecture/resource-operation-map.yml',
+    'active machine map must not bind retired V2 archive',
+    'resources:\n  - owner: deprecated/v2/consistency/comprehensive-consistency-test.mjs\n',
+  ],
+  [
+    'retired V2 active function binding',
+    'docs/architecture/function-map.yml',
+    'active machine map must not bind retired V2 archive',
+    'features:\n  - owner_module: deprecated/v2/consistency/comprehensive-consistency-test.mjs\n',
+  ],
+  [
+    'retired V2 active mainline binding',
+    'docs/architecture/mainline-call-map.yml',
+    'active machine map must not bind retired V2 archive',
+    'functions:\n  - file: deprecated/v2/consistency/comprehensive-consistency-test.mjs\n',
+  ],
+  [
+    'retired V2 active verification binding',
+    'docs/architecture/verification-map.yml',
+    'active machine map must not bind retired V2 archive',
+    'verification:\n  - build: deprecated/v2/consistency/comprehensive-consistency-test.mjs\n',
+  ],
+  [
+    'retired V2 active no-fallback rule',
+    'docs/architecture/no-fallback-diff-rules.json',
+    'active machine map must not bind retired V2 archive',
+    '{"pathContains":"deprecated/v2/monitoring/v2-monitoring-analysis.mjs"}\n',
+  ],
 ];
 
 function run(root, args) {
@@ -29,18 +60,21 @@ function installModuleRegistry(root) {
   const registryPath = 'docs/architecture/repository-filesystem-module-registry.yml';
   fs.mkdirSync(path.dirname(path.join(root, registryPath)), { recursive: true });
   fs.copyFileSync(path.join(repoRoot, registryPath), path.join(root, registryPath));
-  run(root, ['add', '-f', registryPath]);
+  const fixturePath = 'v3/fixtures/config.p2.toml';
+  fs.mkdirSync(path.dirname(path.join(root, fixturePath)), { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, fixturePath), path.join(root, fixturePath));
+  run(root, ['add', '-f', registryPath, fixturePath]);
 }
 
 const failures = [];
-for (const [name, relativePath, expected] of cases) {
+for (const [name, relativePath, expected, content = 'fixture\n'] of cases) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-repo-governance-red-'));
   try {
     run(root, ['init', '-q']);
     installModuleRegistry(root);
     const target = path.join(root, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, 'fixture\n');
+    fs.writeFileSync(target, content);
     run(root, ['add', '-f', relativePath]);
     const result = spawnSync(process.execPath, [verifier, '--root', root], { encoding: 'utf8' });
     const output = `${result.stdout || ''}${result.stderr || ''}`;
