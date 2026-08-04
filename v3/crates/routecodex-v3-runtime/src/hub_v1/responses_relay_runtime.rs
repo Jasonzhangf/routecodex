@@ -5079,10 +5079,7 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
         .await
         .expect_err("unmapped target field must fail before provider transport");
 
-        assert!(
-            error.to_string().contains("$.request.store"),
-            "{error:?}"
-        );
+        assert!(error.to_string().contains("$.request.store"), "{error:?}");
         assert!(
             transport
                 .provider_ids
