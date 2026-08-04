@@ -336,7 +336,7 @@ const cases = [
     name: 'Error06 accepts raw Error05',
     path: 'v3/crates/routecodex-v3-error/src/lib.rs',
     mutate: (source) => source.replace('terminal: V3Error05TerminalDecision', 'terminal: V3Error05ExecutionDecision'),
-    diagnostic: /missing terminal: V3Error05TerminalDecision/u,
+    diagnostic: /terminal: V3Error05TerminalDecision/u,
   },
   {
     name: 'feature regresses to design',

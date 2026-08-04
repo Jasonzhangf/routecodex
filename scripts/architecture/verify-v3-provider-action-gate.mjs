@@ -1272,6 +1272,12 @@ for (const token of [
 ]) {
   requireText(text.error, files.error, token);
 }
+requireOccurrenceCount(
+  text.error,
+  files.error,
+  'terminal: V3Error05TerminalDecision',
+  2,
+);
 if (
   !/pub\s+struct\s+V3Error05RecoveryAdmissionWitness\s*\{[^}]*\bgeneration:\s*u64,/u
     .test(text.error)
