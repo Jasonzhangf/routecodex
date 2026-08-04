@@ -38,7 +38,7 @@ async function main() {
       payload: {
         model: 'gpt-test',
         max_tokens: 200,
-        instructions: '<b>native-crs</b>',
+        instructions: '<b>native-temperature-unsupported</b>',
         temperature: 0.2,
         tools: [
           {
@@ -54,13 +54,13 @@ async function main() {
       adapterContext: {
         requestId: 'req_outbound_compat_cov_native_2',
         providerProtocol: 'openai-responses',
-        compatibilityProfile: 'responses:crs'
+        compatibilityProfile: 'responses:temperature-unsupported'
       }
     });
     assert.equal(result.nativeApplied, true);
-    assert.equal(result.appliedProfile, 'responses:crs');
+    assert.equal(result.appliedProfile, 'responses:temperature-unsupported');
     assert.equal(result.payload.max_tokens, 200);
-    assert.equal(result.payload.instructions, '<b>native-crs</b>');
+    assert.equal(result.payload.instructions, '<b>native-temperature-unsupported</b>');
     assert.equal(result.payload.temperature, undefined);
     assert.equal(result.payload.tools?.[0]?.type, 'function');
     assert.equal(result.payload.tools?.[0]?.name, 'exec_command');

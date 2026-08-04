@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-01-07T12:00:00.000Z",
+  "updated": "2026-08-04T00:00:00.000Z",
   "samples": [
     {
       "reqId": "openai-chat-unknown-unknown-20251206T103315-001",
@@ -192,18 +192,6 @@
       "timestamp": "2025-12-11T12:44:30.066Z",
       "path": "openai-responses/fc.default.gpt-5.1/gpt-5.1/20251211/124430/001",
       "tags": [
-        "regression"
-      ]
-    },
-    {
-      "reqId": "openai-responses-iflow.2-173.glm-4.7-glm-4.7-20260107T114357-001",
-      "entry": "openai-responses",
-      "providerId": "iflow.2-173.glm-4.7",
-      "model": "glm-4.7",
-      "timestamp": "2026-01-07T11:43:57.000Z",
-      "path": "openai-responses/iflow.2-173.glm-4.7/glm-4.7/20260107/114357/001",
-      "tags": [
-        "apply_patch_structured",
         "regression"
       ]
     },
@@ -557,30 +545,6 @@
       "path": "openai-chat/qwen.key1.qwen3-coder-plus/qwen3-coder-plus/20251215/214206/001",
       "tags": [
         "regression"
-      ]
-    },
-    {
-      "reqId": "openai-responses-crs.key1.gpt-5.1-gpt-5.1-20251215T224322727-004",
-      "entry": "openai-responses",
-      "providerId": "crs.key1.gpt-5.1",
-      "model": "gpt-5.1",
-      "timestamp": "2025-12-15T22:43:22.727Z",
-      "path": "openai-responses/crs.key1.gpt-5.1/gpt-5.1/20251215/224322/004",
-      "tags": [
-        "regression",
-        "apply_patch_input"
-      ]
-    },
-    {
-      "reqId": "openai-responses-tab.key1.gpt-5.1-gpt-5.1-20251216T115200-001",
-      "entry": "openai-responses",
-      "providerId": "tab.key1.gpt-5.1",
-      "model": "gpt-5.1",
-      "timestamp": "2025-12-16T03:52:00.886Z",
-      "path": "openai-responses/tab.key1.gpt-5.1/gpt-5.1/20251216/115200/001",
-      "tags": [
-        "regression",
-        "apply_patch_schema"
       ]
     },
     {

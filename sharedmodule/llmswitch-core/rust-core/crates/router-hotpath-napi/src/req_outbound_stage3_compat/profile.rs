@@ -39,8 +39,8 @@ fn profile_matches(profile: &str, expected: &str) -> bool {
     profile.trim().eq_ignore_ascii_case(expected)
 }
 
-pub(super) fn is_responses_crs_profile(profile: &str) -> bool {
-    profile_matches(profile, "responses:crs")
+pub(super) fn is_responses_temperature_unsupported_profile(profile: &str) -> bool {
+    profile_matches(profile, "responses:temperature-unsupported")
 }
 
 pub(super) fn is_lmstudio_profile(profile: &str) -> bool {

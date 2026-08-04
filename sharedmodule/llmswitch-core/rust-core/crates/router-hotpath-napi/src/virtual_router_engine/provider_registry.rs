@@ -451,7 +451,7 @@ mod tests {
             "dibittai.crsa.gpt-5.4": {
                 "providerKey": "dibittai.crsa.gpt-5.4",
                 "providerType": "openai",
-                "compatibilityProfile": "responses-crs",
+                "compatibilityProfile": "responses-temperature-unsupported",
                 "modelId": "gpt-5.4"
             }
         });

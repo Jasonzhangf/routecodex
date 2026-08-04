@@ -1930,18 +1930,18 @@ resources:
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:responses-instructions-to-input-rust-only]
 
-  - resource_id: protocol.responses_crs_request_compat
+  - resource_id: protocol.responses_temperature_unsupported_compat
     resource_kind: normal_payload
     lifecycle: protocol.compat_surface.mainline
     identity: [requestId, providerProtocol, compatibilityProfile]
-    owner_feature_id: responses.crs_request_compat
+    owner_feature_id: responses.temperature_unsupported_compat
     owner_node: ProviderReqOutbound06WirePayload
     allowed_readers: [ProviderReqOutbound06WirePayload, dryrun.provider_request_probe]
-    allowed_writers: [apply_responses_crs_request_compat]
+    allowed_writers: [apply_responses_temperature_unsupported_compat]
     forbidden_writers: [HubRespOutbound04ClientSemantic, response.client_payload, route.selection]
     may_enter_provider_body: true
     may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-crs-request-compat-rust-only]
+    required_gates: [npm run verify:resource-operation-map, npm run verify:responses-request-compat-rust-only]
 
   - resource_id: protocol.gemini_canonical
     resource_kind: normal_payload

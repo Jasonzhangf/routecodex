@@ -41,7 +41,7 @@ describe('provider-profile-loader', () => {
             type: 'apikey',
             apiKey: '${RESPONSES_API_KEY}'
           },
-          compatibilityProfile: 'responses:crs'
+          compatibilityProfile: 'responses:temperature-unsupported'
         }
       }
     };
@@ -53,7 +53,7 @@ describe('provider-profile-loader', () => {
     if (profile.auth.kind === 'apikey') {
       expect(profile.auth.apiKey).toBe('${RESPONSES_API_KEY}');
     }
-    expect(profile.compatibilityProfile).toEqual('responses:crs');
+    expect(profile.compatibilityProfile).toEqual('responses:temperature-unsupported');
   });
 
   it('rejects removed oauth auth config', () => {

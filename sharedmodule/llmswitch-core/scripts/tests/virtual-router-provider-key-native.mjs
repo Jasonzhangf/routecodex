@@ -19,8 +19,8 @@ async function main() {
   const parseProviderKey = binding?.parseVirtualRouterHitProviderKeyJson;
   assert.equal(typeof parseProviderKey, 'function');
 
-  const nativeParsed = JSON.parse(parseProviderKey('iflow.3-138.kimi-k2.5'));
-  assert.equal(nativeParsed.providerId, 'iflow');
+  const nativeParsed = JSON.parse(parseProviderKey('openai.3-138.kimi-k2.5'));
+  assert.equal(nativeParsed.providerId, 'openai');
   assert.equal(nativeParsed.keyAlias, '3-138');
   assert.equal(nativeParsed.modelId, 'kimi-k2.5');
 
@@ -28,13 +28,13 @@ async function main() {
   assert.equal(prefixedAlias.providerId, 'openai');
   assert.equal(prefixedAlias.keyAlias, '3-main');
 
-  const numericAlias = JSON.parse(parseProviderKey('tabglm.12'));
-  assert.equal(numericAlias.providerId, 'tabglm');
+  const numericAlias = JSON.parse(parseProviderKey('anthropic.12'));
+  assert.equal(numericAlias.providerId, 'anthropic');
   assert.equal(numericAlias.keyAlias, undefined);
   assert.equal(numericAlias.modelId, '12');
 
-  const dottedModel = JSON.parse(parseProviderKey('tabglm.12.extra'));
-  assert.equal(dottedModel.providerId, 'tabglm');
+  const dottedModel = JSON.parse(parseProviderKey('anthropic.12.extra'));
+  assert.equal(dottedModel.providerId, 'anthropic');
   assert.equal(dottedModel.keyAlias, '12');
 
   console.log('virtual-router-provider-key-native passed');

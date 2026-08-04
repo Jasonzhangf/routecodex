@@ -21,7 +21,7 @@ const legacyCompatActionsDir = path.join(
 for (const required of [
   'normalize_responses_function_tools',
   'strip_responses_reasoning_content_for_provider_wire',
-  'apply_responses_crs_request_compat',
+  'apply_responses_temperature_unsupported_compat',
   'row.remove("content")',
   'root.remove("temperature")',
 ]) {
@@ -53,7 +53,7 @@ if (fs.existsSync(path.join(root, 'sharedmodule/llmswitch-core/src/conversion/hu
 
 for (const required of [
   'feature_id: responses.request_compat_normalization',
-  'feature_id: responses.crs_request_compat',
+  'feature_id: responses.temperature_unsupported_compat',
   'npm run verify:responses-request-compat-rust-only',
 ]) {
   if (!functionMap.includes(required) || !verificationMap.includes(required)) {
@@ -70,7 +70,7 @@ const forbiddenRuntimeFiles = [
 for (const relPath of forbiddenRuntimeFiles) {
   const source = read(relPath);
   for (const forbidden of [
-    'responses:crs',
+    'responses:temperature-unsupported',
     'instructions")',
     'instructions\')',
   ]) {

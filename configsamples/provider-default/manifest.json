@@ -5,7 +5,6 @@
   "providers": [
     "ali-coding-plan",
     "ark-coding-plan",
-    "crs",
     "gemini",
     "gemini-native",
     "glm",
@@ -21,8 +20,6 @@
     "opencode-zen-free",
     "openrouter",
     "ykk",
-    "tab",
-    "tabglm",
     "dbittai",
     "dbittai-gpt",
     "deepseek"

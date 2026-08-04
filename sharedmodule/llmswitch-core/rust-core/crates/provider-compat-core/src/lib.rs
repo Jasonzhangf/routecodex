@@ -109,13 +109,13 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, None));
     };
 
-    if is_responses_crs_profile(profile_id) {
+    if is_responses_temperature_unsupported_profile(profile_id) {
         if provider_protocol_matches(
             adapter_context.provider_protocol.as_ref(),
             "openai-responses",
         ) {
             if let Some(root) = payload.as_object_mut() {
-                apply_responses_crs_request_compat(root);
+                apply_responses_temperature_unsupported_compat(root);
             }
             return Ok(CompatResult {
                 payload,
@@ -316,8 +316,8 @@ fn is_minimax_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:minimax")
 }
 
-fn is_responses_crs_profile(profile: &str) -> bool {
-    profile_matches(profile, "responses:crs")
+fn is_responses_temperature_unsupported_profile(profile: &str) -> bool {
+    profile_matches(profile, "responses:temperature-unsupported")
 }
 
 fn is_lmstudio_profile(profile: &str) -> bool {
@@ -440,7 +440,7 @@ fn strip_responses_reasoning_content_for_provider_wire(root: &mut Map<String, Va
     }
 }
 
-fn apply_responses_crs_request_compat(root: &mut Map<String, Value>) {
+fn apply_responses_temperature_unsupported_compat(root: &mut Map<String, Value>) {
     normalize_responses_function_tools(root);
     root.remove("temperature");
 }
@@ -1856,7 +1856,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_crs_request_profile_normalizes_tools_and_removes_temperature() {
+    fn responses_temperature_unsupported_profile_normalizes_tools_and_removes_temperature() {
         let input = ReqOutboundCompatInput {
             payload: json!({
                 "model": "gpt-5.5",
@@ -1872,14 +1872,17 @@ mod tests {
                 "input": [{"type":"reasoning","content":[{"type":"summary_text","text":"old"}]}]
             }),
             adapter_context: AdapterContext {
-                compatibility_profile: Some("responses:crs".to_string()),
+                compatibility_profile: Some("responses:temperature-unsupported".to_string()),
                 provider_protocol: Some("openai-responses".to_string()),
                 ..Default::default()
             },
             explicit_profile: None,
         };
         let result = run_req_outbound_stage3_compat(input).unwrap();
-        assert_eq!(result.applied_profile.as_deref(), Some("responses:crs"));
+        assert_eq!(
+            result.applied_profile.as_deref(),
+            Some("responses:temperature-unsupported")
+        );
         assert!(result.payload.get("temperature").is_none());
         assert_eq!(result.payload["tools"][0]["name"], "lookup");
         assert_eq!(

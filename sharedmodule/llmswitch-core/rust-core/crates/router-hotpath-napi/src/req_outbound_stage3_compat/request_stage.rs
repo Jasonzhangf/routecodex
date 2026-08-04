@@ -3,11 +3,11 @@ use super::glm::apply_glm_request_compat;
 use super::lmstudio::apply_lmstudio_request_compat;
 use super::profile::{
     build_compat_result, is_gemini_profile, is_glm_profile, is_lmstudio_profile,
-    is_responses_crs_profile, is_single_tool_call_history_profile, pick_compat_profile,
+    is_responses_temperature_unsupported_profile, is_single_tool_call_history_profile, pick_compat_profile,
     provider_protocol_matches,
 };
 use super::responses::{
-    apply_responses_crs_request_compat, normalize_responses_function_tools,
+    apply_responses_temperature_unsupported_compat, normalize_responses_function_tools,
     strip_responses_reasoning_content_for_provider_wire,
 };
 use super::single_tool_call_history::split_parallel_tool_call_assistant_history;
@@ -120,13 +120,13 @@ pub fn run_req_outbound_stage3_compat(
     }
 
     if let Some(profile_id) = profile.as_deref() {
-        if is_responses_crs_profile(profile_id) {
+        if is_responses_temperature_unsupported_profile(profile_id) {
             if provider_protocol_matches(
                 adapter_context.provider_protocol.as_ref(),
                 "openai-responses",
             ) {
                 if let Some(root) = payload.as_object_mut() {
-                    apply_responses_crs_request_compat(root);
+                    apply_responses_temperature_unsupported_compat(root);
                 }
                 return Ok(CompatResult {
                     payload,

@@ -8,7 +8,6 @@ import path from 'node:path';
 
 describe('Anthropic provider compat', () => {
   const anthropicPath = path.join('samples/mock-provider', 'anthropic-messages');
-  const tabglmPath = path.join('samples/mock-provider', 'openai-responses', 'tab.key1.gpt-5.1');
 
   it('has mock samples for basic messages', () => {
     expect(fs.existsSync(anthropicPath)).toBe(true);
@@ -16,10 +15,6 @@ describe('Anthropic provider compat', () => {
       .filter(d => d.isDirectory() && !d.name.startsWith('_'))
       .map(d => d.name);
     expect(dirs.length).toBeGreaterThan(0);
-  });
-
-  it('tabglm samples use anthropic protocol', () => {
-    expect(fs.existsSync(tabglmPath)).toBe(true);
   });
 
   it('SSE samples exist', () => {

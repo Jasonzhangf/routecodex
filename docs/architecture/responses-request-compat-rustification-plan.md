@@ -2,11 +2,11 @@
 
 ## 目标
 
-把 `responses:crs` request compat、`instructions -> input` 重建、chat-style function tool normalization 全部锁定在 Rust `req_outbound_stage3_compat`，禁止在 TS runtime / provider / server 主链再长出第二份真相。
+把 `responses:temperature-unsupported` request compat、`instructions -> input` 重建、chat-style function tool normalization 全部锁定在 Rust `req_outbound_stage3_compat`，禁止在 TS runtime / provider / server 主链再长出第二份真相。
 
 核心 contract：
 
-- `responses:crs` 负责：
+- `responses:temperature-unsupported` 负责：
   - 删除 `temperature`
   - 归一 chat-style function tools 为 Responses wire
   - 将 string / invalid `parameters` 归一成 object schema
@@ -32,7 +32,7 @@ TS 允许存在的仅是 Host N-API 调用壳和测试 helper；历史 llmswitch
 
 ## 收口规则
 
-1. `responses:crs` 的字段删改与工具归一只能在 Rust stage3 compat 实现。
+1. `responses:temperature-unsupported` 的字段删改与工具归一只能在 Rust stage3 compat 实现。
 2. TS 不得在 `src/providers/*`、`src/server/*`、`src/modules/llmswitch/*` 里重做：
    - `instructions -> input`
    - `temperature` 删改
@@ -55,7 +55,7 @@ TS 允许存在的仅是 Host N-API 调用壳和测试 helper；历史 llmswitch
 1. request compat 真相只在 Rust `req_outbound_stage3_compat` 持有
 2. TS 仅剩 `runReqOutboundStage3CompatJson` bridge / orchestration 壳
 3. function-map / verification-map 可定位唯一 owner、canonical builders、required tests、required gates
-4. 针对 `responses:crs` 与通用 Responses normalization 的 Rust 测试和 architecture gate 全绿
+4. 针对 `responses:temperature-unsupported` 与通用 Responses normalization 的 Rust 测试和 architecture gate 全绿
 
 ## 已拆出的共享 closeout 单元
 

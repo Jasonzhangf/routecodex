@@ -6,7 +6,7 @@
     "enabled": true,
     "type": "responses",
     "baseURL": "http://106.52.126.193:63513/v1",
-    "compatibilityProfile": "responses:crs",
+    "compatibilityProfile": "responses:temperature-unsupported",
     "auth": {
       "type": "apikey",
       "apiKey": "${YKK_API_KEY}"

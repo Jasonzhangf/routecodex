@@ -5571,15 +5571,15 @@ owners:
     notes:
       - "`instructions -> input[0]=system/input_text` plus HTML strip and truncation must stay in Rust only; provider/server TS must not reconstruct it."
 
-  - feature_id: responses.crs_request_compat
+  - feature_id: responses.temperature_unsupported_compat
     status: active
-    summary: "responses:crs request compat must strip temperature only in Rust"
+    summary: "responses:temperature-unsupported request compat must strip temperature only in Rust"
     owner_kind: rust_ssot
-    owner_scope: "responses:crs request compat must strip temperature only in Rust"
+    owner_scope: "responses:temperature-unsupported request compat must strip temperature only in Rust"
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
     resource_bindings:
       writes:
-        - protocol.responses_crs_request_compat@ProviderReqOutbound06WirePayload
+        - protocol.responses_temperature_unsupported_compat@ProviderReqOutbound06WirePayload
       reads:
         - request.provider_semantic@HubReqOutbound05ProviderSemantic
         - provider.wire_payload@ProviderReqOutbound06WirePayload
@@ -5590,7 +5590,7 @@ owners:
       - HubReqOutbound05ProviderSemantic
       - ProviderReqOutbound06WirePayload
     canonical_builders:
-      - apply_responses_crs_request_compat
+      - apply_responses_temperature_unsupported_compat
     allowed_paths:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses
       - tests/sharedmodule/helpers/compat-engine-direct-native.ts
@@ -5601,10 +5601,10 @@ owners:
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/tests/req_profiles.rs
     required_gates:
-      - npm run verify:responses-crs-request-compat-rust-only
+      - npm run verify:responses-request-compat-rust-only
     migration_target: rust
     notes:
-      - "`temperature` stripping for crs is Rust-only."
+      - "`temperature` stripping for providers that declare the generic Responses compatibility profile is Rust-only."
       - "Shared function tool normalization truth lives in `responses.function_tool_normalization`."
       - "Shared parameters normalization truth lives in `responses.tool_parameters_normalization`."
 

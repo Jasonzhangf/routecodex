@@ -27,7 +27,7 @@ for (const required of [
 }
 
 for (const required of [
-  'test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_responses_wire',
+  'test_req_profile_responses_temperature_unsupported_normalizes_chat_style_function_tools_for_responses_wire',
 ]) {
   if (!reqProfiles.includes(required)) {
     failures.push(`shared Rust normalization test missing: ${required}`);

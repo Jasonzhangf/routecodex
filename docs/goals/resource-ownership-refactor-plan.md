@@ -270,7 +270,7 @@ Closed in the protocol/conversion batch:
 - `responses.function_tool_normalization`
 - `responses.tool_parameters_normalization`
 - `responses.instructions_to_input_normalization`
-- `responses.crs_request_compat`
+- `responses.temperature_unsupported_compat`
 - `hub.web_search_tool_governance`
 - `conversion.shared.gemini`
 
@@ -280,7 +280,7 @@ Fourth-layer protocol/conversion resource identities:
 - `protocol.responses_function_tool_schema`
 - `protocol.responses_tool_parameters_schema`
 - `protocol.responses_instruction_projection`
-- `protocol.responses_crs_request_compat`
+- `protocol.responses_temperature_unsupported_compat`
 - `protocol.gemini_canonical`
 - `protocol.web_search_governance_plan`
 

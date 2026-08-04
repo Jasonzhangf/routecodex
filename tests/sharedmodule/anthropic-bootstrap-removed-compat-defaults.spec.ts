@@ -4,11 +4,11 @@ describe('bootstrapVirtualRouterConfig removed compat defaults', () => {
   it('keeps anthropic providers on passthrough without injected compat headers', () => {
     const input = {
       providers: {
-        tabglm: {
-          id: 'tabglm',
+        anthropic_test: {
+          id: 'anthropic_test',
           enabled: true,
           type: 'anthropic',
-          baseURL: 'https://api.tabcode.cc/claude/glm',
+          baseURL: 'https://anthropic.example.test',
           compatibilityProfile: 'compat:passthrough',
           auth: {
             type: 'apikey',
@@ -24,7 +24,7 @@ describe('bootstrapVirtualRouterConfig removed compat defaults', () => {
           {
             id: 'default-primary',
             mode: 'priority',
-            targets: ['tabglm.glm-4.7']
+            targets: ['anthropic_test.glm-4.7']
           }
         ]
       }
@@ -32,7 +32,7 @@ describe('bootstrapVirtualRouterConfig removed compat defaults', () => {
 
     const result = bootstrapVirtualRouterConfig(input);
 
-    const runtime = result.runtime?.['tabglm.key1'] as any;
+    const runtime = result.runtime?.['anthropic_test.key1'] as any;
     expect(runtime?.compatibilityProfile).toBe('compat:passthrough');
     expect(runtime?.headers?.['User-Agent']).toBeUndefined();
     expect(runtime?.headers?.['X-App']).toBeUndefined();

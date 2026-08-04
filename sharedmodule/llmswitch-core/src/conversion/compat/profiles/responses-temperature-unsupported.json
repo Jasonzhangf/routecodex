@@ -1,5 +1,5 @@
 {
-  "id": "responses:crs",
+  "id": "responses:temperature-unsupported",
   "protocol": "openai-responses",
   "request": {
     "mappings": [

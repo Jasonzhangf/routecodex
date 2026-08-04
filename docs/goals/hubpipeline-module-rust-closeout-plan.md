@@ -322,7 +322,7 @@
 #### 必收内容
 
 - provider semantic outbound payload
-- `responses:crs` compat
+- `responses:temperature-unsupported` compat
 - tool normalization / parameters normalization
 - `instructions -> input` normalization
 

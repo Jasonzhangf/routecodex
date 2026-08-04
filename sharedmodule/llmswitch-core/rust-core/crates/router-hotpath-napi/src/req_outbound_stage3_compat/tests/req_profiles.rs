@@ -21,7 +21,7 @@ fn test_req_profile_responses_instructions_to_input_trims_html_and_lifts_system_
 }
 
 #[test]
-fn test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_responses_wire() {
+fn test_req_profile_responses_temperature_unsupported_normalizes_chat_style_function_tools_for_responses_wire() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "model": "gpt-5.5",
@@ -46,9 +46,9 @@ fn test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_respo
             }]
         }),
         adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:crs".to_string()),
+            compatibility_profile: Some("responses:temperature-unsupported".to_string()),
             provider_protocol: Some("openai-responses".to_string()),
-            request_id: Some("req_responses_crs_tool_schema_1".to_string()),
+            request_id: Some("req_responses_temperature_unsupported_tool_schema_1".to_string()),
             entry_endpoint: Some("/v1/responses".to_string()),
             route_id: None,
             rt: None,
@@ -71,7 +71,10 @@ fn test_req_profile_responses_crs_normalizes_chat_style_function_tools_for_respo
     };
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("responses:crs".to_string()));
+    assert_eq!(
+        result.applied_profile,
+        Some("responses:temperature-unsupported".to_string())
+    );
     let tools = result.payload["tools"]
         .as_array()
         .cloned()
@@ -105,7 +108,7 @@ fn test_req_profile_responses_tool_parameters_normalizes_string_json_to_object()
             }]
         }),
         adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:crs".to_string()),
+            compatibility_profile: Some("responses:temperature-unsupported".to_string()),
             provider_protocol: Some("openai-responses".to_string()),
             request_id: Some("req_responses_tool_params_json_string_1".to_string()),
             entry_endpoint: Some("/v1/responses".to_string()),
@@ -158,7 +161,7 @@ fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
             }]
         }),
         adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:crs".to_string()),
+            compatibility_profile: Some("responses:temperature-unsupported".to_string()),
             provider_protocol: Some("openai-responses".to_string()),
             request_id: Some("req_responses_tool_params_fallback_1".to_string()),
             entry_endpoint: Some("/v1/responses".to_string()),
@@ -192,7 +195,7 @@ fn test_req_profile_responses_tool_parameters_fallback_to_object_schema() {
 }
 
 #[test]
-fn test_req_profile_responses_crs_strips_temperature() {
+fn test_req_profile_responses_temperature_unsupported_strips_temperature() {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "model": "gpt-5.2-codex",
@@ -200,7 +203,7 @@ fn test_req_profile_responses_crs_strips_temperature() {
             "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}]
         }),
         adapter_context: AdapterContext {
-            compatibility_profile: Some("responses:crs".to_string()),
+            compatibility_profile: Some("responses:temperature-unsupported".to_string()),
             provider_protocol: Some("openai-responses".to_string()),
             request_id: Some("req_crs_1".to_string()),
             entry_endpoint: Some("/v1/responses".to_string()),
@@ -225,7 +228,10 @@ fn test_req_profile_responses_crs_strips_temperature() {
     };
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
-    assert_eq!(result.applied_profile, Some("responses:crs".to_string()));
+    assert_eq!(
+        result.applied_profile,
+        Some("responses:temperature-unsupported".to_string())
+    );
     assert!(result.payload.get("temperature").is_none());
 }
 

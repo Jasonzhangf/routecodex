@@ -171,8 +171,8 @@ pub(crate) fn apply_responses_instructions_to_input(root: &mut Map<String, Value
     input_array.insert(0, Value::Object(message));
 }
 
-// feature_id: responses.crs_request_compat
-pub(crate) fn apply_responses_crs_request_compat(root: &mut Map<String, Value>) {
+// feature_id: responses.temperature_unsupported_compat
+pub(crate) fn apply_responses_temperature_unsupported_compat(root: &mut Map<String, Value>) {
     normalize_responses_function_tools(root);
     root.remove("temperature");
 }

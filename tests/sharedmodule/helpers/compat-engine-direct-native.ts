@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 
 // Native evidence anchors: run_req_outbound_stage3_compat_json,
 // normalize_responses_function_tools, normalize_responses_tool_parameters,
-// apply_responses_instructions_to_input, apply_responses_crs_request_compat.
+// apply_responses_instructions_to_input, apply_responses_temperature_unsupported_compat.
 // feature_id: responses.request_compat_normalization
 // canonical_builders: run_req_outbound_stage3_compat_json
 
