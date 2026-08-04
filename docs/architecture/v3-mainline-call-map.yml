@@ -1110,7 +1110,7 @@ chains:
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: apply_outbound_projection_transforms
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
-    callee_symbol: reject_openai_chat_unmapped_reasoning_summary_policy
+    callee_symbol: project_openai_chat_reasoning_summary_policy
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
     status: anchored
     binding_kind: adjacent_outbound_codec_helper

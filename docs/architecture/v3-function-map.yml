@@ -2009,7 +2009,7 @@ features:
       - project_openai_client_metadata_to_metadata
       - unsupported_client_metadata_paths
       - validate_openai_metadata
-      - reject_openai_chat_unmapped_reasoning_summary_policy
+      - project_openai_chat_reasoning_summary_policy
       - project_openai_chat_provider_tools
       - build_provider_req_compat_06_from_v3_hub_req_outbound_07
       - execute_v3_responses_relay_runtime_inner
