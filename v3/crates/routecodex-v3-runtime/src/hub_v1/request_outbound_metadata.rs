@@ -76,26 +76,64 @@ pub(super) fn validate_openai_metadata(
     Ok(())
 }
 
-pub(super) fn reject_openai_chat_unmapped_reasoning_summary_policy(
+pub(super) fn project_openai_chat_reasoning_summary_policy(
     projected: &mut Value,
 ) -> Result<(), String> {
-    let Some(summary) = projected
-        .as_object()
-        .and_then(|row| row.get("reasoning_summary_policy"))
-    else {
+    let Some(row) = projected.as_object_mut() else {
         return Ok(());
     };
-    if !summary
-        .as_str()
-        .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed"))
-    {
-        return Err(
-            "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_summary_policy"
+    let Some(summary) = row.remove("reasoning_summary_policy") else {
+        return Ok(());
+    };
+    let summary_effort = match summary.as_str() {
+        Some("auto") => "medium",
+        Some("concise") => "low",
+        Some("detailed") => "high",
+        _ => {
+            return Err(
+                "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_summary_policy"
+                    .to_string(),
+            )
+        }
+    };
+    let selected = match row.get("reasoning_effort") {
+        None => summary_effort,
+        Some(Value::String(value)) => {
+            let explicit = value.trim().to_ascii_lowercase();
+            if reasoning_effort_rank(explicit.as_str()).is_none() {
+                return Err(
+                    "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_effort"
+                        .to_string(),
+                );
+            }
+            if reasoning_effort_rank(explicit.as_str()) >= reasoning_effort_rank(summary_effort) {
+                row.insert(
+                    "reasoning_effort".to_string(),
+                    Value::String(explicit),
+                );
+                return Ok(());
+            }
+            summary_effort
+        }
+        Some(_) => return Err(
+            "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_effort"
                 .to_string(),
-        );
+        ),
+    };
+    row.insert(
+        "reasoning_effort".to_string(),
+        Value::String(selected.to_string()),
+    );
+    Ok(())
+}
+
+fn reasoning_effort_rank(value: &str) -> Option<u8> {
+    match value {
+        "none" | "minimal" => Some(0),
+        "low" => Some(1),
+        "medium" => Some(2),
+        "high" => Some(3),
+        "xhigh" | "max" => Some(4),
+        _ => None,
     }
-    Err(
-        "UnmappedOutboundFields target_protocol=openai_chat paths=$.request.reasoning_summary_policy"
-            .to_string(),
-    )
 }

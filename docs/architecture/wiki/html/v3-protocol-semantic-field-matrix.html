@@ -1583,10 +1583,10 @@
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
       <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort.</div>
-      <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a registered target-local request policy consumer; otherwise the field remains unmapped before provider send.</div></details>
+      <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content. OpenAI Chat uses the registered static effort compatibility mapping; other compatible outbound mappings require a registered target-local request policy consumer.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat and Gemini have no equivalent request policy and must reject the semantic path. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection; Gemini has no equivalent request policy and must reject. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>
@@ -3954,7 +3954,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy; OpenAI Chat and Gemini reject because no equivalent request policy is declared; Anthropic uses the registered static full-native-thinking compatibility projection with no provider-wire field.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy; OpenAI Chat uses the registered static effort compatibility projection; Gemini rejects; Anthropic uses the registered static full-native-thinking compatibility projection with no provider-wire field.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_context_policy</code><br><span class="muted">added Chat extension field</span></td>

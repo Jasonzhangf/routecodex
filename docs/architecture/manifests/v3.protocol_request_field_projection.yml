@@ -131,7 +131,7 @@ semantic_registry:
     alias_conflict_policy: reject
     projections:
       responses: reasoning.summary
-      openai_chat: unmapped
+      openai_chat: compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher
       anthropic: static_compatible_full_native_thinking_summary
       gemini: unmapped
   - semantic_id: request.reasoning_context_policy

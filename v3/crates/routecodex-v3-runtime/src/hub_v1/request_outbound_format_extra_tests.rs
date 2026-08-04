@@ -552,7 +552,7 @@ fn openai_chat_wire_rejects_raw_responses_text_json_schema_shape() {
 }
 
 #[test]
-fn openai_chat_wire_rejects_unmapped_reasoning_summary_policy() {
+fn openai_chat_wire_projects_reasoning_summary_policy_without_wire_loss() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
@@ -560,15 +560,31 @@ fn openai_chat_wire_rejects_unmapped_reasoning_summary_policy() {
         "reasoning_summary_policy": "detailed"
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("OpenAI Chat has no equivalent reasoning summary policy");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("summary policy must use the registered compatible effort projection");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("reasoning_summary_policy"), "{error}");
+    assert_eq!(request["reasoning_effort"], "high");
+    assert!(request.get("reasoning_summary_policy").is_none());
 }
 
 #[test]
-fn openai_chat_wire_rejects_extension_reasoning_summary_policy() {
+fn openai_chat_wire_normalizes_explicit_effort_when_it_wins_summary_merge() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_effort": " XHIGH ",
+        "reasoning_summary_policy": "detailed"
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("accepted explicit effort must use the canonical wire token");
+
+    assert_eq!(request["reasoning_effort"], "xhigh");
+    assert!(request.get("reasoning_summary_policy").is_none());
+}
+
+#[test]
+fn openai_chat_wire_projects_extension_reasoning_summary_policy() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
@@ -579,14 +595,11 @@ fn openai_chat_wire_rejects_extension_reasoning_summary_policy() {
         }
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("Responses summary policy extension must not disappear on Chat wire");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Responses summary extension must project to Chat reasoning effort");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(
-        error.contains("$.request.reasoning_summary_policy"),
-        "{error}"
-    );
+    assert_eq!(request["reasoning_effort"], "high");
+    assert!(request.get("reasoning_summary_policy").is_none());
 }
 
 #[test]

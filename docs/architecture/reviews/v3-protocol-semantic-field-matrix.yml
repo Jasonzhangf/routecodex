@@ -1638,8 +1638,8 @@ chat_semantic_translation_groups:
     standard_semantic_meaning: Request policy asking a compatible target to produce reasoning summaries; not the summary
       text itself and not reasoning effort.
     chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning
-      content or native reasoning_effort. Compatible outbound mappings require a registered target-local request
-      policy consumer; otherwise the field remains unmapped before provider send.
+      content. OpenAI Chat uses the registered static effort compatibility mapping; other compatible outbound mappings
+      require a registered target-local request policy consumer.
     protocol_mappings:
       responses:
         request_fields:
@@ -1647,6 +1647,11 @@ chat_semantic_translation_groups:
           - request.reasoning.generate_summary
         response_fields: []
         transform: Preserve as request summary policy.
+      openai_chat:
+        request_fields:
+          - request.reasoning_effort
+        response_fields: []
+        transform: Static compatible projection auto/concise/detailed to medium/low/high; merge with explicit effort by the higher registered level.
       anthropic:
         request_fields: []
         response_fields: []
@@ -1660,8 +1665,8 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_summary_policy
     current_impl: partial
-    gap: Responses round-trips the policy. OpenAI Chat and Gemini have no equivalent request policy and must reject
-      the semantic path. Anthropic consumes valid values through the registered static compatibility projection with no
+    gap: Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection;
+      Gemini has no equivalent request policy and must reject. Anthropic consumes valid values through the registered static compatibility projection with no
       provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response
       reasoning field does not authorize reconstructing the source request policy.
   - group_id: reasoning.request_context_policy
@@ -5655,8 +5660,8 @@ extended_openai_chat_semantic_superset:
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: partial
-      gap: Responses round-trips the policy; OpenAI Chat and Gemini reject because no equivalent request policy is
-        declared; Anthropic uses the registered static full-native-thinking compatibility projection with no provider-wire field.
+      gap: Responses round-trips the policy; OpenAI Chat uses the registered static effort compatibility projection;
+        Gemini rejects; Anthropic uses the registered static full-native-thinking compatibility projection with no provider-wire field.
       equivalent_fields: &a1
         responses:
           - request.reasoning.summary
@@ -9107,8 +9112,7 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: partial
     source_fields: *a1
-    projection_rule: Responses source-roundtrip; OpenAI Chat and Gemini must report this semantic path as unmapped
-      before provider send; Anthropic uses the registered static full-native-thinking compatibility projection and emits
+    projection_rule: Responses source-roundtrip; OpenAI Chat statically projects auto/concise/detailed to reasoning_effort medium/low/high and merges the higher explicit effort; Gemini must report this semantic path as unmapped before provider send; Anthropic uses the registered static full-native-thinking compatibility projection and emits
       no provider-wire field.
   - field: request.reasoning_context_policy
     semantic_id: request.reasoning_context_policy

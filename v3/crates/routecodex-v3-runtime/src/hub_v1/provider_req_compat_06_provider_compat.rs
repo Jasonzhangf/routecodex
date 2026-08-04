@@ -55,6 +55,17 @@ fn apply_v3_provider_req_compat(
     profile: &V3ProviderCompatProfileId,
 ) -> Result<Value, V3ProviderCompatError> {
     let selected = input.selected_target();
+    let reasoning_effort_explicit = input
+        .provider_semantic_payload()
+        .get("reasoning_effort")
+        .or_else(|| {
+            input
+                .provider_semantic_payload()
+                .get("reasoning")
+                .and_then(Value::as_object)
+                .and_then(|reasoning| reasoning.get("effort"))
+        })
+        .is_some();
     let provider_key = format!(
         "{}:{}:{}",
         selected.provider_id, selected.auth_alias, selected.model_id
@@ -70,6 +81,7 @@ fn apply_v3_provider_req_compat(
         adapter_context: AdapterContext {
             compatibility_profile: profile.as_optional_string(),
             provider_protocol: Some(provider_protocol_compat_id(input.provider_protocol)),
+            reasoning_effort_explicit: Some(reasoning_effort_explicit),
             model_id: Some(selected.model_id.clone()),
             original_model_id: Some(selected.wire_model.clone()),
             provider_id: Some(selected.provider_id.clone()),
@@ -499,6 +511,66 @@ mod tests {
                 .is_none(),
             "Anthropic wire must not relabel text.verbosity as output_config.effort"
         );
+    }
+
+    #[test]
+    fn deepseek_max_profile_uses_max_when_only_summary_projects_an_effort() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"summary": "auto"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.compatibility_profile =
+            Some("chat:deepseek-max".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("summary-derived effort must preserve the DeepSeek default max");
+
+        assert_eq!(req_compat.provider_semantic_payload()["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn deepseek_max_profile_maps_explicit_xhigh_to_max() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "xhigh", "summary": "detailed"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.compatibility_profile =
+            Some("chat:deepseek-max".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("explicit xhigh must use the registered DeepSeek max projection");
+
+        assert_eq!(req_compat.provider_semantic_payload()["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn deepseek_max_profile_merges_explicit_medium_with_detailed_summary() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "medium", "summary": "detailed"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.compatibility_profile =
+            Some("chat:deepseek-max".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("explicit effort and summary must use the registered higher-level merge");
+
+        assert_eq!(req_compat.provider_semantic_payload()["reasoning_effort"], "high");
     }
 
     #[test]

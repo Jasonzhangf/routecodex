@@ -36,6 +36,8 @@ pub struct AdapterContext {
     #[serde(default)]
     pub anthropic_thinking: Option<String>,
     #[serde(default)]
+    pub reasoning_effort_explicit: Option<bool>,
+    #[serde(default)]
     pub estimated_input_tokens: Option<f64>,
     #[serde(default)]
     pub model_id: Option<String>,
@@ -159,6 +161,20 @@ pub fn run_req_outbound_stage3_compat(
         if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat") {
             return Ok(CompatResult {
                 payload: apply_glm_request_compat(payload),
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
+        return Ok(build_compat_result(payload, None));
+    }
+
+    if is_deepseek_max_profile(profile_id) {
+        if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat") {
+            return Ok(CompatResult {
+                payload: apply_deepseek_max_request_compat(
+                    payload,
+                    adapter_context.reasoning_effort_explicit,
+                )?,
                 applied_profile: Some(profile_id.to_string()),
                 native_applied: true,
             });
@@ -332,6 +348,10 @@ fn is_glm_profile(profile: &str) -> bool {
     profile_matches(profile, "chat:glm")
 }
 
+fn is_deepseek_max_profile(profile: &str) -> bool {
+    profile_matches(profile, "chat:deepseek-max")
+}
+
 fn is_cc_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:cc")
 }
@@ -346,6 +366,48 @@ fn provider_protocol_matches(protocol: Option<&String>, expected: &str) -> bool 
         Some(value) => value.trim().eq_ignore_ascii_case(expected),
         None => false,
     }
+}
+
+fn apply_deepseek_max_request_compat(
+    payload: Value,
+    reasoning_effort_explicit: Option<bool>,
+) -> Result<Value, String> {
+    let mut root = payload.as_object().cloned().ok_or_else(|| {
+        "MalformedReasoningEffort profile=chat:deepseek-max reason=request_object_required"
+            .to_string()
+    })?;
+    let projected = match (reasoning_effort_explicit, root.get("reasoning_effort")) {
+        (Some(false), _) => "max",
+        (_, None) => "max",
+        (_, Some(Value::String(value))) => match value.trim().to_ascii_lowercase().as_str() {
+            "none" | "minimal" | "low" => "low",
+            "medium" => "medium",
+            "high" => "high",
+            "xhigh" | "max" => "max",
+            value if value.is_empty() => {
+                return Err(
+                    "MalformedReasoningEffort profile=chat:deepseek-max reason=non_empty_string_required"
+                        .to_string(),
+                )
+            }
+            value => {
+                return Err(format!(
+                    "UnsupportedReasoningEffort profile=chat:deepseek-max value={value}"
+                ))
+            }
+        },
+        (_, Some(_)) => {
+            return Err(
+                "MalformedReasoningEffort profile=chat:deepseek-max reason=string_required"
+                    .to_string(),
+            )
+        }
+    };
+    root.insert(
+        "reasoning_effort".to_string(),
+        Value::String(projected.to_string()),
+    );
+    Ok(Value::Object(root))
 }
 
 fn normalize_responses_tool_parameters(raw: Option<&Value>) -> Value {
@@ -1631,6 +1693,105 @@ fn apply_glm_response_compat(payload: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn deepseek_max_input(
+        payload: Value,
+        provider_protocol: &str,
+        reasoning_effort_explicit: Option<bool>,
+    ) -> ReqOutboundCompatInput {
+        ReqOutboundCompatInput {
+            payload,
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("chat:deepseek-max".to_string()),
+                provider_protocol: Some(provider_protocol.to_string()),
+                reasoning_effort_explicit,
+                ..Default::default()
+            },
+            explicit_profile: None,
+        }
+    }
+
+    #[test]
+    fn deepseek_max_request_profile_defaults_missing_effort_to_max() {
+        let result = run_req_outbound_stage3_compat(deepseek_max_input(
+            json!({"model":"deepseek-v4-flash","messages":[]}),
+            "openai-chat",
+            Some(false),
+        ))
+        .expect("registered DeepSeek profile must project its default effort");
+
+        assert_eq!(result.applied_profile.as_deref(), Some("chat:deepseek-max"));
+        assert_eq!(result.payload["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn deepseek_max_request_profile_maps_all_registered_effort_levels() {
+        for (source, expected) in [
+            ("none", "low"),
+            ("minimal", "low"),
+            ("low", "low"),
+            ("medium", "medium"),
+            ("high", "high"),
+            ("xhigh", "max"),
+            ("max", "max"),
+        ] {
+            let result = run_req_outbound_stage3_compat(deepseek_max_input(
+                json!({
+                    "model":"deepseek-v4-flash",
+                    "messages":[],
+                    "reasoning_effort":source
+                }),
+                "openai-chat",
+                Some(true),
+            ))
+            .expect("registered effort must map statically");
+
+            assert_eq!(result.payload["reasoning_effort"], expected, "{source}");
+        }
+    }
+
+    #[test]
+    fn deepseek_max_request_profile_rejects_unknown_or_malformed_effort() {
+        for value in [json!("turbo"), Value::Null, json!(""), json!(7), json!({})] {
+            let error = run_req_outbound_stage3_compat(deepseek_max_input(
+                json!({
+                    "model":"deepseek-v4-flash",
+                    "messages":[],
+                    "reasoning_effort":value
+                }),
+                "openai-chat",
+                Some(true),
+            ))
+            .expect_err("unknown or malformed effort must not become the default");
+
+            assert!(error.contains("ReasoningEffort"), "{error}");
+        }
+
+        let untouched = run_req_outbound_stage3_compat(deepseek_max_input(
+            json!({"model":"deepseek-v4-flash","messages":[]}),
+            "anthropic-messages",
+            Some(false),
+        ))
+        .expect("profile must not mutate a different provider protocol");
+        assert!(untouched.payload.get("reasoning_effort").is_none());
+        assert!(untouched.applied_profile.is_none());
+    }
+
+    #[test]
+    fn deepseek_max_request_profile_keeps_default_max_for_summary_derived_effort() {
+        let result = run_req_outbound_stage3_compat(deepseek_max_input(
+            json!({
+                "model":"deepseek-v4-flash",
+                "messages":[],
+                "reasoning_effort":"medium"
+            }),
+            "openai-chat",
+            Some(false),
+        ))
+        .expect("summary-derived effort must not replace the profile default");
+
+        assert_eq!(result.payload["reasoning_effort"], "max");
+    }
 
     #[test]
     fn minimax_response_profile_harvests_responses_function_calls_xml_without_text_leak() {

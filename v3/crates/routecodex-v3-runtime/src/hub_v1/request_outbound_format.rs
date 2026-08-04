@@ -5,8 +5,8 @@ use super::request_outbound_builtin_tool_projection::{
     normalize_json_schema_redaction_placeholders, project_openai_chat_provider_tools,
 };
 use super::request_outbound_metadata::{
-    project_openai_client_metadata_to_metadata,
-    reject_openai_chat_unmapped_reasoning_summary_policy, validate_openai_metadata,
+    project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
+    validate_openai_metadata,
 };
 use super::request_outbound_tool_id::compact_tool_id;
 use std::collections::BTreeSet;
@@ -345,7 +345,7 @@ fn apply_outbound_projection_transforms(
             project_responses_request_chat_extension_to_openai_chat(projected)?;
             project_openai_client_metadata_to_metadata(projected, "openai_chat")?;
             validate_openai_metadata(projected, "openai_chat")?;
-            reject_openai_chat_unmapped_reasoning_summary_policy(projected)?;
+            project_openai_chat_reasoning_summary_policy(projected)?;
         }
         V3OutboundTargetProtocol::Anthropic => {}
         V3OutboundTargetProtocol::Gemini => {
@@ -412,6 +412,9 @@ fn project_responses_request_chat_extension_to_openai_chat(
         if let Some(value) = extension.remove(key) {
             insert_unless_matching(row, key, value, "openai_chat")?;
         }
+    }
+    if let Some(value) = extension.remove("reasoning_summary_policy") {
+        insert_unless_matching(row, "reasoning_summary_policy", value, "openai_chat")?;
     }
     if let Some(text) = extension.remove("text") {
         let mut text = text.as_object().cloned().ok_or_else(|| {

@@ -169,7 +169,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `prompt_cache_key` | client cache-key payload extension | preserve exact string; not routing/control state | exact | exact | valid local cache hint is consumed before wire; malformed fails; never rebuild `cache_control` |
 | `prompt_cache_options.*` / `prompt_cache_retention` | cache-options extension | preserve independently from `prompt_cache_key`; no provider-health/cache mutation | exact Responses only | target-specific exact field or unmapped | unmapped |
 | `reasoning.effort` | `request.reasoning_effort` | validate enum; keep separate from budget/summary/mode | exact | exact `reasoning_effort` | conditional exact `output_config.effort` intersection only |
-| `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | unmapped | registered many-to-one static compatibility preserves complete Anthropic native thinking as Responses reasoning summary for all valid policy values |
+| `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | registered static compatibility: `auto/concise/detailed -> medium/low/high`, merged with explicit effort by the higher level | registered many-to-one static compatibility preserves complete Anthropic native thinking as Responses reasoning summary for all valid policy values |
 | `reasoning.context` | `request.reasoning_context_policy` | validate scope/value; no history reconstruction outside Chat Process | exact Responses | unmapped | unmapped |
 | `reasoning.mode` | `request.reasoning_mode` | preserve mode independently from effort/context | exact Responses | unmapped | unmapped |
 | `safety_identifier` | safety identifier payload extension | validate string; never map to `user` or metadata | exact | exact `safety_identifier` if target schema supports | unmapped |
@@ -262,8 +262,10 @@ These are separate semantics and are not mutually reconstructible:
 
 - `reasoning.summary` and deprecated inbound alias `reasoning.generate_summary`
   decode to `request.reasoning_summary_policy`. If both are present they must be
-  equal; conflicting values fail at inbound. Outbound emits only
-  `reasoning.summary`.
+  equal; conflicting values fail at inbound. Responses outbound emits
+  `reasoning.summary`; OpenAI Chat uses the registered static projection
+  `auto/concise/detailed -> reasoning_effort medium/low/high` and retains the
+  higher level when an explicit effort is also present.
 - `reasoning.context` round-trips through
   `request.reasoning_context_policy` only to Responses.
 - `reasoning.mode` round-trips through `request.reasoning_mode` only to
@@ -448,6 +450,18 @@ boundaries have no exact target field; they must not flatten the extension into
 plain instructions and silently discard those semantics.
 
 ## Error contract
+
+### Failure evidence contract
+
+When a relay request terminates with an error, the server-owned diagnostic side
+channel must retain the original client request and every provider transport
+attempt (request, response, or transport error) under the request-scoped
+`~/.rcc/codex-samples/<entry-protocol>/ports/<port>/<request-id>/` directory.
+The evidence is captured at the raw client and provider transport boundaries,
+before normalization or response decoding. Intermediate Chat Process and
+projection payloads are not required to be persisted. Evidence artifacts never
+enter MetadataCenter, provider wire payloads, or client response bodies, and
+must not be used to reconstruct live business state.
 
 The outbound owner reports the canonical semantic paths, not discarded source
 wire aliases:

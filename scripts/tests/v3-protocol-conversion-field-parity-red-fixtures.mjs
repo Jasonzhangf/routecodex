@@ -29,6 +29,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
@@ -70,14 +71,6 @@ const cases = [
     diagnostic: /native_openai_chat_custom_tool_tests/u,
   },
   {
-    name: 'Target projection failure no-switch regression test is removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    from: 'target_protocol_unmapped_field_fails_without_provider_switch_or_transport',
-    to: 'target_protocol_unmapped_field_switch_regression_removed',
-    diagnostic: /projection_failure_no_provider_switch/u,
-  },
-
-  {
     name: 'Responses outbound drops its protocol client_metadata field',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
     from: '        "reasoning",\n        "metadata",\n        "client_metadata",\n        "safety_identifier",',
@@ -113,6 +106,13 @@ const cases = [
     from: '  - field: request.reasoning_summary_policy\n    semantic_id: request.reasoning_summary_policy\n',
     to: '  - field: request.reasoning_summary_policy_removed\n    semantic_id: request.reasoning_summary_policy_removed\n',
     diagnostic: /canonical_extension_registry|request\.reasoning_summary_policy/u,
+  },
+  {
+    name: 'OpenAI Chat reasoning summary compatibility contract regresses to unmapped',
+    file: 'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
+    from: 'openai_chat: compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher',
+    to: 'openai_chat: unmapped',
+    diagnostic: /openai_chat_reasoning_summary_compatible_projection|compatible_reasoning_effort/u,
   },
   {
     name: 'Canonical extension uses provider-shaped hierarchy',
@@ -597,7 +597,7 @@ const cases = [
   },
   {
     name: 'Anthropic Responses metadata projection context owner removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
     from: 'pub struct V3AnthropicResponsesProjectionContext',
     to: 'pub struct RemovedAnthropicResponsesProjectionContext',
     diagnostic: /responses_metadata_projection_context|V3AnthropicResponsesProjectionContext/u,
