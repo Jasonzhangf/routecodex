@@ -455,6 +455,18 @@ fn responses_reasoning_summary_policy_enables_native_thinking_without_effort() {
 }
 
 #[test]
+fn responses_invalid_reasoning_summary_policy_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "reasoning_summary_policy":true,
+        "messages":[{"role":"user","content":"reject malformed policy"}]
+    }))
+    .expect_err("invalid summary policy must fail before provider wire");
+
+    assert!(error.to_string().contains("reasoning_summary_policy"), "{error}");
+}
+
+#[test]
 fn anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape() {
     let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
         "reasoning_summary_policy":"concise",

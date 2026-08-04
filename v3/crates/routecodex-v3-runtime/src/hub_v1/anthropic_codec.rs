@@ -590,6 +590,16 @@ fn responses_reasoning_fields_as_anthropic_thinking(
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
     let mode = object.get("reasoning_thinking_mode");
     let summary_policy = object.get("reasoning_summary_policy");
+    if let Some(summary_policy) = summary_policy {
+        if !summary_policy
+            .as_str()
+            .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed"))
+        {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_summary_policy",
+            });
+        }
+    }
     let explicit_budget = object
         .get("reasoning_budget_tokens")
         .map(|value| {
