@@ -47,22 +47,4 @@ apikey = "secret-key"
     expect(readConfigApiKey(fsImpl as any, configPath)).toBe('secret-key');
   });
 
-  it('keeps legacy JSON parsing working', () => {
-    const configPath = '/tmp/config.json';
-    const fsImpl = createMemFs({
-      [configPath]: JSON.stringify({
-        httpserver: {
-          port: 5555,
-          host: '0.0.0.0',
-          apikey: 'legacy-key'
-        }
-      })
-    });
-
-    expect(tryReadConfigHostPort(fsImpl as any, configPath)).toEqual({
-      host: '0.0.0.0',
-      port: 5555
-    });
-    expect(readConfigApiKey(fsImpl as any, configPath)).toBe('legacy-key');
-  });
 });

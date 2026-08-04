@@ -117,32 +117,6 @@ flowchart LR
 | v3-v2-config-01 | `V3Config01FileSource -> V3Config02AuthoringParsed` | anchored | `parse_authoring_for_store -> compile_v2_config_02_authoring_from_file` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
 | v3-v2-config-02 | `V3Config02AuthoringParsed -> V3Config05ManifestPublished` | anchored | `load_snapshot_with_source_identity -> validate_v3_config_03_schema_from_v3_config_02` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
 
-## webui.config_editor_surface.mainline
-
-WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.
-
-Entry contract: `WebuiConfigEditor01UserIntent` via `docs/loops/runtime-lifecycle/gate-matrix.md`
-
-```mermaid
-flowchart LR
-  WebuiConfigEditor03SharedConfigMutation["WebuiConfigEditor03SharedConfigMutation"]
-  WebuiConfigEditor02AdminApiRequest["WebuiConfigEditor02AdminApiRequest"]
-  WebuiConfigEditor01UserIntent["WebuiConfigEditor01UserIntent"]
-  WebuiConfigEditor01UserIntent -->|wce-01| WebuiConfigEditor02AdminApiRequest
-  WebuiConfigEditor02AdminApiRequest -->|wce-02| WebuiConfigEditor03SharedConfigMutation
-  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
-  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
-  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-  class WebuiConfigEditor01UserIntent anchored;
-  class WebuiConfigEditor02AdminApiRequest anchored;
-  class WebuiConfigEditor03SharedConfigMutation anchored;
-```
-
-| step | transition | status | caller -> callee | split binding | owner |
-| --- | --- | --- | --- | --- | --- |
-| wce-01 | `WebuiConfigEditor01UserIntent -> WebuiConfigEditor02AdminApiRequest` | anchored | `ProviderPage -> apiFetch` |  | `webui.config_editor_surface`<br/>WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration |
-| wce-02 | `WebuiConfigEditor02AdminApiRequest -> WebuiConfigEditor03SharedConfigMutation` | anchored | `registerProviderRoutes -> writeUserConfigFile` |  | `webui.config_editor_surface`<br/>WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration |
-
 ## servertool.hook_skeleton.mainline
 
 Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.

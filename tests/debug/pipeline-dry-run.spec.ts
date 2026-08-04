@@ -95,13 +95,13 @@ describe('pipeline dry-run control and provider request cut point', () => {
       { model: 'gpt-test' } as any,
       {
         requestId: 'req_provider_request_dry_run',
-        providerType: 'mock',
-        providerId: 'mock-provider',
-        providerKey: 'mock.key1.gpt-test',
+        providerType: 'openai',
+        providerId: 'test-provider',
+        providerKey: 'test.key1.gpt-test',
         providerProtocol: 'openai-chat',
         startTime: Date.now(),
         runtimeMetadata: {
-          runtimeKey: 'mock.key1.gpt-test',
+          runtimeKey: 'test.key1.gpt-test',
           providerProtocol: 'openai-chat',
           metadata
         }
@@ -120,9 +120,9 @@ describe('pipeline dry-run control and provider request cut point', () => {
       dryRun: true,
       entryPort: 5555,
       provider: {
-        providerKey: 'mock.key1.gpt-test',
+        providerKey: 'test.key1.gpt-test',
         providerProtocol: 'openai-chat',
-        runtimeKey: 'mock.key1.gpt-test'
+        runtimeKey: 'test.key1.gpt-test'
       },
       providerRequest: {
         method: 'POST',

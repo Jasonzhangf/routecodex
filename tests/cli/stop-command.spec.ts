@@ -120,7 +120,7 @@ describe('cli stop command', () => {
       'exit:1'
     );
     expect(errors.join('\n')).toContain('Cannot determine server port');
-    expect(info.join('\n')).toContain('rcc config init');
+    expect(info.join('\n')).toContain('Please create a configuration file first');
   });
 
   it('prints no server when nothing listens', async () => {

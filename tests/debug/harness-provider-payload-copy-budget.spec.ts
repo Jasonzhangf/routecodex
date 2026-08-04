@@ -14,24 +14,24 @@ import {
 
 const runtime = {
   runtimeKey: 'debug-harness-copy-budget',
-  providerId: 'mock-provider',
-  providerKey: 'mock-provider:debug',
-  providerType: 'mock',
+  providerId: 'test-provider',
+  providerKey: 'test-provider:debug',
+  providerType: 'openai',
   providerProtocol: 'openai',
   endpoint: 'https://example.test/v1/chat/completions',
   auth: { type: 'apikey', value: 'test-only' },
-  defaultModel: 'mock-model'
+  defaultModel: 'test-model'
 } satisfies ProviderHarnessRuntime;
 
 const metadata = {
   requestId: 'req-debug-harness-copy-budget',
-  providerId: 'mock-provider',
-  providerKey: 'mock-provider:debug',
-  providerType: 'mock',
+  providerId: 'test-provider',
+  providerKey: 'test-provider:debug',
+  providerType: 'openai',
   providerProtocol: 'openai',
   routeName: 'default',
   target: {
-    providerKey: 'mock-provider:debug'
+    providerKey: 'test-provider:debug'
   }
 } as ProviderHarnessMetadata;
 
@@ -43,7 +43,7 @@ describe('debug.harness_replay_payload_copy_budget', () => {
   it('gives provider preprocess one independent execution graph without mutating captured replay input', async () => {
     const nested = { value: 'captured' };
     const request: Record<string, unknown> = {
-      model: 'mock-model',
+      model: 'test-model',
       nested,
       bigint: 42n
     };

@@ -232,29 +232,6 @@
         <tr><td>v3-v2-config-02</td><td><code>V3Config02AuthoringParsed -&gt; V3Config05ManifestPublished</code></td><td>anchored</td><td><code>load_snapshot_with_source_identity -&gt; validate_v3_config_03_schema_from_v3_config_02</code></td><td></td><td><code>v3.v2_config_toml_compat_5555</code>&lt;br/&gt;V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract</td></tr>
         </tbody>
         </table>
-        <h2>webui.config_editor_surface.mainline</h2>
-        <p>WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.</p>
-        <p>Entry contract: <code>WebuiConfigEditor01UserIntent</code> via <code>docs/loops/runtime-lifecycle/gate-matrix.md</code></p>
-        <pre class="mermaid">flowchart LR
-          WebuiConfigEditor03SharedConfigMutation[&quot;WebuiConfigEditor03SharedConfigMutation&quot;]
-          WebuiConfigEditor02AdminApiRequest[&quot;WebuiConfigEditor02AdminApiRequest&quot;]
-          WebuiConfigEditor01UserIntent[&quot;WebuiConfigEditor01UserIntent&quot;]
-          WebuiConfigEditor01UserIntent --&gt;|wce-01| WebuiConfigEditor02AdminApiRequest
-          WebuiConfigEditor02AdminApiRequest --&gt;|wce-02| WebuiConfigEditor03SharedConfigMutation
-          classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
-          classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
-          classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-          class WebuiConfigEditor01UserIntent anchored;
-          class WebuiConfigEditor02AdminApiRequest anchored;
-          class WebuiConfigEditor03SharedConfigMutation anchored;</pre>
-        <table>
-        <thead><tr><th>step</th><th>transition</th><th>status</th><th>caller -&gt; callee</th><th>split binding</th><th>owner</th></tr></thead>
-        <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>wce-01</td><td><code>WebuiConfigEditor01UserIntent -&gt; WebuiConfigEditor02AdminApiRequest</code></td><td>anchored</td><td><code>ProviderPage -&gt; apiFetch</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration</td></tr>
-        <tr><td>wce-02</td><td><code>WebuiConfigEditor02AdminApiRequest -&gt; WebuiConfigEditor03SharedConfigMutation</code></td><td>anchored</td><td><code>registerProviderRoutes -&gt; writeUserConfigFile</code></td><td></td><td><code>webui.config_editor_surface</code>&lt;br/&gt;WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration</td></tr>
-        </tbody>
-        </table>
         <h2>servertool.hook_skeleton.mainline</h2>
         <p>Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.</p>
         <p>Entry contract: <code>HubRespChatProcess03Governed</code> via <code>docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md</code></p>

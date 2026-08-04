@@ -389,9 +389,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (!fsImpl.existsSync(configPath)) {
           spinner.fail(`Configuration file not found: ${configPath}`);
           ctx.logger.error('Please create a RouteCodex user config first (e.g., ~/.rcc/config.toml).');
-          ctx.logger.error('Or initialize via CLI:');
-          ctx.logger.error('  rcc init');
-          ctx.logger.error('  rcc config init');
           ctx.logger.error('Or specify a custom configuration file:');
           ctx.logger.error('  rcc start --config ./config.toml');
           ctx.exit(1);

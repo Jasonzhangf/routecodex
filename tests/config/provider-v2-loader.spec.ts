@@ -76,7 +76,7 @@ describe('ProviderConfig v2 loader', () => {
       virtualrouter: {
         providers: {
           foo: {
-            type: 'mock-provider',
+            type: 'openai',
             baseURL: 'https://example.com',
             models: {
               'mock-1': { maxTokens: 1024 }
@@ -105,7 +105,7 @@ describe('ProviderConfig v2 loader', () => {
       version: '2.0.0',
       providerId: 'bar',
       provider: {
-        type: 'mock-provider',
+        type: 'openai',
         baseURL: 'https://bar.example.com'
       }
     };
@@ -167,7 +167,7 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
       version: '2.0.0',
       providerId: 'demo',
       provider: {
-        type: 'mock-provider',
+        type: 'openai',
         baseURL: 'https://demo.example.com'
       }
     };
@@ -192,7 +192,7 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
 
     const input = await compileVirtualRouterInput(userConfig, root);
     expect(Object.keys(input.providers)).toEqual(['demo']);
-    expect(input.providers.demo.type).toBe('mock-provider');
+    expect(input.providers.demo.type).toBe('openai');
     expect(input.routing.default).toHaveLength(1);
     expect(input.routing.default[0].targets).toEqual(['demo.mock-1']);
   });
@@ -473,7 +473,7 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
     await writeProviderToml(root, 'demo', {
       version: '2.0.0',
       providerId: 'demo',
-      provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
+      provider: { type: 'openai', baseURL: 'https://demo.example.com' }
     });
 
     const input = await compileVirtualRouterInput({
@@ -495,7 +495,7 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
     await writeProviderToml(root, 'demo', {
       version: '2.0.0',
       providerId: 'demo',
-      provider: { type: 'mock-provider', baseURL: 'https://demo.example.com' }
+      provider: { type: 'openai', baseURL: 'https://demo.example.com' }
     });
 
     const materialized = await materializeRouteCodexConfig({
@@ -519,13 +519,13 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
     expect((materialized.userConfig.virtualrouter as any).applyPatch).toEqual({ mode: 'client' });
   });
 
-  it('materializes only the primary router port routing policy group', async () => {
+  it('materializes only the primary router port route while retaining the provider registry', async () => {
     const root = await createTempDir('provider-v2-');
     for (const providerId of ['alpha', 'beta']) {
       await writeProviderToml(root, providerId, {
         version: '2.0.0',
         providerId,
-        provider: { type: 'mock-provider', baseURL: `https://${providerId}.example.com` }
+        provider: { type: 'openai', baseURL: `https://${providerId}.example.com` }
       });
     }
 
@@ -554,7 +554,7 @@ describe('Rust runtime manifest virtualRouterBootstrapInput', () => {
     ]);
     expect((materialized.userConfig.virtualrouter as any).routing.default[0]).not.toHaveProperty('id');
     expect((materialized.userConfig.virtualrouter as any).providers).toHaveProperty('alpha');
-    expect((materialized.userConfig.virtualrouter as any).providers).not.toHaveProperty('beta');
+    expect((materialized.userConfig.virtualrouter as any).providers).toHaveProperty('beta');
   });
 
   it('does not auto-synthesize capability routes when route pools are absent', async () => {

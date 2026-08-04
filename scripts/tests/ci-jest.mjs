@@ -3,7 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 // Keep CI Jest fast and deterministic:
-// - Prefer pure unit tests / mock-provider tests (no external network).
+// - Prefer pure unit tests (no external network).
 // - Expand coverage by adding more suites here (don’t run `jest --all` in CI).
 const routingInstructionTests = [
   'tests/server/runtime/request-executor.single-attempt.spec.ts',
@@ -80,7 +80,6 @@ const routingInstructionTests = [
 const cliTests = [
   'tests/cli/clean-command.spec.ts',
   'tests/cli/code-command.spec.ts',
-  'tests/cli/config-command.spec.ts',
   'tests/cli/env-command.spec.ts',
   'tests/cli/env-output.spec.ts',
   'tests/cli/examples-command.spec.ts',
@@ -93,16 +92,8 @@ const cliTests = [
   'tests/cli/stop-command.spec.ts'
 ];
 
-const webuiTests = [
-  'tests/frontend/webui-app.utils.spec.ts',
-  'tests/frontend/webui-app.render.spec.tsx',
-  'tests/frontend/webui-app.integration.spec.tsx',
-  'tests/frontend/webui-app.pages.spec.tsx',
-  'tests/frontend/webui-app.edge.spec.tsx'
-];
-
 const wantsCoverage = process.argv.includes('--coverage') || process.env.ROUTECODEX_CI_COVERAGE === '1';
-const allTests = [...routingInstructionTests, ...cliTests, ...webuiTests];
+const allTests = [...routingInstructionTests, ...cliTests];
 
 const jestBin = path.join(process.cwd(), 'node_modules', 'jest', 'bin', 'jest.js');
 

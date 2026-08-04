@@ -229,7 +229,7 @@ pub(crate) struct ForwarderRegistry {
 | **Profile** | `src/providers/profile/forwarder-types.ts` | `provider-profile-loader.ts`（识别 `forwarders` 节点） |
 | **ProviderRegistry** | — | `router-hotpath-napi/src/virtual_router_engine/routing/bootstrap.rs`（生成虚拟 entries） |
 | **Rust 引擎** | `router-hotpath-napi/src/virtual_router_engine/forwarder.rs` <br> `router-hotpath-napi/src/virtual_router_engine/forwarder_tests.rs` | `routing/selection.rs`（新增 `select_with_forwarder_resolution`）<br> `lib.rs`（NAPI 绑定） |
-| **配置** | `configsamples/forwarder-example.json` | `routecodex-config-loader`（forwarders 节点透传） |
+| **配置** | `~/.rcc/config.v3.toml` | `routecodex-v3-config` 编译 forwarder 声明为 V3 manifest |
 | **测试** | `tests/providers/forwarder-selection.test.ts` <br> `crates/router-hotpath-napi/src/virtual_router_engine/forwarder_tests.rs` | `tests/pipeline/blueprint-regression.test.ts`（回归） |
 
 **核心约束**：

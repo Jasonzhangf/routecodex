@@ -195,8 +195,6 @@ export function createStatusCommand(program: Command, ctx: StatusCommandContext)
         if (!loaded) {
           ctx.logger.error('Configuration file not found');
           ctx.logger.info('Please create a configuration file first:');
-          ctx.logger.info('  rcc init');
-          ctx.logger.info('  rcc config init');
           if (options.json) {
             ctx.log(JSON.stringify({ error: 'Configuration file not found' }, null, 2));
           }

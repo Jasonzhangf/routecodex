@@ -14,7 +14,7 @@ const cases = [
   ['deprecated vendor root', 'vendor/llmswitch-core/package.json', 'forbidden root entry'],
   ['tracked dist output', 'dist/debug/snapshot/writer.js', 'tracked generated output'],
   ['tracked reasonix state', '.reasonix/truncated-results/output.txt', 'forbidden root entry'],
-  ['tracked sample archive', 'samples/mock-provider/_archive/request.json', 'tracked deprecated sample archive'],
+  ['retired sample surface', 'samples/mock-provider/request.json', 'retired V2 sample surface must not be tracked'],
   ['active V2 architecture directory', 'docs/v2-architecture/README.md', 'active V2 directory must be archived'],
   ['active V2 consistency directory', 'scripts/v2-consistency/README.md', 'active V2 directory must be archived'],
   ['active V2 source directory', 'src/v2/README.md', 'active V2 directory must be archived'],

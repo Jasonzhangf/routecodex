@@ -30,10 +30,8 @@ describe('ProviderFactory no fallback', () => {
     expect(resolveProviderModule('responses-http-provider')).toBe('responses-http-provider');
     expect(resolveProviderModule('anthropic-http-provider')).toBe('anthropic-http-provider');
     expect(resolveProviderModule('gemini-http-provider')).toBe('gemini-http-provider');
-    expect(resolveProviderModule('deepseek-http-provider')).toBe('deepseek-http-provider');
     expect(resolveProviderModule('mimoweb')).toBe('mimoweb-provider');
     expect(resolveProviderModule('mimoweb-provider')).toBe('mimoweb-provider');
-    expect(resolveProviderModule('mock-provider')).toBe('mock-provider');
   });
 
   test('moduleType mimoweb-provider wins over generic anthropic providerType', () => {

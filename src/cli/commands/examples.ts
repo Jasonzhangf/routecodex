@@ -14,21 +14,7 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('='.repeat(40));
       ctx.log('');
 
-      ctx.log(chalk.yellow('1. Initialize Configuration:'));
-      ctx.log('  # Guided init (interactive)');
-      ctx.log('  rcc init');
-      ctx.log('');
-      ctx.log('  # Install bundled sanitized provider templates to ~/.rcc/provider');
-      ctx.log('  rcc init default');
-      ctx.log('');
-      ctx.log('  # Non-interactive init (pick providers)');
-      ctx.log('  rcc init --providers openai,tab --default-provider tab');
-      ctx.log('');
-      ctx.log('  # List built-in provider ids');
-      ctx.log('  rcc init --list-providers');
-      ctx.log('');
-
-      ctx.log(chalk.yellow('2. Start Server:'));
+      ctx.log(chalk.yellow('1. Start Server:'));
       ctx.log('  # Start with default config');
       ctx.log('  rcc start');
       ctx.log('');
@@ -36,7 +22,7 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('  rcc start --config ./config/lmstudio-config.toml');
       ctx.log('');
 
-      ctx.log(chalk.yellow('3. Launch Tooling (auto-start server):'));
+      ctx.log(chalk.yellow('2. Launch Tooling (auto-start server):'));
       ctx.log('  # Launch Claude (recommended replacement for deprecated `rcc code`)');
       ctx.log('  rcc claude -- --help');
       ctx.log('');

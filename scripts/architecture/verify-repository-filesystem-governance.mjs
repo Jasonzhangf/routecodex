@@ -53,7 +53,6 @@ function verifyRepositoryFilesystemGovernance() {
       'scripts/ci/repo-sanity.mjs',
       'scripts/architecture/verify-repository-filesystem-governance.mjs',
       'scripts/tests/repository-filesystem-governance-red-fixtures.mjs',
-      'scripts/start-verify.mjs',
       'v3/README.md',
       'v3/fixtures',
       'deprecated/v2',
@@ -100,7 +99,11 @@ function verifyRepositoryFilesystemGovernance() {
     }
   }
 
-  const tracked = lines(git(['ls-files']));
+  const pendingDeletions = new Set(lines(git(['diff', '--name-only', '--diff-filter=D'])));
+  for (const path of lines(git(['diff', '--cached', '--name-only', '--diff-filter=D']))) {
+    pendingDeletions.add(path);
+  }
+  const tracked = lines(git(['ls-files'])).filter((trackedPath) => !pendingDeletions.has(trackedPath));
   const requiredTrackedPaths = [
     'v3/fixtures/config.p2.toml',
   ];
@@ -110,7 +113,7 @@ function verifyRepositoryFilesystemGovernance() {
   for (const trackedPath of tracked) {
     if (trackedPath.startsWith('dist/')) failures.push(`tracked generated output: ${trackedPath}`);
     if (trackedPath.startsWith('.reasonix/')) failures.push(`tracked deprecated tool state: ${trackedPath}`);
-    if (trackedPath.startsWith('samples/mock-provider/_archive/')) failures.push(`tracked deprecated sample archive: ${trackedPath}`);
+    if (trackedPath === 'samples' || trackedPath.startsWith('samples/')) failures.push(`retired V2 sample surface must not be tracked: ${trackedPath}`);
     if (trackedPath.startsWith('docs/architecture/backups/')) failures.push(`tracked architecture backup: ${trackedPath}`);
     if (forbiddenActiveV2Directories.some((relativePath) => trackedPath === relativePath || trackedPath.startsWith(`${relativePath}/`))) {
       failures.push(`tracked active V2 path must be archived: ${trackedPath}`);

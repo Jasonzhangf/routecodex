@@ -1,434 +1,69 @@
 # RouteCodex V3
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+RouteCodex V3 是当前唯一主力实现。生产 CLI、配置、运行时、协议投影和生命周期均由 `v3/` Rust workspace 负责；旧 V2 authoring、WebUI、mock provider、samples 和 `rcc init/config` 已退休，不属于构建或运行入口。
 
-V3 是当前主力实现，生产 CLI 和构建产物统一为 **`rccv3`**。V3 的
-Rust workspace、独立使用入口和边界说明见 [`v3/README.md`](v3/README.md)。
+## 主入口
+
+- Rust workspace: `v3/Cargo.toml`
+- CLI: `v3/crates/routecodex-v3-cli`
+- Installed command: `rccv3`
+- Default config: `~/.rcc/config.v3.toml`
+- Architecture maps: `docs/architecture/v3-*.yml`
+- Mainline review: `docs/architecture/wiki/v3-mainline-caller-flow.md`
+
+## 构建与验证
 
 ```bash
 npm run verify:v3-architecture-ci
 npm run test:v3-workspace
 npm run install:v3
-rccv3 --help
-```
-
-根目录 Node/TypeScript 工具继续承担构建、安装、验证和必要的兼容壳；新的
-runtime、routing、protocol、provider 和 lifecycle 语义只进入 V3 owner。
-旧 V2 authoring material 已迁入 [`deprecated/v2/`](deprecated/v2/README.md)，
-不得恢复为活跃源码或默认测试入口。
-
-兼容安装面仍保留两个历史 CLI：
-
-- **`routecodex`** (dev mode) - Development build with local `llmswitch-core` symlink
-- **`rcc`** (release mode) - Production build from local source release install
-
-Both provide a **unified gateway for AI providers**, handling **routing + protocol conversion + tool call governance** across different upstream protocols.
-
-> **Note**: `routecodex` / `rcc` 只保留既有兼容和聚合运维入口；主力开发、
-> 构建和独立运行请使用 `rccv3`。
-
-## 最新更新 (2026-02-23)
-
-### 进程生命周期管理规范（重要）
-
-本项目已全面清理高危进程终止代码，严格执行**自管理进程**原则：
-
-- **禁止普杀**：代码库中已移除所有 `pkill`、`killall`、`lsof | xargs kill` 等批量终止模式
-- **仅管理已知进程**：只有通过 pid file 或注册表明确记录的进程才能被终止
-- **归属验证**：终止前必须通过 `ps` 验证进程命令归属，防止 PID 复用误杀
-- **自杀优先**：推荐进程通过信号处理自行退出，而非外部强制终止
-
-#### managed tmux 会话生命周期
-- 客户端退出即自动销毁 tmux 会话（`launcher-kernel.ts:921`）
-- SIGTERM 信号下默认销毁 managed tmux（`launcher-kernel.ts:55`）
-- 不再复用旧会话，始终新建（`launcher-kernel.ts:842`）
-
-#### Server 侧 Cleanup 策略
-- Cleanup 端点仅做状态清理，**不终止客户端进程**（`session-client-routes.ts:377`）
-- `allowManagedTermination` 已硬编码为 `false`，确保不会越界终止
-
-#### 启动脚本行为
-- `run-bg.sh` / `run-fg-gtimeout.sh` 偏向"停旧服再起"策略
-- 自动识别 RouteCodex server 进程并优雅替换
-- 非 RouteCodex listener 坚决拒绝终止（防误杀）
-
-详见 [AGENTS.md](./AGENTS.md) 第 1.1 条。
-
-## 主要功能
-
-- **多入口同时支持（同一服务端口）**
-  - OpenAI Chat：`POST /v1/chat/completions`
-  - OpenAI Responses：`POST /v1/responses`
-  - Anthropic Messages：`POST /v1/messages`
-- **多 Provider / 多协议支持**
-  - OpenAI-compatible、Anthropic、Gemini/Gemini CLI、GLM、Qwen、iFlow、LM Studio 等（按配置启用）。
-  - 部分 Provider 支持 OAuth / token file（按配置启用）。
-- **可配置路由**
-  - 将不同"流量池/路由类别"（如 `default` / `thinking` / `tools` / `search` / `longcontext` 等）映射到不同 Provider 目标列表。
-- **请求级"语法控制"**
-  - **指定 Provider/模型**：`model` 可直接写成 `provider.model`（例如 `iflow.glm-4.7`）。
-  - **路由指令**：可在用户文本中插入 `<**...**>` 指令（例如 `<**glm.glm-4.7**>`），详见 `docs/routing-instructions.md`。
-- **Passthrough（透传）**
-  - 可按 Provider 配置启用透传：只做鉴权/路由/日志，不做语义修补（适合严格 SSE 透传场景）。
-
-## 安装
-
-环境要求：Node.js `>=20 <26`、`tmux`、`cargo`（本地源码 dev/release 构建都依赖 Rust native build）。
-
-### routecodex (dev mode)
-
-```bash
-# Build shared module first
-npm --prefix sharedmodule/llmswitch-core run build
-
-# Build host (dev)
-npm run build:dev
-
-# Install globally
-npm run install:global
-
-# Verify
-routecodex --version
-```
-
-### rcc (release mode, recommended for production)
-
-```bash
-npm run install:release
-rcc --version
-```
-
-`npm run install:release` 会执行：
-
-- 隔离构建目录中的 release 构建
-- 缺失依赖时自动 `npm ci` / `npm install`
-- release snapshot 安装到 `~/.rcc/install/current`
-- `rcc restart --port 5520` + `/health` 最小 runtime smoke
-
-升级/卸载：
-
-```bash
-npm run install:release
-npm uninstall -g routecodex
-```
-
-## 使用
-
-### 1) 初始化（推荐用 `rcc`）
-
-默认配置路径：
-- macOS / Linux：`~/.rcc/config.json`
-- Windows：`%USERPROFILE%\\.rcc\\config.json`
-
-默认初始化（会把内置脱敏 quickstart 配置复制到目标路径）：
-
-```bash
-rcc init
-```
-
-若你希望直接解压“脱敏 provider 模板包”（批量写入 `~/.rcc/provider/<providerId>/config.v2.json`），使用：
-
-```bash
-rcc init default
-```
-
-按 provider 模板直接生成 v2（覆盖默认复制流程）：
-
-```bash
-rcc init --providers deepseek-web,tab,qwen --default-provider deepseek-web --camoufox --force
-```
-
-说明：
-- `--providers` 使用 init 内置 provider id（见下文鉴权表）。
-- `init default` 会把内置脱敏 provider 模板包写入 `~/.rcc/provider`，已存在文件默认跳过（`--force` 可覆盖）。
-- `--camoufox` 会显式触发 Camoufox 环境准备（即使当前 provider 不强依赖）。
-- `--force` 会先备份旧配置到 `config.json.bak*` 再重写。
-
-如果你使用 dev CLI，把 `rcc` 替换成 `routecodex` 即可。
-
-#### 1.1 推荐顺序（先 `--camoufox`，再 provider 化）
-
-推荐按这 3 步执行：
-
-1. 先跑 `rcc init --camoufox`
-2. 再用 `rcc init --config ... --force` 把默认/v1 配置转换为 provider 分文件（v2）
-3. 最后配置 key/token 并启动
-
-示例：
-
-```bash
-# Step 1: 先做 camoufox 环境检查/准备
-rcc init --camoufox
-
-# Step 2: rcc init 已自动写入默认 quickstart；这里执行 v1 -> v2 转换
-rcc init --config ~/.rcc/config.json --force
-
-# Step 3: 配置密钥与 token 后启动
-rcc init --list-current-providers
-rcc start --config ~/.rcc/config.json
-```
-
-Step 2 完成后，provider 会拆分到：
-- `~/.rcc/provider/<providerId>/config.v2.json`
-
-Step 3（配置密钥/token）的最小动作：
-- API Key 类：设置环境变量（如 `OPENAI_API_KEY` / `TAB_API_KEY` / `GLM_API_KEY`）
-- OAuth 类：执行 `rcc oauth qwen-auto qwen`、`rcc oauth gemini-auto gemini-cli`、`rcc oauth antigravity-auto antigravity`
-- DeepSeek：在 `~/.rcc/auth/deepseek-account-1.json` 写入 `mobile/password`，启动后自动回填 `access_token`
-
-Windows PowerShell 对应写法：
-
-```powershell
-rcc init --camoufox
-rcc init --config "$env:USERPROFILE\.rcc\config.json" --force
-rcc init --list-current-providers
-rcc start --config "$env:USERPROFILE\.rcc\config.json"
-```
-
-### 2) Camoufox 初始化（macOS / Windows）
-
-`rcc init --camoufox` 会自动检查/安装 Camoufox。你也可以先手工准备：
-
-macOS:
-
-```bash
-python3 -m pip install --user -U camoufox
-python3 -m camoufox path
-```
-
-Windows (PowerShell):
-
-```powershell
-py -3 -m pip install --user -U camoufox
-py -3 -m camoufox path
-```
-
-可选环境变量（当 Python 不在默认命令路径时）：
-- `ROUTECODEX_PYTHON` / `RCC_PYTHON`：指定 Python 可执行文件路径
-- `ROUTECODEX_CAMOUFOX_AUTO_INSTALL=0`：关闭自动安装（默认开启）
-
-验证 Camoufox profile + 指纹是否可打开：
-
-```bash
-rcc camoufox antigravity-oauth-1-alias1.json
-```
-
-### 3) macOS / Windows 环境变量写法
-
-macOS/Linux (zsh/bash):
-
-```bash
-export OPENAI_API_KEY="your_openai_key"
-export TAB_API_KEY="your_tab_key"
-export GLM_API_KEY="your_glm_key"
-```
-
-Windows PowerShell（当前会话）：
-
-```powershell
-$env:OPENAI_API_KEY="your_openai_key"
-$env:TAB_API_KEY="your_tab_key"
-$env:GLM_API_KEY="your_glm_key"
-```
-
-Windows PowerShell（持久化）：
-
-```powershell
-setx OPENAI_API_KEY "your_openai_key"
-setx TAB_API_KEY "your_tab_key"
-setx GLM_API_KEY "your_glm_key"
-```
-
-API key 类 provider 的常用环境变量（按 init 模板）：
-- `OPENAI_API_KEY`
-- `TAB_API_KEY`
-- `GLM_API_KEY`
-- `KIMI_API_KEY`
-- `MODELSCOPE_API_KEY`
-- `MIMO_API_KEY`
-
-### 4) 按 init 内置 provider 配置鉴权
-
-下表对应 `rcc init --list-providers` 的内置模板：
-
-| Provider ID | 默认 auth 类型 | 你需要做什么 |
-|------|------|------|
-| `openai` | `apikey` | 设置 `OPENAI_API_KEY` |
-| `tab` | `apikey` (responses) | 设置 `TAB_API_KEY` |
-| `deepseek-web` | `deepseek-account` (`tokenFile` entries) | 准备 `~/.rcc/auth/deepseek-account-*.json` |
-| `glm` | `apikey` | 设置 `GLM_API_KEY` |
-| `glm-anthropic` | `apikey` (`/v1/messages`) | 设置 `GLM_API_KEY` |
-| `kimi` | `apikey` | 设置 `KIMI_API_KEY` |
-| `modelscope` | `apikey` | 设置 `MODELSCOPE_API_KEY` |
-| `lmstudio` | `apikey` (本地) | 通常可留空或填本地网关 key |
-| `qwen` | `qwen-oauth` (`tokenFile=default`) | 先跑 OAuth 生成 token |
-| `iflow` | `iflow-cookie` | 准备 `~/.rcc/auth/iflow-work.cookie` |
-| `mimo` | `apikey` | 设置 `MIMO_API_KEY` |
-| `gemini-cli` | `gemini-cli-oauth` (`entries[].tokenFile`) | 先跑 OAuth 生成 token |
-| `antigravity` | `antigravity-oauth` (`entries[].tokenFile`) | 先跑 OAuth 生成 token |
-
-#### 4.1) Vision / Web Search 需要配置哪些 provider
-
-这两个能力不是“自动可用”，需要你在路由里显式配置可用目标：
-
-- `virtualrouter.routing.vision`：至少 1 个支持图像输入的 `provider.model`
-- `virtualrouter.routing.web_search`：至少 1 个支持联网搜索的 `provider.model`
-
-按当前 quickstart 的默认实践，推荐如下：
-
-- Vision：`iflow.qwen3-vl-plus`（主）+ `tabglm.glm-4.6v`（备）
-- Web Search：`iflow.glm-4.7`（主）+ `gemini-cli.gemini-2.5-flash-lite` / `tabglm.glm-4.7`（备）
-
-如果你只使用 `rcc init` 内置 provider（不加 `tabglm` 自定义 provider），可先用这组：
-
-- Vision：`iflow.qwen3-vl-plus`
-- Web Search：`iflow.glm-4.7` + `gemini-cli.gemini-2.5-flash-lite`
-
-最小检查原则：
-
-- `routing.vision` / `routing.web_search` 里的每个 `provider.model`，都必须在对应 `~/.rcc/provider/<providerId>/config.v2.json` 的 `models` 里存在
-- 上述 provider 的鉴权必须先配好（apikey/oauth/cookie/tokenFile），否则会在启动时被跳过初始化
-
-OAuth 认证命令（常用）：
-
-```bash
-rcc oauth qwen-auto qwen
-rcc oauth gemini-auto gemini-cli
-rcc oauth antigravity-auto antigravity
-```
-
-DeepSeek 单文件凭据 + token（同一文件）示例：
-
-```json
-{
-  "mobile": "13800000000",
-  "password": "your_password",
-  "access_token": ""
-}
-```
-
-放在 `~/.rcc/auth/deepseek-account-1.json` 后，启动时会自动登录并回填 `access_token`。
-
-### 5) 脱敏快速配置（来自当前线上配置）
-
-已提供脱敏模板：
-- `configsamples/config.v1.quickstart.sanitized.json`
-- `configsamples/provider-default/*/config.v2.json`
-
-快速使用：
-
-```bash
-rcc init
-rcc start --config ~/.rcc/config.json
-```
-
-此模板已经脱敏（API key、token、账号别名），保留了可直接复用的路由结构和 provider 组合。
-
-#### 5.1) 用 `rcc init` 把本地 v1 配置转换为 v2
-
-如果你要把 `configsamples/config.v1.quickstart.sanitized.json` 本地化成 v2（provider 分文件 + `virtualrouterMode: v2`），推荐直接用：
-
-```bash
-rcc init
-rcc init --config ~/.rcc/config.json --force
-```
-
-说明：
-- `rcc init` 会检测到这是 v1 配置并执行迁移。
-- `--force` 会跳过交互确认，适合脚本化/CI。
-- 迁移后会生成 `~/.rcc/provider/<providerId>/config.v2.json`，并备份原始 v1 文件为 `config.json.bak*`。
-
-可选检查：
-
-```bash
-rcc init --list-current-providers
-rcc start --config ~/.rcc/config.json
-```
-
-### 6) 调用 API（示例）
-
-健康检查：
-
-```bash
+rccv3 config check -c ~/.rcc/config.v3.toml
+rccv3 restart -c ~/.rcc/config.v3.toml
 curl http://127.0.0.1:5555/health
 ```
 
-OpenAI Chat：
+V3 的完整边界和验证要求见 [`v3/README.md`](v3/README.md)。`routecodex` / `rcc` 仅保留必要的历史兼容壳，不再提供新的 runtime 或配置能力。
+
+## API 示例
 
 ```bash
+curl http://127.0.0.1:5555/health
+
 curl http://127.0.0.1:5555/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"iflow.glm-4.7","messages":[{"role":"user","content":"hi"}],"stream":false}'
-```
+  -d '{"model":"provider.model","messages":[{"role":"user","content":"hi"}],"stream":false}'
 
-OpenAI Responses：
-
-```bash
 curl http://127.0.0.1:5555/v1/responses \
   -H 'Content-Type: application/json' \
-  -d '{"model":"tab.gpt-5.2","input":[{"role":"user","content":"hi"}],"stream":false}'
-```
+  -d '{"model":"provider.model","input":[{"role":"user","content":"hi"}],"stream":false}'
 
-Anthropic Messages：
-
-```bash
 curl http://127.0.0.1:5555/v1/messages \
   -H 'Content-Type: application/json' \
-  -d '{"model":"anthropic.claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"stream":false}'
+  -d '{"model":"provider.model","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
+
+## 配置与认证
+
+V3 的唯一 authoring 文件是 `~/.rcc/config.v3.toml`。Provider、模型、路由池、监听器和认证句柄必须在该配置及其声明的 V3 provider 文件中定义，并由 `rccv3 config check` 编译为 manifest。
+
+API key 通过 V3 配置引用的认证句柄或环境变量提供，例如：
+
+```bash
+export OPENAI_API_KEY="your_openai_key"
+export ANTHROPIC_API_KEY="your_anthropic_key"
+```
+
+不要创建或恢复 `config.json`、`configsamples/`、`webui/`、仓库 `samples/` 或 `rcc init` 生成的 V2 provider 文件。
 
 ## 文档
 
-### 入门指南
-- **安装与快速上手**：`docs/INSTALLATION_AND_QUICKSTART.md`
-- **OAuth（认证与刷新）**：`docs/OAUTH.md`
-- **内置 Provider**：`docs/PROVIDERS_BUILTIN.md`
-- **Provider 类型与协议**：`docs/PROVIDER_TYPES.md`
+- [V3 workspace 与边界](v3/README.md)
+- [V3 系统定义](docs/design/v3-system-definition.md)
+- [V3 入出站设计](docs/V3_INBOUND_OUTBOUND_DESIGN.md)
+- [V3 Hub relay 固定流水线](docs/design/v3-hub-relay-fixed-pipeline-contract.md)
+- [架构总览](docs/ARCHITECTURE.md)
+- [错误处理](docs/error-handling-v2.md)
+- [路由指令](docs/routing-instructions.md)
+- [AGENTS.md](AGENTS.md)
 
-### 核心功能
-- **路由指令/语法**：`docs/routing-instructions.md`
-- **端口与入口**：`docs/PORTS.md`
-- **Codex / Claude Code 集成**：`docs/CODEX_AND_CLAUDE_CODE.md`
-
-### 架构与设计
-- **架构总览**：`docs/ARCHITECTURE.md`
-- **配置架构**：`docs/CONFIG_ARCHITECTURE.md`
-- **V3 主力实现与独立使用**：`v3/README.md`
-- **V3 入出站设计**：`docs/V3_INBOUND_OUTBOUND_DESIGN.md`
-- **V2 归档（历史参考）**：`deprecated/v2/README.md`
-
-### 错误处理与调试
-- **错误处理 V2**：`docs/error-handling-v2.md`
-- **调试系统设计**：`docs/debug-system-design.md`
-
-### 高级主题
-- **路由策略**：`docs/ROUTING_POLICY_SCHEMA.md`
-- **虚拟路由器优先级与健康**：`docs/VIRTUAL_ROUTER_PRIORITY_AND_HEALTH.md`
-- **配额管理 V3（历史参考）**：`docs/QUOTA_MANAGER_V3.md`
-
-### 开发者文档
-- **源代码目录说明**：`src/README.md`
-- **Provider 模块**：`src/providers/README.md`
-- **配置模块**：`src/config/README.md`
-
-## CLI 差异说明
-
-| 特性 | routecodex (dev) | rcc (release) |
-|------|------------------|---------------|
-| 构建方式 | 本地构建 (`npm run build:dev`) | npm 发布包 |
-| llmswitch-core | local symlink | npm `@jsonstudio/llms` |
-| 共享模块构建 | 需要先 `npm --prefix sharedmodule/llmswitch-core run build` | 不需要 |
-| 用途 | 开发、调试、测试 | 生产环境 |
-| CLI 命令 | `routecodex` | `rcc` |
-
-## 参考配置
-
-- `configsamples/config.reference.json`
-- `configsamples/config.v1.quickstart.sanitized.json`
-- `configsamples/provider/*/config.v1.json`
-
-## 相关链接
-
-- [release 安装脚本（本地源码）](./scripts/install-release.sh)
-- [AGENTS.md](./AGENTS.md) - 项目原则与职责边界
-- [sharedmodule/llmswitch-core](https://github.com/jsonstudio/llmswitch-core) - Hub Pipeline 详细说明
+V2 历史资料仅存放在 [`deprecated/v2/`](deprecated/v2/README.md)，不得被 package、build、CI 或默认测试重新接线。

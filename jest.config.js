@@ -16,15 +16,12 @@ const config = {
     // Allow transforming specific modules that might be ESM
     'node_modules/(?!(rcc-debugcenter|rcc-basemodule|rcc-errorhandling|@jsonstudio/llms|chalk)/)',
   ],
-  roots: ['<rootDir>/src', '<rootDir>/tests', '<rootDir>/webui/src'],
+  roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/__tests__/**/*.ts', '**/__tests__/**/*.tsx', '**/?(*.)+(spec|test).ts', '**/?(*.)+(spec|test).tsx'],
   collectCoverageFrom: [
     'src/**/*.ts',
-    'webui/src/**/*.ts',
-    'webui/src/**/*.tsx',
     '!src/**/*.d.ts',
     '!src/index.ts',
-    '!webui/src/main.tsx',
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
@@ -38,12 +35,6 @@ const config = {
       lines: 1,
       statements: 1,
     },
-    './webui/src/App.tsx': {
-      branches: 40,
-      functions: 55,
-      lines: 60,
-      statements: 60
-    }
   },
   setupFilesAfterEnv: ['<rootDir>/tests/jest-live-safety.ts'],
   moduleNameMapper: (() => {

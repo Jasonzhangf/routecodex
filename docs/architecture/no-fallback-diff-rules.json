@@ -883,16 +883,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/verify-e2e-toolcall.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/verify-install-e2e.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/verify-sse-loop.mjs",
       "textContains": ""
     },
@@ -914,21 +904,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/monitor/memory-guard.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/mock-provider/capture-from-configs.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/mock-provider/extract.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/mock-provider/run-regressions.mjs",
       "textContains": ""
     },
     {
@@ -1168,11 +1143,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/install-verify.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/monitor/daemon-kill-watch.mjs",
       "textContains": ""
     },
@@ -1338,11 +1308,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/cli/commands/init/basic.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/cli/commands/launcher-kernel.ts",
       "textContains": ""
     },
@@ -1359,26 +1324,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/cli/commands/status.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/cli/config/bundled-default-config.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/cli/config/bundled-docs.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/cli/config/bundled-provider-pack.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/cli/config/init-config.ts",
       "textContains": ""
     },
     {
@@ -1474,11 +1419,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/providers/core/utils/http-client.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/mock/mock-provider-runtime.ts",
       "textContains": ""
     },
     {
@@ -1597,10 +1537,6 @@
     {
       "ruleId": "fallback-keyword",
       "pathContains": "scripts/architecture/verify-architecture-deleted-path.mjs"
-    },
-    {
-      "ruleId": "fallback-keyword",
-      "pathContains": "scripts/mock-provider/extract.mjs"
     },
     {
       "ruleId": "fallback-keyword",

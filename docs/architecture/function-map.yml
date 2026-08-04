@@ -20,7 +20,6 @@ owners:
       - scripts/ci/repo-sanity.mjs
       - scripts/architecture/verify-repository-filesystem-governance.mjs
       - scripts/tests/repository-filesystem-governance-red-fixtures.mjs
-      - scripts/start-verify.mjs
       - .agents/skills/rcc-dev-skills/SKILL.md
       - .agents/skills/rcc-dev-skills/references
       - .agents/skills/rcc-v3-architecture/SKILL.md
@@ -5654,9 +5653,7 @@ owners:
       - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
       - src/commands/validate.ts
       - src/cli/commands/launcher-kernel.ts
-      - src/cli/commands/config.ts
       - src/cli/commands/env.ts
-      - src/cli/commands/init.ts
       - src/cli/commands/port-group-resolver.ts
       - src/cli/commands/restart.ts
       - src/cli/commands/start.ts
@@ -5753,9 +5750,7 @@ owners:
       - src/server/runtime/http-server/daemon-admin/control-handler.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
       - src/commands/validate.ts
-      - src/cli/commands/config.ts
       - src/cli/commands/env.ts
-      - src/cli/commands/init/basic.ts
       - src/cli/commands/port-group-resolver.ts
       - src/cli/commands/restart.ts
       - src/cli/commands/stop.ts
@@ -5856,9 +5851,6 @@ owners:
       - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
-      - src/cli/commands/init/basic.ts
-      - src/cli/commands/init.ts
-      - src/cli/commands/init/workflows.ts
       - src/server/handlers/config-admin-handler.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
       - src/commands/provider-update.ts
@@ -6047,9 +6039,7 @@ owners:
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
     resource_bindings:
       writes:
-        - config.shared_write_result@WebuiConfigEditor03SharedConfigMutation
       reads:
-        - config.admin_mutation_request@WebuiConfigEditor02AdminApiRequest
       forbidden:
         - route.selection@VrRoute04SelectedTarget
         - provider.wire_payload@ProviderReqOutbound06WirePayload
@@ -6068,7 +6058,6 @@ owners:
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
       - src/server/runtime/http-server/daemon-admin/routing-policy.ts
       - src/server/runtime/http-server/daemon-admin/control-handler.ts
-      - src/cli/commands/config.ts
     forbidden_paths:
       - src/providers
     required_tests:
@@ -6091,9 +6080,7 @@ owners:
     owner_module: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/config_file_codec.rs
     resource_bindings:
       writes:
-        - config.shared_write_result@WebuiConfigEditor03SharedConfigMutation
       reads:
-        - config.admin_mutation_request@WebuiConfigEditor02AdminApiRequest
       forbidden:
         - route.selection@VrRoute04SelectedTarget
         - provider.wire_payload@ProviderReqOutbound06WirePayload
@@ -6107,7 +6094,6 @@ owners:
       - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-writer.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
-      - src/cli/commands/init/basic.ts
       - src/commands/provider-update.ts
       - src/commands/provider-update-maintenance.ts
     forbidden_paths:
@@ -6125,64 +6111,6 @@ owners:
       - "Provider async writes must call Rust native writer; admin/maintenance must not stringify provider config directly."
       - "writeProviderConfigFileSync(fsImpl) is the remaining TS host boundary because init tests and CLI authoring pass an injected synchronous filesystem; do not replace it with Rust until that injection boundary is removed."
 
-  - feature_id: webui.config_editor_surface
-    status: planned
-    summary: "WebUI online config editor surface for provider cards, single-file httpserver.ports[] entries, routing groups, and fwd aggregation configuration"
-    owner_kind: ts_ui_surface
-    owner_scope: "WebUI may render and submit config editor intent only; provider/config writes stay in shared writers and fwd selection stays Rust-owned"
-    owner_module: webui/src/App.tsx
-    resource_bindings:
-      writes:
-        - webui.config_edit_intent@WebuiConfigEditor01UserIntent
-        - config.admin_mutation_request@WebuiConfigEditor02AdminApiRequest
-      observes:
-        - config.shared_write_result@WebuiConfigEditor03SharedConfigMutation
-      forbidden:
-        - route.selection@VrRoute04SelectedTarget
-        - provider_runtime.observation@ErrorErr04RouterPolicyApplied
-        - provider.wire_payload@ProviderReqOutbound06WirePayload
-    canonical_types:
-      - MainTab
-      - ProviderPage
-      - RoutingPage
-    canonical_builders:
-      - apiFetch
-      - ProviderPage
-      - RoutingPage
-    allowed_paths:
-      - webui/src/App.tsx
-      - webui/src/styles.css
-      - tests/frontend/webui-app.integration.spec.tsx
-      - tests/frontend/webui-app.pages.spec.tsx
-      - tests/frontend/webui-app.edge.spec.tsx
-      - tests/frontend/webui-app.render.spec.tsx
-      - tests/frontend/webui-app.utils.spec.ts
-      - src/server/runtime/http-server/daemon-admin/providers-handler.ts
-      - src/server/runtime/http-server/daemon-admin/providers-handler-routing-utils.ts
-      - src/server/handlers/config-admin-handler.ts
-    forbidden_paths:
-      - src/providers
-      - src/server/runtime/http-server/executor
-      - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine
-    required_tests:
-      - tests/frontend/webui-app.integration.spec.tsx
-      - tests/frontend/webui-app.pages.spec.tsx
-      - tests/frontend/webui-app.edge.spec.tsx
-      - tests/config/config-writer.spec.ts
-      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
-      - tests/config/provider-v2-loader.spec.ts
-      - tests/grep/config-codec-gate.spec.ts
-    required_gates:
-      - npm run test:webui
-      - npm run verify:config-ssot
-      - npm run verify:function-map-compile-gate
-      - npm run verify:runtime-lifecycle-loop-gate-matrix
-    migration_target: ts_ui_thin_surface
-    notes:
-      - "Provider backup/restore must call provider config writer/codec owners; WebUI must not stringify provider config directly."
-      - "Per-port route tabs must write user config through shared user config writer/codec owners."
-      - "`fwd.*` editor may write forwarder config shape but must not implement provider selection, health, priority, weighted, or roundrobin policy."
-      - "Legacy stats/control/restart UI must not remain as required behavior unless Jason explicitly re-approves that scope."
 
   - feature_id: manager.routing_control_surface
     status: active
@@ -7589,12 +7517,10 @@ owners:
       - createStartCommand
       - createStopCommand
       - createStatusCommand
-      - createConfigCommand
       - createCodeCommand
       - createCodexCommand
       - createClaudeCommand
       - createGuardianDaemonCommand
-      - createInitCommand
     allowed_paths:
       - src/cli/commands
       - src/cli/register
@@ -8210,7 +8136,6 @@ owners:
       - src/provider-sdk/provider-inspect.ts
       - src/provider-sdk/provider-runtime-inference.ts
       - tests/provider-sdk/provider-inspect.spec.ts
-      - tests/cli/config-command.spec.ts
       - tests/sharedmodule/virtual-router-websearch-provider-resolution.spec.ts
       - docs
     forbidden_paths:
@@ -8224,7 +8149,6 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_bridge_actions/tests.rs
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
       - tests/provider-sdk/provider-inspect.spec.ts
-      - tests/cli/config-command.spec.ts
       - tests/sharedmodule/virtual-router-websearch-provider-resolution.spec.ts
     required_gates:
       - npm run build:native-hotpath
@@ -8397,7 +8321,6 @@ owners:
     required_tests:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_openai_codec.rs
       - tests/sharedmodule/anthropic-tool-schema-stability.spec.ts
-      - tests/sharedmodule/provider-compat-anthropic.spec.ts
       - tests/sharedmodule/provider-normalization-anthropic-thinking.spec.ts
     required_gates:
       - npm run verify:anthropic-roundtrip

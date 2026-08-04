@@ -63,7 +63,7 @@
    - 更新文档与类型约束。
 2. **回归测试矩阵**  
    - `npm run test:sharedmodule`  
-   - `npm run verify:e2e-toolcall`（覆盖 responses tool loop）  
+   - V3 Rust workspace tests and protocol parity gates（覆盖 Responses tool loop）
    - `sharedmodule/llmswitch-core/scripts/tests/apply-patch-native-regression-matrix.mjs` / `responses-submit` 样本回放
    - Anthropic / Gemini 专属 dry-run（若有）。
 3. **文档更新**  

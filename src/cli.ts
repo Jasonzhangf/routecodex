@@ -26,7 +26,6 @@ import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import { createSpinner, type Spinner } from './cli/spinner.js';
 import { logger } from './cli/logger.js';
 import { registerStatusConfigCommands } from './cli/register/status-config-commands.js';
-import { registerInitCommand } from './cli/register/init-command.js';
 import { registerRestartCommand } from './cli/register/restart-command.js';
 import { registerStopCommand } from './cli/register/stop-command.js';
 import { registerStartCommand } from './cli/register/start-command.js';
@@ -165,19 +164,19 @@ program.addHelpText(
   'after',
   `
 Quickstart:
-  ${pkgName === 'rcc' ? 'rcc' : 'routecodex'} init
-  ${pkgName === 'rcc' ? 'rcc' : 'routecodex'} start
+  rccv3 config check -c ~/.rcc/config.v3.toml
+  rccv3 restart -c ~/.rcc/config.v3.toml
 
 Docs (in this repo):
-  docs/INSTALLATION_AND_QUICKSTART.md
-  docs/PROVIDERS_BUILTIN.md
+  v3/README.md
+  docs/design/v3-system-definition.md
   docs/PROVIDER_TYPES.md
   docs/INSTRUCTION_MARKUP.md
   docs/PORTS.md
   docs/CODEX_AND_CLAUDE_CODE.md
 
 Note:
-  "${pkgName === 'rcc' ? 'rcc' : 'routecodex'} init" also copies these docs into ~/.rcc/docs
+  This compatibility CLI does not create or migrate V2 configuration.
 `
 );
 
@@ -246,15 +245,6 @@ const launcherContext = {
 registerClaudeCommand(program, launcherContext);
 registerCodexCommand(program, launcherContext);
 
-// Init command - guided config generation
-registerInitCommand(program, {
-  logger,
-  createSpinner,
-  fsImpl: fs,
-  pathImpl: path,
-  getHomeDir: homedir
-});
-
 registerBasicCommands(program, {
   env: {
     isDevPackage: IS_DEV_PACKAGE,
@@ -318,14 +308,7 @@ registerStartCommand(program, {
   exit: (code) => process.exit(code)
 });
 
-// Config command
 registerStatusConfigCommands(program, {
-  config: {
-    logger,
-    createSpinner,
-    findListeningPids,
-    sendSignal: (pid, signal) => process.kill(pid, signal)
-  },
   status: {
     logger,
     log: (line) => console.log(line),

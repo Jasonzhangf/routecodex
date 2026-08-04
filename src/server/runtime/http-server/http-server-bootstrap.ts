@@ -428,13 +428,6 @@ export async function waitForRuntimeReady(server: any): Promise<void> {
 }
 
 export function shouldStartManagerDaemon(_server: any): boolean {
-  const mockFlag = String(process.env.ROUTECODEX_USE_MOCK || '').trim();
-  if (mockFlag === '1' || mockFlag.toLowerCase() === 'true') {
-    return false;
-  }
-  if (process.env.ROUTECODEX_MOCK_CONFIG_PATH || process.env.ROUTECODEX_MOCK_SAMPLES_DIR) {
-    return false;
-  }
   return true;
 }
 
