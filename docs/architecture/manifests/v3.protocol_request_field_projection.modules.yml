@@ -60,6 +60,7 @@ modules:
     owner: routecodex-v3-runtime::hub_v1::anthropic_codec
     owned_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
