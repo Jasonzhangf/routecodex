@@ -436,6 +436,22 @@ fn responses_reasoning_summary_policy_is_local_hint_for_anthropic() {
     assert!(!serde_json::to_string(&wire)
         .unwrap()
         .contains("reasoning_summary_policy"));
+    assert_eq!(wire["thinking"], json!({"type":"adaptive"}));
+}
+
+#[test]
+fn responses_reasoning_summary_policy_enables_native_thinking_without_effort() {
+    let wire = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "reasoning_summary_policy":"concise",
+        "messages":[{"role":"user","content":"preserve thinking"}]
+    }))
+    .expect("summary policy must statically enable native Anthropic thinking");
+
+    assert_eq!(wire["thinking"], json!({"type":"adaptive"}));
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("reasoning_summary_policy"));
 }
 
 #[test]
