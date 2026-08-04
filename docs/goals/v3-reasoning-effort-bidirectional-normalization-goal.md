@@ -78,7 +78,7 @@
 7. **全局安装**：`RUSTUP_TOOLCHAIN=stable npm run install:v3`（仅当触及 v3 runtime/provider 时）
 8. **托管聚合重启**：`rccv3 config check && rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml`
 9. **样本重放**（E1）：从 `~/.rcc/codex-samples/` 取最新样本，确认 `causeStatus` 为真实码
-10. **Codex review**：`codex -p cc review` + `~/.claude/skills/codex-review/review-prompt.md`
+10. **Codex review**：按 `~/.codex/skills/codex-review/SKILL.md` 的默认通道与备用 profile 顺序执行；审核提示词唯一真源为 `~/.codex/skills/codex-review/review-prompt.md`
     - 要求语义 PASS；缺即 FAIL；最多 5 轮修复循环
 11. **精确 commit**：单任务 commit，只 stage 改动文件，禁批量 checkout / 通配恢复
 12. **进入下一任务**：PASS + commit + 记忆沉淀完成后立即开始，禁止汇总
