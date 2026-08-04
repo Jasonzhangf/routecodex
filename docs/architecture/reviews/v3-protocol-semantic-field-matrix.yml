@@ -1650,8 +1650,9 @@ chat_semantic_translation_groups:
       anthropic:
         request_fields: []
         response_fields: []
-        transform: No Anthropic provider-wire field is emitted. Valid auto/concise/detailed values are consumed only
-          as a registered local response-shaping hint; invalid values fail before provider send.
+        transform: No Anthropic provider-wire field is emitted. Valid auto/concise/detailed values select the registered
+          static compatibility projection that preserves complete native thinking as Responses reasoning.summary;
+          the proxy does not reject, truncate, or silently discard reasoning. Invalid values fail before provider send.
       gemini:
         request_fields: []
         response_fields: []
@@ -1660,8 +1661,9 @@ chat_semantic_translation_groups:
       - request.reasoning_summary_policy
     current_impl: partial
     gap: Responses round-trips the policy. OpenAI Chat and Gemini have no equivalent request policy and must reject
-      the semantic path. Anthropic consumes valid values only as a registered local response-shaping hint with no
-      provider-wire field. A target response reasoning field does not authorize reconstructing the source request policy.
+      the semantic path. Anthropic consumes valid values through the registered static compatibility projection with no
+      provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response
+      reasoning field does not authorize reconstructing the source request policy.
   - group_id: reasoning.request_context_policy
     standard_chat_field: request.reasoning_context_policy
     chat_fields:
@@ -5654,7 +5656,7 @@ extended_openai_chat_semantic_superset:
       semantic_owner: chat.extension_semantics
       current_impl: partial
       gap: Responses round-trips the policy; OpenAI Chat and Gemini reject because no equivalent request policy is
-        declared; Anthropic consumes valid values only as a registered local response-shaping hint with no provider-wire field.
+        declared; Anthropic uses the registered static full-native-thinking compatibility projection with no provider-wire field.
       equivalent_fields: &a1
         responses:
           - request.reasoning.summary
@@ -9106,7 +9108,7 @@ canonical_extension_registry:
     current_impl: partial
     source_fields: *a1
     projection_rule: Responses source-roundtrip; OpenAI Chat and Gemini must report this semantic path as unmapped
-      before provider send; Anthropic consumes valid values only as a registered local response-shaping hint and emits
+      before provider send; Anthropic uses the registered static full-native-thinking compatibility projection and emits
       no provider-wire field.
   - field: request.reasoning_context_policy
     semantic_id: request.reasoning_context_policy

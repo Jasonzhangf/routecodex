@@ -119,7 +119,7 @@ protocol can reconstruct it. `unmapped` always returns the canonical Chat path.
 | `text.output_config` | rename to `text` | field-wise conditional projection to `verbosity` / `response_format` | conditional projection only where the semantic matrix declares an exact target field | conditional projection only where the semantic matrix declares an exact target field |
 | `reasoning_effort` | rename to `reasoning.effort` | same | conditional rename to `output_config.effort` | conditional enum-case projection to `thinkingLevel` |
 | `reasoning_budget_tokens` | unmapped | unmapped | conditional rename to `thinking.budget_tokens` | conditional rename to `thinkingBudget` |
-| `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | valid policy is consumed as local response-shaping hint; invalid fails | unmapped |
+| `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | registered static compatibility: `auto`/`concise`/`detailed` all preserve Anthropic native thinking and project its complete text to Responses reasoning summary; no truncation or silent loss | unmapped |
 | `reasoning_context_policy` | rename to `reasoning.context` | unmapped | unmapped | unmapped |
 | `reasoning_mode` | rename to `reasoning.mode` | unmapped | unmapped | unmapped |
 | `reasoning_include_thoughts` | unmapped | unmapped | unmapped | rename to `includeThoughts` |
@@ -169,7 +169,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `prompt_cache_key` | client cache-key payload extension | preserve exact string; not routing/control state | exact | exact | valid local cache hint is consumed before wire; malformed fails; never rebuild `cache_control` |
 | `prompt_cache_options.*` / `prompt_cache_retention` | cache-options extension | preserve independently from `prompt_cache_key`; no provider-health/cache mutation | exact Responses only | target-specific exact field or unmapped | unmapped |
 | `reasoning.effort` | `request.reasoning_effort` | validate enum; keep separate from budget/summary/mode | exact | exact `reasoning_effort` | conditional exact `output_config.effort` intersection only |
-| `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | unmapped | valid policy consumed as local response-shaping hint; invalid fails |
+| `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | unmapped | registered many-to-one static compatibility preserves complete Anthropic native thinking as Responses reasoning summary for all valid policy values |
 | `reasoning.context` | `request.reasoning_context_policy` | validate scope/value; no history reconstruction outside Chat Process | exact Responses | unmapped | unmapped |
 | `reasoning.mode` | `request.reasoning_mode` | preserve mode independently from effort/context | exact Responses | unmapped | unmapped |
 | `safety_identifier` | safety identifier payload extension | validate string; never map to `user` or metadata | exact | exact `safety_identifier` if target schema supports | unmapped |
@@ -493,7 +493,7 @@ Before implementation, red tests must prove:
 3. Numeric budget maps only between Anthropic and Gemini and never becomes
    OpenAI effort.
 4. Summary/context/mode cannot become Anthropic system markers; valid summary
-   policy may only be consumed as local response-shaping policy before wire.
+   policy uses the registered Anthropic static compatibility mapping: all valid values retain native thinking and project the complete returned thinking into Responses reasoning summary; the proxy must not reject, truncate, or silently discard reasoning.
 5. Responses request extensions survive ReqInbound02 and Chat Process without raw
    top-level field carry; Anthropic projects only exact `metadata.user_id` and
    compatible structured format. Cache key, registered client metadata,

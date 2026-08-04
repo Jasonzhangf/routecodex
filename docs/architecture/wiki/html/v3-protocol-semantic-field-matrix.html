@@ -255,12 +255,12 @@
   </tr>
 <tr>
     <td><span class="badge runtime_conformance_pending">runtime_conformance_pending</span></td>
-    <td><code>5</code></td>
+    <td><code>3</code></td>
     <td>Design and owner are fixed, but positive/negative runtime and live evidence have not passed.</td>
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>111</code></td>
+    <td><code>113</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
@@ -300,7 +300,7 @@
     <tbody><tr>
     <td><code>gap.client_metadata.target_dependent</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>runtime_conformance_pending</code></li></ul><div>count: <code>5</code></div></td>
+    <td><ul class="field-list"><li><code>runtime_conformance_pending</code></li></ul><div>count: <code>3</code></div></td>
     <td>OpenAI Responses/Chat metadata accepts at most 16 bounded string pairs; Anthropic metadata declares only user_id, so only exact client_metadata.user_id may map to provider metadata. Registered Codex client-local keys may be consumed before provider wire as request-local context; unknown keys must fail.</td>
     <td><code>docs/goals/v3-protocol-conversion-field-parity-test-design.md</code><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Keep target-dependent provider-wire behavior explicit in the adjacent outbound codec; never use MetadataCenter, generic silent strip, or fallback.</span></td>
   </tr>
@@ -321,7 +321,7 @@
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>111</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>113</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -1583,10 +1583,10 @@
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
       <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort.</div>
-      <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a target field that can request visible/summarized thinking; otherwise the field remains decision-required.</div></details>
+      <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content or native reasoning_effort. Compatible outbound mappings require a registered target-local request policy consumer; otherwise the field remains unmapped before provider send.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Responses is source-roundtrip only. OpenAI Chat, Anthropic, and Gemini have no equivalent request policy; outbound must reject the semantic path. A target response reasoning field does not authorize consuming the request policy.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat and Gemini have no equivalent request policy and must reject the semantic path. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>
@@ -1602,7 +1602,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Anthropic thinking.display controls summarized versus omitted visibility and is not equivalent to OpenAI auto/concise/detailed summary policy.</div>
+    <div>No Anthropic provider-wire field is emitted. Valid auto/concise/detailed values select the registered static compatibility projection that preserves complete native thinking as Responses reasoning.summary; the proxy does not reject, truncate, or silently discard reasoning. Invalid values fail before provider send.</div>
 
   </div></td>
     <td><div class="equiv-cell">
@@ -3954,7 +3954,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge runtime_conformance_pending">runtime_conformance_pending</span><br><span class="muted">Responses source-roundtrip only; OpenAI Chat, Anthropic, and Gemini reject because no equivalent request policy is declared.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy; OpenAI Chat and Gemini reject because no equivalent request policy is declared; Anthropic uses the registered static full-native-thinking compatibility projection with no provider-wire field.</span><details><summary>extension <code>thinking_and_cache_control</code></summary><div>owner: <code>chat.extensions.anthropic.thinking_cache</code></div><div><span class="badge extension_declared">extension_declared</span></div></details></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_context_policy</code><br><span class="muted">added Chat extension field</span></td>

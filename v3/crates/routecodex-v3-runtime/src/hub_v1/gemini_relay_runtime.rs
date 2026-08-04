@@ -1063,11 +1063,7 @@ fn gemini_model_from_endpoint_path(
 ) -> Result<String, V3GeminiRelayRuntimeError> {
     let model = endpoint_path
         .strip_prefix("/v1beta/models/")
-        .and_then(|value| {
-            value
-                .strip_suffix("/generateContent")
-                .or_else(|| value.strip_suffix("/streamGenerateContent"))
-        })
+        .and_then(|value| value.strip_suffix("/generateContent"))
         .filter(|value| !value.is_empty() && !value.contains('/'))
         .ok_or_else(|| V3GeminiRelayRuntimeError::EndpointPath(endpoint_path.to_string()))?;
     Ok(model.to_string())

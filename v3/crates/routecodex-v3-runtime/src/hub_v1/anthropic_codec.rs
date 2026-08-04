@@ -884,8 +884,14 @@ fn anthropic_reasoning_part_as_responses_reasoning(
         Some("thinking") => {
             validate_anthropic_reasoning_object_keys(object, &["type", "thinking", "signature"])?;
             let thinking = require_nonempty_reasoning_string(object.get("thinking"))?;
-            let summary_text =
-                responses_reasoning_summary_text_for_policy(thinking, summary_policy);
+            let summary_text = match summary_policy {
+                None | Some("auto" | "concise" | "detailed") => thinking,
+                Some(_) => {
+                    return Err(V3AnthropicCodecError::MalformedField {
+                        field: "reasoning_summary_policy",
+                    })
+                }
+            };
             let mut item = json!({
                 "type":"reasoning",
                 "summary":[{"type":"summary_text","text":summary_text}]
@@ -921,14 +927,6 @@ fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3An
         });
     }
     Ok(value)
-}
-
-fn responses_reasoning_summary_text_for_policy<'a>(
-    thinking: &'a str,
-    summary_policy: Option<&str>,
-) -> &'a str {
-    let _ = summary_policy;
-    thinking
 }
 
 fn optional_nonempty_reasoning_string<'a>(

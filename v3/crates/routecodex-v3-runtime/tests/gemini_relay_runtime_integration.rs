@@ -481,6 +481,11 @@ impl ResponsesTransport for StaticSseTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        assert!(
+            request.url().ends_with("/streamGenerateContent?alt=sse"),
+            "Gemini SSE transport must use the streaming endpoint: {}",
+            request.url()
+        );
         let chunks = self.chunks.lock().unwrap().take().unwrap();
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
@@ -504,26 +509,30 @@ async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signatur
 "#
         .to_vec()])),
     };
-    let output = execute_v3_gemini_relay_runtime(
-        &manifest(),
-        V3GeminiRelayRuntimeInput {
-            server_id: "controlled".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-sse-thought-chain".into(),
-            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-            payload: json!({
-                "contents":[{"role":"user","parts":[{"text":"stream thought"}]}],
-                "stream":true
-            }),
-        },
-        &transport,
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        execute_v3_gemini_relay_runtime(
+            &manifest(),
+            V3GeminiRelayRuntimeInput {
+                server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-sse-thought-chain".into(),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"stream thought"}]}],
+                    "stream":true
+                }),
+            },
+            &transport,
+        ),
     )
     .await
+    .expect("endpoint-only Gemini SSE request must reach transport within five seconds")
     .unwrap();
     assert_eq!(output.status, 200);
     assert_eq!(

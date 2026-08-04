@@ -132,7 +132,7 @@ semantic_registry:
     projections:
       responses: reasoning.summary
       openai_chat: unmapped
-      anthropic: unmapped
+      anthropic: static_compatible_full_native_thinking_summary
       gemini: unmapped
   - semantic_id: request.reasoning_context_policy
     chat_storage: reasoning_context_policy

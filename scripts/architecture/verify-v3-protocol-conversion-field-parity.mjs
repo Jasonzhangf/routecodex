@@ -100,7 +100,7 @@ for (const [semanticId, chatStorage, projections] of [
   ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
   ['request.reasoning_effort', 'reasoning_effort', { responses: 'reasoning.effort', openai_chat: 'reasoning_effort', anthropic: 'output_config.effort_shared_domain_only', gemini: 'generationConfig.thinkingConfig.thinkingLevel_shared_domain_only' }],
   ['request.reasoning_budget_tokens', 'reasoning_budget_tokens', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.budget_tokens_with_thinking_constraints', gemini: 'generationConfig.thinkingConfig.thinkingBudget_with_model_constraints' }],
-  ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
+  ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'unmapped', anthropic: 'static_compatible_full_native_thinking_summary', gemini: 'unmapped' }],
   ['request.reasoning_context_policy', 'reasoning_context_policy', { responses: 'reasoning.context', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.reasoning_mode', 'reasoning_mode', { responses: 'reasoning.mode', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.reasoning_include_thoughts', 'reasoning_include_thoughts', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'generationConfig.thinkingConfig.includeThoughts' }],
