@@ -511,10 +511,15 @@ fn build_v3_gemini_transport_09(
         V3ResponsesStreamIntent::Sse => "streamGenerateContent",
     };
     let url_text = format!(
-        "{}/models/{}/{}",
+        "{}/models/{}/{}{}",
         target.base_url.trim_end_matches('/'),
         target.wire_model,
-        endpoint
+        endpoint,
+        if stream_intent == V3ResponsesStreamIntent::Sse {
+            "?alt=sse"
+        } else {
+            ""
+        }
     );
     build_v3_transport_13_responses_http_request_from_parts(
         request_id,
