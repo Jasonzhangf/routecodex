@@ -1,0 +1,35 @@
+lifecycle_id: vr.route_classifier.mainline
+summary: V2 Virtual Router consumes the shared Rust current-turn/tool classifier before producing the single selected-route truth.
+owner_feature_id: vr.route_classifier
+owner_module: sharedmodule/llmswitch-core/rust-core/crates/route-classifier-core
+entrypoint:
+  node_id: HubReqChatProcess03Governed
+  wiki_page: docs/goals/v3-v2-route-classifier-parity-test-design.md
+  call_map_chain_id: vr.route_classifier.mainline
+node_ids:
+  - HubReqChatProcess03Governed
+  - VrRoute04SelectedTarget
+  - VrRouteClassifier03ActiveTurnSignals
+  - VrRouteClassifier03Classified
+  - VrRouteClassifier03ShellClassification
+  - VrRouteClassifier03ToolClassification
+step_ids:
+  - vrc-01
+  - vrc-02
+  - vrc-03
+  - vrc-04
+  - vrc-05
+edge_status_counts:
+  anchored: 5
+  partial: 0
+  binding_pending: 0
+  total: 5
+sources:
+  mainline_call_map: docs/architecture/mainline-call-map.yml
+  function_map: docs/architecture/function-map.yml
+verification:
+  min_call_map_chain: vr.route_classifier.mainline
+  min_function_feature: vr.route_classifier
+  required_gates:
+    - npm run verify:architecture-mainline-call-map
+    - npm run verify:architecture-mainline-node-id-consistency

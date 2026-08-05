@@ -9,6 +9,8 @@ entrypoint:
 node_ids:
   - DaemonRestartLoop
   - DaemonSupervisorLoop
+  - PortRegistry
+  - PortScopedListenerRelease
   - RestartProcessHttpRequest
   - RestartProcessSignal
   - RuntimeInstanceRecord
@@ -21,7 +23,6 @@ node_ids:
   - StopIntentRecord
 step_ids:
   - rtl-01
-  - rtl-02
   - rtl-03
   - rtl-04
   - rtl-05
@@ -33,11 +34,14 @@ step_ids:
   - rtl-11
   - rtl-12
   - rtl-13
+  - rtl-14
+  - rtl-15
+  - rtl-16
 edge_status_counts:
-  anchored: 13
+  anchored: 15
   partial: 0
   binding_pending: 0
-  total: 13
+  total: 15
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

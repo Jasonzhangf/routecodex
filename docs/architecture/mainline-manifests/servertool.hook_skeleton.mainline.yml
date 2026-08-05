@@ -2,14 +2,13 @@ lifecycle_id: servertool.hook_skeleton.mainline
 summary: "Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks."
 owner_feature_id: hub.servertool_stopless_cli_continuation
 owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
-stopless_standalone_entrypoints: 0
 entrypoint:
   node_id: HubRespChatProcess03Governed
   wiki_page: docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md
   call_map_chain_id: servertool.hook_skeleton.mainline
 node_ids:
+  - ChatProcReqContinuation03CanonicalRestored
   - HubReqChatProcess03Governed
-  - HubReqInbound02Standardized
   - HubRespChatProcess03Governed
   - HubRespOutbound04ClientSemantic
   - ServertoolCli04ClientExecuted
@@ -48,3 +47,4 @@ verification:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-node-id-consistency
     - npm run verify:servertool-mount-boundary
+stopless_standalone_entrypoints: 0

@@ -1,0 +1,9 @@
+{
+  "id": "sample_98dbe17400b40ee2",
+  "timestamp": "2026-01-16T02:04:14.569Z",
+  "errorType": "missing_changes",
+  "originalArgs": "{\"file\":\"packages/card-engine/src/query/association/__tests__/association-query.test.ts\",\"instructions\":\"Fix missing connect() call and CardStatus type issue\"}",
+  "normalizedArgs": "{\"file\":\"packages/card-engine/src/query/association/__tests__/association-query.test.ts\",\"instructions\":\"Fix missing connect() call and CardStatus type issue\"}",
+  "validationError": "missing_changes",
+  "source": "tool-registry.validateToolCall"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "sample_ee6d51fb92fad3e4",
+  "timestamp": "2026-03-04T15:33:10.949Z",
+  "errorType": "invalid_file",
+  "originalArgs": "{\"target\":\"scripts/xiaohongshu/tests/phase1-4-full-collect.mjs\",\"changes\":[{\"kind\":\"replace\",\"target\":\"const oldLine = 1;\",\"lines\":\"const newLine = 1;\"}]}",
+  "normalizedArgs": "{\"target\":\"scripts/xiaohongshu/tests/phase1-4-full-collect.mjs\",\"changes\":[{\"kind\":\"replace\",\"target\":\"const oldLine = 1;\",\"lines\":\"const newLine = 1;\"}]}",
+  "validationError": "invalid_file",
+  "source": "tool-registry.validateToolCall",
+  "meta": {
+    "applyPatchToolMode": "freeform"
+  }
+}

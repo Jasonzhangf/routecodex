@@ -1,5 +1,5 @@
 lifecycle_id: stopless.session.mainline
-summary: "Stopless three-round contract inside Chat Process boundary: every managed request injects the stop schema as a system instruction without a provider-facing stopless tool, Round-1/2 missing or invalid stops project a client-visible CLI, the next provider request receives only an ordinary user continuation plus the system schema, and Round-3 passes the original finish_reason=stop through."
+summary: "Stopless three-round contract inside Chat Process boundary: every managed relay request injects stopless system guidance plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected complete non-persistent ordinary user continuation guideline plus the fresh tool contract, and guard terminal stops without another CLI projection."
 owner_feature_id: hub.servertool_stopless_cli_continuation
 owner_module: sharedmodule/llmswitch-core/rust-core/crates/servertool-core/src
 entrypoint:

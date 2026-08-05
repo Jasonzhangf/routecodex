@@ -1,0 +1,9 @@
+{
+  "id": "sample_ec77b2fe2ef73f5e",
+  "timestamp": "2026-01-16T02:00:42.580Z",
+  "errorType": "invalid_json",
+  "originalArgs": "{\"file\":\"a.ts\",\"changes\":[{\"kind\":\"create_file\",\"lines\":[\"x\"],\"file</arg_key><arg_value>a.ts\"}]}",
+  "normalizedArgs": "{\"file\":\"a.ts\",\"changes\":[{\"kind\":\"create_file\",\"lines\":[\"x\"],\"file</arg_key><arg_value>a.ts\"}]}",
+  "validationError": "invalid_json",
+  "source": "tool-registry.validateToolCall"
+}
