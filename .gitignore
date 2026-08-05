@@ -101,6 +101,7 @@ sharedmodule/llmswitch-core/rust-core/note.md
 .agent-collab/handoff/
 .agent-collab/merge-queue/
 .agent-collab/KILL_SWITCH
+.agent-collab/review/
 
 # Agent collaboration local pointer files. Truth lives under ignored runs/claims;
 # these per-worktree cursors must not dirty git status.
