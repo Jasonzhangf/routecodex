@@ -124,6 +124,7 @@ description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 
 - 禁止用 `rcc start`、repo-local `node dist/...`、手工 snapshot、或临时 shim 代替标准 release/global 安装验证；这些只能作为定位证据，不能作为交付闭环。
 - V3 5555 live lifecycle 纠偏：Jason 要求用 restart 就只能用 restart。`start` / `server start` / 手工 `run-managed-child` 会留下错误 identity、stale socket/lock、foreground child 和不可用证据；如果 `restart` 失败，先查 lifecycle owner、instance declaration、exact PID/socket/lock，不准用 start 兜底恢复。
 - V3 native/rccv3 lifecycle 纠偏：当目标是 `config.v3.toml` 管理的 4444/5555 V3 实例时，交付级动作必须用 `RUSTUP_TOOLCHAIN=stable npm run install:v3` 编译安装，再用 `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml` 和 `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml` 重启该 V3 instance；不要用 V2/legacy `routecodex restart --port <port>` 当作 rccv3 live 证据。重启后验证 4444/5555 `/health`、installed rccv3 hash、provider-request dry-run 和真实样本 replay。
+- V3 server 入口锁：生产、dev、launcher、npm start 与安装产物只能执行 `dist/bin/rccv3 server start [--foreground]`；`src/index.ts`、`dist/index.js`、`RouteCodexHttpServer`、`resolveServerEntryPath()` 和 `serverBin -> nodeBin` fallback 均不得作为 server 入口。入口迁移完成后必须物理删除 `src/index.ts`，并运行 `npm run verify:v3-rust-only-server-entry`。
 - 版本真相必须三点一致：命令入口版本、`~/.rcc/install/current/package.json`、目标端口 `/health.version`。不一致时先修安装/入口，不继续判断业务功能。
 - 区分测试与生命周期动作：`npm run test:webui` 这类 Jest/UI 单测不得启动、停止、重启 live server；若测试前后 server 变化，必须用 `~/.rcc/logs/server-<port>.log` 的 `signal_received` / `self_termination` / `restart_signal_received` 追真正 stop owner，禁止把 install/restart/HTTP shutdown 误归因给 UI 单测。
 - 如果 Jason 说某次执行导致 live server 停止，并且已经手动恢复，立刻接受现场事实；停止争辩和重复复现。后续命令先按 side-effect 分级：禁止再跑 install/restart/start/stop/HTTP shutdown/foreground server/可能退出会话的 browser probe，除非 Jason 明确要求。
@@ -323,9 +324,23 @@ description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 
 - Measure the allocated size of the effective V3 target directory after cleanup. At or below 2 GiB, retain dependencies; above 2 GiB, run Cargo test-profile cleanup only when no other V3 Cargo/rustc builder is active, otherwise fail explicitly rather than racing another build.
 - Required proof pairs a real passing test with a real Cargo failure, confirms cleanup on both paths, proves a warm dependency-cache rerun, verifies `*.rcgu.o = 0`, and runs `verify:v3-build-test-artifact-budget`, its red fixtures, and `verify:v3-architecture-ci`.
 
+## V3 direct global binary install invariant
+- Canonical installed executable is `~/.local/bin/rccv3`; `routecodex` and `rcc` are same-directory aliases. `~/.rcc` contains config, provider, secret, state, log, session, and bounded debug resources only.
+- `~/.rcc/install/current`, `~/.rcc/install/releases`, release snapshots, adjacent runtime `package.json`, npm-global fallback, and repo-build fallback are forbidden V3 runtime paths. Installation must atomically replace the one binary and verify its hash.
+- The RouteCodex build version must be embedded during Cargo build through `ROUTECODEX_BUILD_VERSION`; runtime health and `--version` may not depend on a release directory.
+- Canonical restart is `routecodex restart -c ~/.rcc/config.v3.toml`. The removed `restart --port` syntax must not appear in V3 install or verification instructions.
+- Required proof: distribution test, owned Cargo target cleanup test, resource/module gates, direct installed path/hash/version, aggregate restart, every configured listener health, and physical absence of `~/.rcc/install`.
+- Installer preflight is scoped to this owner: distribution, resource map, module boundaries, and Cargo build. Full V3 architecture CI remains a build/release gate and must not make direct binary publication depend on unrelated in-progress feature claims.
+
 ## V3 unified error-path invariant
 - Trigger: auditing or changing any direct/relay/provider/server error route.
 - Required path: source raise -> host capture -> runtime classification -> router policy -> execution decision -> client projection. Direct and relay must both carry the typed ErrorErr01-06 chain; a handler, SSE layer, or HTTP mapper may not create a projection when ErrorErr05 is absent.
 - Error reporting and client projection are separate operations but have one owner boundary: the reporting hub records the chain, while only the typed ErrorErr05 consumer may produce ErrorErr06. Never use `mapErrorToHttp` as an absent-decision fallback.
 - Required static locks: no direct Error06 builder use outside `routecodex-v3-error`; no `RouteErrorHub` HTTP mapping; no generic runtime wrapper that discards source stage/kind before ErrorErr01 capture. Add a red fixture before changing the owner.
 - Verification: run the error-chain bypass and pipeline-contract gates, direct/relay focused tests, and the real installed direct and relay error samples. A pre-existing unrelated runtime test failure must be reported with its exact test and output; do not weaken the test or add fallback behavior.
+
+## V2 sample and generated-contract retirement invariant
+- Repo `samples/` is not a V3 test or runtime truth source. When retiring repo golden/sync scripts, move required deterministic regressions into tracked `tests/resources/`; do not place required fixtures under ignored `tests/fixtures/` or another `**/fixtures/` path.
+- Verification gates must fail when the required resource root is missing or empty. Missing fixture directories may not silently skip. Diagnostic scanners may read user-owned `~/.routecodex/codex-samples`, `errorsamples`, or `golden_samples`, but may not copy/sync data back into repo `samples/`.
+- After a mainline edge is physically retired, remove the same step from resource flows, binding budgets, generated manifests, wiki declarations, and gate matrices. If a generated manifest carries chain-specific invariants, add them to the canonical generator owner before rendering; never hand-edit only the generated artifact.
+- Required proof: zero repo `samples/` references for the retired surface, tracked regression resources, positive gate execution with a nonzero sample count, missing/empty resource fail-fast behavior, function/resource/mainline/wiki gates, and `git diff --check`.

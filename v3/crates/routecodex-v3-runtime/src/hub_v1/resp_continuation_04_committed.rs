@@ -482,21 +482,18 @@ fn local_continuation_context_ids(
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
     let mut non_internal_ids = Vec::new();
+    if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
+        non_internal_ids.push(response_id.to_string());
+    }
     for id in &call_ids {
-        if !is_v3_stopless_internal_call_id(id) {
+        if !is_v3_stopless_internal_call_id(id)
+            && !non_internal_ids.iter().any(|existing| existing == id)
+        {
             non_internal_ids.push(id.clone());
         }
     }
     if !non_internal_ids.is_empty() {
         return Ok(non_internal_ids);
-    }
-    if call_ids
-        .iter()
-        .any(|id| is_v3_stopless_internal_call_id(id))
-    {
-        if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
-            return Ok(vec![response_id.to_string()]);
-        }
     }
     Ok(non_internal_ids)
 }
@@ -512,7 +509,7 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
     action: V3HubContinuationCommit,
 ) -> Result<(), V3LocalContinuationError> {
     for context_id in restored_context_ids {
-        store.release_in_scope(&scope, context_id);
+        store.release_aliases_in_scope(&scope, context_id);
     }
     if action != V3HubContinuationCommit::LocalContext {
         return Ok(());
@@ -622,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    fn resp04_still_stores_regular_tool_call_local_continuation() {
+    fn resp04_stores_regular_tool_call_by_response_and_call_id() {
         let mut store = V3LocalContinuationStore::default();
         let scope = responses_scope();
         let context = json!({
@@ -650,12 +647,29 @@ mod tests {
             60_000,
             &[],
             &context,
-            None,
+            Some("resp_exec_regular"),
             V3HubContinuationCommit::LocalContext,
         )
         .expect("regular tool call must remain local-continuation owned");
 
+        assert!(store.contains_in_scope(&scope, "resp_exec_regular"));
         assert!(store.contains_in_scope(&scope, "call_exec_regular"));
-        assert_eq!(store.len(), 1);
+        assert_eq!(store.len(), 2);
+
+        commit_or_release_v3_relay_local_continuation_at_resp04(
+            &mut store,
+            scope.clone(),
+            21_000,
+            60_000,
+            &["call_exec_regular".to_string()],
+            &json!({"messages":[]}),
+            None,
+            V3HubContinuationCommit::None,
+        )
+        .expect("consuming either alias must release the complete alias group");
+
+        assert!(!store.contains_in_scope(&scope, "resp_exec_regular"));
+        assert!(!store.contains_in_scope(&scope, "call_exec_regular"));
+        assert_eq!(store.len(), 0);
     }
 }
