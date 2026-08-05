@@ -144,7 +144,6 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
     canonical_request: &Value,
     finalized_response: &Value,
 ) -> Result<Value, V3LocalContinuationError> {
-    let mut input = canonical_request_input_items_at_resp04(canonical_request)?;
     let response_output = finalized_response
         .get("output")
         .and_then(Value::as_array)
@@ -152,37 +151,49 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
         .ok_or_else(|| V3LocalContinuationError::Codec {
             message: "Resp04 local finalized response output must be an array".to_string(),
         })?;
-    input.extend(
-        response_output
-            .iter()
-            .map(project_v3_resp04_output_item_to_chat_input_item)
-            .collect::<Result<Vec<_>, _>>()?,
-    );
-
-    let mut responses_context = Map::new();
-    responses_context.insert("input".to_string(), Value::Array(input));
-    if let Some(id) = finalized_response.get("id").and_then(Value::as_str) {
-        if !id.trim().is_empty() {
-            responses_context.insert("id".to_string(), Value::String(id.to_string()));
+    let mut chat_context = if canonical_request.get("messages").is_some() {
+        canonical_request.clone()
+    } else {
+        let historical_input = canonical_request_input_items_at_resp04(canonical_request)?;
+        let mut historical_responses_context = Map::new();
+        historical_responses_context.insert("input".to_string(), Value::Array(historical_input));
+        for field in [
+            "tools",
+            "tool_choice",
+            "parallel_tool_calls",
+            "instructions",
+        ] {
+            if let Some(value) = canonical_request.get(field) {
+                historical_responses_context.insert(field.to_string(), value.clone());
+            }
         }
-    }
-    for field in [
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "instructions",
-    ] {
-        if let Some(value) = canonical_request.get(field) {
-            responses_context.insert(field.to_string(), value.clone());
-        }
-    }
-    let chat_context =
         super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
-            &Value::Object(responses_context),
+            &Value::Object(historical_responses_context),
         )
-        .map_err(|message| V3LocalContinuationError::Codec { message })?;
-    Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
+        .map_err(|message| V3LocalContinuationError::Codec { message })?
+    };
+    let historical_message_count = chat_context
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
+    let response_input = response_output
+        .iter()
+        .map(project_v3_resp04_output_item_to_chat_input_item)
+        .collect::<Result<Vec<_>, _>>()?;
+    let response_chat_context = build_v3_resp04_response_delta_chat_context(response_input)?;
+    let response_messages = response_chat_context
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    chat_context["messages"]
+        .as_array_mut()
+        .expect("Responses canonical request always produces messages")
+        .extend(response_messages);
+    Ok(coalesce_v3_resp04_latest_response_suffix(
         chat_context,
+        historical_message_count,
     ))
 }
 
@@ -199,71 +210,65 @@ pub(crate) fn build_v3_relay_local_response_continuation_context_at_resp04(
         .iter()
         .map(project_v3_resp04_output_item_to_chat_input_item)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut responses_context = Map::new();
-    responses_context.insert("input".to_string(), Value::Array(response_input));
-    let chat_context =
-        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
-            &Value::Object(responses_context),
-        )
-        .map_err(|message| V3LocalContinuationError::Codec { message })?;
-    Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
-        chat_context,
-    ))
+    let chat_context = build_v3_resp04_response_delta_chat_context(response_input)?;
+    Ok(coalesce_v3_resp04_latest_response_suffix(chat_context, 0))
 }
 
-fn coalesce_v3_resp04_reasoning_with_following_tool_call(mut chat_context: Value) -> Value {
+fn build_v3_resp04_response_delta_chat_context(
+    response_input: Vec<Value>,
+) -> Result<Value, V3LocalContinuationError> {
+    let mut responses_context = Map::new();
+    responses_context.insert("input".to_string(), Value::Array(response_input));
+    super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+        &Value::Object(responses_context),
+    )
+    .map_err(|message| V3LocalContinuationError::Codec { message })
+}
+
+fn coalesce_v3_resp04_latest_response_suffix(
+    mut chat_context: Value,
+    historical_message_count: usize,
+) -> Value {
     let Some(messages) = chat_context
         .get_mut("messages")
         .and_then(Value::as_array_mut)
     else {
         return chat_context;
     };
-    let mut coalesced = Vec::with_capacity(messages.len());
-    let mut pending_reasoning: Option<Value> = None;
-    for message in std::mem::take(messages) {
-        if v3_resp04_chat_message_is_reasoning_only(&message) {
-            pending_reasoning = Some(match pending_reasoning.take() {
-                Some(mut pending) => {
-                    merge_v3_resp04_reasoning_content(&mut pending, &message);
-                    pending
-                }
-                None => message,
-            });
+    let mut index = historical_message_count.min(messages.len());
+    while index + 1 < messages.len() {
+        if v3_resp04_chat_message_is_assistant_semantic(&messages[index])
+            && v3_resp04_chat_message_is_assistant_semantic(&messages[index + 1])
+        {
+            let next_assistant_message = messages.remove(index + 1);
+            merge_v3_resp04_assistant_semantic(&mut messages[index], &next_assistant_message);
             continue;
         }
-        if v3_resp04_chat_message_has_tool_calls(&message) {
-            let mut target = message;
-            if let Some(pending) = pending_reasoning.take() {
-                merge_v3_resp04_reasoning_content(&mut target, &pending);
-            }
-            coalesced.push(target);
+        if v3_resp04_chat_message_is_assistant_semantic(&messages[index])
+            && v3_resp04_chat_message_has_tool_calls(&messages[index + 1])
+        {
+            let tool_call_message = messages.remove(index + 1);
+            merge_v3_resp04_tool_call_message(&mut messages[index], &tool_call_message);
             continue;
         }
-        if let Some(pending) = pending_reasoning.take() {
-            coalesced.push(pending);
-        }
-        coalesced.push(message);
+        index += 1;
     }
-    if let Some(pending) = pending_reasoning {
-        coalesced.push(pending);
-    }
-    *messages = coalesced;
     chat_context
 }
 
-fn v3_resp04_chat_message_is_reasoning_only(message: &Value) -> bool {
+fn v3_resp04_chat_message_is_assistant_semantic(message: &Value) -> bool {
     message
         .get("role")
         .and_then(Value::as_str)
         .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
-        && message
+        && !v3_resp04_chat_message_has_tool_calls(message)
+        && (message
             .get("reasoning_content")
             .and_then(Value::as_str)
-            .is_some_and(|text| !text.trim().is_empty())
-        && !v3_resp04_chat_message_has_tool_calls(message)
-        && message
-            .get("content")
-            .is_none_or(v3_resp04_chat_content_is_empty)
+            .is_some_and(|text| !text.is_empty())
+            || message
+                .get("content")
+                .is_some_and(|value| !v3_resp04_chat_content_is_empty(value)))
 }
 
 fn v3_resp04_chat_message_has_tool_calls(message: &Value) -> bool {
@@ -308,6 +313,49 @@ fn merge_v3_resp04_reasoning_content(target: &mut Value, source: &Value) {
         None => source_reasoning.to_string(),
     };
     target_object.insert("reasoning_content".to_string(), Value::String(merged));
+}
+
+fn merge_v3_resp04_tool_call_message(target: &mut Value, source: &Value) {
+    merge_v3_resp04_reasoning_content(target, source);
+    let Some(source_tool_calls) = source.get("tool_calls").and_then(Value::as_array) else {
+        return;
+    };
+    let Some(target_object) = target.as_object_mut() else {
+        return;
+    };
+    target_object.insert(
+        "tool_calls".to_string(),
+        Value::Array(source_tool_calls.clone()),
+    );
+}
+
+fn merge_v3_resp04_assistant_semantic(target: &mut Value, source: &Value) {
+    merge_v3_resp04_reasoning_content(target, source);
+    let Some(source_content) = source.get("content") else {
+        return;
+    };
+    if v3_resp04_chat_content_is_empty(source_content) {
+        return;
+    }
+    let Some(target_object) = target.as_object_mut() else {
+        return;
+    };
+    let Some(target_content) = target_object.get_mut("content") else {
+        target_object.insert("content".to_string(), source_content.clone());
+        return;
+    };
+    if v3_resp04_chat_content_is_empty(target_content) {
+        *target_content = source_content.clone();
+        return;
+    }
+    match (target_content, source_content) {
+        (Value::String(existing), Value::String(next)) => existing.push_str(next),
+        (Value::Array(existing), Value::Array(next)) => existing.extend(next.clone()),
+        (existing, next) => {
+            let previous = existing.clone();
+            *existing = Value::Array(vec![previous, next.clone()]);
+        }
+    }
 }
 
 fn project_v3_resp04_output_item_to_chat_input_item(

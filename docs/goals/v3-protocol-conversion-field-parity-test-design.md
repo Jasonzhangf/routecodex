@@ -295,3 +295,4 @@ Required closeout after source green: V3 fmt, protocol characterization gates, r
 | Codex `client_metadata["x-codex-turn-metadata"]` longer than 512 survives Responses inbound, Chat canonicalization, and Responses outbound unchanged | Public `metadata` still enforces its 512-character value limit; malformed non-object `client_metadata` fails at inbound |
 | Responses summary round-trips to Responses; valid Anthropic request summary policy selects the registered full-thinking compatibility projection | OpenAI Chat targets reject it; invalid values fail; no system marker/provider-wire field is emitted and Anthropic reasoning is neither rejected nor truncated |
 | Gemini includeThoughts round-trips to Gemini | It never becomes Anthropic display or OpenAI summary |
+| Resp04 appends and normalizes only the current response delta | The complete request-history prefix remains JSON-equivalent; no inbound whole-history scan, merge, sorting, or rewriting is allowed |

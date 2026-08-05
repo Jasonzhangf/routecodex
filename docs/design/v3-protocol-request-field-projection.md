@@ -103,6 +103,17 @@ All listed fields are normal request payload semantics. They must be represented
 as Chat native fields or registered Chat extensions and must survive Chat Process
 unchanged unless a named Chat Process policy owns an explicit transformation.
 
+### Ordered continuation suffix projection
+
+Responses history is immutable. Req inbound performs only the static, adjacent
+protocol projection required for the current request and never scans or rewrites
+previous turns. At Resp04, the canonical request prefix is recorded unchanged;
+the newly appended finalized response output is projected as a separate suffix.
+Only that suffix may coalesce contiguous assistant text/reasoning with its
+following tool call. Tool results remain paired and immediately follow the call.
+No historical message, tool declaration, call id, or result may be sorted,
+reconstructed, or modified by a later round.
+
 ## Field decision matrix
 
 `same` means the source and target use the same concrete wire field. `rename`

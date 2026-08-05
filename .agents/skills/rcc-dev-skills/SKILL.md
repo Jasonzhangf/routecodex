@@ -109,6 +109,7 @@ description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 
 - 配置/loader/VR/Hub/Pipeline 接线前：必须先完成未接线状态下的模块黑盒与旧配置样本对比，证明新实现能读取/等价处理现有用户配置；黑盒未绿禁止接线、禁止启动/重启 live server。
 - 禁止为绕过代码缺陷去修改 `~/.rcc` 或用户真实配置文件。若现有配置暴露兼容失败，必须回代码唯一 owner 修正；需要清理/迁移用户配置文件时必须先获得 Jason 明确授权。
 - 验证后：必须做 architecture review，判断结果是否正确、架构是否正确、是否用了 fallback / 临时绕路 / 补丁式修复、是否存在“结果对了但架构错了”。
+- Review finding 不是协议事实：修 reviewer finding 前必须回 canonical protocol/design 和真实样本证明该序列合法、可达且属于本 owner。未证明合法的假序列不得驱动 runtime 分支、fail-fast 特判或测试；若 finding 与 canonical design 冲突，保留设计真源并在复审 prompt 中列出精确条款和合法生命周期。
 - 验证通过不等于闭环完成；架构 review 不过，仍视为未完成。
 - RouteCodex 结案汇报必须短但完整：问题来源、验证根因、唯一 owner/节点、解决了什么、为什么符合 V3 架构、source gate、install/restart/live 证据、剩余风险。禁止只报“测试通过/已修复”。
 
@@ -297,6 +298,12 @@ description: RouteCodex 调试/开发入口；开发前必须先读 AGENTS、V3 
 - First inspect `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/provider-request.json` and `provider-response.json`. `attempts[]` is the routing truth; the human `[virtual-router-hit]` line may show only the final successful provider after retry/switch.
 - If an earlier priority candidate has `streamError` or malformed/incomplete raw SSE, debug provider response event codec / provider stream completeness before changing route priority. SSE transport is only framing; missing terminal `finish_reason`, `[DONE]`, or Anthropic `message_stop` is provider event-codec/response-owner evidence.
 - For OpenAI Chat streaming usage, verify provider-bound `stream_options.include_usage=true` and raw final chunks. If requests omit `stream_options`, upstream may emit `usage:null`, causing console `usage=unreported`; fix provider-standard request formatting, not server console fallback.
+
+## V3 provider-cache transcript diagnosis guard
+- Trigger: local OpenAI-compatible provider reports `cached_tokens=0`, `usage_cache=0`, `token-mismatch`, or a high-common-prefix cache miss after a Responses tool-call continuation.
+- First compare provider-bound raw Chat messages against the provider-rendered prompt/trace. A single assistant provider turn with visible text and tool calls must remain one Chat message containing both `content` and `tool_calls`; splitting it into adjacent assistant messages lets Chat renderers insert an EOS before tool-call markup and breaks prefix cache.
+- Correct owner for split local continuation is Resp04 local continuation canonical context, then Req04 restore consumes that saved context. Do not fix by changing usage projection, console output, SSE, provider transport, DS4 cache policy, or by stripping/reordering payload at request send time.
+- Required proof: byte-level trace showing the first mismatch, a red/green Resp04 coalescing test, local continuation integration, and a live replay only after the matching V3 binary is installed/restarted from an isolated or approved worktree.
 
 ## V3 provider-error console prefix invariant
 - 触发信号：human console line prefix `route:provider.model` 和同一行 `provider=...` 不一致，尤其是 switch 后显示 next provider 但错误来自 previous provider。

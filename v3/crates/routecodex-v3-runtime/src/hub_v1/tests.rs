@@ -801,6 +801,79 @@ fn local_continuation_context_preserves_request_history_tools_and_response_delta
 }
 
 #[test]
+fn resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable() {
+    let mut historical_input = vec![
+        json!({"type":"output_text","text":"historical visible text"}),
+        json!({
+            "type":"function_call",
+            "call_id":"call_historical",
+            "name":"historical_tool",
+            "arguments":"{}"
+        }),
+        json!({
+            "type":"function_call_output",
+            "call_id":"call_historical",
+            "output":"historical result"
+        }),
+    ];
+    for index in 3..294 {
+        historical_input.push(json!({
+            "type":"message",
+            "role":"user",
+            "content":[{"type":"input_text","text":format!("history-{index}")}]
+        }));
+    }
+    let canonical_request = json!({"input": historical_input});
+    let historical_chat =
+        build_v3_openai_chat_provider_payload_from_responses_payload(&canonical_request)
+            .expect("historical request must canonicalize without rewriting its order");
+    let historical_messages = historical_chat["messages"]
+        .as_array()
+        .expect("historical messages")
+        .clone();
+    assert_eq!(historical_messages.len(), 294);
+    assert_eq!(historical_messages[0]["content"], "historical visible text");
+    assert_eq!(
+        historical_messages[1]["tool_calls"][0]["id"],
+        "call_historical"
+    );
+    assert_eq!(historical_messages[2]["tool_call_id"], "call_historical");
+
+    let finalized_response = json!({
+        "status":"requires_action",
+        "output":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"latest thought"}]},
+            {"type":"output_text","text":"latest visible text"},
+            {
+                "type":"function_call",
+                "call_id":"call_latest",
+                "name":"latest_tool",
+                "arguments":"{\"path\":\"/tmp\"}"
+            }
+        ]
+    });
+    let context = build_v3_relay_local_continuation_context_at_resp04(
+        &canonical_request,
+        &finalized_response,
+    )
+    .expect("Resp04 must append and normalize only the current response delta");
+    let messages = context["messages"]
+        .as_array()
+        .expect("continuation messages");
+
+    assert_eq!(
+        &messages[..294],
+        historical_messages.as_slice(),
+        "the complete historical prefix must remain byte-for-byte JSON equivalent"
+    );
+    assert_eq!(messages.len(), 295);
+    assert_eq!(messages[294]["role"], "assistant");
+    assert_eq!(messages[294]["content"], "latest visible text");
+    assert_eq!(messages[294]["reasoning_content"], "latest thought");
+    assert_eq!(messages[294]["tool_calls"][0]["id"], "call_latest");
+}
+
+#[test]
 fn local_continuation_context_never_carries_stopless_center_state() {
     let canonical_request = json!({
         "input": [{"role": "user", "content": "original task"}],
