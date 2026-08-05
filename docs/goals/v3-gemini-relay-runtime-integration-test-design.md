@@ -68,7 +68,7 @@ Required assertions:
 
 - `execute_v3_gemini_relay_runtime` consumes the Config manifest and the endpoint URL model.
 - Client alias selects the controlled provider target while the provider URL uses
-  `/v1beta/models/gemini-wire/generateContent`.
+  `/v1beta/models/gemini-wire:generateContent`.
 - Gemini request body remains semantically equivalent; URL-path model truth is not injected as a
   provider body field.
 - JSON and SSE both traverse the same fixed Hub v1 lifecycle.

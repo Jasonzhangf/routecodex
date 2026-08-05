@@ -589,6 +589,17 @@ fn responses_reasoning_fields_as_anthropic_thinking(
     object: &Map<String, Value>,
 ) -> Result<Option<Value>, V3AnthropicCodecError> {
     let mode = object.get("reasoning_thinking_mode");
+    let summary_policy = object.get("reasoning_summary_policy");
+    if let Some(summary_policy) = summary_policy {
+        if !summary_policy
+            .as_str()
+            .is_some_and(|value| matches!(value, "auto" | "concise" | "detailed"))
+        {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_summary_policy",
+            });
+        }
+    }
     let explicit_budget = object
         .get("reasoning_budget_tokens")
         .map(|value| {
@@ -598,14 +609,21 @@ fn responses_reasoning_fields_as_anthropic_thinking(
         })
         .transpose()?;
     let display = object.get("reasoning_display_policy");
-    if mode.is_none() && explicit_budget.is_none() && display.is_none() {
+    if mode.is_none() && explicit_budget.is_none() && display.is_none() && summary_policy.is_none()
+    {
         return Ok(None);
     }
-    let mode = mode
-        .and_then(Value::as_str)
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning_thinking_mode",
-        })?;
+    let mode = match mode.and_then(Value::as_str) {
+        Some(mode) => mode,
+        None if summary_policy.is_some() && explicit_budget.is_none() && display.is_none() => {
+            "adaptive"
+        }
+        None => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "reasoning_thinking_mode",
+            })
+        }
+    };
     let mut thinking = Map::new();
     match mode {
         "enabled" => {
@@ -640,7 +658,7 @@ fn responses_reasoning_fields_as_anthropic_thinking(
             thinking.insert("type".to_string(), Value::String("adaptive".to_string()));
         }
         "disabled" => {
-            if explicit_budget.is_some() || display.is_some() {
+            if explicit_budget.is_some() || display.is_some() || summary_policy.is_some() {
                 return Err(V3AnthropicCodecError::MalformedField {
                     field: "reasoning_thinking_mode",
                 });

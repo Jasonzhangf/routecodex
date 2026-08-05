@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, Uri},
     response::Response,
     routing::post,
     Json, Router,
@@ -33,8 +33,20 @@ struct ProviderState {
 async fn controlled_gemini_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
+    uri: Uri,
     Json(body): Json<Value>,
 ) -> Response<Body> {
+    if !matches!(
+        uri.path(),
+        "/v1beta/models/gemini-wire:generateContent"
+            | "/v1beta/models/gemini-wire:streamGenerateContent"
+    ) {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap();
+    }
+
     state
         .captures
         .send(ProviderCapture {
@@ -59,7 +71,7 @@ async fn controlled_gemini_upstream(
             ))
             .unwrap();
     }
-    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+    if uri.path().ends_with(":streamGenerateContent") {
         let stream = futures_util::stream::unfold(0_u8, |step| async move {
             match step {
                 0 => Some((
@@ -120,9 +132,10 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     let (upstream_shutdown_tx, upstream_shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route(
-            "/v1beta/models/gemini-wire/generateContent",
+            "/v1beta/models/gemini-wire:generateContent",
             post(controlled_gemini_upstream),
         )
+        .fallback(controlled_gemini_upstream)
         .with_state(Arc::new(ProviderState {
             captures: captures_tx,
         }));
@@ -146,6 +159,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
 
     let json_response = client
         .post(&endpoint)
+        .header("x-session-id", "gemini-controlled-test-session")
+        .header("x-conversation-id", "gemini-controlled-test-conversation")
         .json(&json!({
             "contents":[{"role":"user","parts":[{"text":"json"}]}],
             "tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"object"}}]}],
@@ -178,6 +193,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
 
     let sse_response = client
         .post(&endpoint)
+        .header("x-session-id", "gemini-controlled-test-session")
+        .header("x-conversation-id", "gemini-controlled-test-conversation")
         .json(&json!({
             "contents":[{"role":"user","parts":[{"text":"sse"}]}],
             "stream":true
@@ -212,6 +229,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
 
     let error_response = client
         .post(&endpoint)
+        .header("x-session-id", "gemini-controlled-test-session")
+        .header("x-conversation-id", "gemini-controlled-test-conversation")
         .json(&json!({
             "contents":[{"role":"user","parts":[{"text":"fail"}]}],
             "stream":false
@@ -247,6 +266,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
 
     let isolation_response = client
         .post(&endpoint)
+        .header("x-session-id", "gemini-controlled-test-session")
+        .header("x-conversation-id", "gemini-controlled-test-conversation")
         .json(&json!({
             "contents":[{"role":"user","parts":[{"text":"isolation"}]}],
             "metadata_center":{"route":"must-not-leak"}

@@ -436,6 +436,34 @@ fn responses_reasoning_summary_policy_is_local_hint_for_anthropic() {
     assert!(!serde_json::to_string(&wire)
         .unwrap()
         .contains("reasoning_summary_policy"));
+    assert_eq!(wire["thinking"], json!({"type":"adaptive"}));
+}
+
+#[test]
+fn responses_reasoning_summary_policy_enables_native_thinking_without_effort() {
+    let wire = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "reasoning_summary_policy":"concise",
+        "messages":[{"role":"user","content":"preserve thinking"}]
+    }))
+    .expect("summary policy must statically enable native Anthropic thinking");
+
+    assert_eq!(wire["thinking"], json!({"type":"adaptive"}));
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("reasoning_summary_policy"));
+}
+
+#[test]
+fn responses_invalid_reasoning_summary_policy_fails_before_anthropic_wire() {
+    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "reasoning_summary_policy":true,
+        "messages":[{"role":"user","content":"reject malformed policy"}]
+    }))
+    .expect_err("invalid summary policy must fail before provider wire");
+
+    assert!(error.to_string().contains("reasoning_summary_policy"), "{error}");
 }
 
 #[test]

@@ -1371,6 +1371,7 @@ features:
       - characterize_v3_anthropic_hub_response_semantic_to_client_projection
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
@@ -1976,6 +1977,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
@@ -2022,7 +2024,7 @@ features:
       - responses_openai_chat_field_parity_request_matrix
       - responses_openai_chat_field_parity_response_matrix
       - responses_relay_reasoning_effort_projects_anthropic_output_config_effort
-      - responses_relay_reasoning_summary_is_rejected_before_anthropic_wire
+      - responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire
       - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
       - openai_chat_wire_projects_responses_web_search_tool_to_options
       - responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning
@@ -2043,6 +2045,7 @@ features:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs

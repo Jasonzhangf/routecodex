@@ -106,7 +106,7 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
 
     assert_eq!(
         transport.captured_url.lock().unwrap().as_deref(),
-        Some("http://controlled.invalid/v1beta/models/gemini-wire/generateContent")
+        Some("http://controlled.invalid/v1beta/models/gemini-wire:generateContent")
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     let mut expected_provider_payload = payload;
@@ -482,7 +482,7 @@ impl ResponsesTransport for StaticSseTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         assert!(
-            request.url().ends_with("/streamGenerateContent?alt=sse"),
+            request.url().ends_with(":streamGenerateContent?alt=sse"),
             "Gemini SSE transport must use the streaming endpoint: {}",
             request.url()
         );

@@ -4963,6 +4963,133 @@ targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
         compile_v3_config_05_manifest(authoring).expect("relay-to-direct manifest")
     }
 
+    fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.anthropic_first]
+type = "anthropic"
+base_url = "http://anthropic.invalid/v1"
+default_model = "claude-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "ANTHROPIC_FIRST_KEY" }] }
+[providers.anthropic_first.models.claude-test]
+wire_name = "claude-test"
+capabilities = ["text", "tools"]
+
+[providers.openai_second]
+type = "openai_chat"
+base_url = "http://openai.invalid/v1"
+default_model = "chat-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "OPENAI_SECOND_KEY" }] }
+[providers.openai_second.models.chat-test]
+wire_name = "chat-test"
+capabilities = ["text", "tools"]
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "anthropic_first", model = "claude-test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "openai_second", model = "chat-test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
+"#,
+        )
+        .expect("mixed protocol authoring");
+        compile_v3_config_05_manifest(authoring).expect("mixed protocol manifest")
+    }
+
+    struct RecordingChatTransport {
+        provider_ids: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponsesTransport for RecordingChatTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.provider_ids
+                .lock()
+                .expect("provider id recorder")
+                .push(request.provider_id().to_string());
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"msg_static_projection","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#.to_vec(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn target_protocol_unmapped_field_fails_without_provider_switch_or_transport() {
+        std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
+        std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
+        let manifest = anthropic_then_openai_chat_manifest();
+        let session_scope =
+            V3ProviderFailureSessionScope::new("test", "default", "protocol-incompatible-session")
+                .expect("session scope");
+        let transport = RecordingChatTransport {
+            provider_ids: Mutex::new(Vec::new()),
+        };
+
+        let error = execute_v3_responses_relay_runtime_inner(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "test".to_string(),
+                failure_session_scope: session_scope,
+                request_id: "req-unmapped-field-no-switch".to_string(),
+                payload: json!({
+                    "model": "client-model",
+                    "input": "hello",
+                    "store": true
+                }),
+            },
+            &transport,
+            None,
+            None,
+            V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+            V3ResponsesRelayRetryPolicy::default(),
+            None,
+            None,
+            None,
+            None,
+            BTreeSet::new(),
+            None,
+        )
+        .await
+        .expect_err("unmapped target field must fail before provider transport");
+
+        assert!(error.to_string().contains("$.request.store"), "{error:?}");
+        assert!(
+            transport
+                .provider_ids
+                .lock()
+                .expect("provider ids")
+                .is_empty(),
+            "target protocol projection failure must not switch provider or enter transport"
+        );
+    }
+
     #[test]
     fn missing_execution_block_preserves_relay_mode() {
         let authoring = parse_v3_config_02_authoring(
