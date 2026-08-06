@@ -21,7 +21,7 @@ use routecodex_v3_config::{
     V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
-    V3DebugTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
+    V3DebugBoundedTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
@@ -2783,7 +2783,7 @@ struct V3LiveSnapClientResponseSseRecorder {
     error_chain: Option<Vec<&'static str>>,
     observability: Option<Value>,
     finalized_response: Option<Value>,
-    raw_sse: Arc<Mutex<V3DebugTextCapture>>,
+    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
 }
 
 impl V3LiveSnapClientResponseSseRecorder {
@@ -2807,7 +2807,7 @@ impl V3LiveSnapClientResponseSseRecorder {
                 .as_ref()
                 .map(project_v3_runtime_observability_debug),
             finalized_response: output.finalized_response.clone(),
-            raw_sse: Arc::new(Mutex::new(V3DebugTextCapture::new())),
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
         }
     }
 
@@ -2923,7 +2923,7 @@ struct V3LiveSnapDirectClientResponseSseRecorder {
     node_trace: Vec<&'static str>,
     error_chain: Vec<&'static str>,
     observability: Option<Value>,
-    raw_sse: Arc<Mutex<V3DebugTextCapture>>,
+    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
 }
 
 impl V3LiveSnapDirectClientResponseSseRecorder {
@@ -2946,7 +2946,7 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                 .observability
                 .as_ref()
                 .map(project_v3_runtime_observability_debug),
-            raw_sse: Arc::new(Mutex::new(V3DebugTextCapture::new())),
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
         }
     }
 
