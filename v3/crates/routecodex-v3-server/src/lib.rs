@@ -21,7 +21,7 @@ use routecodex_v3_config::{
     V3Config05ManifestPublished, V3DebugManifest, V3EntryProtocolExecutionMode, V3ServerManifest,
 };
 use routecodex_v3_debug::{
-    V3DebugBoundedTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
+    V3DebugTextCapture, V3DebugError, V3DebugRuntime, V3DebugRuntimeConfig,
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
@@ -2783,7 +2783,7 @@ struct V3LiveSnapClientResponseSseRecorder {
     error_chain: Option<Vec<&'static str>>,
     observability: Option<Value>,
     finalized_response: Option<Value>,
-    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+    raw_sse: Arc<Mutex<V3DebugTextCapture>>,
 }
 
 impl V3LiveSnapClientResponseSseRecorder {
@@ -2807,7 +2807,7 @@ impl V3LiveSnapClientResponseSseRecorder {
                 .as_ref()
                 .map(project_v3_runtime_observability_debug),
             finalized_response: output.finalized_response.clone(),
-            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            raw_sse: Arc::new(Mutex::new(V3DebugTextCapture::new())),
         }
     }
 
@@ -2923,7 +2923,7 @@ struct V3LiveSnapDirectClientResponseSseRecorder {
     node_trace: Vec<&'static str>,
     error_chain: Vec<&'static str>,
     observability: Option<Value>,
-    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+    raw_sse: Arc<Mutex<V3DebugTextCapture>>,
 }
 
 impl V3LiveSnapDirectClientResponseSseRecorder {
@@ -2946,7 +2946,7 @@ impl V3LiveSnapDirectClientResponseSseRecorder {
                 .observability
                 .as_ref()
                 .map(project_v3_runtime_observability_debug),
-            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+            raw_sse: Arc::new(Mutex::new(V3DebugTextCapture::new())),
         }
     }
 
@@ -6142,22 +6142,15 @@ fn build_v3_provider_failure_session_scope_for_request(
 fn get_failure_session_scope(
     server: &V3ServerManifest,
     headers: &HeaderMap,
-    entry_protocol: &str,
-    request_id: &str,
+    _entry_protocol: &str,
+    _request_id: &str,
 ) -> Result<V3ProviderFailureSessionScope, String> {
+    // All entry protocols require session-id header for failure isolation.
+    // If missing, this is a server-side bug - not a client error to tolerate.
     if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers) {
         return Ok(scope);
     }
-    // For Responses, session-id is required
-    if entry_protocol == "responses" {
-        return Err("provider failure isolation requires the existing request session-id header".to_string());
-    }
-    // For other protocols, use anonymous scope
-    Ok(V3ProviderFailureSessionScope::new(
-        &server.id,
-        &server.routing_group,
-        &format!("anon:{}", request_id),
-    ).expect("anonymous scope must be valid"))
+    Err("provider failure isolation requires the existing request session-id header".to_string())
 }
 
 fn provider_failure_session_id_from_request_headers(
