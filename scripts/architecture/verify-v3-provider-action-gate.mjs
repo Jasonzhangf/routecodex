@@ -6,13 +6,6 @@ import YAML from 'yaml';
 const root = process.cwd();
 const failures = [];
 const files = {
-  v2Gate: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs',
-  v2Napi: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
-  v2Host: 'src/modules/llmswitch/bridge/provider-action-gate-host.ts',
-  v2Queue: 'src/server/runtime/http-server/executor/request-executor-error-action-queue.ts',
-  v2Plan: 'src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts',
-  v2Handler: 'src/server/handlers/handler-utils.ts',
-  v2Projection: 'src/server/utils/http-error-mapper.ts',
   gate: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
   policy: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
   policyTests: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
@@ -37,13 +30,6 @@ const files = {
   responsesRelayTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   directTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   errorTests: 'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
-  v2FunctionMap: 'docs/architecture/function-map.yml',
-  v2ResourceMap: 'docs/architecture/resource-operation-map.yml',
-  v2MainlineMap: 'docs/architecture/mainline-call-map.yml',
-  v2VerificationMap: 'docs/architecture/verification-map.yml',
-  v2BindingBudget: 'docs/architecture/mainline-binding-budget.yml',
-  v2Manifest: 'docs/architecture/manifests/error.provider_action_gate.mainline.yml',
-  v2Wiki: 'docs/architecture/wiki/error-provider-action-gate-mainline.md',
   functionMap: 'docs/architecture/v3-function-map.yml',
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   mainlineMap: 'docs/architecture/v3-mainline-call-map.yml',
@@ -288,105 +274,6 @@ function assertCallerInvokesCallee(edge) {
     );
   }
 }
-
-const requiredV2Edges = [
-  {
-    step_id: 'error-provider-action-gate-01',
-    from_node: 'ErrorErr05ExecutionDecision',
-    to_node: 'ProviderActionGateFailureRecorded',
-    caller_symbol: 'resolveRequestExecutorProviderFailurePlan',
-    caller_file: files.v2Plan,
-    callee_symbol: 'recordErrorActionBackoff',
-    callee_file: files.v2Queue,
-    call_witness: /\brecordErrorActionBackoff\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-02',
-    from_node: 'ProviderActionGateFailureRecorded',
-    to_node: 'ProviderActionGateAdmission',
-    caller_symbol: 'resolveRequestExecutorProviderFailurePlan',
-    caller_file: files.v2Plan,
-    callee_symbol: 'waitErrorActionBackoffWithGate',
-    callee_file: files.v2Queue,
-    call_witness: /\bwaitErrorActionBackoffWithGate\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-03',
-    from_node: 'ProviderActionGateAdmission',
-    to_node: 'ProviderActionGateTerminalCommitRequested',
-    caller_symbol: 'waitErrorActionBackoffWithGate',
-    caller_file: files.v2Queue,
-    callee_symbol: 'commitProviderActionTerminalNative',
-    callee_file: files.v2Host,
-    call_witness: /\bcommitProviderActionTerminalNative\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-04',
-    from_node: 'ProviderActionGateTerminalCommitRequested',
-    to_node: 'ProviderActionGateTerminalCommitted',
-    caller_symbol: 'commit_provider_action_terminal_json',
-    caller_file: files.v2Napi,
-    callee_symbol: 'commit_terminal',
-    callee_file: files.v2Gate,
-    call_witness: /\bprovider_action_gate::commit_terminal\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-05',
-    from_node: 'ProviderActionGateAdmission',
-    to_node: 'ProviderActionGateSuccessRequested',
-    caller_symbol: 'recordErrorActionSuccessByLaneGroup',
-    caller_file: files.v2Queue,
-    callee_symbol: 'recordProviderActionSuccessNative',
-    callee_file: files.v2Host,
-    call_witness: /\brecordProviderActionSuccessNative\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-06',
-    from_node: 'ProviderActionGateSuccessRequested',
-    to_node: 'ProviderActionGateSuccessCommitted',
-    caller_symbol: 'record_provider_action_success_json',
-    caller_file: files.v2Napi,
-    callee_symbol: 'record_success',
-    callee_file: files.v2Gate,
-    call_witness: /\bprovider_action_gate::record_success\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-07',
-    from_node: 'ProviderActionGateAdmission',
-    to_node: 'ProviderActionGateAbandonRequested',
-    caller_symbol: 'waitErrorActionBackoffWithGate',
-    caller_file: files.v2Queue,
-    callee_symbol: 'abandonProviderActionAdmissionNative',
-    callee_file: files.v2Host,
-    call_witness: /\babandonProviderActionAdmissionNative\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-  {
-    step_id: 'error-provider-action-gate-08',
-    from_node: 'ProviderActionGateAbandonRequested',
-    to_node: 'ProviderActionGateAbandoned',
-    caller_symbol: 'abandon_provider_action_admission_json',
-    caller_file: files.v2Napi,
-    callee_symbol: 'abandon_admission',
-    callee_file: files.v2Gate,
-    call_witness: /\bprovider_action_gate::abandon_admission\s*\(/u,
-    status: 'anchored',
-    owner_feature_id: 'error.provider_action_gate',
-  },
-];
 
 const requiredV3Edges = [
   {
@@ -1149,49 +1036,6 @@ if (
 }
 
 for (const token of [
-  'PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000',
-  'PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000',
-  'pub fn commit_terminal(',
-  'pub fn record_success(',
-  'pub fn abandon_admission(',
-  'admitted_action_scope: Option<String>',
-  'admitted_action_requires_explicit_abandon_before_replacement_generation',
-  'stale_action_scope_cannot_abandon_or_commit_a_reused_generation',
-  'unrelated_success_cannot_release_an_active_action_scope',
-  'waiter_ticket_rejects_action_scope_rebinding',
-]) {
-  requireText(text.v2Gate, files.v2Gate, token);
-}
-requireText(
-  text.v2Gate,
-  files.v2Gate,
-  'state.next_admission_at = now + Duration::from_millis(PROVIDER_ACTION_SUSTAINED_DELAY_MS);',
-);
-requireOccurrenceCount(
-  text.v2Gate,
-  files.v2Gate,
-  'state.admitted_action_scope.as_deref() != Some(action_scope_key.as_str())',
-  2,
-);
-requireOccurrenceCount(
-  text.v2Gate,
-  files.v2Gate,
-  'ticket.action_scope_key != action_scope_key',
-  2,
-);
-for (const token of [
-  'terminalProjection?: boolean',
-  'commitProviderActionTerminalNative(',
-  'recordProviderActionSuccessNative(',
-  'abandonProviderActionAdmissionNative(',
-  'throwIfClientAbortSignalAborted(args.signal)',
-  "registration.signal.removeEventListener('abort', registration.onAbort)",
-  "terminalProjection: retryExecutionPlan.action === 'project_terminal'",
-]) {
-  requireText(`${text.v2Queue}\n${text.v2Plan}`, `${files.v2Queue} + ${files.v2Plan}`, token);
-}
-
-for (const token of [
   'pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;',
   'pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;',
   'pub fn process_shared() -> Self',
@@ -1578,27 +1422,12 @@ for (const token of [
   requireText(text.server, files.server, token);
 }
 
-const v2FunctionMap = parseYaml(files.v2FunctionMap);
-const v2ResourceMap = parseYaml(files.v2ResourceMap);
-const v2MainlineMap = parseYaml(files.v2MainlineMap);
-const v2VerificationMap = parseYaml(files.v2VerificationMap);
-const v2BindingBudget = parseYaml(files.v2BindingBudget);
-const v2Manifest = parseYaml(files.v2Manifest);
 const functionMap = parseYaml(files.functionMap);
 const resourceMap = parseYaml(files.resourceMap);
 const mainlineMap = parseYaml(files.mainlineMap);
 const verificationMap = parseYaml(files.verificationMap);
 const manifest = parseYaml(files.manifest);
 
-verifyEdgeContract({
-  mapDoc: v2MainlineMap,
-  manifestDoc: v2Manifest,
-  chainId: 'error.provider_action_gate.mainline',
-  requiredEdges: requiredV2Edges,
-  mapRel: files.v2MainlineMap,
-  manifestRel: files.v2Manifest,
-  v3: false,
-});
 verifyEdgeContract({
   mapDoc: mainlineMap,
   manifestDoc: manifest,
@@ -1608,17 +1437,9 @@ verifyEdgeContract({
   manifestRel: files.manifest,
   v3: true,
 });
-const requiredV2Nodes = [...new Set(
-  requiredV2Edges.flatMap((edge) => [edge.from_node, edge.to_node]),
-)];
 const requiredV3Nodes = [...new Set(
   requiredV3Edges.flatMap((edge) => [edge.from_node, edge.to_node]),
 )];
-assertExactStrings(
-  v2Manifest?.node_ids,
-  requiredV2Nodes,
-  `${files.v2Manifest}: node_ids`,
-);
 assertExactStrings(
   asArray(manifest?.nodes).map((node) => node?.node_id),
   requiredV3Nodes,
@@ -1668,115 +1489,15 @@ assertExactStrings(
   `${files.manifest}: return_path`,
 );
 
-const v2Feature = asArray(v2FunctionMap.owners).find((row) => row?.feature_id === 'error.provider_action_gate');
-const v2Verification = asArray(v2VerificationMap.verification).find(
-  (row) => row?.feature_id === 'error.provider_action_gate',
-);
-const v2Resource = asArray(v2ResourceMap.resources).find(
-  (row) => row?.resource_id === 'error.provider_action_gate',
-);
-const v2Budget = asArray(v2BindingBudget.chains).find(
-  (row) => row?.chain_id === 'error.provider_action_gate.mainline',
-);
-const v2Chain = asArray(v2MainlineMap.chains).find(
-  (row) => row?.chain_id === 'error.provider_action_gate.mainline',
-);
-const v3Chain = asArray(mainlineMap.chains).find(
-  (row) => row?.chain_id === 'v3.provider_action_gate.mainline',
-);
-if (v2Feature?.status !== 'active') failures.push(`${files.v2FunctionMap}: V2 feature must be active`);
-if (
-  v2Feature?.owner_kind !== 'rust_ssot'
-  || v2Feature?.owner_module !== files.v2Gate
-) {
-  failures.push(`${files.v2FunctionMap}: V2 feature owner must remain the Rust provider action gate`);
-}
-assertExactStrings(
-  v2Feature?.mainline_bindings,
-  requiredV2Edges.map((edge) => edge.step_id),
-  `${files.v2FunctionMap}: error.provider_action_gate.mainline_bindings`,
-);
-assertIncludes(
-  v2Feature?.resource_bindings?.writes,
-  ['error.provider_action_gate@ProviderActionGateState'],
-  `${files.v2FunctionMap}: error.provider_action_gate.resource_bindings.writes`,
-);
-assertIncludes(
-  v2Feature?.canonical_builders,
-  ['commit_terminal', 'record_success', 'abandon_admission'],
-  `${files.v2FunctionMap}: error.provider_action_gate.canonical_builders`,
-);
-assertExactStrings(
-  v2Verification?.mainline_bindings,
-  requiredV2Edges.map((edge) => edge.step_id),
-  `${files.v2VerificationMap}: error.provider_action_gate.mainline_bindings`,
-);
-assertIncludes(
-  v2Verification?.contract,
-  [files.v2FunctionMap, files.v2ResourceMap, files.v2MainlineMap, files.v2Manifest, files.v2Wiki],
-  `${files.v2VerificationMap}: error.provider_action_gate.contract`,
-);
-if (v2Resource?.binding_status !== 'anchored') {
-  failures.push(`${files.v2ResourceMap}: V2 provider action gate resource must be anchored`);
-}
-if (
-  v2Resource?.resource_kind !== 'side_channel'
-  || v2Resource?.owner_node !== 'ProviderActionGateState'
-  || v2Resource?.lifecycle !== 'error.provider_action_gate.mainline'
-  || v2Resource?.owner_feature_id !== 'error.provider_action_gate'
-  || v2Chain?.owner_feature_id !== 'error.provider_action_gate'
-  || v2Manifest?.lifecycle_id !== 'error.provider_action_gate.mainline'
-  || v2Manifest?.owner_feature_id !== 'error.provider_action_gate'
-  || v2Manifest?.entrypoint?.call_map_chain_id !== 'error.provider_action_gate.mainline'
-) {
-  failures.push(
-    `${files.v2ResourceMap} + ${files.v2MainlineMap} + ${files.v2Manifest}: V2 lifecycle/chain/owner binding drift`,
-  );
-}
-if (
-  v2Manifest?.downstream_projection?.lifecycle_id !== 'error.mainline'
-  || v2Manifest?.downstream_projection?.step_id !== 'err-05'
-  || v2Manifest?.downstream_projection?.provider_action_gate_witness !== 'none'
-) {
-  failures.push(`${files.v2Manifest}: downstream Error06 projection reference must remain error.mainline#err-05 with no gate witness`);
-}
-if (asArray(v2Resource?.allowed_readers).includes('resolveReportedRouteErrorHttpResponse')) {
-  failures.push(`${files.v2ResourceMap}: Error06 projector must not claim to read provider action gate state`);
-}
-if (
-  v2Budget?.expected_total_edges !== requiredV2Edges.length
-  || v2Budget?.min_anchored_edges !== requiredV2Edges.length
-  || v2Budget?.max_partial_edges !== 0
-  || v2Budget?.max_binding_pending_edges !== 0
-) {
-  failures.push(
-    `${files.v2BindingBudget}: error.provider_action_gate.mainline must lock ${requiredV2Edges.length} anchored edges with zero debt`,
-  );
-}
-assertIncludes(
-  v2Resource?.allowed_writers,
-  ['commit_terminal', 'record_success', 'abandon_admission'],
-  `${files.v2ResourceMap}: error.provider_action_gate.allowed_writers`,
-);
-if (
-  v2Manifest?.admission_ownership?.wall_clock_expiry_forbidden !== true
-  || v2Manifest?.admission_ownership?.abandon_increments_failure_count !== false
-  || v2Manifest?.admission_ownership?.max_admissions_per_generation !== 1
-) {
-  failures.push(
-    `${files.v2Manifest}: admission_ownership must lock explicit outcomes, no wall-clock expiry, and health-neutral abandon`,
-  );
-}
-if (Object.hasOwn(v2Manifest, 'admission_lease')) {
-  failures.push(`${files.v2Manifest}: disproved admission_lease contract must be physically removed`);
-}
-
 const feature = asArray(functionMap.features).find((row) => row?.feature_id === 'v3.provider_action_gate');
 const verification = asArray(verificationMap.features).find(
   (row) => row?.feature_id === 'v3.provider_action_gate',
 );
 const resource = asArray(resourceMap.resources).find(
   (row) => row?.resource_id === 'v3.error.provider_action_gate',
+);
+const v3Chain = asArray(mainlineMap.chains).find(
+  (row) => row?.chain_id === 'v3.provider_action_gate.mainline',
 );
 if (feature?.status !== 'active' || feature?.runtime_status !== 'source_active_live_verification_required') {
   failures.push(`${files.functionMap}: v3.provider_action_gate must be active with live verification explicit`);
@@ -1871,33 +1592,15 @@ assertIncludes(
   ],
   `${files.resourceMap}: v3.error.provider_action_gate.required_gates`,
 );
-if (v2Manifest.status !== 'active' || manifest.status !== 'active') {
-  failures.push('provider action gate V2/V3 manifests must both be active');
+if (manifest.status !== 'active') {
+  failures.push('provider action gate V3 manifest must be active');
 }
-const v2WikiMermaid = extractSingleMermaidBlock(text.v2Wiki, files.v2Wiki);
 const v3WikiMermaid = extractSingleMermaidBlock(text.wiki, files.wiki);
-assertExactStrings(
-  extractWikiStepIds(v2WikiMermaid, 'error-provider-action-gate-'),
-  requiredV2Edges.map((edge) => edge.step_id),
-  `${files.v2Wiki}: machine edge IDs`,
-);
 assertExactStrings(
   extractWikiStepIds(v3WikiMermaid, 'v3-provider-action-gate-'),
   requiredV3Edges.map((edge) => edge.step_id),
   `${files.wiki}: machine edge IDs`,
 );
-for (const [stepId, fromAlias, toAlias] of [
-  ['error-provider-action-gate-01', 'E05', 'Failure'],
-  ['error-provider-action-gate-02', 'Failure', 'Admission'],
-  ['error-provider-action-gate-03', 'Admission', 'CommitRequest'],
-  ['error-provider-action-gate-04', 'CommitRequest', 'Committed'],
-  ['error-provider-action-gate-05', 'Admission', 'SuccessRequest'],
-  ['error-provider-action-gate-06', 'SuccessRequest', 'SuccessCommitted'],
-  ['error-provider-action-gate-07', 'Admission', 'AbandonRequest'],
-  ['error-provider-action-gate-08', 'AbandonRequest', 'Abandoned'],
-]) {
-  assertWikiEdge(v2WikiMermaid, files.v2Wiki, stepId, fromAlias, toAlias);
-}
 for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-01', 'Compat', 'E05'],
   ['v3-provider-action-gate-02', 'Wire', 'E05'],
@@ -1953,9 +1656,6 @@ for (const [stepId, fromAlias, toAlias] of [
 ]) {
   assertWikiEdge(v3WikiMermaid, files.wiki, stepId, fromAlias, toAlias);
 }
-if (/^\s*Committed\s*-->/mu.test(v2WikiMermaid)) {
-  failures.push(`${files.v2Wiki}: terminal commit cannot claim a downstream machine edge`);
-}
 if (/^\s*TerminalCommit\s*-->/mu.test(v3WikiMermaid)) {
   failures.push(`${files.wiki}: terminal commit cannot claim a downstream machine edge`);
 }
@@ -1989,7 +1689,6 @@ if (failures.length) {
   process.exit(1);
 }
 console.log('[verify:v3-provider-action-gate] ok');
-console.log(`- V2 required machine edges: ${requiredV2Edges.length}`);
 console.log(`- V3 required machine edges: ${requiredV3Edges.length}`);
 console.log('- every declared symbol exists and every caller body invokes its declared callee');
-console.log('- V2/V3 map-manifest endpoints, status, symbols, files, and owner bindings are synchronized');
+console.log('- V3 map-manifest endpoints, status, symbols, files, and owner bindings are synchronized');

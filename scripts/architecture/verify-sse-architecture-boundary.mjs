@@ -31,20 +31,6 @@ function listFiles(dir) {
   return out;
 }
 
-for (const featureId of [
-  'sse.runtime_rust_dispatch',
-  'sse.stream_parse_boundary',
-  'sse.event_type_validation',
-  'sse.chat_stream_projection',
-  'sse.responses_encode_projection',
-  'sse.responses_decode_projection',
-  'sse.anthropic_gemini_stream_projection',
-]) {
-  const marker = `feature_id: ${featureId}`;
-  if (!functionMap.includes(marker)) failures.push(`function-map missing ${marker}`);
-  if (!verificationMap.includes(marker)) failures.push(`verification-map missing ${marker}`);
-}
-
 const rustDispatchPath = 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs';
 const rustDispatch = read(rustDispatchPath);
 for (const required of [
@@ -77,45 +63,6 @@ for (const forbidden of [
 const deletedNativeBridgePath = 'sharedmodule/llmswitch-core/src/native/router-hotpath/native-sse-runtime.ts';
 if (fs.existsSync(path.join(root, deletedNativeBridgePath))) {
   failures.push(`${deletedNativeBridgePath}: retired SSE native TS wrapper must stay physically deleted`);
-}
-
-for (const [ownerPath, requiredMarkers] of [
-  ['src/modules/llmswitch/bridge/provider-response-converter-host.ts', [
-    'buildSseFramesFromJsonWithNative',
-    'buildReadableFromSseFrames',
-  ]],
-  ['src/modules/llmswitch/bridge/provider-response-native-host.ts', [
-    'getRouterHotpathJsonBindingSync',
-  ]],
-  ['src/modules/llmswitch/bridge/provider-response-native-calls.ts', [
-    'getProviderResponseNativeBindingSync',
-    'buildSseFramesFromJsonJson',
-  ]],
-  ['src/modules/llmswitch/bridge/runtime-integrations.ts', [
-    'buildJsonFromSseWithNative',
-    'collectSseBodyText',
-  ]],
-  ['src/modules/llmswitch/bridge/sse-runtime-host.ts', [
-    'getRouterHotpathJsonBindingSync',
-    'buildJsonFromSseJson',
-  ]],
-  ['scripts/helpers/sse-direct-native.mjs', [
-    'router_hotpath_napi.node',
-    'buildSseFramesFromJsonJson',
-    'buildJsonFromSseJson',
-  ]],
-  ['tests/sharedmodule/helpers/sse-direct-native.ts', [
-    'router_hotpath_napi.node',
-    'buildSseFramesFromJsonJson',
-    'buildJsonFromSseJson',
-  ]],
-]) {
-  const source = read(ownerPath);
-  for (const marker of requiredMarkers) {
-    if (!source.includes(marker)) {
-      failures.push(`${ownerPath}: missing direct native SSE marker ${marker}`);
-    }
-  }
 }
 
 const lib = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');

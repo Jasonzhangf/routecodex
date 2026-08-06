@@ -2524,12 +2524,6 @@ mainline_resource_flows:
     side_channel_reads: [stopless.schema_gate_state, stopless.runtime_snapshot]
     side_channel_writes: []
   - chain_id: stopless.session.mainline
-    step_id: stl-04
-    consumes: [stopless.cli_projection]
-    produces: [stopless.cli_result]
-    side_channel_reads: []
-    side_channel_writes: []
-  - chain_id: stopless.session.mainline
     step_id: stl-05
     consumes: [stopless.cli_result, stopless.runtime_snapshot, continuation.scope_state]
     produces: [stopless.runtime_snapshot]

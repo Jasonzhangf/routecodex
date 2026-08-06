@@ -200,100 +200,46 @@ function checkNoActiveRuntimeRefs() {
   pass('server-side-tool-runtime-ref-deleted', `scanned ${files.length} active runtime files`);
 }
 
-function checkProviderResponseFailFastShell() {
-  const hostPath = repoPath('src/modules/llmswitch/bridge/provider-response-converter-host.ts');
-  const effectsPath = repoPath('src/modules/llmswitch/bridge/provider-response-effects.ts');
-  const metadataPath = repoPath('src/modules/llmswitch/bridge/provider-response-metadata-effects.ts');
-  const effectPlanRustPath = repoPath('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs');
-  const hostSource = readRequired(hostPath);
-  const effectsSource = readRequired(effectsPath);
-  const metadataSource = readRequired(metadataPath);
-  const effectPlanRustSource = readRequired(effectPlanRustPath);
-  assertContains('provider-response-servertool-failfast', hostPath, hostSource, './provider-response-effects.js');
-  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'executeProviderResponseNativeServertoolEffects');
-  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'planProviderResponseServertoolRetirementEffectWithNative');
-  assertNotContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'server-side tool execution has been removed');
-  assertContains('provider-response-servertool-failfast', effectPlanRustPath, effectPlanRustSource, 'server-side tool execution has been removed');
-  assertContains('provider-response-servertool-failfast', effectPlanRustPath, effectPlanRustSource, 'CLI-owned tools must be projected by Rust');
-  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'writeRustStopGatewayContextToMetadataCenter');
-  assertContains('provider-response-servertool-failfast', effectsPath, effectsSource, 'applyNativeRuntimeControlWritePlan');
-  assertContains('provider-response-servertool-failfast', metadataPath, metadataSource, 'readBoundMetadataCenter');
-  for (const [path, source] of [
-    [hostPath, hostSource],
-    [effectsPath, effectsSource],
-    [metadataPath, metadataSource],
-  ]) {
-    for (const marker of deletedTsBridgeSymbols) {
-      assertNotContains('provider-response-servertool-failfast', path, source, marker);
+function checkProviderResponseRustOnlyBoundary() {
+  const deletedBridgeHosts = [
+    'src/modules/llmswitch/bridge/provider-response-converter-host.ts',
+    'src/modules/llmswitch/bridge/provider-response-effects.ts',
+    'src/modules/llmswitch/bridge/provider-response-metadata-effects.ts',
+    'src/modules/llmswitch/bridge/provider-response-native-calls.ts',
+    'src/modules/llmswitch/bridge/runtime-integrations.ts',
+    'src/modules/llmswitch/bridge/sse-runtime-host.ts',
+    'src/modules/llmswitch/bridge/native-exports.ts',
+  ].map(repoPath);
+  for (const p of deletedBridgeHosts) {
+    if (existsSync(p)) {
+      fail('provider-response-servertool-failfast', `${rel(p)} must stay physically deleted with the V2 runtime`);
     }
   }
-  pass('provider-response-servertool-failfast', 'provider-response host boundary has no server-side executor bridge');
+  pass('provider-response-servertool-failfast', `${deletedBridgeHosts.length} V2 provider-response TS bridge hosts are physically absent`);
 }
 
 function checkNativeExportSurface() {
-  const requiredExportsPath = repoPath('sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
-  const libPath = repoPath('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
-  const protocolPath = repoPath('tests/sharedmodule/helpers/hub-pipeline-orchestration-direct-native.ts');
-  const nativeExportsPath = repoPath('src/modules/llmswitch/bridge/native-exports.ts');
-  for (const [path, source] of [
-    [requiredExportsPath, readRequired(requiredExportsPath)],
-    [libPath, readRequired(libPath)],
-  ]) {
-    for (const marker of deletedNativeExports) {
-      assertNotContains('native-servertool-runtime-action-export-deleted', path, source, marker);
+  const deletedNativeSymbolFiles = [
+    'src/modules/llmswitch/bridge/native-exports.ts',
+    'src/modules/llmswitch/bridge/executor-metadata-host.ts',
+    'src/modules/llmswitch/bridge/responses-request-handler-host.ts',
+    'src/modules/llmswitch/bridge/responses-client-projection-host.ts',
+  ].map(repoPath);
+  for (const p of deletedNativeSymbolFiles) {
+    if (existsSync(p)) {
+      fail('native-servertool-runtime-action-export-deleted', `${rel(p)} must stay physically deleted with the V2 runtime`);
     }
   }
-  const protocol = readRequired(protocolPath);
-  assertContains('native-servertool-runtime-effects-carrier', protocolPath, protocol, 'servertoolRuntimeActions: Array<Record<string, unknown>>');
-  assertContains('native-servertool-runtime-effects-carrier', protocolPath, protocol, 'Array.isArray(row.servertoolRuntimeActions)');
-  const nativeExports = readRequired(nativeExportsPath);
-  const retiredServertoolWrapperSubpath = ['native', 'servertool-wrapper'].join('/');
-  const retiredServertoolWrapperToken = ['servertool', 'wrapper'].join('-');
-  for (const marker of [
-    'SERVERTOOL ORCHESTRATION WRAPPERS',
-    'SERVERTOOL CORE BRIDGE WRAPPERS',
-    'servertool-core bridge:',
-    retiredServertoolWrapperSubpath,
-    'export function inspectStopGatewaySignalWithNative',
-    'export function planServertoolEnginePreflightWithNative',
-    'export function resolveServertoolExecutionLoopInitialDecisionWithNative',
-    'export function finalizeServertoolResponseStageWithNative',
-  ]) {
-    assertNotContains('native-servertool-wrapper-fanout-deleted', nativeExportsPath, nativeExports, marker);
-  }
-  for (const [path, source] of [
-    [repoPath('sharedmodule/llmswitch-core/package.json'), readRequired(repoPath('sharedmodule/llmswitch-core/package.json'))],
-    [repoPath('scripts/verify-rcc-release-install.mjs'), readRequired(repoPath('scripts/verify-rcc-release-install.mjs'))],
-    [repoPath('scripts/install-release-snapshot.mjs'), readRequired(repoPath('scripts/install-release-snapshot.mjs'))],
-    [repoPath('scripts/lib/build-core-utils.mjs'), readRequired(repoPath('scripts/lib/build-core-utils.mjs'))],
-  ]) {
-    assertNotContains('native-servertool-wrapper-package-subpath-deleted', path, source, retiredServertoolWrapperToken);
-  }
-  pass('native-servertool-runtime-action-export-deleted', 'runtime action planner exports are absent');
+  pass('native-servertool-runtime-action-export-deleted', `${deletedNativeSymbolFiles.length} V2 native export surfaces are physically absent`);
 }
 
 function checkFocusedVerificationMap() {
   const verificationMapPath = repoPath('docs/architecture/verification-map.yml');
   const verificationMap = readRequired(verificationMapPath);
-  for (const required of [
-    'tests/cli/servertool-command.spec.ts',
-    'tests/servertool/servertool-cli-native-bridge.spec.ts',
-    'tests/servertool/servertool-cli-result-restore.spec.ts',
-    'tests/servertool/servertool-active-orchestration-audit.spec.ts',
-    'tests/sharedmodule/provider-response.metadata-center-provider-protocol.spec.ts',
-    'tests/sharedmodule/native-required-exports-sse-stream.spec.ts',
-    'tests/sharedmodule/apply-patch-chat-process-contract.spec.ts',
-  ]) {
-    if (!existsSync(repoPath(required))) {
-      fail('servertool-verification-map', `${required} is listed as required but is missing`);
-      continue;
-    }
-    assertContains('servertool-verification-map', verificationMapPath, verificationMap, required);
-  }
   for (const deleted of deletedServerSideToolTests.map(rel)) {
     assertNotContains('servertool-verification-map', verificationMapPath, verificationMap, deleted);
   }
-  pass('servertool-verification-map', 'verification map points at live servertool closeout gates');
+  pass('servertool-verification-map', 'verification map no longer lists retired V2 servertool tests');
 }
 
 function checkPackageAndCiLists() {
@@ -319,7 +265,7 @@ console.log('\n=== verify-servertool-rust-only ===\n');
 
 checkDeletedServerSideToolRuntimeAbsent();
 checkNoActiveRuntimeRefs();
-checkProviderResponseFailFastShell();
+checkProviderResponseRustOnlyBoundary();
 checkNativeExportSurface();
 checkFocusedVerificationMap();
 checkPackageAndCiLists();

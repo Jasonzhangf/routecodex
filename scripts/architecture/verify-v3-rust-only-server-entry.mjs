@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import process from 'node:process';
 
-const productionFiles = [
+const physicallyAbsent = [
+  'src/index.ts',
   'src/cli.ts',
-  'src/cli/commands/start.ts',
-  'src/cli/commands/launcher-kernel.ts',
-  'package.json',
-  'scripts/run-bg.sh',
-  'scripts/run-fg-gtimeout.sh',
+  'src/cli',
+  'src/commands',
+  'src/server',
+  'src/providers',
 ];
 const forbidden = [
   'resolveServerEntryPath',
@@ -15,22 +15,20 @@ const forbidden = [
   "['dist/index.js']",
   "'dist/index.js'",
   'RouteCodexHttpServer',
+  'dist/cli.js',
 ];
 const failures = [];
 
-if (fs.existsSync('src/index.ts')) failures.push('src/index.ts: legacy TS HTTP server entry must be physically absent');
+for (const path of physicallyAbsent) {
+  if (fs.existsSync(path)) failures.push(`${path}: legacy TS runtime entry must be physically absent`);
+}
 
-for (const file of productionFiles) {
+for (const file of ['package.json', 'scripts/run-bg.sh', 'scripts/run-fg-gtimeout.sh']) {
+  if (!fs.existsSync(file)) continue;
   const text = fs.readFileSync(file, 'utf8');
   for (const token of forbidden) {
     if (text.includes(token)) failures.push(`${file}: forbidden legacy server entry '${token}'`);
   }
-}
-
-for (const file of ['src/cli.ts', 'src/cli/commands/start.ts', 'src/cli/commands/launcher-kernel.ts']) {
-  const text = fs.readFileSync(file, 'utf8');
-  if (text.includes('serverBin || nodeBin')) failures.push(`${file}: server spawn may fall back to nodeBin`);
-  if (!text.includes('server start') && file !== 'src/cli.ts') failures.push(`${file}: Rust server command is not declared`);
 }
 
 if (failures.length) {

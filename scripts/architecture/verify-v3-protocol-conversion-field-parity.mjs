@@ -44,6 +44,7 @@ const paths = {
   verificationMap: 'docs/architecture/v3-verification-map.yml',
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   packageJson: 'package.json',
+  v3ArchitectureCi: 'scripts/architecture/verify-v3-architecture-ci.mjs',
   matrixReview: 'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
   fieldMatrix: V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_PATH,
   fieldMatrixHtml: V3_PROTOCOL_SEMANTIC_FIELD_MATRIX_HTML_PATH,
@@ -483,8 +484,8 @@ for (const phrase of [
   '"type":"custom_tool_call"',
 ]) requireText(text.responsesRuntime, `${paths.responsesRuntime}::native_openai_chat_custom_tool_response`, phrase);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
-requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'target_protocol_unmapped_field_fails_without_provider_switch_or_transport');
-requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_no_provider_switch`, 'target protocol projection failure must not switch provider or enter transport');
+requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_switches_without_invalid_wire`, 'target_protocol_unmapped_field_skips_invalid_wire_and_switches_provider');
+requireText(text.responsesRuntime, `${paths.responsesRuntime}::projection_failure_switches_without_invalid_wire`, 'the incompatible Anthropic candidate must receive no wire request');
 requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
 for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');
@@ -1143,10 +1144,8 @@ for (const command of [
     failures.push(`${paths.packageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
   }
 }
-if (!String(pkg.scripts?.['verify:architecture-review-surface-light'] ?? '').includes(
-  'npm run verify:v3-protocol-conversion-field-parity-ci',
-)) {
-  failures.push(`${paths.packageJson}: verify:architecture-review-surface-light must run verify:v3-protocol-conversion-field-parity-ci`);
+if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity'")) {
+  failures.push(`${paths.v3ArchitectureCi}: verify:v3-architecture-ci must run verify:v3-protocol-conversion-field-parity`);
 }
 if (pkg.scripts?.['render:v3-protocol-semantic-field-matrix'] !== 'node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs') {
   failures.push(`${paths.packageJson}: render:v3-protocol-semantic-field-matrix must run node scripts/architecture/render-v3-protocol-semantic-field-matrix.mjs`);
