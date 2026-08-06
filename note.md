@@ -34625,3 +34625,11 @@ Hard guards observed:
 - 重跑全仓引用扫描（src 466），92 个零引用候选。宽松正则验证后，绝大多数 REF（活文件，严格正则漏匹配 import 的 ./ 前缀）。真 ZERO 项全是 `.d.ts` 类型声明（common-utils.d.ts / llms-engine-shadow.d.ts / glob.d.ts / external-modules.d.ts / ajv.d.ts / ajv-shim.d.ts / sensitive-redaction.d.ts / build-info.d.ts / finish-reason.d.ts / errorsamples.d.ts / runtime-versions.d.ts）+ `provider-error-logger.ts`（verify-debug-unified-surface 要求存在的壳）。
 - 判定：`.d.ts` 类型声明靠 tsc 全局收集，不能当孤儿归档；provider-error-logger 是 gate 壳。故第二批**无可归档非 d.ts 孤儿**。src/ 已清完孤儿（第一批 23 + 第二批 0）。剩余 466 文件全活跃（被 runtime/CLI/测试消费），退役需 Rust 接管（guardian/CLI 编排、handler 等），非归档能解决。
 - dist 残留 30 个旧孤儿 js（tsc 不清理 dist，重编译仍 490 js vs src 460 ts）。dist 是 gitignore 生成物，残留无害，后续 build clean 处理。
+
+## 2026-08-06 - Req04 内容反推控制状态根因确认
+- Jason 最新硬约束：客户端历史前缀不可变；只允许处理当前轮 request/response suffix；禁止从业务内容反推控制状态；任何内容截取/截断/摘要/占位/历史裁剪均错误。
+- 当前 HEAD 仍存在 `reject_apply_patch_guidance_payload_leak_at_req04`，它扫描 `instructions` 与 `messages[].content` 的 `[Codex Tool Guidance]` marker 并返回 500。此逻辑不是正向 writer/carrier，而是从业务 payload 反推控制泄漏，直接造成 5520 Responses 500，必须物理删除。
+- 已删除该 Req04 guard、错误变体，以及 function/mainline/verification map 和 manifest 对该错误 owner 的授权；canonical mainline wiki 已重新生成。
+- 新测试 `apply_patch_guidance_text_is_preserved_as_business_payload_at_req04` 锁定 marker 文本作为业务 payload 原样保留；Req04 apply_patch 请求仍不注入 guidance。
+- 验证：定向 2/2 PASS；完整 `hub_relay_request_semantics` 22/22 PASS；`verify:v3-architecture-docs`、`verify:v3-module-boundaries`、`verify:v3-relay-request-semantics` PASS；owner files rustfmt check、`git diff --check` PASS。全 workspace `cargo fmt --check` 被无关 dirty/conflict 文件的既有格式漂移阻塞，未修改这些文件。
+- 当前工作树含他人改动和两个 unmerged 文件，禁止覆盖/清理。
