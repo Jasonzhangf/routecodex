@@ -27,10 +27,10 @@ use routecodex_v3_debug::{
 use routecodex_v3_error::{
     project_v3_http_boundary_error, project_v3_post_commit_sse_source,
     project_v3_server_invalid_request, project_v3_server_runtime_failure,
-    project_v3_server_websocket_error,
-    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
-    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    project_v3_server_websocket_error, raise_v3_debug_artifact_failure,
+    raise_v3_runtime_observability_contract_failure, raise_v3_sse_client_disconnect,
+    raise_v3_sse_provider_failure, V3Error01SourceRaised, V3HttpBoundaryErrorKind,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw,
@@ -1103,21 +1103,11 @@ async fn pending_endpoint_after_responses_admission(
             }
         }
     }
-    let provider_failure_session_scope = match build_v3_provider_failure_session_scope_for_request(
+    let provider_failure_session_scope = get_or_create_failure_session_scope(
         &state.server,
         &request_headers,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            return error_output_response_for_server_with_project_path(
-                &state.server,
-                &path,
-                &request_id,
-                project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                None,
-            );
-        }
-    };
+        &request_id,
+    );
     let responses_protocol_plan = None;
     if entry_protocol == "responses" {
         if let Some(entry_facts) = responses_entry_facts.as_ref() {
@@ -2273,16 +2263,7 @@ async fn execute_responses_relay_websocket_output(
         }
     };
     let provider_failure_session_scope =
-        match build_v3_provider_failure_session_scope_for_request(&state.server, headers) {
-            Ok(scope) => scope,
-            Err(message) => {
-                return V3ResponsesDirectServerOutcome::RelayOutput(
-                    project_v3_responses_relay_runtime_failure(
-                        V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
-                    ),
-                );
-            }
-        };
+        get_or_create_failure_session_scope(&state.server, headers, &request_id);
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
         Err(error) => {
@@ -3254,7 +3235,11 @@ fn capture_v3_responses_relay_provider_snapshots(
     }
     let snapshots = output.provider_snapshots.as_mut()?;
     if let Some(provider_request) = snapshots.provider_request.take() {
-        if force_error_evidence || state.debug.should_capture_snapshot_stage("provider-request") {
+        if force_error_evidence
+            || state
+                .debug
+                .should_capture_snapshot_stage("provider-request")
+        {
             let provider_request = state
                 .debug
                 .redact_payload_for_side_channel(provider_request);
@@ -3274,7 +3259,11 @@ fn capture_v3_responses_relay_provider_snapshots(
         }
     }
     if let Some(provider_response) = snapshots.provider_response.take() {
-        if force_error_evidence || state.debug.should_capture_snapshot_stage("provider-response") {
+        if force_error_evidence
+            || state
+                .debug
+                .should_capture_snapshot_stage("provider-response")
+        {
             let provider_response = state
                 .debug
                 .redact_payload_for_side_channel(provider_response);
@@ -3320,7 +3309,9 @@ fn finalize_v3_responses_relay_server_output(
             endpoint,
             request_id,
             "request.json",
-            &state.debug.redact_payload_for_side_channel(raw_request_payload.clone()),
+            &state
+                .debug
+                .redact_payload_for_side_channel(raw_request_payload.clone()),
         );
         let _ = persist_v3_error_evidence_payload(
             state,
@@ -6133,12 +6124,32 @@ fn v3_responses_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool 
 fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,
-) -> Result<V3ProviderFailureSessionScope, String> {
-    let session_id =
-        provider_failure_session_id_from_request_headers(headers)?.ok_or_else(|| {
-            "provider failure isolation requires the existing request session-id header".to_string()
-        })?;
-    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)
+) -> Option<V3ProviderFailureSessionScope> {
+    provider_failure_session_id_from_request_headers(headers)
+        .ok()
+        .flatten()
+        .and_then(|session_id| {
+            V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id).ok()
+        })
+}
+
+/// Get failure session scope, falling back to request-scoped anonymous scope when no session-id header present.
+/// This is used for runtime inputs that require a non-optional scope.
+fn get_or_create_failure_session_scope(
+    server: &V3ServerManifest,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> V3ProviderFailureSessionScope {
+    build_v3_provider_failure_session_scope_for_request(server, headers)
+        .unwrap_or_else(|| {
+            // Create an anonymous scope for requests without session-id header
+            V3ProviderFailureSessionScope::new(
+                &server.id,
+                &server.routing_group,
+                &format!("no-session-{}", request_id),
+            )
+            .expect("request-scoped anonymous scope must be valid")
+        })
 }
 
 fn provider_failure_session_id_from_request_headers(
@@ -6293,7 +6304,7 @@ fn request_local_continuation_scope(
     let (session_id, conversation_id) = responses_control_scope_headers(headers)?;
     match (session_id, conversation_id) {
         (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
-        (None, None) if !requires_client_scope => {
+        _ if !requires_client_scope => {
             let request_scope = format!("request:{request_id}");
             Ok((request_scope.clone(), request_scope))
         }
