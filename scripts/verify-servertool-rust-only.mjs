@@ -158,7 +158,6 @@ const deletedTsBridgeSymbols = [
 const activeRuntimeRoots = [
   repoPath('src'),
   repoPath('sharedmodule/llmswitch-core/src'),
-  repoPath('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src'),
 ];
 
 function checkDeletedServerSideToolRuntimeAbsent() {
@@ -244,7 +243,6 @@ function checkFocusedVerificationMap() {
 
 function checkPackageAndCiLists() {
   const packagePath = repoPath('package.json');
-  const ciPath = repoPath('scripts/tests/ci-jest.mjs');
   const pkg = JSON.parse(readRequired(packagePath));
   for (const scriptName of ['build', 'build:min']) {
     const script = pkg.scripts?.[scriptName] ?? '';
@@ -253,10 +251,8 @@ function checkPackageAndCiLists() {
     }
   }
   const packageText = readRequired(packagePath);
-  const ciText = readRequired(ciPath);
   for (const deleted of deletedServerSideToolTests.map(rel)) {
     assertNotContains('servertool-deleted-tests-unlisted', packagePath, packageText, deleted);
-    assertNotContains('servertool-deleted-tests-unlisted', ciPath, ciText, deleted);
   }
   pass('servertool-gate-in-build', 'build scripts keep servertool rust-only gate');
 }

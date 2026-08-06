@@ -20,9 +20,6 @@ function writeSource(relativePath, source) {
 function seedCleanFixture() {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
   fs.mkdirSync(tmpRoot, { recursive: true });
-  writeSource(converterRelative, 'export const providerResponseErrorBoundaryFixture = true;\n');
-  writeSource(sendFailureRelative, 'export const providerResponseFailureBoundaryFixture = true;\n');
-  writeSource(providerFailureRelative, 'export const providerFailureReportBoundaryFixture = true;\n');
 }
 
 function runVerifier(name, relativePath, source, expectedSubstring) {
@@ -72,55 +69,55 @@ const cases = [
     'status-retryable-write',
     converterRelative,
     'function classify(error) { error.statusCode = 429; error.retryable = true; }\n',
-    'TS normalized statusCode write'
+    'must stay physically deleted'
   ),
   runVerifier(
     'rate-limit-classifier',
     converterRelative,
     'function classify(message, code) { return isRateLimitLikeError(message, code); }\n',
-    'TS rate-limit classifier'
+    'must stay physically deleted'
   ),
   runVerifier(
     'provider-configured-mapping',
     converterRelative,
     'function classify(input) { return applyProviderConfiguredErrorMapping(input); }\n',
-    'TS provider-configured error mapper'
+    'must stay physically deleted'
   ),
   runVerifier(
     'message-based-sse-classification',
     converterRelative,
     'const normalizedMessage = message.toLowerCase(); const isSseDecodeError = normalizedMessage.includes("sse");\n',
-    'TS bridge error classification predicate'
+    'must stay physically deleted'
   ),
   runVerifier(
     'provider-sse-stage-write',
     converterRelative,
     "function classify(errRecord) { errRecord.requestExecutorProviderErrorStage = 'provider.sse_decode'; }\n",
-    'TS provider SSE stage classification write'
+    'must stay physically deleted'
   ),
   runVerifier(
     'executor-response-retry-classifier',
     sendFailureRelative,
     'function isRetryableProviderResponseProcessingFailure(record) { return record.retryable === true; }\n',
-    'executor TS provider-response retry classifier'
+    'must stay physically deleted'
   ),
   runVerifier(
     'report-plan-sse-stage-classifier',
     providerFailureRelative,
     'const stage = isSseDecodeRateLimitError(error, 429) ? "provider.sse_decode" : "provider.send";\n',
-    'report-plan TS SSE rate-limit classifier'
+    'must stay physically deleted'
   ),
   runVerifier(
     'dead-sse-normalizer-module',
     deadSseNormalizerRelative,
     'export function remapBridgeSseErrorToHttp() { return true; }\n',
-    'dead TS bridge SSE remapper module'
+    'must stay physically deleted'
   ),
   runVerifier(
     'dead-empty-sse-remap-jest',
     deadEmptySseSpecRelative,
     'import { remapBridgeSseErrorToHttp } from "../../../../../src/server/runtime/http-server/executor/provider-response-sse-error-normalizer.js";\n',
-    'legacy empty-SSE TS remap Jest'
+    'must stay physically deleted'
   ),
 ];
 

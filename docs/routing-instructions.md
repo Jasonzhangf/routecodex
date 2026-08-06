@@ -399,7 +399,7 @@ routecodex daemon status routing --server <server-id>
 
 ## 参考实现
 
-- 解析逻辑：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/parse.rs`
-- 类型定义：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/instructions/types.rs`；历史 TS `sharedmodule/llmswitch-core/src/native/router-hotpath/virtual-router-contracts.ts` 已删除，不得恢复为 source-side binding contract
-- 集成位置：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/engine`
+- 解析逻辑：`v3/crates/routecodex-v3-route-classifier/src/route.rs`
+- 类型定义：`v3/crates/routecodex-v3-route-classifier/src/lib.rs`；历史 V2 TS/Rust 实现已退役，不得恢复为 source-side binding contract
+- 集成位置：`v3/crates/routecodex-v3-virtual-router/`、`v3/crates/routecodex-v3-route-classifier/`
 - Daemon 接口：`src/daemon/`（待实现）

@@ -2,14 +2,9 @@
 resolver = "2"
 
 members = [
-  "crates/route-classifier-core",
-  "crates/sse-transport-core",
   "crates/provider-compat-core",
-  "crates/router-hotpath-napi",
   "crates/stop-message-core",
-  "crates/followup-core",
-  "crates/servertool-core",
-  "crates/traffic-governor-core"
+  "crates/servertool-core"
 ]
 
 [workspace.package]

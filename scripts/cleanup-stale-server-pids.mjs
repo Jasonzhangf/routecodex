@@ -49,9 +49,6 @@ function isTrustedRouteCodexCommand(command) {
   if (normalized.includes('routecodex/dist/bin/rccv3') || normalized.includes('/rccv3 server')) {
     return true;
   }
-  if (normalized.includes('routecodex/dist/cli.js')) {
-    return true;
-  }
   return false;
 }
 

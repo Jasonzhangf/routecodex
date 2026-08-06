@@ -19,10 +19,10 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 
 ### Hub Pipeline / Virtual Router Rust 真源说明（当前状态）
 
-- Hub Pipeline 与 Virtual Router 的核心运行时语义，当前以 Rust hotpath 为唯一真源：
-  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/`
-- TS 层职责为 thin-shell（桥接/编排/输入输出承接），不再承载第二套语义真源。
-- 已废弃的 TS 旧实现统一归档到 `archive`/`*.legacy.ts`，避免在主路径被误改并引入双真源分叉。
+- Hub Pipeline 与 Virtual Router 的核心运行时语义，当前以 Rust 为唯一真源：
+  - `v3/crates/routecodex-v3-runtime/src/hub_v1/`（Hub Pipeline 节点链）
+  - `v3/crates/routecodex-v3-virtual-router/`、`v3/crates/routecodex-v3-route-classifier/`（路由与分类）
+- TS 层职责为 thin-shell（桥接/编排/输入输出承接），不再承载第二套语义真源；V2 运行时已物理移除。
 
 ## 系统架构
 
@@ -183,8 +183,8 @@ RouteCodex 是一个多 Provider OpenAI 代理服务器，支持动态路由、�
 
 RouteCodex 现在完全依赖 sharedmodule/llmswitch-core 的 Hub Pipeline，实现“HTTP ↔ 标准化请求 ↔ Virtual Router ↔ Provider”全链路处理：
 
-- **唯一入口**：服务器通过 `RouteCodexHttpServer` 进入 `src/modules/llmswitch/bridge/*` 的窄 Host/N-API 壳，再调用 `router-hotpath-napi` 的 Rust Hub Pipeline / Virtual Router 真源；禁止恢复或旁路加载已删除的 llmswitch-core TS pipeline shell。
-- **Rust 真源**：Hub Pipeline / Virtual Router 的 runtime semantics 由 `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/` 提供，TS 仅保留桥接编排薄壳。
+- **唯一入口**：服务器通过 `dist/bin/rccv3`（Rust server）进入 `v3/crates/routecodex-v3-server/`，再调用 `routecodex-v3-runtime` 的 Hub Pipeline / Virtual Router 真源；V2 TS runtime 已物理移除，禁止恢复。
+- **Rust 真源**：Hub Pipeline / Virtual Router 的 runtime semantics 由 `v3/crates/routecodex-v3-runtime/src/hub_v1/` 与 `v3/crates/routecodex-v3-virtual-router/` 提供。
 - **配置来源**：`routecodex-config-loader` 读取用户配置后调用 `bootstrapVirtualRouterConfig`。该工具会校验 routing/providers、展开 `provider.keyAlias.model`、生成 `targetRuntime` 映射（endpoint、headers、auth、compat profile），Hub Pipeline 构造函数直接接受该结果。
 - **节点链路**：Hub Pipeline 在内部组成 `SSE Input → Input Node → Chat Process → Virtual Router → (Compatibility，可选) → Output/SSE`。Host 不关心节点细节，只需要把 HTTP 请求封装成标准化的 Hub 请求。
 - **工具治理**：工具治理属于 Rust Chat Process / Hub Pipeline；compat profile authoring 数据保留在 `sharedmodule/llmswitch-core/src/conversion/compat/*.json`，运行语义由 Rust/native owner 消费，Host 不恢复 TS tool-governance shell。

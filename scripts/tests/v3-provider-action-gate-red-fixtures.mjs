@@ -35,20 +35,10 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
   'v3/crates/routecodex-v3-server/src/tests/mod.rs',
-  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs',
-  'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs',
-  'src/modules/llmswitch/bridge/provider-action-gate-host.ts',
-  'src/server/runtime/http-server/executor/request-executor-error-action-queue.ts',
-  'src/server/runtime/http-server/executor/request-executor-provider-failure-plan.ts',
-  'src/server/handlers/handler-utils.ts',
-  'src/server/utils/http-error-mapper.ts',
   'docs/architecture/function-map.yml',
   'docs/architecture/resource-operation-map.yml',
   'docs/architecture/mainline-call-map.yml',
   'docs/architecture/verification-map.yml',
-  'docs/architecture/mainline-binding-budget.yml',
-  'docs/architecture/manifests/error.provider_action_gate.mainline.yml',
-  'docs/architecture/wiki/error-provider-action-gate-mainline.md',
   'docs/architecture/v3-function-map.yml',
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/v3-mainline-call-map.yml',
@@ -264,42 +254,6 @@ const cases = [
     diagnostic: /missing wait_for_exact_selected_provider_action/u,
   },
   {
-    name: 'V2 explicit outcome loses its sustained spacing floor',
-    path: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll(
-      'state.next_admission_at = now + Duration::from_millis(PROVIDER_ACTION_SUSTAINED_DELAY_MS);',
-      'state.next_admission_at = now;',
-    ),
-    diagnostic: /missing state\.next_admission_at = now \+ Duration::from_millis/u,
-  },
-  {
-    name: 'V2 stale action scope can abandon or commit a reused generation',
-    path: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll(
-      'state.admitted_action_scope.as_deref() != Some(action_scope_key.as_str())',
-      'false',
-    ),
-    diagnostic: /expected at least 2 occurrences of state\.admitted_action_scope/u,
-  },
-  {
-    name: 'V2 waiter ticket can be rebound to another action scope',
-    path: 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll(
-      'ticket.action_scope_key != action_scope_key',
-      'false',
-    ),
-    diagnostic: /expected at least 2 occurrences of ticket\.action_scope_key/u,
-  },
-  {
-    name: 'V2 success leaves a stale abort listener attached',
-    path: 'src/server/runtime/http-server/executor/request-executor-error-action-queue.ts',
-    mutate: (source) => source.replace(
-      "registration.signal.removeEventListener('abort', registration.onAbort)",
-      'void registration.signal',
-    ),
-    diagnostic: /missing registration\.signal\.removeEventListener/u,
-  },
-  {
     name: 'provider change restarts isolated delay',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replaceAll('active_lane_generation', 'bypassed_lane_generation'),
@@ -345,16 +299,6 @@ const cases = [
     diagnostic: /must be active/u,
   },
   {
-    name: 'V2 required terminal commit edge is deleted',
-    path: 'docs/architecture/mainline-call-map.yml',
-    mutate: (source) => mutateYaml(source, (document) => removeEdge(
-      document,
-      'error.provider_action_gate.mainline',
-      'error-provider-action-gate-04',
-    )),
-    diagnostic: /missing required edge error-provider-action-gate-04/u,
-  },
-  {
     name: 'V3 required atomic terminal commit edge is deleted',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: (source) => mutateYaml(source, (document) => removeEdge(
@@ -381,14 +325,6 @@ const cases = [
       edge(document, 'v3-provider-action-gate-01').caller_symbol = 'fake_execute_v3_responses_relay_runtime_inner';
     }),
     diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_inner/u,
-  },
-  {
-    name: 'V2 map declares a fake callee symbol',
-    path: 'docs/architecture/mainline-call-map.yml',
-    mutate: (source) => mutateYaml(source, (document) => {
-      edge(document, 'error-provider-action-gate-03').callee_symbol = 'fakeCommitProviderActionTerminalNative';
-    }),
-    diagnostic: /callee_symbol must equal commitProviderActionTerminalNative/u,
   },
   {
     name: 'V3 terminal admission caller stops invoking atomic commit',
@@ -432,15 +368,6 @@ const cases = [
     diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
   },
   {
-    name: 'V2 terminal admission caller stops invoking native commit',
-    path: 'src/server/runtime/http-server/executor/request-executor-error-action-queue.ts',
-    mutate: (source) => source.replace(
-      '&& commitProviderActionTerminalNative(',
-      '&& bypassProviderActionTerminalCommit(',
-    ),
-    diagnostic: /does not call commitProviderActionTerminalNative/u,
-  },
-  {
     name: 'V3 manifest endpoint drifts from map',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(
@@ -474,25 +401,10 @@ const cases = [
     diagnostic: /V3Error05ExecutionDecision owner must be routecodex-v3-error/u,
   },
   {
-    name: 'V2 manifest status drifts from map',
-    path: 'docs/architecture/manifests/error.provider_action_gate.mainline.yml',
-    mutate: (source) => source.replace(
-      /(  - step_id: error-provider-action-gate-04\n[\s\S]{0,800}?\n    status:) anchored/u,
-      '$1 partial',
-    ),
-    diagnostic: /status is out of sync/u,
-  },
-  {
     name: 'V3 function map drops atomic terminal mainline binding',
     path: 'docs/architecture/v3-function-map.yml',
     mutate: (source) => source.replace('      - v3-provider-action-gate-06\n', ''),
     diagnostic: /mainline_bindings: missing binding v3-provider-action-gate-06/u,
-  },
-  {
-    name: 'V2 function map drops atomic terminal builder',
-    path: 'docs/architecture/function-map.yml',
-    mutate: (source) => source.replace('      - commit_terminal\n', ''),
-    diagnostic: /missing binding commit_terminal/u,
   },
   {
     name: 'V3 resource map drops atomic terminal writer',
@@ -504,18 +416,6 @@ const cases = [
       );
     }),
     diagnostic: /allowed_writers: missing binding V3ProviderActionGate::commit_terminal_admission/u,
-  },
-  {
-    name: 'V2 verification map drops terminal commit edge binding',
-    path: 'docs/architecture/verification-map.yml',
-    mutate: (source) => {
-      const feature = source.indexOf('  - feature_id: error.provider_action_gate\n');
-      const binding = source.indexOf('      - error-provider-action-gate-04\n', feature);
-      return binding >= 0
-        ? source.slice(0, binding) + source.slice(binding + '      - error-provider-action-gate-04\n'.length)
-        : source;
-    },
-    diagnostic: /mainline_bindings: missing binding error-provider-action-gate-04/u,
   },
   {
     name: 'V3 verification map drops Responses Relay provider-bound failure contract',
@@ -532,24 +432,6 @@ const cases = [
         : source;
     },
     diagnostic: /v3\.provider_action_gate\.required_positive: missing binding Responses Relay provider-bound request compatibility/u,
-  },
-  {
-    name: 'V2 binding budget accepts a missing terminal edge',
-    path: 'docs/architecture/mainline-binding-budget.yml',
-    mutate: (source) => source.replace(
-      '  - chain_id: error.provider_action_gate.mainline\n    expected_total_edges: 8\n    min_anchored_edges: 8',
-      '  - chain_id: error.provider_action_gate.mainline\n    expected_total_edges: 7\n    min_anchored_edges: 7',
-    ),
-    diagnostic: /must lock 8 anchored edges with zero debt/u,
-  },
-  {
-    name: 'V2 resource lifecycle drifts from its chain',
-    path: 'docs/architecture/resource-operation-map.yml',
-    mutate: (source) => source.replace(
-      '    lifecycle: error.provider_action_gate.mainline\n',
-      '    lifecycle: fake.provider_action_gate.lifecycle\n',
-    ),
-    diagnostic: /V2 lifecycle\/chain\/owner binding drift/u,
   },
   {
     name: 'V3 resource lifecycle drifts from its chain',
@@ -597,15 +479,6 @@ const cases = [
         '```\n\n<!-- Compat -->|v3-provider-action-gate-01| E05 -->\n\nThe gate',
       ),
     diagnostic: /machine edge IDs: missing binding v3-provider-action-gate-01/u,
-  },
-  {
-    name: 'V2 map duplicates a required edge ID',
-    path: 'docs/architecture/mainline-call-map.yml',
-    mutate: (source) => mutateYaml(source, (document) => {
-      const owner = chain(document, 'error.provider_action_gate.mainline');
-      owner.edges.push({ ...edge(document, 'error-provider-action-gate-04') });
-    }),
-    diagnostic: /duplicate edge IDs: error-provider-action-gate-04/u,
   },
   {
     name: 'V3 map duplicates a required edge ID',

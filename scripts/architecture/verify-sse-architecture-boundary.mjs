@@ -2,9 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const functionMap = fs.readFileSync(path.join(root, 'docs/architecture/function-map.yml'), 'utf8');
-const verificationMap = fs.readFileSync(path.join(root, 'docs/architecture/verification-map.yml'), 'utf8');
-
 const failures = [];
 
 function read(relPath) {
@@ -23,7 +20,7 @@ function listFiles(dir) {
       if (entry.isDirectory()) {
         if (entry.name === 'dist' || entry.name === 'node_modules' || entry.name === 'target') continue;
         stack.push(next);
-      } else if (/\.(ts|tsx|js|mjs|cjs)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+      } else if (/\.(rs|ts|tsx|js|mjs|cjs)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
         out.push(next);
       }
     }
@@ -31,32 +28,33 @@ function listFiles(dir) {
   return out;
 }
 
-const rustDispatchPath = 'sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/sse_runtime_dispatch.rs';
-const rustDispatch = read(rustDispatchPath);
+// V3 SSE transport must remain protocol-neutral: it frames/decodes SSE without
+// interpreting event names or payload semantics.
+const v3SseCrate = 'v3/crates/routecodex-v3-sse/src/lib.rs';
+const v3Sse = read(v3SseCrate);
 for (const required of [
-  'feature_id: sse.runtime_rust_dispatch',
-  'pub fn build_sse_frames_from_json_json',
-  'pub fn build_json_from_sse_json',
-  'fn normalize_protocol',
-  '"openai-chat"',
-  '"openai-responses"',
-  '"anthropic-messages"',
-  '"gemini-chat"',
-  'Unsupported SSE protocol',
+  'Protocol-neutral incremental SSE framing',
+  'does not interpret event names',
+  'SseTransportLimits',
+  'SseTransportError',
 ]) {
-  if (!rustDispatch.includes(required)) {
-    failures.push(`${rustDispatchPath}: missing Rust runtime dispatch marker ${required}`);
+  if (!v3Sse.includes(required)) {
+    failures.push(`${v3SseCrate}: missing V3 protocol-neutral SSE marker ${required}`);
   }
 }
 for (const forbidden of [
-  'unwrap_or("openai-chat")',
-  'unwrap_or("openai-responses")',
-  'unwrap_or("responses")',
-  'unwrap_or("chat")',
-  'unknown" => Ok',
+  'response.created',
+  'output_item',
+  'message_start',
+  'message_stop',
+  'function_call',
+  'tool_use',
+  'finish_reason',
+  'required_action',
+  'chat.completion',
 ]) {
-  if (rustDispatch.includes(forbidden)) {
-    failures.push(`${rustDispatchPath}: Rust SSE dispatch must not default/fallback protocol: ${forbidden}`);
+  if (v3Sse.includes(forbidden)) {
+    failures.push(`${v3SseCrate}: V3 SSE transport must not interpret business event semantics: ${forbidden}`);
   }
 }
 
@@ -65,28 +63,9 @@ if (fs.existsSync(path.join(root, deletedNativeBridgePath))) {
   failures.push(`${deletedNativeBridgePath}: retired SSE native TS wrapper must stay physically deleted`);
 }
 
-const lib = read('sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/lib.rs');
-for (const required of [
-  'mod sse_runtime_dispatch;',
-  'buildJsonFromSseJson',
-  'buildSseFramesFromJsonJson',
-]) {
-  if (!lib.includes(required)) failures.push(`router-hotpath lib.rs missing ${required}`);
-}
-
-const requiredExports = read('sharedmodule/llmswitch-core/native-hotpath-required-exports.json');
-for (const required of [
-  '"buildSseFramesFromJsonJson"',
-  '"buildJsonFromSseJson"',
-]) {
-  if (!requiredExports.includes(required)) {
-    failures.push(`native required exports missing ${required}`);
-  }
-}
-
+// TS runtime roots must not import retired TS SSE wrapper paths.
 for (const runtimeRoot of [
   'sharedmodule/llmswitch-core/src/conversion/hub',
-  'src/server',
   'sharedmodule/llmswitch-core/src/runtime',
   'sharedmodule/llmswitch-core/src/servertool',
 ]) {
@@ -139,5 +118,5 @@ if (failures.length > 0) {
 }
 
 console.log('[verify:sse-architecture-boundary] ok');
-console.log('- SSE runtime dispatch is Rust-owned');
+console.log('- V3 SSE transport is protocol-neutral (routecodex-v3-sse)');
 console.log('- runtime roots do not import TS SSE wrapper paths');

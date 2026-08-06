@@ -69,14 +69,8 @@ jobs:
         run: npm run test:v3-console-request-count-visibility-red-fixtures
       - name: V2 and V3 route-classifier semantic gate
         run: npm run test:route-classifier-semantics
-      - name: V3 route classifier local owner gate
-        run: npm run verify:v3-route-classifier-local-owner
-      - name: V3 route classifier local owner red fixtures
-        run: npm run test:v3-route-classifier-local-owner-red-fixtures
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
-      - name: Ensure release llms module
-        run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Build (release)
         env:
           BUILD_MODE: release
@@ -85,10 +79,8 @@ jobs:
         run: npm run build:min
       - name: Run host tests
         env:
-          ROUTECODEX_JEST_USE_NPM_LLMS: "1"
-          # Prevent test-triggered builds (mock regressions) from auto-bumping version files in CI.
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run test:ci
+        run: npm run test:v3-workspace
 
   coverage:
     runs-on: ubuntu-latest
@@ -147,8 +139,6 @@ jobs:
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
         run: npm run verify:servertool-rust-only
-      - name: Ensure release llms module
-        run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Build (release)
         env:
           BUILD_MODE: release
@@ -156,10 +146,9 @@ jobs:
         run: npm run build:min
       - name: Run CI coverage (jest-only)
         env:
-          ROUTECODEX_JEST_USE_NPM_LLMS: "1"
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
           ROUTECODEX_CI_MAX_WORKERS: "2"
-        run: npm run test:ci:coverage
+        run: npm run jest:run -- --coverage --silent
       - name: Coverage summary
         if: always()
         shell: bash

@@ -37,19 +37,13 @@ jobs:
 
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
-      - name: Architecture gates
-        run: npm run verify:architecture-ci
       - name: V3 architecture CI umbrella
         run: npm run verify:v3-architecture-ci
 
-      - name: Ensure release llms module
-        run: BUILD_MODE=release npm run llmswitch:ensure
-
-      - name: Test (release deps)
+      - name: Test (V3 workspace)
         env:
-          ROUTECODEX_JEST_USE_NPM_LLMS: "1"
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run test:ci
+        run: npm run test:v3-workspace
 
       - name: Pack rcc tarball
         env:

@@ -29,7 +29,6 @@ const STEPS = [
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
   ['verify:v3-module-boundaries', 'V3 module boundaries (Server cannot build/classify Error)'],
   ['verify:sse-architecture-boundary', 'SSE runtime dispatch remains Rust-owned'],
-  ['verify:sse-transport-core-shared', 'SSE transport remains protocol-neutral'],
   ['verify:error-pipeline-contract', 'Provider failures use the shared typed error pipeline'],
   [
     'verify:provider-response-errorerr-bypass-closeout',

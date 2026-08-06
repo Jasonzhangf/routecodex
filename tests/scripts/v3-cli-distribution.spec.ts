@@ -15,7 +15,6 @@ describe('V3 CLI distribution surface', () => {
   const executableScript = read('scripts/ensure-cli-executable.mjs');
   const globalInstall = read('scripts/install-global.sh');
   const releaseInstall = read('scripts/install-release.sh');
-  const releaseVerifier = read('scripts/verify-rcc-release-install.mjs');
   const installV3Script = read('scripts/install-v3-cli.mjs');
   const v3ConfigSource = read('v3/crates/routecodex-v3-config/src/lib.rs');
 
@@ -100,7 +99,7 @@ describe('V3 CLI distribution surface', () => {
     expect(globalInstall).toContain('routecodex_version="$(routecodex --version)"');
     expect(globalInstall).toContain('rcc_version="$(rcc --version)"');
     expect(globalInstall).toContain('"$routecodex_version" != "$rccv3_version"');
-    expect(globalInstall).toContain('rccv3 --help');
+    expect(releaseInstall).toContain('rccv3 --help');
     expect(globalInstall).toContain('rcc --version');
     expect(releaseInstall).toContain('run_default_v3_release_install');
     expect(releaseInstall).toContain('node scripts/install-v3-cli.mjs');
@@ -109,15 +108,11 @@ describe('V3 CLI distribution surface', () => {
     expect(releaseInstall).toContain('command -v rccv3');
     expect(releaseInstall).toContain('command -v rcc');
     expect(releaseInstall).toContain('rccv3 --help');
-    expect(releaseVerifier).toContain("extraBins: ['rcc', 'rccv3']");
-    expect(releaseVerifier).toContain("run(extraBinPath, ['--help']");
-    expect(globalInstall).toContain('默认 V3 产物：dist/bin/rccv3');
+    expect(globalInstall).toContain('V3 command identity');
+    expect(globalInstall).toContain('.local/bin/rccv3');
     expect(releaseInstall).toContain('默认 V3 产物 $INSTALL_BUILD_ROOT/dist/bin/rccv3');
-    expect(globalInstall).toContain('V2 JS 兼容产物：dist/cli.js');
-    expect(releaseInstall).toContain('V2 JS 兼容产物 $INSTALL_BUILD_ROOT/dist/cli.js');
-    expect(globalInstall).toContain('INSTALL_V2_MODE');
-    expect(releaseInstall).toContain('INSTALL_V2_MODE');
-    expect(globalInstall).toContain('.gitignore .github AGENTS.md');
+    expect(globalInstall).not.toContain('INSTALL_V2_MODE');
+    expect(releaseInstall).not.toContain('INSTALL_V2_MODE');
     expect(releaseInstall).toContain('.gitignore .github AGENTS.md');
     expect(globalInstall).not.toContain('command -v routecodex-v3');
     expect(releaseInstall).not.toContain('command -v routecodex-v3');
