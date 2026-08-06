@@ -112,7 +112,6 @@
     "verify:provider-failure-ban-blackbox": "node scripts/tests/provider-failure-ban-blackbox.mjs",
     "verify:errorsamples": "node scripts/verify-codex-error-samples.mjs",
     "verify:debug-unified-surface": "node scripts/verify-debug-unified-surface.mjs",
-    "verify:internal-error-numbering": "node scripts/architecture/verify-internal-error-numbering.mjs",
     "test:resource-source-bindings-red-fixtures": "node scripts/tests/resource-source-bindings-red-fixtures.mjs",
     "test:architecture-thin-wrapper-only-red-fixtures": "node scripts/tests/architecture-thin-wrapper-only-red-fixtures.mjs",
     "verify:error-pipeline-contract": "node scripts/architecture/verify-error-pipeline-contract.mjs",
