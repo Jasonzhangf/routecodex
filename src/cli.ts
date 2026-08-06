@@ -255,11 +255,7 @@ registerBasicCommands(program, {
   },
   clean: { logger },
   examples: { log: (line) => console.log(line) },
-  servertool: {
-    log: (line) => console.log(line),
-    error: (line) => console.error(line),
-    exit: (code) => process.exit(code)
-  },
+
   port: {
     defaultPort: DEFAULT_CONFIG.PORT,
     createSpinner,

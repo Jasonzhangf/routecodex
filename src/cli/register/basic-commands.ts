@@ -7,7 +7,6 @@ import { createCleanCommand } from '../commands/clean.js';
 import { createEnvCommand } from '../commands/env.js';
 import { createExamplesCommand } from '../commands/examples.js';
 import { createPortCommand } from '../commands/port.js';
-import { createServertoolCommand } from '../commands/servertool.js';
 
 export function registerBasicCommands(
   program: Command,
@@ -25,11 +24,7 @@ export function registerBasicCommands(
     examples: {
       log: (line: string) => void;
     };
-    servertool: {
-      log: (line: string) => void;
-      error: (line: string) => void;
-      exit: (code: number) => never;
-    };
+
     port: {
       defaultPort: number;
       createSpinner: (text: string) => Promise<Spinner>;
@@ -46,6 +41,5 @@ export function registerBasicCommands(
   createEnvCommand(program, deps.env);
   createCleanCommand(program, deps.clean);
   createExamplesCommand(program, deps.examples);
-  createServertoolCommand(program, deps.servertool);
   createPortCommand(program, deps.port);
 }

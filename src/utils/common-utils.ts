@@ -73,3 +73,35 @@ export function expandHome(inputPath: string): string {
   const homeDir = String(process.env.HOME || '').trim() || os.homedir();
   return path.join(homeDir, inputPath.slice(1));
 }
+
+/**
+ * Stable JSON stringify - sorts keys to produce deterministic output.
+ * Extracted from deprecated/v2/legacy-ts-orphans/monitoring/semantic-tracker.ts
+ */
+export function stableStringify(value: unknown): string {
+  const cache = new WeakSet();
+  const replacer = (_key: string, val: unknown) => {
+    if (val && typeof val === 'object') {
+      if (cache.has(val as object)) {
+        return undefined;
+      }
+      cache.add(val as object);
+      if (Array.isArray(val)) {
+        return val.map((item) => item);
+      }
+      const record = val as Record<string, unknown>;
+      return Object.keys(record)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+          acc[key] = record[key];
+          return acc;
+        }, {});
+    }
+    return val;
+  };
+  try {
+    return JSON.stringify(value, replacer);
+  } catch {
+    return '[unserializable]';
+  }
+}

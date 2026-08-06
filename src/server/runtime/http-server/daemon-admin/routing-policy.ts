@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { writeUserConfigFile } from '../../../../config/user-config-writer.js';
-import { stableStringify } from '../../../../monitoring/semantic-tracker.js';
+import { stableStringify } from '../../../../utils/common-utils.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 import {
   applyRoutingPolicyAtLocation,
