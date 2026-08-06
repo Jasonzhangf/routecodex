@@ -380,7 +380,7 @@ export async function handleResponses(
         } catch (loggingError) {
           logResponsesHandlerNonBlockingError('timeout.log_request_error', loggingError, { requestId });
         }
-        // Notify pipeline/servertool/provider transport via shared connection state object.
+        // Notify pipeline/provider transport via shared connection state object.
         try {
           markClientConnectionDisconnected(clientConnectionState, 'HTTP_REQUEST_TIMEOUT');
         } catch (stateError) {
