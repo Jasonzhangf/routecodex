@@ -11,7 +11,7 @@ import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../../modules/llmswitch/bridge/snapshot-recorder.js';
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
-import { logExecutorRuntimeNonBlockingWarning } from './servertool-runtime-log.js';
+import { logExecutorRuntimeNonBlockingWarning } from './executor-runtime-log.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason } from '../../../utils/finish-reason.js';

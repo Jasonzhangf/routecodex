@@ -88,7 +88,6 @@ import { initializeRequestExecutorRequestState } from './executor/request-execut
 import { prepareRequestExecutorAttemptState } from './executor/request-executor-attempt-state.js';
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
-import { isServerToolEnabled } from './servertool-admin-state.js';
 import { registerRequestLogContext } from '../../utils/request-log-color.js';
 import { getClientConnectionAbortSignal } from '../../utils/client-connection-state.js';
 import { deriveFinishReason } from '../../utils/finish-reason.js';
@@ -1339,7 +1338,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const runtimeControl = readRuntimeControlProjection(mergedMetadata);
           const metadataServerToolsDisabled = runtimeControl.stopMessageEnabled === false;
-          const serverToolsEnabled = isServerToolEnabled() && !metadataServerToolsDisabled;
+          const serverToolsEnabled = !metadataServerToolsDisabled;
           logStageLazy('provider.response_convert.start', input.requestId, () => ({
             providerKey: target.providerKey,
             protocol: providerProtocol,

@@ -53,7 +53,7 @@ export const DEFAULT_TIMEOUTS = {
   PROVIDER_STREAM_CONTENT_IDLE_TIMEOUT_MS: 900_000, // 15 min（语义帧间隔，与 SSE 总窗口对齐）
 
   // Host → client (SSE bridge)
-  HTTP_SSE_TOTAL_MS: 900_000,              // 15 min（避免 servertool followup 超时）
+  HTTP_SSE_TOTAL_MS: 900_000,              // 15 min SSE total timeout
 } as const;
 
 // HTTP 协议前缀

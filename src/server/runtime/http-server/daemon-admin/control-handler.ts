@@ -16,11 +16,6 @@ import {
   extractRoutingGroupsSnapshot,
   extractRoutingSnapshot
 } from './providers-handler-routing-utils.js';
-import {
-  getServerToolRuntimeState,
-  readServerToolStatsSnapshot,
-  setServerToolEnabled
-} from '../servertool-admin-state.js';
 import { resolveRccSessionsDir } from '../../../../config/user-data-paths.js';
 import { formatUnknownError, isRecord } from '../../../../utils/common-utils.js';
 
@@ -37,10 +32,6 @@ type ControlSnapshot = {
   nowMs: number;
   controlServer: { serverId: string };
   servers: ControlServerInfo[];
-  serverTool?: {
-    state: ReturnType<typeof getServerToolRuntimeState>;
-    stats: ReturnType<typeof readServerToolStatsSnapshot>;
-  };
   routing?: {
     virtualRouterConfig?: unknown;
     policy?: unknown;
@@ -247,10 +238,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       nowMs,
       controlServer: { serverId: options.getServerId() },
       servers,
-      serverTool: {
-        state: getServerToolRuntimeState(),
-        stats: readServerToolStatsSnapshot()
-      },
       routing: {
         virtualRouterConfig: vrConfig,
         policy,
@@ -423,23 +410,6 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       }
 
       res.status(200).json({ ok: true, action, nowMs, results, schema: 'v2', updatedVia: 'unified_control' });
-      return;
-    }
-
-    if (action === 'servertool.set_enabled') {
-      if (typeof body.enabled !== 'boolean') {
-        res.status(400).json({ error: { message: 'enabled(boolean) is required', code: 'bad_request' } });
-        return;
-      }
-      const state = setServerToolEnabled(body.enabled, 'daemon-admin.control');
-      res.status(200).json({
-        ok: true,
-        action,
-        nowMs,
-        state,
-        schema: 'v2',
-        updatedVia: 'unified_control'
-      });
       return;
     }
 
