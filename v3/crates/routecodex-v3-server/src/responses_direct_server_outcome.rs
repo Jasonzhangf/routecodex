@@ -80,21 +80,13 @@ pub(super) async fn execute_responses_direct_server_outcome(
             );
         }
     };
-    let provider_failure_session_scope =
-        match build_v3_provider_failure_session_scope_for_request(&state.server, request_headers) {
-            Ok(scope) => scope,
-            Err(message) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                );
-                return V3ResponsesDirectServerOutcome::DirectFrame(
-                    project_v3_responses_direct_stream_error_frame_if_requested(
-                        frame,
-                        requested_stream,
-                    ),
-                );
-            }
-        };
+    let provider_failure_session_scope = get_failure_session_scope(
+        &state.server,
+        request_headers,
+        "responses",
+        &request_id,
+    )
+    .expect("responses continuation requires session-id for failure scope");
     let raw = build_v3_server_03_http_request_raw(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),

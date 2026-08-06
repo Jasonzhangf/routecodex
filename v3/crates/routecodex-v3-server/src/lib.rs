@@ -1103,9 +1103,11 @@ async fn pending_endpoint_after_responses_admission(
             }
         }
     }
-    let provider_failure_session_scope = match build_v3_provider_failure_session_scope_for_request(
+    let provider_failure_session_scope = match get_failure_session_scope(
         &state.server,
         &request_headers,
+        &entry_protocol,
+        &request_id,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -2273,16 +2275,8 @@ async fn execute_responses_relay_websocket_output(
         }
     };
     let provider_failure_session_scope =
-        match build_v3_provider_failure_session_scope_for_request(&state.server, headers) {
-            Ok(scope) => scope,
-            Err(message) => {
-                return V3ResponsesDirectServerOutcome::RelayOutput(
-                    project_v3_responses_relay_runtime_failure(
-                        V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
-                    ),
-                );
-            }
-        };
+        get_failure_session_scope(&state.server, headers, "responses", &request_id)
+            .expect("responses requests must have session-id for failure isolation");
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
         Err(error) => {
@@ -6133,12 +6127,37 @@ fn v3_responses_request_wants_sse(headers: &HeaderMap, payload: &Value) -> bool 
 fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,
+) -> Option<V3ProviderFailureSessionScope> {
+    provider_failure_session_id_from_request_headers(headers)
+        .ok()
+        .flatten()
+        .and_then(|session_id| {
+            V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id).ok()
+        })
+}
+
+/// Get failure session scope.
+/// For Responses requests: requires session-id header (returns error if missing).
+/// For other requests: falls back to anonymous scope if session-id is missing.
+fn get_failure_session_scope(
+    server: &V3ServerManifest,
+    headers: &HeaderMap,
+    entry_protocol: &str,
+    request_id: &str,
 ) -> Result<V3ProviderFailureSessionScope, String> {
-    let session_id =
-        provider_failure_session_id_from_request_headers(headers)?.ok_or_else(|| {
-            "provider failure isolation requires the existing request session-id header".to_string()
-        })?;
-    V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)
+    if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers) {
+        return Ok(scope);
+    }
+    // For Responses, session-id is required
+    if entry_protocol == "responses" {
+        return Err("provider failure isolation requires the existing request session-id header".to_string());
+    }
+    // For other protocols, use anonymous scope
+    Ok(V3ProviderFailureSessionScope::new(
+        &server.id,
+        &server.routing_group,
+        &format!("anon:{}", request_id),
+    ).expect("anonymous scope must be valid"))
 }
 
 fn provider_failure_session_id_from_request_headers(
