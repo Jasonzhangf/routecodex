@@ -50,7 +50,7 @@ stale pid files or broad process kill commands.
 | Layer | Required gates |
 | --- | --- |
 | Owner | `runtime.lifecycle.pid_cache`, `runtime.lifecycle.stop_intent`, or `runtime.lifecycle.instance_registry`. |
-| Mainline | `runtime.lifecycle.mainline` edges `rtl-01`, `rtl-02`, `rtl-03`, `rtl-04`, `rtl-07`, `rtl-08`, `rtl-09`, `rtl-10`, `rtl-11`, `rtl-12` as applicable. |
+| Mainline | `runtime.lifecycle.mainline` edges `rtl-01`, `rtl-03`, `rtl-04`, `rtl-07`, `rtl-08`, `rtl-09`, `rtl-10`, `rtl-11`, `rtl-12` as applicable. |
 | Whitebox | `npm run verify:runtime-lifecycle-pid-rebase`; focused Jest for touched owner: `tests/utils/server-runtime-pid.spec.ts`, `tests/utils/daemon-stop-intent.spec.ts`, `tests/utils/runtime-instance-registry.spec.ts`, `tests/cli/start-command.spec.ts`, `tests/cli/stop-command.spec.ts`, `tests/cli/restart-command.spec.ts`. |
 | Blackbox | Managed `rcc start --snap`, `rcc stop --port <port>`, or `rcc restart --port <port>` only with explicit human approval; then `/health`, expected port-group behavior, and process lifecycle log evidence. Explicit `rcc start --restart --port <port>` is a guard/fail-fast test when a runtime already exists, not a stop/restart blackbox. |
 | Quality | No `pkill`, `killall`, `kill $(...)`, `xargs kill`, broad checkout/reset, stale pid truth, root `server-*.pid`, root `daemon-stop-*.json`, or top-level host reuse for explicit multi-port targets. |
@@ -71,21 +71,6 @@ loop action changes runtime behavior.
 | Quality | No invented symbols, no `binding pending` claimed as anchored, no ownerless required gate, no generated artifact drift, no duplicate owner for the same lifecycle truth. |
 | Evidence | run log must include `feature_id`, owner module, allowed path, forbidden path, mainline edge id, and exact required gates. |
 | Escalate | Owner cannot be found in one or two map queries, required gates are absent, or generated review surfaces are stale. |
-
-### `webui_config_editor`
-
-Purpose: rebuild the WebUI as an online `config.toml` editor without moving
-provider, routing, or forwarder truth out of their existing owners.
-
-| Layer | Required gates |
-| --- | --- |
-| Owner | New WebUI surface owner must be mapped before implementation; config reads/writes must stay under `config.user_config_codec`, `config.user_config_write_surface`, `config.provider_config_codec`, and `config.provider_config_write_surface`; `fwd.*` selection truth remains `vr.provider_forwarder_runtime`. |
-| Mainline | Documentation-only L2 may use `not_applicable`; implementation L2 must bind the WebUI API edge to shared config writer/codec owners and must not claim Rust VR selection edges as WebUI-owned. |
-| Whitebox | `npm run test:webui`; `npm run verify:config-ssot`; `npm run verify:function-map-compile-gate`; focused tests for any touched WebUI/admin API/config writer file. |
-| Blackbox | Browser/API smoke against a test config: read existing providers, render one provider card per provider, backup/restore one provider, render one tab per configured port, create a new port tab, select providers from existing provider IDs, edit a `fwd.*` aggregation with `priority`/`weighted`/`roundrobin`, validate/save config, reload and prove semantic equivalence. |
-| Quality | No provider secret exposure, no raw TOML stringify outside shared writer, no WebUI-owned routing/forwarder selection policy, no legacy stats/control/restart surface retained unless explicitly re-approved, no tests that keep removed WebUI functions as required behavior. |
-| Evidence | run log must include WebUI feature id, owner files, config writer/codec owners, `fwd` owner, old WebUI functions removed or intentionally retained, whitebox gates, blackbox smoke target, and residual risks. |
-| Escalate | Any target owner file has unrelated dirty edits, feature map/mainline/verification rows are missing, blackbox config save cannot run safely, provider backup/restore semantics are ambiguous, or implementation would touch secrets/live production config. |
 
 ### `worker_collision`
 

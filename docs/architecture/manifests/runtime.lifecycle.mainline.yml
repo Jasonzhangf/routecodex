@@ -37,19 +37,6 @@ edges:
         - runtime.pid_cache
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: rtl-02
-    from_node: ServerStartCommand
-    to_node: ServerPidCacheRecord
-    status: anchored
-    owner_feature_id: runtime.lifecycle.pid_cache
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes: []
-      produces:
-        - runtime.pid_cache
-      side_channel_reads: []
-      side_channel_writes: []
   - step_id: rtl-03
     from_node: ServerStopCommand
     to_node: StopIntentRecord

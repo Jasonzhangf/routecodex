@@ -3,8 +3,8 @@ use super::glm::apply_glm_request_compat;
 use super::lmstudio::apply_lmstudio_request_compat;
 use super::profile::{
     build_compat_result, is_gemini_profile, is_glm_profile, is_lmstudio_profile,
-    is_responses_temperature_unsupported_profile, is_single_tool_call_history_profile, pick_compat_profile,
-    provider_protocol_matches,
+    is_responses_temperature_unsupported_profile, is_single_tool_call_history_profile,
+    pick_compat_profile, provider_protocol_matches,
 };
 use super::responses::{
     apply_responses_temperature_unsupported_compat, normalize_responses_function_tools,

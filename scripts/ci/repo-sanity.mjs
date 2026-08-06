@@ -80,7 +80,6 @@ function checkRootLayout() {
     'MEMORY.md',
     'README.md',
     'config',
-    'configsamples',
     'deprecated',
     'docs',
     'eslint.config.js',
@@ -89,7 +88,6 @@ function checkRootLayout() {
     'note.md',
     'package-lock.json',
     'package.json',
-    'samples',
     'scripts',
     'sharedmodule',
     'src',
@@ -98,7 +96,6 @@ function checkRootLayout() {
     'tsconfig.jest.json',
     'tsconfig.json',
     'v3',
-    'webui',
   ]);
   const generatedRoots = new Set([
     'artifacts',

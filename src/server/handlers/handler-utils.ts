@@ -783,22 +783,46 @@ export async function resolveReportedRouteErrorHttpResponse(args: {
 }): Promise<HttpErrorPayload> {
   const projectionSource = buildClientHttpProjectionSource(args.routePayload, args.normalizedError);
   const errorErr05 = readErrorErr05ExecutionDecision(args.normalizedError);
-  const mapped = errorErr05
-    ? project_error_err_06_client_from_error_err_05_execution_decision(
-      Object.assign(projectionSource, errorErr05)
-    )
-    : mapErrorToHttp(projectionSource);
   try {
-    await reportRouteError(args.routePayload, { includeHttpResult: true });
+    await reportRouteError(args.routePayload);
   } catch (error) {
     args.onReportError?.(error);
   }
+  if (!errorErr05) {
+    throw new Error('Typed execution decision is required before client error projection');
+  }
+  const mapped = project_error_err_06_client_from_error_err_05_execution_decision(
+    Object.assign(projectionSource, errorErr05)
+  );
   const requestId = typeof args.routePayload.requestId === 'string' ? args.routePayload.requestId : undefined;
   const shouldAttachRequestId = mapped.body?.error?.code !== 'upstream_error';
   if (requestId && shouldAttachRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = requestId;
   }
   return mapped;
+}
+
+export async function projectMalformedClientRequestHttpResponse(args: {
+  routePayload: RouteErrorPayload;
+  normalizedError: Error & Record<string, unknown>;
+  onReportError?: (error: unknown) => void;
+}): Promise<HttpErrorPayload> {
+  const status = typeof args.normalizedError.status === 'number'
+    ? args.normalizedError.status
+    : args.normalizedError.statusCode;
+  if (
+    status !== 400
+    || args.normalizedError.name !== 'SyntaxError'
+    || args.routePayload.code !== 'MALFORMED_REQUEST'
+  ) {
+    throw new Error('Malformed client request projection requires the JSON parser 400 SyntaxError contract');
+  }
+  try {
+    await reportRouteError(args.routePayload);
+  } catch (error) {
+    args.onReportError?.(error);
+  }
+  return mapErrorToHttp(buildClientHttpProjectionSource(args.routePayload, args.normalizedError));
 }
 
 function buildClientHttpProjectionSource(

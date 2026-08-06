@@ -969,7 +969,7 @@ resources:
     owner_node: V3ProtocolConversionFieldParityContract
     identity: [entryProtocol, providerProtocol, clientProjectionProtocol, fieldFamily]
     allowed_writers: [docs/design/v3-protocol-request-field-projection.md, docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/architecture/manifests/v3.protocol_request_field_projection.yml, docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
-    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
+    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
     data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
@@ -1293,6 +1293,23 @@ resources:
     binding_status: anchored
     required_gates: [npm run verify:v3-debug-payload-budget, npm run verify:v3-resource-map]
 
+  - resource_id: v3.error.raw_wire_evidence
+    resource_kind: failure_scoped_diagnostic_artifact
+    lifecycle: v3.error.raw_wire_evidence
+    owner_feature_id: v3.error.raw_wire_evidence
+    owner_crate: routecodex-v3-server
+    owner_node: V3ErrorEvidenceFlushOnTerminalFailure
+    identity: [entryProtocol, endpoint, port, requestId, artifactName]
+    allowed_readers: [developer_diagnostics, incident_replay]
+    allowed_writers: [persist_v3_error_evidence_payload, capture_v3_responses_relay_provider_snapshots]
+    forbidden_writers: [routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    retention: failure_only
+    binding_status: anchored
+    required_gates: [npm run verify:v3-resource-map]
+
   - resource_id: v3.server.responses_session_admission
     resource_kind: listener_scoped_concurrency_gate
     lifecycle: v3.responses_session_admission
@@ -1369,3 +1386,23 @@ resources:
     may_enter_metadata_center: false
     binding_status: anchored
     required_gates: [npm run verify:v3-build-test-artifact-budget]
+
+  - resource_id: v3.global_binary_install
+    resource_kind: installed_runtime_executable
+    lifecycle: v3.global_binary_install
+    owner_feature_id: v3.global_binary_install
+    owner_crate: routecodex-v3-config
+    owner_module: v3-global-binary-install
+    owner_node: V3Install03DirectBinaryPublished
+    identity: [absoluteBinaryPath, buildVersion, sha256]
+    allowed_writers: [install-v3-cli]
+    allowed_readers: [routecodex-v3-cli, routecodex-v3-lifecycle]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, response.client_payload]
+    forbidden_paths: [~/.rcc/install/current, ~/.rcc/install/releases]
+    canonical_path: ~/.local/bin/rccv3
+    aliases: [~/.local/bin/routecodex, ~/.local/bin/rcc]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run test:v3-cli-distribution, npm run test:install-v3-target-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]

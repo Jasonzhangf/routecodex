@@ -169,13 +169,12 @@ prepare_isolated_build_root() {
     for item in \
         package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
         .gitignore .github AGENTS.md \
-        src scripts config configsamples docs tests webui vendor; do
+        src scripts config docs tests vendor; do
         copy_isolated_path "$item"
     done
     copy_v3_source
     copy_isolated_path ".agents/skills/rcc-dev-skills"
     copy_agent_collab_contract
-    copy_isolated_path "samples/mock-provider"
     copy_llmswitch_core
 
     if [ -d "$SOURCE_ROOT/node_modules" ]; then
@@ -345,6 +344,41 @@ verify_install() {
     fi
 }
 
+verify_direct_v3_install() {
+    local expected_bin="$HOME/.local/bin/rccv3"
+    local expected_routecodex="$HOME/.local/bin/routecodex"
+    local expected_rcc="$HOME/.local/bin/rcc"
+    local rccv3_version
+    local routecodex_version
+    local rcc_version
+    echo "🔍 验证直接 V3 binary 安装..."
+    if [ ! -x "$expected_bin" ]; then
+        echo "❌ V3 binary 未安装到 $expected_bin"
+        exit 1
+    fi
+    if [ "$(command -v rccv3)" != "$expected_bin" ]; then
+        echo "❌ rccv3 未解析到直接安装路径: $(command -v rccv3)"
+        exit 1
+    fi
+    if [ "$(command -v routecodex)" != "$expected_routecodex" ]; then
+        echo "❌ routecodex 未解析到直接安装路径: $(command -v routecodex)"
+        exit 1
+    fi
+    if [ "$(command -v rcc)" != "$expected_rcc" ]; then
+        echo "❌ rcc 未解析到直接安装路径: $(command -v rcc)"
+        exit 1
+    fi
+    rccv3_version="$(rccv3 --version)"
+    routecodex_version="$(routecodex --version)"
+    rcc_version="$(rcc --version)"
+    if [ "$routecodex_version" != "$rccv3_version" ] || [ "$rcc_version" != "$rccv3_version" ]; then
+        echo "❌ V3 command 版本不一致: rccv3=$rccv3_version routecodex=$routecodex_version rcc=$rcc_version"
+        exit 1
+    fi
+    echo "✅ V3 command identity: $rccv3_version"
+    rccv3 config check -c "$HOME/.rcc/config.v3.toml"
+}
+
 
 restart_managed_dev_server_if_requested() {
     local restart_only="${ROUTECODEX_BUILD_RESTART_ONLY:-${RCC_BUILD_RESTART_ONLY:-0}}"
@@ -352,15 +386,15 @@ restart_managed_dev_server_if_requested() {
         return
     fi
 
-    local restart_port="${ROUTECODEX_DEV_RESTART_PORT:-${RCC_DEV_RESTART_PORT:-5555}}"
+    local restart_config="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-$HOME/.rcc/config.v3.toml}}"
     echo ""
-    echo "🔄 尝试通过服务端 restart 入口刷新现有 RouteCodex 服务 (port=${restart_port})..."
-    if routecodex restart --port "$restart_port"; then
-        echo "✅ 受管服务已重启: ${restart_port}"
+    echo "🔄 尝试通过 V3 aggregate restart 刷新现有 RouteCodex 服务..."
+    if routecodex restart -c "$restart_config"; then
+        echo "✅ V3 聚合服务已重启"
         return
     fi
-    echo "⚠ ${restart_port} 自动重启未完成；全局安装已完成，但运行中的服务可能尚未刷新到最新构建。"
-    echo "ℹ 请根据上方 routecodex restart 日志继续处理；当前 CLI 已支持 HTTP restart 与 legacy signal restart。"
+    echo "❌ V3 聚合重启失败: $restart_config"
+    exit 1
 }
 
 # 清理旧安装
@@ -396,16 +430,29 @@ cleanup_old_install() {
 
 run_default_v3_install() {
     check_node
-    check_tmux
+    cleanup_retired_v2_install
     node scripts/cleanup-stale-server-pids.mjs --quiet
+    npm run test:install-v3-target-cleanup
     echo "🔁 install:global 默认入口走 V3-only: node scripts/install-v3-cli.mjs"
     node scripts/install-v3-cli.mjs
-    ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node scripts/ensure-cli-command-shim.mjs
+    node scripts/ensure-cli-command-shim.mjs
     node scripts/ensure-cli-executable.mjs
-    verify_install
+    verify_direct_v3_install
     restart_managed_dev_server_if_requested
     node scripts/cleanup-stale-server-pids.mjs --quiet
     echo "🎉 V3-only 全局安装完成: rcc -> rccv3"
+}
+
+cleanup_retired_v2_install() {
+    local retired_install="$HOME/.rcc/install"
+    if [ -e "$retired_install" ]; then
+        echo "🧹 移除已退役 V2 install tree: $retired_install"
+        rm -rf "$retired_install"
+    fi
+    if [ -e "$retired_install" ]; then
+        echo "❌ 退役 V2 install tree 清理失败: $retired_install"
+        exit 1
+    fi
 }
 
 # 主函数

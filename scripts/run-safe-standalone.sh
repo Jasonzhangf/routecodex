@@ -11,7 +11,7 @@ fi
 export ROUTECODEX_PROVIDER_DIR="${ROUTECODEX_PROVIDER_DIR:-/Volumes/extension/.rcc/provider}"
 export ROUTECODEX_PORT="${PORT}"
 
-nohup node dist/index.js >"${LOG}" 2>&1 &
+nohup dist/bin/rccv3 server start --foreground >"${LOG}" 2>&1 &
 PID=$!
 echo "[safe-standalone] pid=${PID} log=${LOG}"
 

@@ -2,6 +2,61 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.global_binary_install
+  owner_feature_id: v3.global_binary_install
+  summary: The isolated Cargo build embeds the RouteCodex version, atomically publishes one Rust binary to the user bin directory, then creates same-directory command aliases without release snapshots.
+  edges:
+  - step_id: v3-install-01
+    from_node: V3Install01SourceVersionResolved
+    to_node: V3Install02RustBinaryBuilt
+    caller_symbol: buildV3Cli
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: runInterruptibleCommand
+    callee_file: scripts/install-v3-cli.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    semantic_contract:
+      - buildV3Cli passes ROUTECODEX_BUILD_VERSION into the Cargo invocation through runInterruptibleCommand.
+      - The compiled Rust CLI resolves that embedded value at runtime without requiring adjacent package.json.
+    resource_flow:
+      consumes: []
+      produces: [v3.global_binary_install]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-install-02
+    from_node: V3Install02RustBinaryBuilt
+    to_node: V3Install03DirectBinaryPublished
+    caller_symbol: main
+    caller_file: scripts/install-v3-cli.mjs
+    callee_symbol: copyExecutableAtomic
+    callee_file: scripts/install-v3-cli.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    semantic_contract:
+      - Exactly one executable is atomically published to ~/.local/bin/rccv3 and hash-verified.
+      - No install/current or install/releases tree is created.
+    resource_flow:
+      consumes: [v3.global_binary_install]
+      produces: [v3.global_binary_install]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-install-03
+    from_node: V3Install03DirectBinaryPublished
+    to_node: V3Install04CommandAliasesPublished
+    caller_symbol: main
+    caller_file: scripts/ensure-cli-command-shim.mjs
+    callee_symbol: installDirectNativeCommand
+    callee_file: scripts/ensure-cli-command-shim.mjs
+    status: anchored
+    owner_feature_id: v3.global_binary_install
+    semantic_contract:
+      - routecodex and rcc resolve only to the same-directory direct rccv3 executable.
+      - Command resolution has no release-snapshot or repository fallback.
+    resource_flow:
+      consumes: [v3.global_binary_install]
+      produces: [v3.global_binary_install]
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.target.session_global_selection
   owner_feature_id: v3.virtual_router_target_interpreter
   summary: Target09 candidate sets become Target10 concrete providers through one session-first selection owner shared by Direct planning, Direct pre-send revalidation, initial Relay resolution, and Relay failure reselection.
@@ -3956,6 +4011,28 @@ chains:
   lifecycle_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.yml
   module_boundary_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml
   edges:
+  - step_id: v3-protocol-field-parity-responses-chat-inbound-order-01
+    from_node: V3HubReqInbound01ClientRaw
+    to_node: V3HubReqInbound02Normalized
+    caller_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
+    callee_symbol: build_v3_chat_canonical_request_from_responses_payload_for_req_inbound
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
+    status: anchored
+    binding_kind: adjacent_inbound_static_order_projection
+    owner_feature_id: v3.protocol_conversion_field_parity
+    semantic_contract:
+      - Consume Responses input strictly left to right without sorting messages, declarations, calls, or results.
+      - Project only contiguous assistant semantic items into one Chat assistant turn and stop at every message or tool-result boundary.
+    resource_flow:
+      consumes:
+      - v3.request.normal_payload
+      - v3.hub.entry_protocol
+      produces:
+      - v3.request.normal_payload
+      side_channel_reads:
+      - v3.protocol_conversion.field_parity_contract
+      side_channel_writes: []
   - step_id: v3-protocol-field-parity-responses-chat-req-01
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: V3ProviderReqOutbound08WirePayload
@@ -4173,6 +4250,29 @@ chains:
       - v3.debug.dry_run_execution
       side_channel_writes:
       - v3.debug.dry_run_execution
+- chain_id: v3.error.raw_wire_evidence
+  owner_feature_id: v3.error.raw_wire_evidence
+  summary: Terminal Responses Relay failure flushes redacted request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel only.
+  edges:
+  - step_id: v3-responses-relay-error-evidence-01
+    from_node: V3Error06ClientProjected
+    to_node: V3ErrorEvidenceFlushOnTerminalFailure
+    caller_symbol: finalize_v3_responses_relay_server_output
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: persist_v3_error_evidence_payload
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    status: anchored
+    edge_kind: failure_side_channel_edge
+    owner_feature_id: v3.error.raw_wire_evidence
+    resource_flow:
+      consumes:
+      - v3.error.chain
+      produces:
+      - v3.error.raw_wire_evidence
+      side_channel_reads:
+      - v3.error.chain
+      side_channel_writes:
+      - v3.error.raw_wire_evidence
 - chain_id: v3.servertool_hook_skeleton_lifecycle
   owner_feature_id: v3.servertool_hook_skeleton_lifecycle
   summary: StoplessCenter Metadata Center control-signal state-machine lifecycle inside declared Chat Process stopless SOP only. Server entry and generic relay closeout are aggregate routing edges; StoplessCenter read/write ownership is bound to Req04/Resp03 StoplessCenter nodes; CLI is no-input no-op evidence only.

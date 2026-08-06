@@ -740,6 +740,10 @@ async function ensureServerReady(
   resolved: ResolvedServerConnection,
   allowAutoStartServer: boolean
 ): Promise<{ started: boolean; ready: boolean; logPath?: string }> {
+  const serverBin = String(ctx.serverBin || '').trim();
+  if (!serverBin) {
+    throw new Error('Rust V3 server binary is not configured');
+  }
   const alreadyReady = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey);
   if (alreadyReady) {
     return { started: false, ready: true };
@@ -853,8 +857,8 @@ async function ensureServerReady(
       role: 'routecodex-server',
       result: 'attempt',
       port: resolved.port,
-      command: ctx.nodeBin,
-      args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+      command: serverBin,
+      args: ['server', 'start', '--foreground', '--config', ctx.getModulesConfigPath()],
       logPath
     }
   });
@@ -866,7 +870,7 @@ async function ensureServerReady(
     }
 
     try {
-      const serverProcess = ctx.spawn(ctx.nodeBin, [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()], {
+      const serverProcess = ctx.spawn(serverBin, ['server', 'start', '--foreground', '--config', ctx.getModulesConfigPath()], {
         stdio: ['ignore', logFd, logFd],
         env,
         detached: true
@@ -882,8 +886,8 @@ async function ensureServerReady(
           role: 'routecodex-server',
           result: 'success',
           port: resolved.port,
-          command: ctx.nodeBin,
-          args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+          command: serverBin,
+          args: ['server', 'start', '--foreground', '--config', ctx.getModulesConfigPath()],
           childPid: serverPid,
           logPath
         }
@@ -896,8 +900,8 @@ async function ensureServerReady(
             role: 'routecodex-server',
             result: 'failed',
             port: resolved.port,
-            command: ctx.nodeBin,
-            args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+            command: serverBin,
+            args: ['server', 'start', '--foreground', '--config', ctx.getModulesConfigPath()],
             childPid: serverPid,
             logPath,
             error
@@ -930,8 +934,8 @@ async function ensureServerReady(
           role: 'routecodex-server',
           result: 'failed',
           port: resolved.port,
-          command: ctx.nodeBin,
-          args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+          command: serverBin,
+          args: ['server', 'start', '--foreground', '--config', ctx.getModulesConfigPath()],
           logPath,
           error
         }

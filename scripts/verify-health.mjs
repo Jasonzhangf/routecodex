@@ -25,7 +25,7 @@ const env = {
   RCC_BASEDIR: baseDir
 };
 
-const server = spawn(process.execPath, ['dist/index.js'], {
+const server = spawn(path.join(baseDir, 'dist', 'bin', 'rccv3'), ['server', 'start', '--foreground'], {
   cwd: baseDir,
   env,
   stdio: ['ignore', 'inherit', 'inherit']

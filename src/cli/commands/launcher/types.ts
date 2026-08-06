@@ -32,6 +32,7 @@ export type LauncherCommandContext = {
   isWindows: boolean;
   defaultDevPort: number;
   nodeBin: string;
+  serverBin?: string;
   createSpinner: (text: string) => Promise<Spinner>;
   logger: LoggerLike;
   env: NodeJS.ProcessEnv;
@@ -50,7 +51,6 @@ export type LauncherCommandContext = {
   reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
   getModulesConfigPath: () => string;
   resolveCliEntryPath?: () => string;
-  resolveServerEntryPath: () => string;
   waitForever: () => Promise<void>;
   onSignal?: (signal: NodeJS.Signals, cb: () => void) => void;
   exit: (code: number) => never;

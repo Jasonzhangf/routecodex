@@ -5,7 +5,10 @@ import { handleImageEdits, handleImageGenerations } from '../../handlers/images-
 import { handleMessages } from '../../handlers/messages-handler.js';
 import { handleResponses } from '../../handlers/responses-handler.js';
 import type { HandlerContext } from '../../handlers/types.js';
-import { resolveReportedRouteErrorHttpResponse } from '../../handlers/handler-utils.js';
+import {
+  projectMalformedClientRequestHttpResponse,
+  resolveReportedRouteErrorHttpResponse,
+} from '../../handlers/handler-utils.js';
 import { isLocalRequest, registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { ServerConfigV2 } from './types.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
@@ -1171,17 +1174,16 @@ export function registerHttpRoutes(options: RouteOptions): void {
     const isMalformedJsonRequest =
       httpStatus === 400
       && normalizedError.name === 'SyntaxError';
-    const mapped = await resolveReportedRouteErrorHttpResponse({
-      routePayload: {
-        code: isMalformedJsonRequest
-          ? 'MALFORMED_REQUEST'
-          : typeof errorRecord.code === 'string'
-            ? String(errorRecord.code)
-            : 'HTTP_MIDDLEWARE_ERROR',
+    const routePayload = {
+      code: isMalformedJsonRequest
+        ? 'MALFORMED_REQUEST'
+        : typeof errorRecord.code === 'string'
+          ? String(errorRecord.code)
+          : 'HTTP_MIDDLEWARE_ERROR',
         message: normalizedError.message,
         source: 'http-middleware.global',
-        scope: 'http',
-        severity: 'high',
+        scope: 'http' as const,
+        severity: 'high' as const,
         endpoint: req.path,
         requestId: typeof req.headers['x-request-id'] === 'string'
           ? req.headers['x-request-id']
@@ -1191,16 +1193,21 @@ export function registerHttpRoutes(options: RouteOptions): void {
           status: httpStatus
         },
         originalError: normalizedError
-      },
+    };
+    const projectionArgs = {
+      routePayload,
       normalizedError: normalizedError as Error & Record<string, unknown>,
-      onReportError: (hubError) => {
+      onReportError: (hubError: unknown) => {
         logRoutesNonBlockingError('globalMiddleware.reportRouteError', hubError, {
           requestId: typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : undefined,
           path: req.path,
           method: req.method
         });
       }
-    });
+    };
+    const mapped = isMalformedJsonRequest
+      ? await projectMalformedClientRequestHttpResponse(projectionArgs)
+      : await resolveReportedRouteErrorHttpResponse(projectionArgs);
     res.status(mapped.status).json(mapped.body);
   });
 

@@ -1,5 +1,4 @@
 import type { InitProviderTemplate, ProviderCatalogWebSearchBinding } from '../cli/config/init-provider-catalog.js';
-import { buildWeightedRoutePool } from '../cli/config/init-v2-builder.js';
 import type { ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import {
   normalizeModelsNode,
@@ -15,7 +14,13 @@ function sortObjectKeys<T extends Record<string, unknown>>(value: T): T {
 }
 
 function routePool(routeId: string, target: string): Record<string, unknown>[] {
-  return [buildWeightedRoutePool(`${routeId}-primary`, [target])];
+  return [{
+    id: `${routeId}-primary`,
+    loadBalancing: {
+      strategy: 'weighted',
+      weights: { [target]: 1 }
+    }
+  }];
 }
 
 function summarizeWebSearchBinding(

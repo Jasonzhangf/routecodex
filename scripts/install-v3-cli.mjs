@@ -11,24 +11,36 @@ const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'v3', 'Cargo.toml');
 const packageJsonPath = path.join(repoRoot, 'package.json');
 const buildInfoScript = path.join(repoRoot, 'scripts', 'gen-build-info.mjs');
-const routeClassifierFileSizeGate = path.join(
+const v3ResourceMapGate = path.join(
   repoRoot,
   'scripts',
   'architecture',
-  'verify-route-classifier-core-file-size.mjs',
+  'verify-v3-resource-map.mjs',
 );
-const v3ArchitectureCiGate = path.join(
+const v3ModuleBoundariesGate = path.join(
   repoRoot,
   'scripts',
   'architecture',
-  'verify-v3-architecture-ci.mjs',
+  'verify-v3-module-boundaries.mjs',
 );
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
 const repoBin = path.join(repoRoot, 'dist', 'bin', binaryName);
-const RCC_HOME_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'];
+
+function readPackageVersion() {
+  if (!fs.existsSync(packageJsonPath)) {
+    fail(`source package.json missing: ${packageJsonPath}`);
+  }
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  const version = String(packageJson.version || '').trim();
+  if (!version) {
+    fail(`source package version missing: ${packageJsonPath}`);
+  }
+  return version;
+}
 
 export function buildV3CargoEnv(sourceEnv = process.env) {
   const env = { ...sourceEnv };
+  env.ROUTECODEX_BUILD_VERSION = readPackageVersion();
   if (!Object.prototype.hasOwnProperty.call(env, 'RUSTUP_TOOLCHAIN')) {
     env.RUSTUP_TOOLCHAIN = 'stable';
   }
@@ -193,32 +205,33 @@ async function buildV3Cli(build) {
   if (!fs.existsSync(manifestPath)) {
     fail(`missing V3 manifest: ${manifestPath}`);
   }
-  await runInterruptibleCommand(process.execPath, [v3ArchitectureCiGate], {
+  await runInterruptibleCommand(process.execPath, [v3ResourceMapGate], {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
-  }, build, 'V3 architecture CI gate');
-  await runInterruptibleCommand(process.execPath, [routeClassifierFileSizeGate], {
+  }, build, 'V3 install resource-map gate');
+  await runInterruptibleCommand(process.execPath, [v3ModuleBoundariesGate], {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
-  }, build, 'route classifier file-size gate');
+  }, build, 'V3 install module-boundary gate');
   await runInterruptibleCommand(
     process.platform === 'win32' ? 'npm.cmd' : 'npm',
-    ['run', 'test:route-classifier-semantics'],
+    ['run', 'test:v3-cli-distribution'],
     {
       cwd: repoRoot,
       env,
       stdio: 'inherit',
     },
     build,
-    'route classifier semantic gate',
+    'V3 CLI distribution gate',
   );
   await runInterruptibleCommand(process.execPath, [buildInfoScript], {
     cwd: repoRoot,
     env,
     stdio: 'inherit',
   }, build, 'build-info/version generation');
+  env.ROUTECODEX_BUILD_VERSION = readPackageVersion();
   await runInterruptibleCommand('cargo', [
     'build',
     '--manifest-path',
@@ -290,91 +303,12 @@ function copyExecutableAtomic(sourcePath, targetPath) {
   fs.renameSync(tempPath, targetPath);
 }
 
-function copyPackageJsonAtomic(targetPath) {
-  if (!fs.existsSync(packageJsonPath)) {
-    fail(`source package.json missing: ${packageJsonPath}`);
-  }
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  const tempPath = path.join(
-    path.dirname(targetPath),
-    `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.tmp`,
-  );
-  fs.copyFileSync(packageJsonPath, tempPath);
-  fs.renameSync(tempPath, targetPath);
-}
-
 function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function splitPathList(value) {
-  return String(value || '')
-    .split(path.delimiter)
-    .map(expandUserPath)
-    .filter(Boolean);
-}
-
-function readActiveRccHomes() {
-  const result = spawnSync('ps', ['-axo', 'command='], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  if ((result.status ?? 0) !== 0) {
-    return [];
-  }
-  const homes = [];
-  for (const line of String(result.stdout || '').split(/\r?\n/u)) {
-    const match = line.match(/(\S+?\.rcc)\/install\/(?:current|releases\/[^/\s]+)\/dist\/bin\/rccv3(?:\s|$)/u);
-    if (match?.[1]) {
-      homes.push(path.resolve(match[1]));
-    }
-  }
-  return homes;
-}
-
-function defaultCandidateHomes() {
-  const homes = [];
-  for (const key of RCC_HOME_ENV_KEYS) {
-    const expanded = expandUserPath(process.env[key]);
-    if (expanded) {
-      homes.push(expanded);
-    }
-  }
-  homes.push(path.join(resolveHomeDir(), '.rcc'));
-  const volumeHome = '/Volumes/extension/.rcc';
-  if (fs.existsSync(volumeHome)) {
-    homes.push(volumeHome);
-  }
-  homes.push(...readActiveRccHomes());
-  return homes;
-}
-
-function uniqueInstallHomes(homes) {
-  const seen = new Set();
-  const unique = [];
-  for (const home of homes) {
-    const normalized = path.resolve(home);
-    if (seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    const currentBin = path.join(normalized, 'install', 'current', 'dist', 'bin', binaryName);
-    unique.push({ home: normalized, currentBin });
-  }
-  return unique;
-}
-
-function resolveInstallTargets() {
-  const explicitHomes = splitPathList(process.env.ROUTECODEX_V3_INSTALL_HOMES)
-    .concat(splitPathList(process.env.RCC_V3_INSTALL_HOMES));
-  const explicit = explicitHomes.length > 0;
-  const homes = uniqueInstallHomes(explicit ? explicitHomes : defaultCandidateHomes());
-  if (homes.length === 0) {
-    fail(
-      'no V3 install target resolved; set ROUTECODEX_V3_INSTALL_HOMES to one or more .rcc homes',
-    );
-  }
-  return homes;
+function resolveInstallBinDir() {
+  return path.join(resolveHomeDir(), '.local', 'bin');
 }
 
 async function main() {
@@ -384,18 +318,14 @@ async function main() {
     const expectedHash = sha256(repoBin);
     console.log(`[install-v3-cli] installed repo ${path.relative(repoRoot, repoBin)} sha256=${expectedHash}`);
 
-    const targets = resolveInstallTargets();
-    for (const target of targets) {
-      copyExecutableAtomic(repoBin, target.currentBin);
-      const targetPackageJson = path.join(target.home, 'install', 'current', 'package.json');
-      copyPackageJsonAtomic(targetPackageJson);
-      const actualHash = sha256(target.currentBin);
-      if (actualHash !== expectedHash) {
-        fail(`hash mismatch after installing ${target.currentBin}`);
-      }
-      console.log(`[install-v3-cli] installed ${target.currentBin} sha256=${actualHash}`);
+    const installBin = path.join(resolveInstallBinDir(), binaryName);
+    copyExecutableAtomic(repoBin, installBin);
+    const actualHash = sha256(installBin);
+    if (actualHash !== expectedHash) {
+      fail(`hash mismatch after installing ${installBin}`);
     }
-    console.log(`[install-v3-cli] ok: installed V3 CLI only; skipped TS build, WebUI build, and release snapshot`);
+    console.log(`[install-v3-cli] installed ${installBin} sha256=${actualHash}`);
+    console.log('[install-v3-cli] ok: installed direct V3 binary; skipped TS build, WebUI build, and release snapshot');
   });
 }
 

@@ -49,8 +49,6 @@ describe('install-release-snapshot', () => {
     writeTextFile(path.join(projectRoot, 'dist', 'index.js'), 'export {};\n');
     writeTextFile(path.join(projectRoot, 'dist', 'build-info.js'), "export const buildInfo = { mode: 'release' };\n");
     writeTextFile(path.join(projectRoot, 'config', '.keep'));
-    writeTextFile(path.join(projectRoot, 'configsamples', '.keep'));
-    writeTextFile(path.join(projectRoot, 'samples', 'mock-provider', '.keep'));
     writeTextFile(path.join(projectRoot, 'sharedmodule', 'llmswitch-core', 'dist', 'native', 'router_hotpath_napi.node'));
     writeTextFile(path.join(projectRoot, 'node_modules', 'rcc-llmswitch-core', 'package.json'), '{"name":"rcc-llmswitch-core"}\n');
     writeTextFile(path.join(projectRoot, 'node_modules', 'rcc-llmswitch-core', 'dist', 'native', 'router_hotpath_napi.node'));

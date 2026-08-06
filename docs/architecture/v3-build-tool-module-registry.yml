@@ -1,6 +1,29 @@
 version: 1
 status: active
 modules:
+  - module_id: v3-global-binary-install
+    owner_feature_id: v3.global_binary_install
+    owned_paths:
+      - scripts/install-v3-cli.mjs
+      - scripts/ensure-cli-command-shim.mjs
+      - scripts/install-global.sh
+      - tests/scripts/v3-cli-distribution.spec.ts
+      - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+    allowed_dependencies:
+      - v3/crates/routecodex-v3-cli
+      - dist/bin/rccv3
+      - ~/.local/bin/rccv3
+    forbidden_paths:
+      - src
+      - sharedmodule
+      - ~/.rcc/install
+    required_gates:
+      - npm run test:v3-cli-distribution
+      - npm run test:install-v3-target-cleanup
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+
   - module_id: v3-build-test-artifact-budget
     owner_feature_id: v3.build_test_artifact_budget
     owned_paths:

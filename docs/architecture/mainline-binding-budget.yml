@@ -28,15 +28,6 @@ chains:
       V3 V2-config compatibility for 5555 is fully anchored in routecodex-v3-config:
       store detection enters the V2 TOML compiler, then normal V3 schema validation
       publishes the manifest consumed by CLI/server/runtime.
-  - chain_id: webui.config_editor_surface.mainline
-    expected_total_edges: 2
-    min_anchored_edges: 2
-    max_partial_edges: 0
-    max_binding_pending_edges: 0
-    note: >
-      WebUI config editor is a thin surface: user intent and admin API config
-      mutation edges must stay anchored to WebUI/apiFetch and shared config
-      writer owners; WebUI must not own provider runtime or forwarder selection.
   - chain_id: servertool.hook_skeleton.mainline
     expected_total_edges: 11
     min_anchored_edges: 11
@@ -130,12 +121,13 @@ chains:
     max_binding_pending_edges: 0
     note: Metadata center runtime-control family is fully anchored after the obsolete servertool-context projection edge was removed; remaining mtc-01..mtc-07 stay locked.
   - chain_id: runtime.lifecycle.mainline
-    expected_total_edges: 16
-    min_anchored_edges: 16
+    expected_total_edges: 15
+    min_anchored_edges: 15
     max_partial_edges: 0
     max_binding_pending_edges: 0
     note: >
-      Runtime lifecycle chain is fully anchored and locked, including
+      Runtime lifecycle chain is fully anchored and locked after removing the
+      deleted `src/index.ts` duplicate pid-cache edge, including
       restart-process HTTP, SIGUSR2 in-session restart, the start takeover
       guard, port-scoped listener release for start/stop, and the final
       PortRegistry removal edge.

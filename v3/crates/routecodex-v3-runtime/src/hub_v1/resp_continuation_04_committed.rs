@@ -144,6 +144,7 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
     canonical_request: &Value,
     finalized_response: &Value,
 ) -> Result<Value, V3LocalContinuationError> {
+    let mut input = canonical_request_input_items_at_resp04(canonical_request)?;
     let response_output = finalized_response
         .get("output")
         .and_then(Value::as_array)
@@ -151,49 +152,37 @@ pub(crate) fn build_v3_relay_local_continuation_context_at_resp04(
         .ok_or_else(|| V3LocalContinuationError::Codec {
             message: "Resp04 local finalized response output must be an array".to_string(),
         })?;
-    let mut chat_context = if canonical_request.get("messages").is_some() {
-        canonical_request.clone()
-    } else {
-        let historical_input = canonical_request_input_items_at_resp04(canonical_request)?;
-        let mut historical_responses_context = Map::new();
-        historical_responses_context.insert("input".to_string(), Value::Array(historical_input));
-        for field in [
-            "tools",
-            "tool_choice",
-            "parallel_tool_calls",
-            "instructions",
-        ] {
-            if let Some(value) = canonical_request.get(field) {
-                historical_responses_context.insert(field.to_string(), value.clone());
-            }
+    input.extend(
+        response_output
+            .iter()
+            .map(project_v3_resp04_output_item_to_chat_input_item)
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+
+    let mut responses_context = Map::new();
+    responses_context.insert("input".to_string(), Value::Array(input));
+    if let Some(id) = finalized_response.get("id").and_then(Value::as_str) {
+        if !id.trim().is_empty() {
+            responses_context.insert("id".to_string(), Value::String(id.to_string()));
         }
+    }
+    for field in [
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "instructions",
+    ] {
+        if let Some(value) = canonical_request.get(field) {
+            responses_context.insert(field.to_string(), value.clone());
+        }
+    }
+    let chat_context =
         super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
-            &Value::Object(historical_responses_context),
+            &Value::Object(responses_context),
         )
-        .map_err(|message| V3LocalContinuationError::Codec { message })?
-    };
-    let historical_message_count = chat_context
-        .get("messages")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or_default();
-    let response_input = response_output
-        .iter()
-        .map(project_v3_resp04_output_item_to_chat_input_item)
-        .collect::<Result<Vec<_>, _>>()?;
-    let response_chat_context = build_v3_resp04_response_delta_chat_context(response_input)?;
-    let response_messages = response_chat_context
-        .get("messages")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    chat_context["messages"]
-        .as_array_mut()
-        .expect("Responses canonical request always produces messages")
-        .extend(response_messages);
-    Ok(coalesce_v3_resp04_latest_response_suffix(
+        .map_err(|message| V3LocalContinuationError::Codec { message })?;
+    Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
         chat_context,
-        historical_message_count,
     ))
 }
 
@@ -210,65 +199,71 @@ pub(crate) fn build_v3_relay_local_response_continuation_context_at_resp04(
         .iter()
         .map(project_v3_resp04_output_item_to_chat_input_item)
         .collect::<Result<Vec<_>, _>>()?;
-    let chat_context = build_v3_resp04_response_delta_chat_context(response_input)?;
-    Ok(coalesce_v3_resp04_latest_response_suffix(chat_context, 0))
-}
-
-fn build_v3_resp04_response_delta_chat_context(
-    response_input: Vec<Value>,
-) -> Result<Value, V3LocalContinuationError> {
     let mut responses_context = Map::new();
     responses_context.insert("input".to_string(), Value::Array(response_input));
-    super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
-        &Value::Object(responses_context),
-    )
-    .map_err(|message| V3LocalContinuationError::Codec { message })
+    let chat_context =
+        super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &Value::Object(responses_context),
+        )
+        .map_err(|message| V3LocalContinuationError::Codec { message })?;
+    Ok(coalesce_v3_resp04_reasoning_with_following_tool_call(
+        chat_context,
+    ))
 }
 
-fn coalesce_v3_resp04_latest_response_suffix(
-    mut chat_context: Value,
-    historical_message_count: usize,
-) -> Value {
+fn coalesce_v3_resp04_reasoning_with_following_tool_call(mut chat_context: Value) -> Value {
     let Some(messages) = chat_context
         .get_mut("messages")
         .and_then(Value::as_array_mut)
     else {
         return chat_context;
     };
-    let mut index = historical_message_count.min(messages.len());
-    while index + 1 < messages.len() {
-        if v3_resp04_chat_message_is_assistant_semantic(&messages[index])
-            && v3_resp04_chat_message_is_assistant_semantic(&messages[index + 1])
-        {
-            let next_assistant_message = messages.remove(index + 1);
-            merge_v3_resp04_assistant_semantic(&mut messages[index], &next_assistant_message);
+    let mut coalesced = Vec::with_capacity(messages.len());
+    let mut pending_reasoning: Option<Value> = None;
+    for message in std::mem::take(messages) {
+        if v3_resp04_chat_message_is_reasoning_only(&message) {
+            pending_reasoning = Some(match pending_reasoning.take() {
+                Some(mut pending) => {
+                    merge_v3_resp04_reasoning_content(&mut pending, &message);
+                    pending
+                }
+                None => message,
+            });
             continue;
         }
-        if v3_resp04_chat_message_is_assistant_semantic(&messages[index])
-            && v3_resp04_chat_message_has_tool_calls(&messages[index + 1])
-        {
-            let tool_call_message = messages.remove(index + 1);
-            merge_v3_resp04_tool_call_message(&mut messages[index], &tool_call_message);
+        if v3_resp04_chat_message_has_tool_calls(&message) {
+            let mut target = message;
+            if let Some(pending) = pending_reasoning.take() {
+                merge_v3_resp04_reasoning_content(&mut target, &pending);
+            }
+            coalesced.push(target);
             continue;
         }
-        index += 1;
+        if let Some(pending) = pending_reasoning.take() {
+            coalesced.push(pending);
+        }
+        coalesced.push(message);
     }
+    if let Some(pending) = pending_reasoning {
+        coalesced.push(pending);
+    }
+    *messages = coalesced;
     chat_context
 }
 
-fn v3_resp04_chat_message_is_assistant_semantic(message: &Value) -> bool {
+fn v3_resp04_chat_message_is_reasoning_only(message: &Value) -> bool {
     message
         .get("role")
         .and_then(Value::as_str)
         .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
-        && !v3_resp04_chat_message_has_tool_calls(message)
-        && (message
+        && message
             .get("reasoning_content")
             .and_then(Value::as_str)
-            .is_some_and(|text| !text.is_empty())
-            || message
-                .get("content")
-                .is_some_and(|value| !v3_resp04_chat_content_is_empty(value)))
+            .is_some_and(|text| !text.trim().is_empty())
+        && !v3_resp04_chat_message_has_tool_calls(message)
+        && message
+            .get("content")
+            .is_none_or(v3_resp04_chat_content_is_empty)
 }
 
 fn v3_resp04_chat_message_has_tool_calls(message: &Value) -> bool {
@@ -313,49 +308,6 @@ fn merge_v3_resp04_reasoning_content(target: &mut Value, source: &Value) {
         None => source_reasoning.to_string(),
     };
     target_object.insert("reasoning_content".to_string(), Value::String(merged));
-}
-
-fn merge_v3_resp04_tool_call_message(target: &mut Value, source: &Value) {
-    merge_v3_resp04_reasoning_content(target, source);
-    let Some(source_tool_calls) = source.get("tool_calls").and_then(Value::as_array) else {
-        return;
-    };
-    let Some(target_object) = target.as_object_mut() else {
-        return;
-    };
-    target_object.insert(
-        "tool_calls".to_string(),
-        Value::Array(source_tool_calls.clone()),
-    );
-}
-
-fn merge_v3_resp04_assistant_semantic(target: &mut Value, source: &Value) {
-    merge_v3_resp04_reasoning_content(target, source);
-    let Some(source_content) = source.get("content") else {
-        return;
-    };
-    if v3_resp04_chat_content_is_empty(source_content) {
-        return;
-    }
-    let Some(target_object) = target.as_object_mut() else {
-        return;
-    };
-    let Some(target_content) = target_object.get_mut("content") else {
-        target_object.insert("content".to_string(), source_content.clone());
-        return;
-    };
-    if v3_resp04_chat_content_is_empty(target_content) {
-        *target_content = source_content.clone();
-        return;
-    }
-    match (target_content, source_content) {
-        (Value::String(existing), Value::String(next)) => existing.push_str(next),
-        (Value::Array(existing), Value::Array(next)) => existing.extend(next.clone()),
-        (existing, next) => {
-            let previous = existing.clone();
-            *existing = Value::Array(vec![previous, next.clone()]);
-        }
-    }
 }
 
 fn project_v3_resp04_output_item_to_chat_input_item(
@@ -482,18 +434,21 @@ fn local_continuation_context_ids(
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
     let mut non_internal_ids = Vec::new();
-    if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
-        non_internal_ids.push(response_id.to_string());
-    }
     for id in &call_ids {
-        if !is_v3_stopless_internal_call_id(id)
-            && !non_internal_ids.iter().any(|existing| existing == id)
-        {
+        if !is_v3_stopless_internal_call_id(id) {
             non_internal_ids.push(id.clone());
         }
     }
     if !non_internal_ids.is_empty() {
         return Ok(non_internal_ids);
+    }
+    if call_ids
+        .iter()
+        .any(|id| is_v3_stopless_internal_call_id(id))
+    {
+        if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
+            return Ok(vec![response_id.to_string()]);
+        }
     }
     Ok(non_internal_ids)
 }
@@ -509,7 +464,7 @@ pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
     action: V3HubContinuationCommit,
 ) -> Result<(), V3LocalContinuationError> {
     for context_id in restored_context_ids {
-        store.release_aliases_in_scope(&scope, context_id);
+        store.release_in_scope(&scope, context_id);
     }
     if action != V3HubContinuationCommit::LocalContext {
         return Ok(());
@@ -619,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn resp04_stores_regular_tool_call_by_response_and_call_id() {
+    fn resp04_still_stores_regular_tool_call_local_continuation() {
         let mut store = V3LocalContinuationStore::default();
         let scope = responses_scope();
         let context = json!({
@@ -647,29 +602,12 @@ mod tests {
             60_000,
             &[],
             &context,
-            Some("resp_exec_regular"),
+            None,
             V3HubContinuationCommit::LocalContext,
         )
         .expect("regular tool call must remain local-continuation owned");
 
-        assert!(store.contains_in_scope(&scope, "resp_exec_regular"));
         assert!(store.contains_in_scope(&scope, "call_exec_regular"));
-        assert_eq!(store.len(), 2);
-
-        commit_or_release_v3_relay_local_continuation_at_resp04(
-            &mut store,
-            scope.clone(),
-            21_000,
-            60_000,
-            &["call_exec_regular".to_string()],
-            &json!({"messages":[]}),
-            None,
-            V3HubContinuationCommit::None,
-        )
-        .expect("consuming either alias must release the complete alias group");
-
-        assert!(!store.contains_in_scope(&scope, "resp_exec_regular"));
-        assert!(!store.contains_in_scope(&scope, "call_exec_regular"));
-        assert_eq!(store.len(), 0);
+        assert_eq!(store.len(), 1);
     }
 }

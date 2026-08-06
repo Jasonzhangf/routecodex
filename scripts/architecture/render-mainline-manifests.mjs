@@ -76,6 +76,15 @@ for (const chain of parsed.chains ?? []) {
     },
   };
 
+  if (chainId === 'servertool.hook_skeleton.mainline') {
+    manifest.stopless_standalone_entrypoints = 0;
+    manifest.verification.required_gates.push('npm run verify:servertool-mount-boundary');
+  }
+  if (chainId === 'responses.continuation.mainline') {
+    manifest.servertool_semantic_nodes = 0;
+    manifest.verification.required_gates.push('npm run verify:servertool-mount-boundary');
+  }
+
   const outFile = path.join(outDir, `${chainId}.yml`);
   fs.writeFileSync(outFile, YAML.stringify(manifest, { lineWidth: 0 }), 'utf8');
   written += 1;

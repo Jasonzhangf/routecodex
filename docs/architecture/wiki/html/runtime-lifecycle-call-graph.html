@@ -154,7 +154,6 @@
           ServerPidCacheRecord[&quot;ServerPidCacheRecord&quot;]
           ServerStartCommand[&quot;ServerStartCommand&quot;]
           ServerStartCommand --&gt;|rtl-01| ServerPidCacheRecord
-          ServerStartCommand --&gt;|rtl-02| ServerPidCacheRecord
           ServerStopCommand --&gt;|rtl-03| StopIntentRecord
           ServerStartCommand --&gt;|rtl-04| StopIntentRecord
           ServerRestartCommand --&gt;|rtl-05| RestartProcessHttpRequest
@@ -191,7 +190,6 @@
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
         <tr><td>rtl-01</td><td><code>ServerStartCommand -&gt; ServerPidCacheRecord</code></td><td>anchored</td><td><code>writeServerPidCache -&gt; planRuntimePidCacheWrite</code></td><td></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td></tr>
-        <tr><td>rtl-02</td><td><code>ServerStartCommand -&gt; ServerPidCacheRecord</code></td><td>anchored</td><td><code>writeServerPidCache -&gt; planRuntimePidCacheWrite</code></td><td></td><td><code>runtime.lifecycle.pid_cache</code>&lt;br/&gt;server pid cache lives under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/pid.cache; pid is a transient cache, not the authoritative runtime state</td></tr>
         <tr><td>rtl-03</td><td><code>ServerStopCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>writeDaemonStopIntent -&gt; planRuntimeStopIntentWrite</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
         <tr><td>rtl-04</td><td><code>ServerStartCommand -&gt; StopIntentRecord</code></td><td>anchored</td><td><code>consumeDaemonStopIntent -&gt; planRuntimeStopIntentConsume</code></td><td></td><td><code>runtime.lifecycle.stop_intent</code>&lt;br/&gt;stop-intent is a cross-process signal under &lt;rccUserDir&gt;/state/runtime-lifecycle/ports/&lt;port&gt;/stop-intent.json; it must be reaped when older than TTL</td></tr>
         <tr><td>rtl-05</td><td><code>ServerRestartCommand -&gt; RestartProcessHttpRequest</code></td><td>anchored</td><td><code>planRestartTransport -&gt; planRuntimeRestartRequest</code></td><td></td><td><code>runtime.lifecycle.restart_command</code>&lt;br/&gt;CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports</td></tr>

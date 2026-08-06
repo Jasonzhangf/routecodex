@@ -54,7 +54,7 @@ is_routecodex_process() {
   local normalized
   normalized=$(echo "$cmd" | tr '[:upper:]' '[:lower:]')
 
-  if [[ "$normalized" == *"routecodex/dist/index.js"* ]]; then
+  if [[ "$normalized" == *"routecodex/dist/bin/rccv3"* || "$normalized" == *"/rccv3 server"* ]]; then
     return 0
   fi
   return 1
@@ -158,7 +158,7 @@ ensure_singleton() {
     fi
 
     if [[ "$REPLACE" -ne 1 ]]; then
-      if [[ "$(echo "${CMD_STR:-}" | tr '[:upper:]' '[:lower:]')" == *"dist/index.js"* ]]; then
+      if [[ "$(echo "${CMD_STR:-}" | tr '[:upper:]' '[:lower:]')" == *"dist/bin/rccv3 server"* || "$(echo "${CMD_STR:-}" | tr '[:upper:]' '[:lower:]')" == *"/rccv3 server"* ]]; then
         echo "[run-fg] RouteCodex server already listening on port $port (PID(s): ${trusted_pids:-unknown}); auto-replacing trusted server listener." >&2
         REPLACE=1
       else

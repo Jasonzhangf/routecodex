@@ -177,13 +177,13 @@ export function isTrustedRouteCodexCommand(command: string): boolean {
   if (!normalized) {
     return false;
   }
-  if (normalized.includes('routecodex/dist/index.js')) {
+  if (normalized.includes('routecodex/dist/bin/rccv3') || normalized.includes('/rccv3 server')) {
     return true;
   }
   if (normalized.includes('routecodex/dist/cli.js')) {
     return true;
   }
-  if (normalized.includes('/node_modules/rcc/dist/index.js')) {
+  if (normalized.includes('/node_modules/rcc/dist/bin/rccv3') || normalized.includes('/rccv3 server')) {
     return true;
   }
   if (normalized.includes('/node_modules/rcc/dist/cli.js')) {

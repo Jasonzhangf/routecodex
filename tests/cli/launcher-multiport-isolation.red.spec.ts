@@ -10,17 +10,22 @@ function spinner() {
 
 describe('launcher multi-port isolation red tests', () => {
   it('does not bind a multi-port server process to one port log file', async () => {
-    const configPath = '/configs/multi.json';
-    const configContent = JSON.stringify({
-      httpserver: {
-        host: '127.0.0.1',
-        port: 5520,
-        ports: [
-          { port: 5520, mode: 'router', routingPolicyGroup: 'gateway_priority_5520' },
-          { port: 5555, mode: 'router', routingPolicyGroup: 'gateway_priority_5555' }
-        ]
-      }
-    });
+    const configPath = '/configs/multi.toml';
+    const configContent = `
+[httpserver]
+host = "127.0.0.1"
+port = 5520
+
+[[httpserver.ports]]
+port = 5520
+mode = "router"
+routingPolicyGroup = "gateway_priority_5520"
+
+[[httpserver.ports]]
+port = 5555
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+`;
     const openedLogs: string[] = [];
     const spawnCalls: Array<{ options: any }> = [];
     let readyChecks = 0;
@@ -31,12 +36,13 @@ describe('launcher multi-port isolation red tests', () => {
       isWindows: false,
       defaultDevPort: 5555,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => spinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: (message: unknown) => { throw new Error(`logger-error:${String(message)}`); } },
       env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
       rawArgv: ['codex', '--config', configPath, '--port', '5555', '--', '--help'],
       fsImpl: {
-        existsSync: (target: string) => target === configPath,
+        existsSync: (target: string) => target === configPath || target === '/tmp/rccv3',
         readFileSync: (target: string) => (target === configPath ? configContent : ''),
         mkdirSync: () => undefined,
         openSync: (target: string) => {
@@ -66,7 +72,6 @@ describe('launcher multi-port isolation red tests', () => {
         return { pid: 12345, on: () => {}, once: () => {}, unref: () => {} } as any;
       },
       getModulesConfigPath: () => '/tmp/modules.json',
-      resolveServerEntryPath: () => '/tmp/index.js',
       waitForever: async () => {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -81,17 +86,22 @@ describe('launcher multi-port isolation red tests', () => {
   });
 
   it('injects the same port log root when starting a multi-port server directly', async () => {
-    const configPath = '/configs/multi.json';
-    const configContent = JSON.stringify({
-      httpserver: {
-        host: '127.0.0.1',
-        port: 5520,
-        ports: [
-          { port: 5520, mode: 'router', routingPolicyGroup: 'gateway_priority_5520' },
-          { port: 5555, mode: 'router', routingPolicyGroup: 'gateway_priority_5555' }
-        ]
-      }
-    });
+    const configPath = '/configs/multi.toml';
+    const configContent = `
+[httpserver]
+host = "127.0.0.1"
+port = 5520
+
+[[httpserver.ports]]
+port = 5520
+mode = "router"
+routingPolicyGroup = "gateway_priority_5520"
+
+[[httpserver.ports]]
+port = 5555
+mode = "router"
+routingPolicyGroup = "gateway_priority_5555"
+`;
     const spawnCalls: Array<{ options: any }> = [];
     const program = new Command();
     createStartCommand(program, {
@@ -99,11 +109,12 @@ describe('launcher multi-port isolation red tests', () => {
       isWindows: false,
       defaultDevPort: 5555,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => spinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
       fsImpl: {
-        existsSync: (target: string) => target === configPath || target === '/tmp/index.js' || target === '/tmp/modules.json',
+        existsSync: (target: string) => target === configPath || target === '/tmp/rccv3' || target === '/tmp/modules.json',
         statSync: () => ({ isDirectory: () => false }),
         readFileSync: (target: string) => (target === configPath ? configContent : ''),
         mkdirSync: () => undefined,
@@ -120,7 +131,6 @@ describe('launcher multi-port isolation red tests', () => {
       ensurePortAvailable: async () => undefined,
       ensureLocalTokenPortalEnv: async () => undefined,
       getModulesConfigPath: () => '/tmp/modules.json',
-      resolveServerEntryPath: () => '/tmp/index.js',
       setupKeypress: () => () => undefined,
       onSignal: () => undefined,
       waitForever: async () => {},

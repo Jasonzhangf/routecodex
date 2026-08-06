@@ -2,7 +2,6 @@
  * MiMo Web Provider - XML/JSON parsing utilities
  *
  * Shared parsing helpers ported from mimo2api parser.ts.
- * Used by mimoweb-tool-harvest.ts for response-side tool-call extraction.
  */
 
 // ---------- String cleaning ----------

@@ -2,6 +2,34 @@ version: 2
 status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+  - feature_id: v3.global_binary_install
+    status: source_active_live_verification_required
+    change_risk: high
+    owner_kind: build_and_runtime_install_control
+    owner_scope: Direct publication of the self-contained Rust V3 binary and its local command aliases.
+    owner_modules: [v3-global-binary-install]
+    contract:
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_positive:
+      - Installed rccv3 path is ~/.local/bin/rccv3 and reports the embedded RouteCodex build version.
+      - routecodex and rcc execute the same installed binary.
+      - Aggregate restart and every configured listener health endpoint succeed after installation.
+    required_negative:
+      - Installation does not create ~/.rcc/install/current or ~/.rcc/install/releases.
+      - Command aliases do not fall back to a repository build, npm global package, or release snapshot.
+      - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
+      - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
+    required_gates:
+      - npm run test:v3-cli-distribution
+      - npm run test:install-v3-target-cleanup
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+    completion_rule:
+      source: Distribution and owned-target tests plus architecture gates pass.
+      runtime: Direct global install, aggregate restart, all-listener health, command path, version, and absence of ~/.rcc/install are verified.
+
   - feature_id: v3.managed_server_lifecycle
     status: source_controlled_and_live_5555_release_rollover_verified
     change_risk: high
@@ -1457,6 +1485,7 @@ features:
       - openai_chat_wire_rejects_unknown_client_metadata
       - responses_supported_verbosity_is_registered_local_style_hint_for_anthropic
       - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
+      - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
       - openai_chat_wire_rejects_invalid_reasoning_summary_policy
       - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action` after the complete typed node chain.
       - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
@@ -1894,9 +1923,12 @@ features:
       - Resp03 splits tool_call servertool hook from stop servertool hook
       - Resp03 runs ordinary apply_patch/client tool governance only after tool-call servertool pass-through
       - Resp04 reuses Resp03 governed provider payload and does not mutate status finish_reason or tool frames
+      - Resp04 preserves the complete historical message prefix and only coalesces the newly appended response suffix
     required_gates:
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics -- --nocapture
       - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity -- --nocapture
+      - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib hub_v1::tests::resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable -- --exact --nocapture
+      - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --nocapture
       - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
       - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
       - npm run verify:v3-normalization-payload-logic-boundary
@@ -2561,6 +2593,31 @@ features:
     completion_rule:
       source: Debug budget, red fixtures, resource map, and build gate pass.
       runtime: Live sample capture remains required before production closeout.
+
+  - feature_id: v3.error.raw_wire_evidence
+    status: source_active_live_verification_required
+    change_risk: medium
+    owner_kind: rust_v3_failure_scoped_diagnostic_artifact
+    owner_scope: "Server persists redacted request, Error chain, and provider wire snapshots only after terminal failure; artifacts remain outside MetadataCenter and normal payload."
+    owner_modules:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+    contract:
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+    required_positive:
+      - Terminal Relay failure persists redacted request and Error chain evidence through the declared side-channel edge.
+    required_negative:
+      - Success responses do not force failure evidence persistence.
+      - Failure evidence never enters MetadataCenter, provider payload, client payload, or continuation state.
+    required_gates:
+      - npm run verify:v3-resource-relation-edge-lock
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib -- --nocapture
+    completion_rule:
+      source: Resource, function, mainline, module, and Server unit gates pass.
+      runtime: Live failed request evidence capture remains required before production closeout.
 
   - feature_id: v3.build_test_artifact_budget
     status: source_active

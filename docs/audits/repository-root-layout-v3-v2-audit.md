@@ -18,10 +18,10 @@ The repository must remain a multi-root repository. Moving every source director
 | `src/` | Node/TS server, CLI, adapters, IO, and compatibility shell | Keep until per-module owner audit proves retirement |
 | `scripts/` | Build, install, verification, generation, replay, and maintenance tools | Keep as tooling root |
 | `tests/` | Unit, integration, architecture, and red-fixture tests | Keep as test root; classify by owner |
-| `webui/` | Independent frontend | Keep outside V3 runtime |
+| `webui/` | Retired V2 admin/config editor | Remove from source and build |
 | `config/` | Configuration authoring, schema, and module declarations | Keep as configuration root |
-| `configsamples/` | Configuration examples and fixtures | Keep; review secrets and consumers |
-| `samples/` | Mock-provider recordings, golden fixtures, and replay inputs | Keep; enforce sample contract and lifecycle |
+| `configsamples/` | Retired V2 init/config examples | Remove from source and build |
+| `samples/` | Retired V2 mock-provider recordings and golden fixtures | Remove from source and build |
 | `docs/` | Canonical human-readable architecture and design | Keep as formal documentation root |
 | `deprecated/v2/` | Retired V2 archive | Keep read-only; no runtime imports |
 | `artifacts/` | Generated package/build output | Keep directory policy, remove stale outputs |
@@ -49,15 +49,14 @@ The repository must remain a multi-root repository. Moving every source director
 
 ### Sample boundary and current failure
 
-`samples/mock-provider` is consumed by install scripts, mock-provider replay scripts, provider compatibility tests, and golden-cycle tests. It cannot be moved into `v3/` or deleted as generic clutter.
+The repository `samples/` tree was consumed only by retired TS mock/replay tooling. V3 live evidence remains under `~/.rcc/codex-samples` and is not part of this repository deletion.
 
-The current sample registry audit fails for exactly three entries because the request body `reqId` does not match the registry entry:
+The first sample registry audit found exactly three entries because the request body `reqId` did not match the registry entry:
 
-- `openai-responses/iflow.2-173.glm-4.7/.../001`
-- `openai-responses/crs.key1.gpt-5.1/.../004`
-- `openai-responses/tab.key1.gpt-5.1/.../001`
 
-The largest subtree is `samples/mock-provider/openai-responses/unknown`, about 861 MiB and 3,906 files. It is tracked and therefore requires a sample-level retention decision, not filesystem deletion by size alone.
+Jason confirmed these three providers are retired. Their registry entries and sample directories were physically removed on 2026-08-04. The stale test assertion that required the retired `tab.key1.gpt-5.1` sample was removed as well.
+
+The former `samples/mock-provider/openai-responses/unknown` subtree was retired with the V2 mock provider; no V3 source imports it.
 
 ## Required actions
 
@@ -69,9 +68,8 @@ The largest subtree is `samples/mock-provider/openai-responses/unknown`, about 8
 
 ### Immediate next actions
 
-1. Repair or explicitly retire the three invalid mock-provider registry entries. Do not rewrite request semantics; fix only the unique sample/registry owner after confirming the intended `reqId`.
-2. Audit the 861 MiB `openai-responses/unknown` subtree for duplicate, replay-required, and accidental capture samples. Retain only entries required by registered tests or golden coverage.
-3. Run mock-provider regression and compatibility tests after sample changes.
+1. Keep the filesystem gate red-locked against reintroducing `samples/`, `configsamples/`, or `webui/`.
+2. Treat `~/.rcc/codex-samples` as the separate V3 runtime evidence surface.
 
 ### V2/V3 layout work
 
@@ -90,8 +88,8 @@ src/                Node/TS shell, CLI, adapters, and IO
 scripts/            build/install/gate/replay tooling
 tests/              tests and architecture gates
 config/             configuration authoring and schemas
-configsamples/      configuration examples
-samples/            registered protocol and provider fixtures
+configsamples/      retired; absent
+samples/            retired; absent
 docs/               reviewed canonical documentation
 deprecated/v2/      retired V2 archive
 artifacts/pack/     temporary packaging output, ignored

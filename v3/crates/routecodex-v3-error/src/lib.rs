@@ -971,6 +971,77 @@ pub fn project_v3_http_boundary_error(
     })
 }
 
+fn project_v3_server_boundary_error(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    detail: impl Into<String>,
+    status: u16,
+) -> V3Error06ClientProjected {
+    let source = build_v3_error_01_source_raised(
+        source_kind,
+        source_stage,
+        code,
+        detail,
+    );
+    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+        source,
+        action_scope: V3ErrorActionScope::None,
+        candidates_remaining: 0,
+        source_status: Some(status),
+    })
+}
+
+pub fn project_v3_server_invalid_request(
+    source_stage: &'static str,
+    code: impl Into<String>,
+    detail: impl Into<String>,
+    status: u16,
+) -> V3Error06ClientProjected {
+    project_v3_server_boundary_error(
+        V3ErrorSourceKind::InvalidRequest,
+        source_stage,
+        code,
+        detail,
+        status,
+    )
+}
+
+pub fn project_v3_server_runtime_failure(
+    source_stage: &'static str,
+    code: impl Into<String>,
+    detail: impl Into<String>,
+    status: u16,
+) -> V3Error06ClientProjected {
+    project_v3_server_boundary_error(
+        V3ErrorSourceKind::RuntimeFailure,
+        source_stage,
+        code,
+        detail,
+        status,
+    )
+}
+
+pub fn project_v3_server_websocket_error(
+    code: &'static str,
+    detail: impl Into<String>,
+) -> V3Error06ClientProjected {
+    if code == "invalid_client_event" {
+        return project_v3_server_invalid_request(
+            "V3ServerRespOutbound06ClientFrame",
+            code,
+            detail,
+            400,
+        );
+    }
+    project_v3_server_runtime_failure(
+        "V3ServerRespOutbound06ClientFrame",
+        code,
+        detail,
+        500,
+    )
+}
+
 pub fn raise_v3_sse_provider_failure(
     code: impl Into<String>,
     message: impl Into<String>,

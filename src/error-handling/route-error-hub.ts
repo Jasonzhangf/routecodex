@@ -1,11 +1,6 @@
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import { ErrorHandlerRegistry } from '../utils/error-handler-registry.js';
 import {
-  isClientDisconnectHttpProjectionSentinel,
-  mapErrorToHttp,
-  type HttpErrorPayload
-} from '../server/utils/http-error-mapper.js';
-import {
   formatErrorForErrorCenter,
   type ErrorExtras
 } from '../utils/error-center-payload.js';
@@ -33,13 +28,9 @@ export interface RouteErrorPayload {
   originalError?: unknown;
 }
 
-export interface RouteErrorReportOptions {
-  includeHttpResult?: boolean;
-}
+export interface RouteErrorReportOptions {}
 
-export interface RouteErrorReportResult {
-  http?: HttpErrorPayload;
-}
+export interface RouteErrorReportResult {}
 
 export interface RouteErrorHubDeps {
   errorHandlingCenter: ErrorHandlingCenter;
@@ -99,18 +90,7 @@ export class RouteErrorHub {
       );
     }
 
-    let http: HttpErrorPayload | undefined;
-    if (options?.includeHttpResult) {
-      try {
-        http = mapErrorToHttp(this.buildHttpPayload(normalized));
-      } catch (error) {
-        if (!isClientDisconnectHttpProjectionSentinel(error)) {
-          throw error;
-        }
-      }
-    }
-
-    return { http };
+    return {};
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -172,49 +152,6 @@ export class RouteErrorHub {
     };
   }
 
-  private buildHttpPayload(payload: RouteErrorPayload): Record<string, unknown> {
-    const originalError =
-      payload.originalError && typeof payload.originalError === 'object'
-        ? (payload.originalError as Record<string, unknown>)
-        : undefined;
-    const nestedErrorDetails =
-      payload.details?.details && typeof payload.details.details === 'object' && !Array.isArray(payload.details.details)
-        ? (payload.details.details as Record<string, unknown>)
-        : undefined;
-    const status =
-      typeof originalError?.status === 'number'
-        ? originalError.status
-        : typeof originalError?.statusCode === 'number'
-          ? originalError.statusCode
-          : typeof payload.details?.status === 'number'
-            ? payload.details.status
-            : typeof payload.details?.statusCode === 'number'
-              ? payload.details.statusCode
-              : typeof nestedErrorDetails?.status === 'number'
-                ? nestedErrorDetails.status
-                : typeof nestedErrorDetails?.statusCode === 'number'
-                  ? nestedErrorDetails.statusCode
-                  : undefined;
-    return {
-      message: payload.message,
-      code: payload.code,
-      ...(typeof status === 'number' ? { status, statusCode: status } : {}),
-      requestId: payload.requestId,
-      providerKey: payload.providerKey,
-      providerType: payload.providerType,
-      routeName: payload.routeName,
-      details: {
-        ...nestedErrorDetails,
-        ...payload.details,
-        ...(typeof status === 'number' ? { status, statusCode: status } : {}),
-        requestId: payload.requestId,
-        providerKey: payload.providerKey,
-        providerType: payload.providerType,
-        routeName: payload.routeName,
-        model: payload.model
-      }
-    };
-  }
 }
 
 let currentHub: RouteErrorHub | null = null;

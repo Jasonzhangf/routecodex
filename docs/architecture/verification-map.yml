@@ -1819,7 +1819,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/virtual_router_engine/routing/config.rs
     integration:
       - tests/provider-sdk/provider-inspect.spec.ts
-      - tests/cli/config-command.spec.ts
       - tests/sharedmodule/virtual-router-websearch-provider-resolution.spec.ts
     smoke:
       - npm run verify:resource-operation-map
@@ -2025,7 +2024,6 @@ verification:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/anthropic_response_helper.rs
     contract:
       - tests/sharedmodule/anthropic-tool-schema-stability.spec.ts
-      - tests/sharedmodule/provider-compat-anthropic.spec.ts
       - tests/sharedmodule/provider-normalization-anthropic-thinking.spec.ts
     integration:
       - tests/sharedmodule/anthropic-image-mapping.spec.ts
@@ -3117,9 +3115,6 @@ verification:
       - src/modules/llmswitch/bridge/config-integrations.ts
       - src/config/provider-config-codec.ts
       - src/config/provider-v2-loader.ts
-      - src/cli/commands/init/basic.ts
-      - src/cli/commands/init.ts
-      - src/cli/commands/init/workflows.ts
       - src/server/handlers/config-admin-handler.ts
       - src/server/runtime/http-server/daemon-admin/providers-handler.ts
       - src/commands/provider-update.ts
@@ -3251,33 +3246,6 @@ verification:
     notes:
       - "Provider async writes must stay Rust-owned through config_file_codec; writeProviderConfigFileSync(fsImpl) remains a TS injected-fs host boundary until init fs injection is removed."
 
-  - feature_id: webui.config_editor_surface
-    change_risk: high
-    unit:
-      - webui/src/App.tsx
-      - webui/src/styles.css
-    contract:
-      - tests/frontend/webui-app.integration.spec.tsx
-      - tests/frontend/webui-app.pages.spec.tsx
-      - tests/frontend/webui-app.edge.spec.tsx
-      - tests/frontend/webui-app.render.spec.tsx
-      - tests/frontend/webui-app.utils.spec.ts
-      - tests/config/config-writer.spec.ts
-      - tests/config/routecodex-config-loader.v2-single-source.spec.ts
-      - tests/config/provider-v2-loader.spec.ts
-    integration:
-      - tests/grep/config-codec-gate.spec.ts
-    smoke:
-      - npm run test:webui
-      - npm run verify:config-ssot
-      - npm run verify:resource-operation-map
-      - npm run verify:function-map-compile-gate
-      - npm run verify:runtime-lifecycle-loop-gate-matrix
-    build:
-      - npm run build:base
-    notes:
-      - "WebUI config editor must prove provider cards, provider backup/restore, single-file httpserver.ports[] editing, provider selection, and fwd priority/weighted/roundrobin config without owning runtime selection semantics."
-      - "Blackbox must use a test config path or disposable fixture; live production config writes require explicit approval."
 
   - feature_id: manager.routing_control_surface
     change_risk: high
@@ -3764,7 +3732,7 @@ verification:
     notes:
       - "CLI surface is dispatch only; all actions go through http-server or manager modules."
 
-  - feature_id: responses.crs_request_compat
+  - feature_id: responses.temperature_unsupported_compat
     change_risk: high
     unit:
       - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/req_outbound_stage3_compat/responses/request.rs
@@ -3774,7 +3742,7 @@ verification:
       - tests/sharedmodule/native-required-exports-sse-stream.spec.ts
     smoke:
       - npm run verify:resource-operation-map
-      - npm run verify:responses-crs-request-compat-rust-only
+      - npm run verify:responses-request-compat-rust-only
     build:
       - npm run build:base
     notes:

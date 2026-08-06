@@ -104,11 +104,12 @@ describe('cli start command', () => {
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
       fsImpl: {
-        existsSync: (target: string) => target === configPath || target === '/tmp/index.js' || target === '/tmp/modules.json',
+        existsSync: (target: string) => target === configPath || target === '/tmp/rccv3' || target === '/tmp/modules.json',
         statSync: () => ({ isDirectory: () => false } as any),
         readFileSync: () => `
 [httpserver]
@@ -225,6 +226,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: {
         info: (msg) => infoLogs.push(String(msg)),
@@ -345,6 +347,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: {
         info: (msg) => infoLogs.push(String(msg)),
@@ -458,6 +461,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -536,10 +540,8 @@ routingPolicyGroup = "gateway_coding_10000"
     }
 
     expect(spawnedArgs.length).toBeGreaterThanOrEqual(2);
-    expect(spawnedArgs[0][0]).toBe('/home/test/.rcc/install/current/dist/index.js');
-    expect(spawnedArgs[0][1]).toBe('/home/test/.rcc/install/current/config/modules.json');
-    expect(spawnedArgs[1][0]).toBe('/home/test/.rcc/install/current/dist/index.js');
-    expect(spawnedArgs[1][1]).toBe('/home/test/.rcc/install/current/config/modules.json');
+    expect(spawnedArgs[0]).toEqual(['server', 'start', '--foreground', '--config', '/tmp/modules.json']);
+    expect(spawnedArgs[1]).toEqual(['server', 'start', '--foreground', '--config', '/tmp/modules.json']);
   });
 
   it('registers start command', () => {
@@ -549,6 +551,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/repo/dist/bin/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -598,6 +601,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -650,6 +654,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -705,6 +710,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -731,7 +737,7 @@ routingPolicyGroup = "gateway_coding_10000"
       findListeningPids: () => [],
       killPidBestEffort: () => {},
       getModulesConfigPath: () => '/tmp/modules.json',
-      resolveServerEntryPath: () => '/repo/dist/index.js',
+      serverBin: '/repo/dist/bin/rccv3',
       spawn: (_bin, _args, options) => {
         spawns.push(options as { cwd?: string; env?: Record<string, string> });
         return {
@@ -764,6 +770,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: (msg) => errors.push(msg) },
       env: {},
@@ -816,6 +823,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -860,8 +868,8 @@ routingPolicyGroup = "gateway_coding_10000"
 
     await program.parseAsync(['node', 'rcc', 'start'], { from: 'node' });
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].command).toBe('node');
-    expect(spawnCalls[0].args).toContain('/tmp/index.js');
+    expect(spawnCalls[0].command).toBe('/tmp/rccv3');
+    expect(spawnCalls[0].args).toEqual(['server', 'start', '--foreground', '--config', '/tmp/modules.json']);
     expect(spawnCalls[0].options?.detached).toBeUndefined();
     expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBeUndefined();
     expect(spawnCalls[0].options?.env?.ROUTECODEX_EXPECT_PARENT_PID).toBeUndefined();
@@ -875,6 +883,7 @@ routingPolicyGroup = "gateway_coding_10000"
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: { ROUTECODEX_START_DAEMON: '0' },
@@ -955,11 +964,12 @@ routingPolicyGroup = "gateway_coding_10000"
         isWindows: false,
         defaultDevPort: 5520,
         nodeBin: 'node',
+        serverBin: '/tmp/rccv3',
         createSpinner: async () => createStubSpinner(),
         logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
         env: { ROUTECODEX_START_DAEMON: '0' },
         fsImpl: {
-          existsSync: (target: string) => target === configPath || target === '/tmp/index.js' || target === '/tmp/modules.json',
+          existsSync: (target: string) => target === configPath || target === '/tmp/rccv3' || target === '/tmp/modules.json',
           statSync: () => ({ isDirectory: () => false } as any),
           readFileSync: () => `
 [httpserver]
@@ -1043,12 +1053,13 @@ port = 5520
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-daemon-takeover-intent-'));
     const configPath = path.join(tempHome, 'config.toml');
     const cliPath = path.join(tempHome, 'dist', 'cli.js');
-    const indexPath = path.join(tempHome, 'dist', 'index.js');
+    const serverBin = path.join(tempHome, 'dist', 'bin', 'rccv3');
     const modulesPath = path.join(tempHome, 'config', 'modules.json');
     fs.mkdirSync(path.dirname(cliPath), { recursive: true });
+    fs.mkdirSync(path.dirname(serverBin), { recursive: true });
     fs.mkdirSync(path.dirname(modulesPath), { recursive: true });
     fs.writeFileSync(cliPath, '', 'utf8');
-    fs.writeFileSync(indexPath, '', 'utf8');
+    fs.writeFileSync(serverBin, '', 'utf8');
     fs.writeFileSync(modulesPath, '{}', 'utf8');
     fs.writeFileSync(configPath, `
 [httpserver]
@@ -1072,6 +1083,7 @@ port = 5520
         isWindows: false,
         defaultDevPort: 5520,
         nodeBin: 'node',
+        serverBin,
         createSpinner: async () => createStubSpinner(),
         logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
         env: { ROUTECODEX_START_DAEMON: '1' },
@@ -1090,7 +1102,6 @@ port = 5520
         killPidBestEffort: () => {},
         getModulesConfigPath: () => modulesPath,
         resolveCliEntryPath: () => cliPath,
-        resolveServerEntryPath: () => indexPath,
         spawn: (_command, _args, options) => {
           spawnedEnv = options.env as NodeJS.ProcessEnv;
           return createFakeChild(43210);
@@ -1174,6 +1185,7 @@ port = 5520
         isWindows: false,
         defaultDevPort: 5520,
         nodeBin: 'node',
+        serverBin: '/tmp/rccv3',
         createSpinner: async () => createStubSpinner(),
         logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
         env: { ROUTECODEX_START_LOCK_WAIT_MS: '1000' },
@@ -1262,6 +1274,7 @@ port = 5520
         isWindows: false,
         defaultDevPort: 5520,
         nodeBin: 'node',
+        serverBin: '/tmp/rccv3',
         createSpinner: async () =>
           ({
             ...createStubSpinner(),
@@ -1332,6 +1345,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: { ROUTECODEX_START_DAEMON: '1' },
@@ -1397,6 +1411,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -1442,7 +1457,7 @@ port = 5520
 
     await program.parseAsync(['node', 'rcc', 'start', '--snap'], { from: 'node' });
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].args).toContain('/tmp/index.js');
+    expect(spawnCalls[0].args).toEqual(['server', 'start', '--foreground', '--config', '/tmp/modules.json']);
     expect(spawnCalls[0].options?.env?.ROUTECODEX_SNAPSHOT).toBe('1');
     expect(spawnCalls[0].options?.detached).toBeUndefined();
     expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBeUndefined();
@@ -1458,6 +1473,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: { ROUTECODEX_START_DAEMON: '1' },
@@ -1525,6 +1541,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () =>
         ({
           ...createStubSpinner(),
@@ -1590,6 +1607,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -1640,8 +1658,10 @@ port = 5520
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-start-lock-running-'));
     const configPath = path.join(tempHome, 'config.toml');
     const modulesPath = path.join(tempHome, 'modules.json');
+    const serverBin = path.join(tempHome, 'rccv3');
     fs.writeFileSync(configPath, '[httpserver]\nport = 5520\nhost = "127.0.0.1"\n');
     fs.writeFileSync(modulesPath, '{}');
+    fs.writeFileSync(serverBin, '');
     const lockDir = path.join(tempHome, '.rcc', 'state', 'runtime-lifecycle', 'start-locks');
     fs.mkdirSync(lockDir, { recursive: true });
     fs.writeFileSync(path.join(lockDir, '5520.lock'), JSON.stringify({ pid: 99999999, ports: [5520], startedAtMs: Date.now() }), 'utf8');
@@ -1655,6 +1675,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin,
       createSpinner: async () => ({ ...createStubSpinner(), succeed: (message?: string) => { if (message) successes.push(message); } }),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: { RCC_START_LOCK_WAIT_MS: '1000' },
@@ -1670,7 +1691,6 @@ port = 5520
       findListeningPids: () => [1234],
       killPidBestEffort: () => {},
       getModulesConfigPath: () => modulesPath,
-      resolveServerEntryPath: () => path.join(tempHome, 'index.js'),
       spawn: () => createFakeChild(1),
       fetch: (async () => ({
         ok: true,
@@ -1700,6 +1720,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -1756,6 +1777,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},
@@ -1813,6 +1835,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: (message: string) => errors.push(message) },
       env: {},
@@ -1870,6 +1893,7 @@ port = 5520
       isWindows: false,
       defaultDevPort: 5520,
       nodeBin: 'node',
+      serverBin: '/tmp/rccv3',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       env: {},

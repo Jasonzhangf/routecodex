@@ -42,12 +42,6 @@ function readOrNull(p) {
 
 const checks = [
   {
-    label: 'src/index.ts must not write server-<port>.pid in <rccHome>/',
-    file: 'src/index.ts',
-    forbidden: [/join\(resolveRccPath\(\),\s*`server-\$\{bindPort\}\.pid`\)/],
-    required: [/writeServerPidCache\(/]
-  },
-  {
     label: 'src/cli/commands/start.ts must use writeServerPidCache',
     file: 'src/cli/commands/start.ts',
     forbidden: [/join\(routeCodexHome,\s*`server-\$\{resolvedPort\}\.pid`\)/],

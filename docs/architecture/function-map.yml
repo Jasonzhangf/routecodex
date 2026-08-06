@@ -6298,7 +6298,6 @@ owners:
       - src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
       - src/utils/server-runtime-pid.ts
       - src/cli/commands/start.ts
-      - src/index.ts
       - src/cli.ts
       - scripts/cleanup-stale-server-pids.mjs
     forbidden_paths:
@@ -9179,6 +9178,8 @@ owners:
       - sharedmodule/llmswitch-core/rust-core/crates/sse-transport-core
       - src/server/handlers
       - src/modules/llmswitch
+    forbidden_mentions_allowlist:
+      - SseTransportError
     required_tests:
       - v3/crates/routecodex-v3-sse/src/lib.rs
       - v3/crates/routecodex-v3-provider-responses/src/shared.rs
@@ -9303,6 +9304,8 @@ owners:
       - v3/crates/routecodex-v3-provider-responses
       - src/server/runtime/http-server
       - src/providers
+    forbidden_mentions_allowlist:
+      - V3Config05ManifestPublished
     required_tests:
       - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
     required_gates:

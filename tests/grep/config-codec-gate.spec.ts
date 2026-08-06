@@ -211,7 +211,6 @@ describe('Config Codec Gate', () => {
       `grep -rn --include='*.ts' -E 'decodeProviderConfigFile|decodeProviderConfigFileSync|coerceProviderConfigV2FromParsed|planRouteCodexProviderConfigV2FilesSync|resolveRouteCodexProviderConfigV2IdentitySync|getProviderRootDir|getProviderConfigOutputPath|writeJsonFile|config\\.v2\\.json|provider/\\*\\.json' ` +
       `src/commands/provider-update.ts src/commands/provider-update-maintenance.ts src/tools/provider-update/index.ts ` +
       `src/server/handlers/config-admin-handler.ts src/server/runtime/http-server/daemon-admin/providers-handler.ts ` +
-      `src/cli/commands/init.ts src/cli/commands/init/basic.ts src/cli/commands/init/workflows.ts ` +
       `| grep -v 'node_modules'`,
       rootDir
     );

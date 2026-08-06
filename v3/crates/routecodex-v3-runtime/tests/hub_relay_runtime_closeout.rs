@@ -2090,7 +2090,7 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_actio
             payload: json!({
                 "model":"client-responses",
                 "messages":[{"role":"user","content":"provider compat must reselect"}],
-                "metadata":{"unsupported":"forces_anthropic_provider_compat_error"},
+                "store":true,
                 "stream":false
             }),
         },
@@ -2142,7 +2142,7 @@ async fn concurrent_provider_request_compat_failures_do_not_serialize_request_lo
                 payload: json!({
                     "model":"client-responses",
                     "messages":[{"role":"user","content":"serialize provider compat failures"}],
-                    "metadata":{"unsupported":"forces_anthropic_provider_compat_error"},
+                    "store":true,
                     "stream":false
                 }),
             },

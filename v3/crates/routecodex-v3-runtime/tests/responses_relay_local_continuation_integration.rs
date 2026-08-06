@@ -1911,7 +1911,7 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
         V3ResponsesRelayClientBody::Sse(_) => panic!("first stopless turn must be JSON"),
     };
     assert_eq!(first_body["status"], "requires_action");
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 
     let submit_payload = json!({
         "model":"gpt-5.5",
@@ -1988,8 +1988,8 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     assert_no_stopless_shell_artifacts(body);
     assert_eq!(
         state.len().unwrap(),
-        1,
-        "provider-request dry-run must not release or commit local continuation state"
+        2,
+        "provider-request dry-run must preserve the response-id and call-id continuation aliases"
     );
 
     let second_dry_run =
@@ -2031,8 +2031,8 @@ async fn provider_request_dry_run_uses_live_local_continuation_state() {
     assert_no_stopless_shell_artifacts(second_body);
     assert_eq!(
         state.len().unwrap(),
-        1,
-        "repeated provider-request dry-run must leave local continuation state unchanged"
+        2,
+        "repeated provider-request dry-run must leave both continuation aliases unchanged"
     );
 }
 
@@ -2151,8 +2151,8 @@ async fn sse_runtime_runs_apply_patch_through_json_hub_pipeline_before_client_ss
     }
     assert_eq!(
         state.len().unwrap(),
-        1,
-        "SSE Relay must save the Hub-finalized apply_patch continuation payload at Resp04"
+        2,
+        "SSE Relay must save Resp04 continuation under response-id and call-id aliases"
     );
     let snapshot = stream_observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("requires_action"));
@@ -2224,7 +2224,7 @@ async fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
         V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
         V3ResponsesRelayClientBody::Sse(_) => panic!("first turn must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 
     let second = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
@@ -2384,7 +2384,7 @@ async fn json_two_turn_preserves_responses_additional_tools_surface_and_tool_res
         V3ResponsesRelayClientBody::Json(body) => assert_eq!(body["status"], "requires_action"),
         V3ResponsesRelayClientBody::Sse(_) => panic!("first additional-tools turn must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 
     let second = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
@@ -2539,7 +2539,7 @@ async fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback()
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("first turn must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 
     let second = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
@@ -2641,7 +2641,7 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
     )
     .await
     .unwrap();
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 
     let error = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
@@ -2673,7 +2673,7 @@ async fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
     .unwrap_err();
     assert!(error.to_string().contains("not found"));
     assert_eq!(transport.captures.lock().unwrap().len(), 1);
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 }
 
 #[tokio::test]
@@ -2730,7 +2730,7 @@ async fn previous_response_id_tool_output_restores_response_context_not_call_id(
     )
     .await
     .unwrap();
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 
     let second = execute_v3_responses_relay_runtime_with_local_continuation(
         &manifest(),
@@ -3358,7 +3358,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("custom tool response must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 }
 
 #[tokio::test]
@@ -3447,7 +3447,7 @@ async fn responses_relay_selected_openai_chat_provider_restores_custom_tool_call
         }
         V3ResponsesRelayClientBody::Sse(_) => panic!("custom tool response must be JSON"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 }
 
 #[tokio::test]
@@ -4440,7 +4440,7 @@ async fn responses_relay_selected_openai_chat_provider_sse_uses_chat_wire_and_re
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE body"),
     }
-    assert_eq!(state.len().unwrap(), 1);
+    assert_eq!(state.len().unwrap(), 2);
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {

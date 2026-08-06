@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Scan tool-call argument shapes in:
- * 1) repo samples: samples/ci-goldens/**
- * 2) user samples: ~/.routecodex/codex-samples/** (or ~/.routecodex/codex samples/**)
+ * Scan tool-call argument shapes in user samples under
+ * ~/.routecodex/codex-samples/** (or ~/.routecodex/codex samples/**).
  *
  * Tools covered:
  * - apply_patch
@@ -16,7 +15,6 @@
  * Usage:
  *   node scripts/scan-tool-shape-samples.mjs
  *   node scripts/scan-tool-shape-samples.mjs --user-all
- *   node scripts/scan-tool-shape-samples.mjs --to-repo --user-all
  */
 
 import fs from 'node:fs/promises';
@@ -33,7 +31,6 @@ const USER_CODEX_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
 const USER_CODEX_ROOT_SPACE = path.join(HOME, '.routecodex', 'codex samples');
 const USER_CODEX_PENDING = path.join(USER_CODEX_ROOT, 'openai-chat', '__pending__');
 const USER_CODEX_PENDING_SPACE = path.join(USER_CODEX_ROOT_SPACE, 'openai-chat', '__pending__');
-const REPO_GOLDENS_ROOT = path.join(repoRoot, 'samples', 'ci-goldens');
 
 const TOOL_NAMES = ['apply_patch', 'exec_command'];
 
@@ -242,15 +239,7 @@ function resolveUserRoot({ userAll }) {
 async function main() {
   const args = process.argv.slice(2);
   const userAll = args.includes('--user-all');
-  const toRepo = args.includes('--to-repo');
-  if (toRepo) {
-    process.env.ROUTECODEX_APPLY_PATCH_REGRESSION_TO_REPO = '1';
-  }
-
   const { validateToolCall } = await loadValidator();
-
-  const repo = await scanRoot('repo samples/ci-goldens', REPO_GOLDENS_ROOT, validateToolCall);
-  printReport(repo);
 
   let userRoot = null;
   for (const p of resolveUserRoot({ userAll })) {
@@ -265,8 +254,8 @@ async function main() {
   const user = await scanRoot(`user ${userLabel}`, userRoot || USER_CODEX_ROOT, validateToolCall);
   printReport(user);
 
-  const totalCalls = repo.calls + user.calls;
-  const totalOk = repo.ok + user.ok;
+  const totalCalls = user.calls;
+  const totalOk = user.ok;
   console.log(`\n[scan] TOTAL tool_calls=${totalCalls} ok=${totalOk} fail=${totalCalls - totalOk}`);
 
   process.exitCode = totalCalls - totalOk > 0 ? 1 : 0;

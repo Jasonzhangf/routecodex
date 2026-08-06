@@ -34496,3 +34496,132 @@ Hard guards observed:
 - Unique-owner repair: `servertool_hooks.rs` now recognizes only immediately adjacent stopless CLI call/output pairs in Responses-form and Chat-form, keyed by exact call id, `exec_command`, and single-field JSON arguments where `cmd == "routecodex hook run reasoningStop"`. It does not accept arbitrary orphan outputs, raw command strings, extra state fields, substring-only mentions, SSE/handler/outbound cleanup, or MetadataCenter payload reconstruction.
 - Red/green evidence: focused dynamic-stopless replay test first failed with `OrphanToolOutput`, then passed; exact-match negative tests reject raw command strings, extra fields, and `echo routecodex hook run reasoningStop`; multi-pair red test proves stale dynamic outputs are removed; full `responses_relay_local_continuation_integration` passed `31/31`, `hub_relay_stopless_center_semantics` passed `15/15`, Anthropic stopless wire integration passed, server continuation scope passed, Rust fmt and diff checks passed, stopless/resource and normalization gates plus red fixtures passed.
 - Install/live: `install:v3` produced `0.90.4114`, installed SHA256 `63d73a1991d9e94cfae8a53f669f999e8dabdabd8b81da12b70e8a7c9afcd6e1`; aggregate restart and health passed on 10000/5520/5555. Live dynamic stopless multi-pair replay returned HTTP 200 `completed` with `RCC_STOPLESS_DYNAMIC_4114_OK`, model `claude-fable-5`, 17-node trace. Real `codex exec -p rcm` returned `RCC_CODEX_5520_4114_OK`; server log shows 5520 `/v1/responses` completed HTTP 200 on `route=tools`, model `claude-fable-5`, nodes=17, transport=SSE.
+
+## 2026-08-04 V3 reasoning/thinking projection closeout and 0.90.4116 live replay
+- Anthropic/OpenAI first, Gemini last: Responses `reasoning.summary` remains a request policy, not response reasoning content or effort. OpenAI Chat/Gemini targets reject it before provider send; Anthropic validates `auto|concise|detailed` only as a registered local response-shaping hint and emits no provider-wire field.
+- Gemini runtime gap fixed after Anthropic/OpenAI verification: Gemini outbound now treats `stream` as transport intent, validates it is boolean, consumes it before provider wire, and preserves `generationConfig.thinkingConfig` unchanged.
+- Red/green evidence: Anthropic codec characterization `70/70`, OpenAI Chat relay `15/15`, V2/V3 reasoning parity `5/5`, reasoning suite `19/19`, Gemini targeted `49/49`, protocol parity verify plus `109/109` red mutations, and architecture CI `32/32` passed.
+- Install/live: `install:v3` produced `0.90.4116` with installed rccv3 SHA256 `3e9351c678f699e55f16d52d319bd4d3e53fadb1fb53ce838969a74a72da912c`; aggregate restart succeeded and 10000/5520/5555 health report `0.90.4116`.
+- Live 5520 replay: Responses request with `reasoning.effort=medium` + `reasoning.summary=detailed` selected `modrouter_anthropic[key2].claude-fable-5`, returned HTTP 200 `completed`, `RCC_REASONING_4116_OK`, and full 17-node adjacent trace. OpenAI-compatible direct request to `minimax_openai.MiniMax-M3` with `reasoning.effort=medium` returned HTTP 200 `completed`, `RCC_OPENAI_REASONING_4116_OK`, and full 17-node adjacent trace. No Gemini live target is configured on 5520, so Gemini is closed by local codec/runtime/gate evidence only.
+- Repository hygiene: provider-action manifest had a pre-existing invalid deletion that blocked `install:v3`; restored its machine edge/status/downstream/admission fields manually so the owner gate is active again. Remaining unrelated dirty config/sample/provider-compat files are not part of this projection change and must not be staged into this commit.
+
+## 2026-08-04 Direct / Relay 错误处理路线审计
+- V3 Rust 逻辑中心为 `routecodex-v3-error::V3ErrorHandlingCenter`：非 provider 错误走 `handle` 完成 Error01-06；provider 错误走 `decide_provider` 得到 Error05，caller 再投影 Error06。
+- Direct provider failure 的分类/动作经过 `V3HookRegistry::run_error -> V3ErrorHandlingCenter::decide_provider`，但 `kernel.rs` 多处直接调用 `build_v3_error_06_client_projected_from_v3_error_05`，Error05->06 不经 center.handle；属于投影 owner 分散，不是分类绕过。
+- Relay provider failure 同样先经统一 provider policy/center decision；普通 runtime error 经各 relay `error_output -> V3ErrorHandlingCenter::handle`。但 Responses Relay `try_before_resp03!` 将多种 typed runtime error `Err(error.into())` 抛到 server wrapper，再统一降格成 generic RuntimeFailure，丢失原始 source kind/stage 的分类精度。
+- 明确违规并行路径仍存在于 TS handler：`resolveReportedRouteErrorHttpResponse` 在没有 typed Error05 时直接 `mapErrorToHttp`；`RouteErrorHub` 还挂载独立 `rcc-errorhandling::ErrorHandlingCenter`，且内部也调用同一个 TS mapper。当前存在 Rust V3ErrorHandlingCenter + TS rcc-errorhandling center + TS mapper 三套可参与 HTTP 投影的 owner，不满足“所有错误唯一进入同一处理中心”。
+- 现有 `verify:architecture-error-chain-bypass`、`verify:error-pipeline-contract`、`verify:direct-route-response-error-rust-only`、`verify:provider-response-errorerr-bypass-closeout` 均 PASS，但 gate 主要扫描 provider/executor/direct 分类，未禁止 handler 的 `errorErr05 ? typed projection : mapErrorToHttp` fallback，也未禁止 RouteErrorHub 第二中心。
+## 2026-08-04 V3 unified error-path repair continuation
+- Changes: centralized terminal Error05 -> Error06 projection behind `V3ErrorHandlingCenter::{project_terminal,project_terminal_decision}`; removed runtime direct uses of the low-level Error06 builder; removed HTTP projection fallback from `resolveReportedRouteErrorHttpResponse`; `RouteErrorHub` now reports only and does not map HTTP responses; added static contract checks and local skill reference `96-unified-error-path-audit.md`.
+- Verification: `verify:architecture-error-chain-bypass`, `verify:error-pipeline-contract`, `verify:direct-route-response-error-rust-only`, `verify:provider-response-errorerr-bypass-closeout`, `verify:architecture-mainline-call-map`, and `routecodex-v3-error` tests passed. Runtime compiled and ran 261 tests; 260 passed, with existing `hub_v1::responses_relay_runtime::tests::target_protocol_unmapped_field_fails_without_provider_switch_or_transport` failing because it returned a successful relay response instead of rejecting an unmapped target field. This is not fixed or weakened here.
+- Remaining: Relay `try_before_resp03!` still converts typed runtime failures to a generic wrapper before server capture; no install/restart/live direct+relay replay or codex review has been run after this change.
+## 2026-08-04 全流程统一错误中心复审
+- 已修复 V3 Server 旁路：Virtual Router diagnostics 的 403/500 和 Responses WebSocket 错误事件不再直接拼错误 JSON，统一先经 `project_v3_server_boundary_error -> V3ErrorHandlingCenter -> ErrorErr06`，再做 HTTP/WebSocket 传输投影。
+- Direct Rust 主链已统一：runtime 内无低层 Error06 builder 调用；provider 终态必须由 typed Error05 进入 `V3ErrorHandlingCenter::project_terminal*`。
+- 仍未统一的根因：V2/TS map 仍将 `src/server/utils/http-error-mapper.ts` 注册为 `error.client_projection` owner，`project_error_err_06_client_from_error_err_05_execution_decision -> mapErrorToHttp` 是第二 Error06 owner；chat/messages/config/admin 等 TS handlers 仍有直拼 4xx/5xx；四种 Relay runtime failure wrapper 会把具体 enum 统一降格为 `V3HubRuntime`，虽进入中心但丢失 source stage/kind。
+- 验证：routecodex-v3-error tests 全通过；routecodex-v3-server lib 74/74；`verify:error-pipeline-contract` 通过。不能宣称全流程唯一中心，下一步必须先为 TS host 落 Rust typed Error01-06 bridge，并同步 function/mainline/resource/verification map，再物理删除 TS mapper owner 与 handler 直拼路径。
+
+## 2026-08-04 routecodex local DeepSeek provider
+- 新增 `~/.rcc/provider/routecodex/config.v2.toml`：`type=openai`，`baseURL=http://127.0.0.1:8000/v1`，默认模型 `deepseek-v4-flash`，`timeout=900000`（15 分钟），上下文 `262144`。
+- 本地 DwarfStar 不校验密钥，但 Vercel AI SDK provider doctor 要求 Bearer 凭据，因此使用非敏感占位值 `routecodex-local`，未改变模型服务鉴权语义。
+- 验证：provider inspect 成功；Vercel AI SDK doctor 在 RCC 重启前后均成功，重启后返回 `ROUTECODEX_OK_AFTER_RESTART`；`rccv3 config check -c ~/.rcc/config.v3.toml` 返回 `config ok: version=3 servers=3`。
+
+## 2026-08-04 routecodex DeepSeek lazy listener on 4444
+- DwarfStar 没有内置懒加载/空闲卸载选项，因此新增外接盘上的 `runtime/lazy-proxy/ds4-lazy-proxy.mjs`：4444 常驻监听，`GET /v1/models` 只返回静态模型目录，不加载 GGUF；首次推理请求才启动 8000 后端；连续空闲 3600 秒后发送 `SIGTERM` 卸载后端；新请求自动重新加载。
+- `~/.rcc/provider/routecodex/config.v2.toml` 已改为 `baseURL=http://127.0.0.1:4444/v1`。macOS LaunchAgent 为 `com.fanzhang.ds4-lazy-server`，开机运行并保持代理常驻。
+- 验证：4444 listener 存在、启动前 8000 无后端、首次请求触发 8000 DwarfStar 加载并返回 HTTP 200；RCC `0.90.4118` 重启后仍 `running`，配置检查通过。
+
+## 2026-08-04 RAM-only KV cache correction
+- 审查发现懒加载代理和旧 `start-ds4-server.sh` 都显式传了 `--kv-disk-dir`/`--kv-disk-space-mb 8192`，会把冷/续接 KV checkpoint 写到外接盘；已从两条启动路径物理移除。
+- 当前首次加载实际进程命令仅包含 `--ctx 262144`、Metal、model、host/port，没有任何 `kv-disk` 参数；日志只出现内存 KV 规划 `KV 2.36 GiB`，不再出现 `KV disk cache`。
+- 正向验证：重启 LaunchAgent 后 4444 仍常驻、8000 初始无后端；首次推理触发后端加载并返回 HTTP 200 `RAM_ONLY_KV_OK`。旧 `runtime/kv/*.kv` 文件未删除，避免未授权破坏；它们不再被当前启动参数读取或写入。
+
+## 2026-08-04 RAM-only benchmark and disk-cache assessment
+- Jason 授权后删除 `runtime/kv` 下此前 6 个 `.kv` 文件，目录降为 `0B`；本次测试后仍无新 `.kv` 文件。
+- RAM-only 38,316-token request：wall `76.54s`，usage `prompt_tokens=38316`、`completion_tokens=17`；两路同时请求：wall `157s`，两份响应均 `373B`。当前没有 `--batched-session`，多路请求不会因为磁盘 KV 自动并行，实测约按单路串行。
+- 代码/文档结论：磁盘 KV 的主要价值是跨 session / server restart 保留 prefix；内存 live KV 只保留当前 session。它不能增加 Metal 的 live KV 并发槽位，也不能让同时到达的请求自动并行。磁盘恢复使用普通 `read`/`write`，长前缀 checkpoint 会产生明显写盘延迟；历史日志显示 2.4--3.3GiB checkpoint 保存约 `0.9--13.1s`，并发生 `disk-cache-full` 淘汰。
+
+## 2026-08-04 four-session batching and persistence boundary
+- DwarfStar lazy proxy now starts `--batched-session 4`; this allocates four resident KV states and enables native Metal DeepSeek Flash decode batching when supported. RouteCodex `routecodex` provider `maxInFlight` is now `4` so the upstream lease does not serialize the requests.
+- Four-session 38k-context concurrent benchmark: wall `175s` for two requests, versus RAM-only one-session baseline `157s` for two requests. This run is dominated by long prefill and does not yet demonstrate a throughput win; logs show batched mode enabled and native/ordered scheduling must be evaluated with shorter decode-heavy prompts.
+- There is no existing asynchronous/background disk-KV write option. `ds4_kvstore` performs synchronous `fwrite`/`fflush`/`rename` under `inference_mu` and `kv_mu`; cache stores occur on continued/cold/evict paths and on shutdown. A true RAM-first/background-persist mode would require a bounded snapshot queue and a dedicated writer, which is a code change rather than a CLI flag.
+- Safe existing compromise: enable disk KV only with large `--kv-cache-min-tokens`, disable continued saves with `--kv-cache-continued-interval-tokens 0`, and rely on shutdown persistence; however cold/evict saves can still block, so it is not equivalent to background persistence.
+
+## 2026-08-04 shutdown-persistence configuration applied
+- Lazy proxy now starts DwarfStar with disk KV enabled at `runtime/kv`, budget `8192MiB`, `--kv-cache-cold-max-tokens 0`, and `--kv-cache-continued-interval-tokens 0`; together with `--batched-session 4`, normal incremental requests stay in live RAM KV and periodic cold/continued disk writes are disabled.
+- Proxy shutdown now waits for DwarfStar's clean exit, allowing its shutdown persistence path to finish before the LaunchAgent is relaunched. The backend log confirms `shutdown requested, draining requests` and exit code `0`.
+- A short post-config request produced no `.kv` file because the built-in minimum is `512` tokens; this is expected. Long resident sessions meeting that threshold will be persisted on graceful backend shutdown or slot eviction.
+
+## 2026-08-04 V3 TS HTTP 入口物理移除
+- 生产入口已统一为 `dist/bin/rccv3 server start [--foreground]`；CLI start/launcher、npm start/dev、standalone/health/e2e helper 均不再 spawn `node dist/index.js`，且禁止 `serverBin -> nodeBin` fallback。
+- `src/index.ts` 已物理删除；function map 与 mainline 中该入口的 PID cache 路径/edge 已删除；新增 `verify:v3-rust-only-server-entry` 并接入 build/build:min，local skill 同步记录入口锁。
+- 定向证据：TypeScript compile 通过；start lifecycle 26/26；Error crate 4/4；Server 74/74；v3 module/resource/mainline/error-chain gates 通过。Rust CLI foundation 9/9 通过；全 tests 的受控回放暴露现有样本缺 session-id，进入 Error01-06 后返回 400。
+- 安装未完成：`install:v3` 首轮因 raw wire evidence 缺 mainline edge 被阻断，补齐 resource/function/mainline/verification 后该 gate 通过；次轮被既有 `verify:v3-provider-action-gate` 的 runtime/manifest/mainline 大面积失配阻断。未执行 restart/live/codex review，禁止宣称闭环。
+
+## 2026-08-04 V3 全局 binary 迁移闭环
+- `scripts/install-v3-cli.mjs` 现将带构建版本的 V3 binary 直接安装到 `~/.local/bin/rccv3`；`routecodex`、`rcc`、`rccv3` 均指向同一 binary，不再存在 release/npm/repository fallback。
+- repo 与全局 binary 的 SHA256 均为 `3d3739700c581b310f8649410ad0da88d3bb95e40c8df07d80e53e4d6224aac3`，版本均为 `0.90.4118`。managed PID `38966` 运行 `~/.local/bin/rccv3`，10000/4444/5520/5555 四端口均返回 V3 health 与 build `0.90.4118`。
+- 已移除 `~/.rcc/install`、`config.toml` 与 V2 guardian 目录。旧 guardian PID `2192` 忽略 SIGTERM，随后仅按明确 PID 停止，未复活；当前 `~/.rcc` 为 5.6M，仅保留有效配置、provider/secrets、state、sessions、logs 与 canonical samples。
+- Review 首轮发现的命令路径/版本校验、默认安装 cleanup gate 和 mainline 伪调用边已修复；修复后重新安装、聚合重启并在线验证版本 `0.90.4120`，四端口与三命令均一致。
+
+## 2026-08-04 V3 全局 binary 迁移最终验证
+- 最终 `0.90.4127` 安装、hash/realpath、四端口在线验证和旧 V2 路径清理均通过；function map 已标记 live verified。
+- scoped review `VERDICT: PASS`；P2 仅建议增加隔离 HOME 的旧 install cleanup 行为测试，记录为非阻塞后续增强。
+
+## 2026-08-05 V2→V3 迁移：首轮安全归档（TS 孤儿 + 空目录）
+- Scope: 全仓 TS 移除 + 无用统一归档 第一步，低风险可逆动作。
+- 归档 23 个真孤儿 TS 到 `deprecated/v2/legacy-ts-orphans/`（git mv 保留相对路径）：
+  error-handling-utils / hooks-integration / pipeline-health-manager / key-429-tracker / stats-usage / module-config-reader / gemini-sse-normalizer / utf8-chunk-buffer / credentials-handler / memory-observer / ecodev-profile / non-blocking-error-logger / pipeline-config-path / shared-dtos / forwarder-sticky-hint / rate-limiter / response-headers / port-resolver / stats-request-events / module.types / safe-read-json / grok-cli-auth / grok-cli-profile。
+- 判定依据：严格 import 正则扫描 src/tests/scripts/sharedmodule/config/v3 全仓，24 候选全部 ZERO 入边；tsc --noEmit PASS；src 490→467。
+- 回滚 1 个：`src/providers/core/utils/provider-error-logger.ts` 被 `verify-debug-unified-surface` assertShellOnly 要求必须存在（debug 统一表面壳），已 git mv 回 src。verify-debug-unified-surface 复跑 PASS。
+- 删除空目录：`webui/`（空）、`configsamples/`（0 文件空目录树）。repo-sanity 失败 3→1（仅剩 samples）。
+- Pre-existing 失败（与本次归档无关）：`verify-architecture-deleted-path` 报 `sharedmodule/llmswitch-core/src/conversion/hub/response` 缺（allowed_path 指向不存在目录）；`tokenfile-auth.unit.spec.ts` + `auth-provider-factory.ecodev.spec.ts` import 不存在的 `src/providers/auth/tokenfile-auth.ts`（git 历史从未存在）。
+- 遗留：`samples/ci-goldens` 11 文件被 8+ scan/golden 脚本引用，但 repo-sanity 要求删——退役不一致，需先退役脚本或放行。
+
+## 2026-08-05 RouteCodex DeepSeek cache miss diagnosis
+- 结论：4444 DeepSeek 的 `usage_cache=0` 不是 RouteCodex usage 投影丢字段。RouteCodex 同一运行日志能正确显示 DS4 原始 `input_tokens_details.cached_tokens`，例如 2026-08-04 23:04 `706306` 为 `77920/77970(99.9%)`、`706310` 为 `78186/78716(99.3%)`，2026-08-05 08:11 `706567` 为 `125771/125822(100.0%)`。
+- 08:34/08:40 慢请求是真实 DS4 miss：`ds4-lazy-proxy.log` 记录 `live kv cache miss live=131037 prompt=131499 common=130874 reason=token-mismatch` 和 `live=131843 prompt=132033 common=131560 reason=token-mismatch`，随后从 `ctx=0..prompt` 全量 prefill，耗时约 356s/362s。
+- 当前 DS4 进程参数为 `--batched-session 4 --kv-disk-dir ... --kv-disk-space-mb 8192 --kv-cache-cold-max-tokens 0 --kv-cache-continued-interval-tokens 0`。磁盘 KV 只有约 8GiB，当前 4 个 `.kv` 文件约 1.8GiB/个；日志持续 `disk-cache-full` 淘汰旧 1.6-1.7GiB 前缀。
+- 根因方向：DS4 cache owner，不是 RouteCodex。live continuation 要求 Responses visible-prefix / call-id 或 exact token/text/disk key 匹配；慢请求虽然 token common 很高，但 first mismatch 早于 live frontier，visible-prefix 未命中，于是 DS4 按设计全量 prefill。下一步若要修，需要启用 DS4 `--trace` 或构造最小 replay，定位 visible transcript 与 `build_responses_visible_assistant_suffix` / prompt renderer 的首个字节差异，再改 DS4 唯一 owner；不要改 RouteCodex usage/logger。
+
+## 2026-08-05 V2→V3 迁移：ci-goldens、stale tests、第二批 TS 孤儿
+- `samples/ci-goldens` 已彻底退出 repo 真源：11 个 apply_patch 回归样本迁入可跟踪的 `tests/resources/apply-patch-regressions/`；`verify:apply-patch-regressions` 缺目录/零样本 fail-fast，正向 11/11（fixed=4, stillFailing=7, mismatches=0），反向缺目录退出码 2。
+- 删除 repo golden 双向同步入口 `sync-ci-goldens.mjs` / `sync-apply-patch-regressions.mjs` 及 package scripts；三个 scan 工具只读用户 `~/.routecodex/codex-samples`，provider golden capture 不再读 `samples/ci-goldens`。空 `samples/` 目录物理移除。
+- 删除两个从创建起就 import 不存在 `tokenfile-auth.ts` 的 stale tests；未复活 V2 token-file auth owner。
+- 第二批归档 7 个零入边 TS 到 `deprecated/v2/legacy-ts-orphans/`：mimoweb-tool-harvest、anthropic-tool-alias、credentials-handler-utils、tools/error-log、types/pipeline-types、utils/error-handler、utils/failover。`src` 467→460；`tsc --noEmit`、MiMo provider、capture owner、debug、function-map、resource-map、Rust-only、fallback denylist 通过。
+- `src/index.ts` 删除后遗留 `runtime.lifecycle.mainline::rtl-02` 死边，已从 resource flow、binding budget、gate matrix 和 canonical generated manifest/wiki 中移除；runtime lifecycle 现 15/15 anchored。修复 `render-mainline-manifests.mjs`，确保 servertool/continuation 链级不变量每次 render 保留。
+- 全局安装最终版本 `0.90.4130`，repo/global SHA256 均为 `9d857a4a4f2ca3669b691536fe262c04cddb38a9db252a8175e24f82464b2f87`；聚合 restart 成功，10000/4444/5520/5555 均返回 V3 health build `0.90.4130`。
+- 既有失败：routing 扩展套件中 `request-executor.single-attempt.spec.ts` 3 个 timeout + 1 个共享日志污染断言；`hub-pipeline-stage-residue-audit.spec.ts` 7 个当前 Rust 主线断言漂移。均非本轮归档调用边，未弱化或修补。
+
+## 2026-08-05 RouteCodex DeepSeek cache miss root-cause correction
+- Correction to the previous entry: DS4 `usage_cache=0` is real, but the root cause is RouteCodex provider-bound Chat history shape, not DS4 cache owner. DS4 trace request 3 shows `memory_miss_reason=token-mismatch`, `tool_replay mem=1 disk=81 canonical=0`, `missing_ids=0`, and `first_mismatch_token=132650`.
+- Byte-level DS4 trace comparison found RouteCodex sent one provider assistant turn as two adjacent Chat messages: visible assistant content first, then an empty assistant message with `tool_calls`. DS4 rendered an `<｜end▁of▁sentence｜>` between visible text and `<｜DSML｜tool_calls>`, while the live previous output had visible text immediately followed by DSML tool calls.
+- Unique owner: V3 Resp04 local continuation canonical context, `v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs`, specifically `coalesce_v3_resp04_reasoning_with_following_tool_call`. This is the adjacent Resp04 save/projection owner; no handler/SSE/provider/logger cleanup is involved.
+- Fix: coalesce assistant visible content-only messages with the following assistant tool-call message, preserving reasoning and text order, so Req04 restore sends one Chat assistant message containing both `content` and `tool_calls`.
+- Source verification: owner tests `4/4`, `responses_relay_local_continuation_integration` `31/31`, `rustfmt --check`, and `git diff --check` passed. Live install/restart/replay intentionally not run because the worktree contains large unrelated dirty changes; deploying now would mix this fix with other in-progress changes.
+
+## 2026-08-05 samples 退役一致化 + repo-sanity 现状
+- samples/ 当前 0 文件（ci-goldens 空残留），verify-apply-patch-regressions 因缺 `samples/ci-goldens/_regressions/apply_patch` 报 skip（不 fail）。判定：samples 是空残留，删除而非放行。已删 samples 空目录树。repo-sanity root layout 检查（configsamples/samples/webui）从失败(3项)→通过。
+- 曾误判把 samples 加入 generatedRoots 放行，已回滚（samples 空残留应删）。repo-sanity 现不含 samples 修改（已 revert）。
+- 已删 webui/（空）+ configsamples/（0 文件空树）。
+- 我的 2 个 docs 交付物（audit 报告 + 计划）已 git add 跟踪（repo-sanity 要求 add to git）。
+- repo-sanity 仍失败，但剩余全是 pre-existing untracked：`.agent-collab/review/*`（他人 codex review 产物，mtime 早）、`tests/resources/apply-patch-regressions/*`（测试资源）、`deprecated/v2/legacy-ts-orphans/` 7 个遗留文件（mimoweb-tool-harvest/anthropic-tool-alias/credentials-handler-utils/error-log/pipeline-types/error-handler/failover，mtime 2025-12~2026-04，pre-existing 非我引入）、`v3/.../responses_openai_ordered_projection.rs`、`scripts/architecture/verify-v3-rust-only-server-entry.mjs`。这些非本次引入，涉及他人产物/测试资源，未擅删。
+- 我的 23 归档 staged(A) 跟踪，2 docs 跟踪。我的变更已清除所有我引入的 repo-sanity 失败源。剩余 pre-existing untracked 清理需独立决策。
+
+## 2026-08-05 Resp04 latest-suffix immutable-history closeout
+- Real DS4 request comparison: request 18 = 294 messages; request 19 = 297; prefix[0..294] JSON-equivalent; appended suffix is assistant semantic + assistant tool call + paired result.
+- Removed the untracked whole-history inbound ordered projector and stale registrations. Final owner is Resp04 local continuation save; Chat `messages` history is cloned unchanged, Responses `input` history uses the existing static codec once, and finalized response output is projected separately. Coalescing starts at the recorded historical message count.
+- Regression: 294-message prefix exact equality and historical split preservation; only newest reasoning/text/tool call coalesces. Focused test PASS, continuation integration 31/31 PASS, architecture/parity/resource/module gates PASS, 109 red mutations rejected.
+- Installed/restarted V3 `0.90.4142`, SHA256 `f188324e61efbfd53175b19f0ba2ed7af2d67c37f7b40fb8554efc1240344462`; ports 10000/4444/5520/5555 healthy. Jason live-tested and reported cache behavior normal.
+
+## 2026-08-05 repo-sanity 全绿（untracked 清零）
+- `.agent-collab/review/` 加入 .gitignore（73 个 codex review 临时产物忽略）。同 runs/claims/handoff 一致，review 是临时产物非交付物。
+- git add 正式交付物：docs/architecture/mainline-manifests 10 个 yml、tests/resources/apply-patch-regressions 11 个 fixture、scripts/architecture/verify-v3-rust-only-server-entry.mjs、.agents/skills/rcc-dev-skills/references/96-unified-error-path-audit.md、deprecated/v2/legacy-ts-orphans 7 个遗留归档文件。
+- 结果：untracked 0，repo-sanity PASS（exit 0，ok）。首个 gate 全绿里程碑。
+- 验证：verify-apply-patch-regressions PASS（total=11 fixed=4 stillFailing=7 mismatches=0，消费 tests/resources）；render-mainline-manifests PASS（32 yml 可渲染，写 29 manifests）。tsc --noEmit PASS。
+- 遗留：git status 96 M 为 pre-existing 工作区修改（他人遗留），非本次引入；verify-mainline-manifest-sync.mjs 脚本缺失（package.json gate 指向不存在脚本，pre-existing）。
+
+## 2026-08-05 src/ 第二批孤儿审计：无可归档孤儿
+- 重跑全仓引用扫描（src 466），92 个零引用候选。宽松正则验证后，绝大多数 REF（活文件，严格正则漏匹配 import 的 ./ 前缀）。真 ZERO 项全是 `.d.ts` 类型声明（common-utils.d.ts / llms-engine-shadow.d.ts / glob.d.ts / external-modules.d.ts / ajv.d.ts / ajv-shim.d.ts / sensitive-redaction.d.ts / build-info.d.ts / finish-reason.d.ts / errorsamples.d.ts / runtime-versions.d.ts）+ `provider-error-logger.ts`（verify-debug-unified-surface 要求存在的壳）。
+- 判定：`.d.ts` 类型声明靠 tsc 全局收集，不能当孤儿归档；provider-error-logger 是 gate 壳。故第二批**无可归档非 d.ts 孤儿**。src/ 已清完孤儿（第一批 23 + 第二批 0）。剩余 466 文件全活跃（被 runtime/CLI/测试消费），退役需 Rust 接管（guardian/CLI 编排、handler 等），非归档能解决。
+- dist 残留 30 个旧孤儿 js（tsc 不清理 dist，重编译仍 490 js vs src 460 ts）。dist 是 gitignore 生成物，残留无害，后续 build clean 处理。

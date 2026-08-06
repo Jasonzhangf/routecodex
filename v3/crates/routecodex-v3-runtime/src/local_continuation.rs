@@ -326,6 +326,35 @@ impl V3LocalContinuationStore {
             .is_some()
     }
 
+    pub fn release_aliases_in_scope(
+        &mut self,
+        scope: &V3LocalContinuationScopeKey,
+        context_id: &str,
+    ) -> bool {
+        let lookup_key = V3LocalContinuationStoreKey::new(scope.clone(), context_id.to_string());
+        let Some(record) = self.records.get(&lookup_key) else {
+            return false;
+        };
+        let canonical_context = record.canonical_context.clone();
+        let committed_at_epoch_ms = record.committed_at_epoch_ms;
+        let expires_at_epoch_ms = record.expires_at_epoch_ms;
+        let keys = self
+            .records
+            .iter()
+            .filter(|(key, candidate)| {
+                key.scope == *scope
+                    && candidate.canonical_context == canonical_context
+                    && candidate.committed_at_epoch_ms == committed_at_epoch_ms
+                    && candidate.expires_at_epoch_ms == expires_at_epoch_ms
+            })
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        for key in keys {
+            self.records.remove(&key);
+        }
+        true
+    }
+
     pub fn contains(&self, context_id: &str) -> bool {
         self.records
             .keys()

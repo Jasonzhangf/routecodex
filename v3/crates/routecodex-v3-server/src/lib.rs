@@ -26,6 +26,8 @@ use routecodex_v3_debug::{
 };
 use routecodex_v3_error::{
     project_v3_http_boundary_error, project_v3_post_commit_sse_source,
+    project_v3_server_invalid_request, project_v3_server_runtime_failure,
+    project_v3_server_websocket_error,
     raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
     raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, V3Error01SourceRaised,
     V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
@@ -654,9 +656,16 @@ async fn virtual_router_status(
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
 ) -> Response<Body> {
     if !remote.ip().is_loopback() {
-        return json_response(
-            403,
-            json!({"error":{"message":"forbidden","code":"forbidden"}}),
+        return error_output_response_for_server(
+            &state.server,
+            "/_routecodex/diagnostics/virtual-router",
+            "diagnostics",
+            project_v3_server_invalid_request(
+                "V3Server03HttpRequestRaw",
+                "forbidden",
+                "forbidden",
+                403,
+            ),
         );
     }
     match project_v3_virtual_router_status(
@@ -675,9 +684,16 @@ async fn virtual_router_status(
                 "virtualRouter": virtual_router
             }),
         ),
-        Err(message) => json_response(
-            500,
-            json!({"error":{"message":message,"code":"virtual_router_diagnostics_failed"}}),
+        Err(message) => error_output_response_for_server(
+            &state.server,
+            "/_routecodex/diagnostics/virtual-router",
+            "diagnostics",
+            project_v3_server_runtime_failure(
+                "V3RouterDiagnostics",
+                "virtual_router_diagnostics_failed",
+                message,
+                500,
+            ),
         ),
     }
 }
@@ -688,9 +704,16 @@ async fn virtual_router_dry_run(
     request: Request,
 ) -> Response<Body> {
     if !remote.ip().is_loopback() {
-        return json_response(
-            403,
-            json!({"error":{"message":"forbidden","code":"forbidden"}}),
+        return error_output_response_for_server(
+            &state.server,
+            "/_routecodex/diagnostics/virtual-router/dry-run",
+            "diagnostics",
+            project_v3_server_invalid_request(
+                "V3Server03HttpRequestRaw",
+                "forbidden",
+                "forbidden",
+                403,
+            ),
         );
     }
     let payload = match read_json_payload(request).await {
@@ -721,9 +744,16 @@ async fn virtual_router_dry_run(
                 "diagnostics": diagnostics
             }),
         ),
-        Err(message) => json_response(
-            500,
-            json!({"error":{"message":message,"code":"virtual_router_dry_run_failed"}}),
+        Err(message) => error_output_response_for_server(
+            &state.server,
+            "/_routecodex/diagnostics/virtual-router/dry-run",
+            "diagnostics",
+            project_v3_server_runtime_failure(
+                "V3RouterDiagnostics",
+                "virtual_router_dry_run_failed",
+                message,
+                500,
+            ),
         ),
     }
 }
@@ -1495,12 +1525,12 @@ async fn pending_endpoint_after_responses_admission(
         );
         let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
         let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
-        let capture_provider_request = state
-            .debug
-            .should_capture_snapshot_stage("provider-request");
-        let capture_provider_response = state
-            .debug
-            .should_capture_snapshot_stage("provider-response");
+        // Keep raw provider attempts in the request-scoped recorder so terminal
+        // errors can flush the original wire evidence even when normal debug
+        // snapshot stages are disabled. Successful requests still persist only
+        // explicitly enabled intermediate stages.
+        let capture_provider_request = true;
+        let capture_provider_response = true;
         let mut output = if capture_provider_request || capture_provider_response {
             match responses_protocol_plan.as_ref() {
                 Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
@@ -1688,6 +1718,7 @@ async fn pending_endpoint_after_responses_admission(
                         &console_context,
                         started_at,
                         request_console_project_path.as_deref(),
+                        &console_payload,
                     );
                 }
             }
@@ -1703,9 +1734,11 @@ async fn pending_endpoint_after_responses_admission(
             &console_context,
             started_at,
             request_console_project_path.as_deref(),
+            &console_payload,
         );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+        let raw_request_payload = payload.clone();
         let console_payload = payload.clone();
         let console_context = build_v3_console_emission_context(
             &state,
@@ -1780,6 +1813,7 @@ async fn pending_endpoint_after_responses_admission(
                     &console_context,
                     started_at,
                     request_console_project_path.as_deref(),
+                    &raw_request_payload,
                 )
             }
         }
@@ -2146,12 +2180,7 @@ async fn handle_responses_websocket_message_with_mode(
     {
         Ok(identity) => identity.request_id,
         Err(message) => {
-            let body = json!({"error":{"type":"runtime_error","message":message}});
-            let _ = socket
-                .send(Message::Text(
-                    json!({"type":"error","error":body["error"].clone()}).to_string(),
-                ))
-                .await;
+            let _ = send_responses_websocket_error(socket, "runtime_error", message).await;
             return Err(());
         }
     };
@@ -2641,12 +2670,10 @@ async fn send_responses_websocket_error(
     code: &'static str,
     message: impl Into<String>,
 ) -> Result<(), ()> {
+    let projected = project_v3_server_websocket_error(code, message);
     let event = json!({
         "type": "error",
-        "error": {
-            "code": code,
-            "message": message.into()
-        }
+        "error": projected.body["error"].clone()
     });
     send_responses_websocket_json(socket, &event).await
 }
@@ -3210,21 +3237,24 @@ fn capture_v3_responses_relay_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
+    let force_error_evidence = output.status >= 400
+        || output
+            .observability
+            .as_ref()
+            .is_some_and(|observability| !observability.provider_failure_events.is_empty());
     if !state
         .debug
         .should_capture_snapshot_stage("provider-request")
         && !state
             .debug
             .should_capture_snapshot_stage("provider-response")
+        && !force_error_evidence
     {
         return None;
     }
     let snapshots = output.provider_snapshots.as_mut()?;
     if let Some(provider_request) = snapshots.provider_request.take() {
-        if state
-            .debug
-            .should_capture_snapshot_stage("provider-request")
-        {
+        if force_error_evidence || state.debug.should_capture_snapshot_stage("provider-request") {
             let provider_request = state
                 .debug
                 .redact_payload_for_side_channel(provider_request);
@@ -3244,10 +3274,7 @@ fn capture_v3_responses_relay_provider_snapshots(
         }
     }
     if let Some(provider_response) = snapshots.provider_response.take() {
-        if state
-            .debug
-            .should_capture_snapshot_stage("provider-response")
-        {
+        if force_error_evidence || state.debug.should_capture_snapshot_stage("provider-response") {
             let provider_response = state
                 .debug
                 .redact_payload_for_side_channel(provider_response);
@@ -3280,7 +3307,39 @@ fn finalize_v3_responses_relay_server_output(
     console_context: &V3ConsoleEmissionContext,
     started_at: Instant,
     request_console_project_path: Option<&str>,
+    raw_request_payload: &Value,
 ) -> Response<Body> {
+    let has_provider_failure = output
+        .observability
+        .as_ref()
+        .is_some_and(|observability| !observability.provider_failure_events.is_empty());
+    if output.status >= 400 || has_provider_failure {
+        let _ = persist_v3_error_evidence_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "request.json",
+            &state.debug.redact_payload_for_side_channel(raw_request_payload.clone()),
+        );
+        let _ = persist_v3_error_evidence_payload(
+            state,
+            entry_protocol,
+            endpoint,
+            request_id,
+            "error.json",
+            &json!({
+                "object": "routecodex.v3.error_evidence",
+                "stage": "error",
+                "status": output.status,
+                "request_id": request_id,
+                "endpoint": endpoint,
+                "node_trace": output.node_trace.clone(),
+                "error_chain": output.error_chain.clone(),
+                "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+            }),
+        );
+    }
     if let Some(response) = capture_v3_responses_relay_provider_snapshots(
         state,
         entry_protocol,
@@ -3551,6 +3610,42 @@ fn persist_v3_codex_sample_payload(
     if !state.manifest.debug.codex_samples {
         return Ok(());
     }
+    persist_v3_codex_sample_payload_unchecked(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        file_name,
+        payload,
+    )
+}
+
+fn persist_v3_error_evidence_payload(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    file_name: &str,
+    payload: &Value,
+) -> Result<(), String> {
+    persist_v3_codex_sample_payload_unchecked(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        file_name,
+        payload,
+    )
+}
+
+fn persist_v3_codex_sample_payload_unchecked(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    file_name: &str,
+    payload: &Value,
+) -> Result<(), String> {
     let _persistence_guard = state
         .codex_sample_persistence
         .lock()

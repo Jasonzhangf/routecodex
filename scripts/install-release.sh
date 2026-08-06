@@ -167,13 +167,12 @@ prepare_isolated_build_root() {
   for item in \
     package.json package-lock.json tsconfig.json tsconfig.jest.json jest.config.js README.md LICENSE \
     .gitignore .github AGENTS.md \
-    src scripts config configsamples docs tests webui vendor; do
+    src scripts config docs tests vendor; do
     copy_isolated_path "$item"
   done
   copy_v3_source
   copy_isolated_path ".agents/skills/rcc-dev-skills"
   copy_agent_collab_contract
-  copy_isolated_path "samples/mock-provider"
   copy_llmswitch_core
 
   if [ -d "$SOURCE_ROOT/node_modules" ]; then

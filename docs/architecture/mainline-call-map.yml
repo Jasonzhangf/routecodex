@@ -268,49 +268,6 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
     status: anchored
-- chain_id: webui.config_editor_surface.mainline
-  summary: WebUI config editor intent must flow through daemon admin/config APIs into shared config codec/writer owners; WebUI owns no provider runtime, routing policy, or forwarder selection semantics.
-  entry_contract:
-    node: WebuiConfigEditor01UserIntent
-    owner_doc: docs/loops/runtime-lifecycle/gate-matrix.md
-  edges:
-  - step_id: wce-01
-    from_node: WebuiConfigEditor01UserIntent
-    to_node: WebuiConfigEditor02AdminApiRequest
-    caller_symbol: ProviderPage
-    caller_file: webui/src/App.tsx
-    callee_symbol: apiFetch
-    callee_file: webui/src/App.tsx
-    owner_feature_id: webui.config_editor_surface
-    semantic_input: provider card, backup/restore, single-file httpserver.ports[] entry, provider picker, or fwd aggregation edit intent
-    semantic_output: authenticated daemon admin/config HTTP request intent without provider secrets in client state
-    resource_flow:
-      consumes:
-      - webui.config_edit_intent
-      produces:
-      - config.admin_mutation_request
-      side_channel_reads: []
-      side_channel_writes: []
-    status: anchored
-  - step_id: wce-02
-    from_node: WebuiConfigEditor02AdminApiRequest
-    to_node: WebuiConfigEditor03SharedConfigMutation
-    caller_symbol: registerProviderRoutes
-    caller_file: src/server/runtime/http-server/daemon-admin/providers-handler.ts
-    callee_symbol: writeUserConfigFile
-    callee_file: src/config/user-config-writer.ts
-    owner_feature_id: webui.config_editor_surface
-    semantic_input: admin config mutation request for provider/routing/forwarder editor surface
-    semantic_output: shared writer/codec-owned user/provider config mutation; fwd selection remains vr.provider_forwarder_runtime
-    resource_flow:
-      consumes:
-      - config.admin_mutation_request
-      produces:
-      - config.shared_write_result
-      side_channel_reads: []
-      side_channel_writes: []
-    status: anchored
-    note: Current admin route owner writes routing/user-config mutations through writeUserConfigFile; future dedicated WebUI config editor APIs must keep this shared writer edge.
 - chain_id: servertool.hook_skeleton.mainline
   invariant: Stopless has no standalone lifecycle entrypoint; every stopless transition is dispatched by ServertoolReqHook or ServertoolRespHook.
   summary: 'Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.'
@@ -1986,23 +1943,6 @@ chains:
     to_node: ServerPidCacheRecord
     caller_symbol: writeServerPidCache
     caller_file: src/cli/commands/start.ts
-    callee_symbol: planRuntimePidCacheWrite
-    callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
-    owner_feature_id: runtime.lifecycle.pid_cache
-    semantic_input: server port + pid number
-    semantic_output: Rust plan returns runtime.pid_cache record; TS writes pid.cache JSON under <rccUserDir>/state/runtime-lifecycle/ports/<port>/
-    resource_flow:
-      consumes: []
-      produces:
-      - runtime.pid_cache
-      side_channel_reads: []
-      side_channel_writes: []
-    status: anchored
-  - step_id: rtl-02
-    from_node: ServerStartCommand
-    to_node: ServerPidCacheRecord
-    caller_symbol: writeServerPidCache
-    caller_file: src/index.ts
     callee_symbol: planRuntimePidCacheWrite
     callee_file: src/modules/llmswitch/bridge/runtime-lifecycle-host.ts
     owner_feature_id: runtime.lifecycle.pid_cache

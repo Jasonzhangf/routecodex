@@ -268,11 +268,6 @@
     },
     {
       "ruleId": "catch-return-or-continue",
-      "pathContains": "src/tools/error-log.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
       "pathContains": "src/tools/semantic-replay-snapshot-loader.ts",
       "textContains": ""
     },
@@ -344,11 +339,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/server/runtime/http-server/executor/sse-error-handler.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/server/runtime/http-server/daemon-admin/credentials-handler-utils.ts",
       "textContains": ""
     },
     {
@@ -469,11 +459,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "src/providers/auth/oauth-lifecycle.ts",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "src/providers/auth/tokenfile-auth.ts",
       "textContains": ""
     },
     {
@@ -894,11 +879,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/tools/capture-provider-goldens.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/tools/sync-apply-patch-regressions.mjs",
       "textContains": ""
     },
     {

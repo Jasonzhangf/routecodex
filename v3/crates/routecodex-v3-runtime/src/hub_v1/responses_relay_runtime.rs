@@ -1637,7 +1637,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         request_stopless_control_state.is_some(),
         stopless_state.as_ref(),
     )?;
-    macro_rules! try_before_resp03 {
+    macro_rules! handle_error_before_resp03 {
         ($expr:expr) => {
             match $expr {
                 Ok(value) => value,
@@ -1783,7 +1783,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
-        let provider_wire_protocol = try_before_resp03!(
+        let provider_wire_protocol = handle_error_before_resp03!(
             provider_wire_protocol_for_selected_candidate(&selected.candidate)
         );
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
@@ -1793,17 +1793,15 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         );
         let req07 =
             build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        let target = try_before_resp03!(provider_target(manifest, req07.selected_target()));
-        let req_compat = try_before_resp03!(
-            build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-        );
-        provider_send_attempts = provider_send_attempts.saturating_add(1);
+        let target =
+            handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
         let mut selected_observability =
             build_v3_relay_observability_from_selected(&selected, client_response_transport_intent);
         selected_observability.attempts = Some(
             observability_accumulator
                 .attempts()
-                .saturating_add(provider_send_attempts),
+                .saturating_add(provider_send_attempts)
+                .saturating_add(1),
         );
         selected_observability.provider_failure_events = provider_failure_events.clone();
         if let Some(sink) = route_selection_event_sink.as_ref() {
@@ -1816,7 +1814,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &selected_target_provider_id,
                     Some(selected_observability.clone()),
                 )?;
-                let terminal_failure = try_before_resp03!(
+                let terminal_failure = handle_error_before_resp03!(
                     handle_v3_responses_relay_provider_failure(
                         &failure_context,
                         selected,
@@ -1846,6 +1844,15 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }};
         }
+        let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
+            Ok(req_compat) => req_compat,
+            Err(error) => {
+                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(
+                    error
+                ));
+            }
+        };
+        provider_send_attempts = provider_send_attempts.saturating_add(1);
         trace.push("V3HubReqTarget06Resolved");
         trace.push("V3HubReqOutbound07ProviderSemantic");
         trace.push("ProviderReqCompat06ProviderCompat");
@@ -1879,7 +1886,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
         if let Some(recovery) = pending_provider_action_recovery.take() {
-            match try_before_resp03!(provider_health
+            match handle_error_before_resp03!(provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
                 .await
                 .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
@@ -1889,7 +1896,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
-                    pending_provider_action_recovery = Some(try_before_resp03!(ticket
+                    pending_provider_action_recovery = Some(handle_error_before_resp03!(ticket
                         .recovery_witness()
                         .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
                     retry_selected = Some(selected);
@@ -1897,7 +1904,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     continue;
                 }
                 V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {
-                    pending_provider_action_recovery = Some(try_before_resp03!(ticket
+                    pending_provider_action_recovery = Some(handle_error_before_resp03!(ticket
                         .recovery_witness()
                         .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
                     retry_selected = Some(selected);
@@ -1906,13 +1913,13 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         }
-        try_before_resp03!(runtime_timing
+        handle_error_before_resp03!(runtime_timing
             .start_external()
             .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(V3ProviderError::HttpStatus { response }) => {
-                try_before_resp03!(runtime_timing
+                handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
                 let failure = provider_http_failure(
@@ -1922,7 +1929,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     Some(selected_observability.clone()),
                 );
                 drop(_provider_action_permit.take());
-                let terminal_failure = try_before_resp03!(
+                let terminal_failure = handle_error_before_resp03!(
                     handle_v3_responses_relay_provider_failure(
                         &failure_context,
                         selected,
@@ -1952,7 +1959,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }
             Err(error) => {
-                try_before_resp03!(runtime_timing
+                handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
                 let failure = provider_runtime_failure(
@@ -1961,7 +1968,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     Some(selected_observability.clone()),
                 );
                 drop(_provider_action_permit.take());
-                let terminal_failure = try_before_resp03!(
+                let terminal_failure = handle_error_before_resp03!(
                     handle_v3_responses_relay_provider_failure(
                         &failure_context,
                         selected,
@@ -1994,7 +2001,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         if provider_raw.body_kind()
             == routecodex_v3_provider_responses::V3ProviderResponseBodyKind::Json
         {
-            try_before_resp03!(runtime_timing
+            handle_error_before_resp03!(runtime_timing
                 .finish_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
         }
@@ -2015,7 +2022,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             Some(selected_observability.clone()),
                         );
                         drop(_provider_action_permit.take());
-                        let terminal_failure = try_before_resp03!(
+                        let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
                                 selected,
@@ -2057,7 +2064,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             Some(selected_observability.clone()),
                         );
                         drop(_provider_action_permit.take());
-                        let terminal_failure = try_before_resp03!(
+                        let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
                                 selected,
@@ -2090,7 +2097,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 }
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        try_before_resp03!(
+                        handle_error_before_resp03!(
                             project_v3_anthropic_message_as_responses_response_with_context(
                                 &provider_value,
                                 &anthropic_response_projection_context,
@@ -2121,7 +2128,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             Some(selected_observability.clone()),
                         );
                         drop(_provider_action_permit.take());
-                        let terminal_failure = try_before_resp03!(
+                        let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
                                 selected,
@@ -2181,7 +2188,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                                 Some(selected_observability.clone()),
                             );
                             drop(_provider_action_permit.take());
-                            let terminal_failure = try_before_resp03!(
+                            let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
                                     selected,
@@ -2211,7 +2218,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             }
                             continue;
                         }
-                        Err(error) => try_before_resp03!(Err(error)),
+                        Err(error) => handle_error_before_resp03!(Err(error)),
                     };
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
@@ -2226,7 +2233,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
-                try_before_resp03!(provider_health
+                handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
                         &failure_context.failure_session_scope,
                         &selected_target_provider_id,
@@ -2253,7 +2260,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 observability.stopless_activation =
                     response_has_stopless_activation(&finalized_provider_value);
-                observability.timing = Some(try_before_resp03!(runtime_timing
+                observability.timing = Some(handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming)));
                 let finalized_response = finalized_provider_value.clone();
@@ -2283,7 +2290,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                         &anthropic_response_projection_context,
                     )
                     .await;
-                try_before_resp03!(runtime_timing
+                handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
                 let provider_value = match provider_value_result {
@@ -2296,7 +2303,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             Some(selected_observability.clone()),
                         );
                         drop(_provider_action_permit.take());
-                        let terminal_failure = try_before_resp03!(
+                        let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
                                 selected,
@@ -2346,7 +2353,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             Some(selected_observability.clone()),
                         );
                         drop(_provider_action_permit.take());
-                        let terminal_failure = try_before_resp03!(
+                        let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
                                 selected,
@@ -2406,7 +2413,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                                 Some(selected_observability.clone()),
                             );
                             drop(_provider_action_permit.take());
-                            let terminal_failure = try_before_resp03!(
+                            let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
                                     selected,
@@ -2436,7 +2443,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             }
                             continue;
                         }
-                        Err(error) => try_before_resp03!(Err(error)),
+                        Err(error) => handle_error_before_resp03!(Err(error)),
                     };
                 apply_v3_responses_relay_stopless_control_transition(
                     manifest,
@@ -2451,7 +2458,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     &finalized_provider_value,
                     action,
                 )?;
-                try_before_resp03!(provider_health
+                handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
                         &failure_context.failure_session_scope,
                         &selected_target_provider_id,
@@ -2502,7 +2509,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     });
                 observability.stopless_activation =
                     response_has_stopless_activation(&finalized_provider_value);
-                let timing = try_before_resp03!(runtime_timing
+                let timing = handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
                 observability.timing = Some(timing);
@@ -2599,6 +2606,9 @@ fn find_responses_tool_output_ids(
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty());
     let mut ids = V3ResponsesRelayToolOutputIds::default();
+    if let Some(previous_response_id) = previous_response_id {
+        ids.consumed_ids.push(previous_response_id.to_owned());
+    }
     for item in payload
         .get("input")
         .and_then(Value::as_array)
@@ -5210,6 +5220,25 @@ targets = [{ kind = "provider_model", provider = "relay", model = "test", key = 
         assert!(
             !responses_relay_protocol_switch_allowed(&payload, &ids),
             "Relay-owned local continuation must remain in Relay after ReqChatProcess restore"
+        );
+    }
+
+    #[test]
+    fn relay_local_tool_output_consumes_previous_response_and_call_id_aliases() {
+        let payload = json!({
+            "previous_response_id": "resp_relay_owned",
+            "input": [{
+                "type": "function_call_output",
+                "call_id": "call_relay_owned",
+                "output": "done"
+            }]
+        });
+        let ids = find_responses_tool_output_ids(&payload).expect("tool output ids");
+
+        assert_eq!(ids.restore_ids, vec!["call_relay_owned"]);
+        assert_eq!(
+            ids.consumed_ids,
+            vec!["resp_relay_owned", "call_relay_owned"]
         );
     }
 

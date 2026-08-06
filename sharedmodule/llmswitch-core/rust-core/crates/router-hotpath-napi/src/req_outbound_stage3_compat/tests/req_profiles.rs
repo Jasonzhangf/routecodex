@@ -21,7 +21,8 @@ fn test_req_profile_responses_instructions_to_input_trims_html_and_lifts_system_
 }
 
 #[test]
-fn test_req_profile_responses_temperature_unsupported_normalizes_chat_style_function_tools_for_responses_wire() {
+fn test_req_profile_responses_temperature_unsupported_normalizes_chat_style_function_tools_for_responses_wire(
+) {
     let input = ReqOutboundCompatInput {
         payload: json!({
             "model": "gpt-5.5",

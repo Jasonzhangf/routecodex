@@ -740,8 +740,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         }
 
         const nodeBin = ctx.nodeBin || process.execPath;
-        const serverEntry = ctx.resolveServerEntryPath();
-        const resolveServerRuntimeCwd = (entryPath: string): string => {
+        const serverBin = String(ctx.serverBin || '').trim();
+        if (!serverBin || !fsImpl.existsSync(serverBin)) {
+          throw new Error(`Rust V3 server binary not found: ${serverBin || '<unset>'}`);
+        }
+        const resolveServerRuntimeCwd = (binaryPath: string): string => {
           const dirname =
             typeof (pathImpl as typeof path).dirname === 'function'
               ? (pathImpl as typeof path).dirname.bind(pathImpl)
@@ -750,13 +753,13 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             typeof (pathImpl as typeof path).basename === 'function'
               ? (pathImpl as typeof path).basename.bind(pathImpl)
               : path.basename;
-          const entryDir = dirname(entryPath);
-          if (basename(entryDir) === 'dist') {
-            return dirname(entryDir);
+          const binaryDir = dirname(binaryPath);
+          if (basename(binaryDir) === 'bin') {
+            return dirname(dirname(binaryDir));
           }
-          return entryDir;
+          return binaryDir;
         };
-        const serverRuntimeCwd = resolveServerRuntimeCwd(serverEntry);
+        const serverRuntimeCwd = resolveServerRuntimeCwd(serverBin);
 
         const env = { ...ctx.env } as NodeJS.ProcessEnv;
         env.ROUTECODEX_CONFIG = configPath;
@@ -791,8 +794,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             : {})
         } as NodeJS.ProcessEnv;
 
-        const args: string[] = [serverEntry, modulesConfigPath];
-
         const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
           fsImpl,
           pathImpl,
@@ -820,66 +821,24 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         };
 
         type ServerSpawnPlan = {
-          entry: string;
-          modulesConfigPath: string;
           args: string[];
           cwd: string;
           env: NodeJS.ProcessEnv;
         };
 
         const resolveLiveServerSpawnPlan = (): ServerSpawnPlan => {
-          let nextEntry = serverEntry;
-          let nextModulesConfigPath = modulesConfigPath;
-          try {
-            const cliEntry = String(process.argv[1] || '').trim();
-            if (cliEntry) {
-              const dirname =
-                typeof (pathImpl as typeof path).dirname === 'function'
-                  ? (pathImpl as typeof path).dirname.bind(pathImpl)
-                  : path.dirname;
-              const basename =
-                typeof (pathImpl as typeof path).basename === 'function'
-                  ? (pathImpl as typeof path).basename.bind(pathImpl)
-                  : path.basename;
-              const join =
-                typeof (pathImpl as typeof path).join === 'function'
-                  ? (pathImpl as typeof path).join.bind(pathImpl)
-                  : path.join;
-              const cliBase = basename(cliEntry).toLowerCase();
-              if (cliBase === 'cli.js' || cliBase === 'index.js') {
-                const distDir = dirname(cliEntry);
-                const installRoot = dirname(distDir);
-                const candidateEntry = join(distDir, 'index.js');
-                const candidateModulesConfigPath = join(installRoot, 'config', 'modules.json');
-                if (fsImpl.existsSync(candidateEntry) && fsImpl.existsSync(candidateModulesConfigPath)) {
-                  nextEntry = candidateEntry;
-                  nextModulesConfigPath = candidateModulesConfigPath;
-                }
-              }
-            }
-          } catch (error) {
-            logStartNonBlocking(ctx, 'resolve_live_server_spawn_plan', error, {
-              port: resolvedPort,
-              fallbackEntry: serverEntry,
-              fallbackModulesConfigPath: modulesConfigPath
-            });
-          }
-
-          const nextCwd = resolveServerRuntimeCwd(nextEntry);
           const nextEnv = {
             ...childProcessEnv,
             ...(baseDirWasDefaulted
               ? {
-                ROUTECODEX_BASEDIR: nextCwd,
-                RCC_BASEDIR: nextCwd
+                ROUTECODEX_BASEDIR: serverRuntimeCwd,
+                RCC_BASEDIR: serverRuntimeCwd
               }
               : {})
           } as NodeJS.ProcessEnv;
           return {
-            entry: nextEntry,
-            modulesConfigPath: nextModulesConfigPath,
-            args: [nextEntry, nextModulesConfigPath],
-            cwd: nextCwd,
+            args: ['server', 'start', '--foreground', '--config', modulesConfigPath],
+            cwd: serverRuntimeCwd,
             env: nextEnv
           };
         };
@@ -891,7 +850,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               return resolved.trim();
             }
             const fallback = String(process.argv[1] || '').trim();
-            return fallback || serverEntry;
+            return fallback;
           })();
 
           const daemonEnv = {
@@ -996,7 +955,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             }
 
             const spawnPlan = resolveLiveServerSpawnPlan();
-            const childProc = ctx.spawn(nodeBin, spawnPlan.args, {
+            const childProc = ctx.spawn(serverBin, spawnPlan.args, {
               stdio: 'inherit',
               env: spawnPlan.env,
               cwd: spawnPlan.cwd
@@ -1168,23 +1127,6 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           return probeStartHealth('child_health_probe');
         };
 
-        const waitForServerEntryReady = async (entryPath: string, deadlineMs: number): Promise<boolean> => {
-          while (Date.now() < deadlineMs) {
-            try {
-              if (fsImpl.existsSync(entryPath)) {
-                const stat = fsImpl.statSync(entryPath);
-                if (!stat.isDirectory()) {
-                  return true;
-                }
-              }
-            } catch {
-              // ignore transient fs errors while rebuild/restart race is in progress
-            }
-            await ctx.sleep(150);
-          }
-          return false;
-        };
-
         const waitForChildHealthyOrExit = async (
           proc: ReturnType<typeof ctx.spawn>,
           deadlineMs: number
@@ -1252,13 +1194,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                   }
                   const attempt = 1;
                   const spawnPlan = resolveLiveServerSpawnPlan();
-                  const entryReady = await waitForServerEntryReady(spawnPlan.entry, restartDeadline);
-                  if (!entryReady) {
-                    throw new Error(
-                      `Timed out waiting for restarted child on port ${resolvedPort}: server entry not ready: ${spawnPlan.entry}`
-                    );
-                  }
-                  const nextChild = ctx.spawn(nodeBin, spawnPlan.args, {
+                  const nextChild = ctx.spawn(serverBin, spawnPlan.args, {
                     ...spawnOptions,
                     env: spawnPlan.env,
                     cwd: spawnPlan.cwd
@@ -1348,7 +1284,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const spawnChild = (): ReturnType<typeof ctx.spawn> => {
           const spawnPlan = resolveLiveServerSpawnPlan();
-          const proc = ctx.spawn(nodeBin, spawnPlan.args, {
+          const proc = ctx.spawn(serverBin, spawnPlan.args, {
             ...spawnOptions,
             env: spawnPlan.env,
             cwd: spawnPlan.cwd

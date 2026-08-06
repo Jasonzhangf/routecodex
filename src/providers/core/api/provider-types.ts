@@ -44,7 +44,7 @@ export interface IProviderV2 extends ProviderModule {
  *
  * 注意：品牌/家族（glm 等）通过 providerId/providerFamily 表达，禁止写入 providerType。
  */
-export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mimoweb' | 'mock';
+export type ProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mimoweb';
 
 /**
  * 服务协议类型映射
@@ -136,7 +136,7 @@ export interface ProviderRuntimeProfile {
   providerFamily?: string;
   providerProtocol?: string;
   /**
-   * Optional module implementation override (e.g. 'mock-provider').
+   * Optional module implementation override.
    * Allows host to keep logical providerType while instantiating a different module.
    */
   providerModule?: string;

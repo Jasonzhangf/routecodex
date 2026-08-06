@@ -224,14 +224,11 @@ try {
       zod: original.dependencies?.zod || '^3.23.8',
       'rcc-llmswitch-core': llmsVersion
     };
-    // Ensure rcc ships bundled docs (copied to ~/.routecodex/docs by `rcc init`).
+    // Ensure rcc ships bundled docs.
     if (isRcc) {
       const baseFiles = Array.isArray(original.files) ? [...original.files] : [];
       if (!baseFiles.includes('docs/')) {
         baseFiles.push('docs/');
-      }
-      if (!baseFiles.includes('configsamples/')) {
-        baseFiles.push('configsamples/');
       }
       mutated.files = baseFiles;
     }

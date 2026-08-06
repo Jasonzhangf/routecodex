@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Scan exec_command tool call shapes in:
- * 1) repo samples: samples/ci-goldens/**
- * 2) user samples: ~/.routecodex/codex-samples/** and ~/.routecodex/codex samples/**
+ * Scan exec_command tool call shapes in user samples under
+ * ~/.routecodex/codex-samples/** and ~/.routecodex/codex samples/**.
  *
  * Goal: identify remaining shape failures and (via llmswitch-core) capture failures into:
  *   ~/.routecodex/errorsamples/exec_command/<error-type>/
@@ -26,7 +25,6 @@ const HOME = os.homedir();
 const USER_CODEX_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
 const USER_CODEX_ROOT_ALT = path.join(HOME, '.routecodex', 'codex samples');
 const USER_CODEX_PENDING = path.join(USER_CODEX_ROOT, 'openai-chat', '__pending__');
-const REPO_GOLDENS_ROOT = path.join(repoRoot, 'samples', 'ci-goldens');
 
 async function fileExists(p) {
   try {
@@ -209,16 +207,13 @@ function printReport(report) {
 async function main() {
   const { validateToolCall } = await loadValidator();
 
-  const repo = await scanRoot('repo samples/ci-goldens', REPO_GOLDENS_ROOT, validateToolCall);
-  printReport(repo);
-
   const userAll = process.argv.slice(2).includes('--user-all');
   if (!userAll) {
     const userRoot = (await fileExists(USER_CODEX_PENDING)) ? USER_CODEX_PENDING : USER_CODEX_ROOT;
     const user = await scanRoot('user ~/.routecodex/codex-samples/openai-chat/__pending__', userRoot, validateToolCall);
     printReport(user);
-    const totalCalls = repo.calls + user.calls;
-    const totalOk = repo.ok + user.ok;
+    const totalCalls = user.calls;
+    const totalOk = user.ok;
     console.log(`\n[scan] TOTAL exec_command_calls=${totalCalls} ok=${totalOk} fail=${totalCalls - totalOk}`);
     process.exitCode = totalCalls - totalOk > 0 ? 1 : 0;
     return;
@@ -230,8 +225,8 @@ async function main() {
   if (!roots.length) {
     const user = await scanRoot('user ~/.routecodex/codex-samples (all)', USER_CODEX_ROOT, validateToolCall);
     printReport(user);
-    const totalCalls = repo.calls + user.calls;
-    const totalOk = repo.ok + user.ok;
+    const totalCalls = user.calls;
+    const totalOk = user.ok;
     console.log(`\n[scan] TOTAL exec_command_calls=${totalCalls} ok=${totalOk} fail=${totalCalls - totalOk}`);
     process.exitCode = totalCalls - totalOk > 0 ? 1 : 0;
     return;
@@ -245,8 +240,8 @@ async function main() {
   }
 
   const user = merged;
-  const totalCalls = repo.calls + user.calls;
-  const totalOk = repo.ok + user.ok;
+  const totalCalls = user.calls;
+  const totalOk = user.ok;
   console.log(`\n[scan] TOTAL exec_command_calls=${totalCalls} ok=${totalOk} fail=${totalCalls - totalOk}`);
 
   process.exitCode = totalCalls - totalOk > 0 ? 1 : 0;

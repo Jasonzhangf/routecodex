@@ -1,13 +1,12 @@
 import type { ProviderProtocol } from './types.js';
 
-type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'mock';
+type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini';
 
 const CANONICAL_PROVIDER_TYPES = new Set<CanonicalProviderType>([
   'openai',
   'responses',
   'anthropic',
-  'gemini',
-  'mock'
+  'gemini'
 ]);
 const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   openai: 'openai',
@@ -18,8 +17,7 @@ const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   'openai-responses': 'responses',
   anthropic: 'anthropic',
   claude: 'anthropic',
-  gemini: 'gemini',
-  mock: 'mock'
+  gemini: 'gemini'
 };
 
 export function normalizeProviderType(input?: string): string {
@@ -74,9 +72,6 @@ export function mapProviderModule(providerType: string): string {
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio') {
     return 'openai-http-provider';
   }
-  if (normalized === 'mock') {
-    return 'mock-provider';
-  }
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
@@ -95,9 +90,6 @@ export function mapProviderProtocol(providerType?: string, providerFamily?: stri
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio') {
     return 'openai-chat';
   }
-  if (normalized === 'mock') {
-    return 'openai-chat';
-  }
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
@@ -113,9 +105,6 @@ export function defaultEndpointForProvider(providerType?: string): string {
     return '/v1beta/models';
   }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'lmstudio') {
-    return '/v1/chat/completions';
-  }
-  if (normalized === 'mock') {
     return '/v1/chat/completions';
   }
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);

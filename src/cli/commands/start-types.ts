@@ -42,6 +42,7 @@ export type StartCommandContext = {
   isWindows: boolean;
   defaultDevPort: number;
   nodeBin: string;
+  serverBin?: string;
   createSpinner: (text: string) => Promise<Spinner>;
   logger: LoggerLike;
   env: NodeJS.ProcessEnv;
@@ -56,7 +57,6 @@ export type StartCommandContext = {
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   getModulesConfigPath: () => string;
   resolveCliEntryPath?: () => string;
-  resolveServerEntryPath: () => string;
   spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
   fetch: typeof fetch;
   ensureGuardianDaemon?: () => Promise<void>;

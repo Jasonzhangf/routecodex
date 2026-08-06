@@ -154,6 +154,11 @@ Hard locks:
 - `node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs`
 - `git diff --check -- <changed files>`
 
+## V3 installed executable boundary
+- V3 runtime executable truth is `~/.local/bin/rccv3`; `routecodex` and `rcc` must resolve to that binary without release snapshot, npm package, or repository fallback.
+- `~/.rcc/install/**` is retired and forbidden. Runtime data directories may not own executable artifacts, and executable install identity may not enter request/response payload, MetadataCenter, provider wire, or Error payload.
+- Version identity is compiled into the Rust binary and validated through `--version` plus `/health`; no adjacent `package.json` runtime dependency is allowed.
+
 ## Red flags
 - Request and response are merged into one confusing main graph.
 - Request graph omits `ProviderReqCompat06ProviderCompat` between outbound semantic and provider wire.

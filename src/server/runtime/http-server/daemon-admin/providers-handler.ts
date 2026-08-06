@@ -6,7 +6,6 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { resolveRccAuthDir } from '../../../../config/user-data-paths.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { VirtualRouterArtifacts, ProviderProtocol } from '../types.js';
-import type { PortConfig } from '../port-config-types.js';
 import { writeProviderConfigFile } from '../../../../config/provider-config-writer.js';
 import { loadProviderConfigsV2 } from '../../../../config/provider-v2-loader.js';
 import type { ProviderConfigV2 } from '../../../../config/provider-v2-loader.js';
@@ -36,7 +35,6 @@ import { decodeUserConfigFile } from '../../../../config/user-config-codec.js';
 import { updateUserConfigStringScalar, writeUserConfigFile } from '../../../../config/user-config-writer.js';
 import { isRecord } from '../../../../utils/common-utils.js';
 
-// feature_id: webui.config_editor_surface
 interface ProviderRuntimeView {
   providerKey: string;
   runtimeKey: string;
@@ -58,101 +56,6 @@ interface ProviderConfigV2Summary {
 
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function toArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function buildConfigEditorSnapshot(parsed: unknown): {
-  ports: Array<Record<string, unknown>>;
-  routingPolicyGroups: Record<string, unknown>;
-  forwarders: Record<string, unknown>;
-  activeRoutingPolicyGroup?: string;
-} {
-  const root = toRecord(parsed);
-  const httpserver = toRecord(root.httpserver);
-  const virtualrouter = toRecord(root.virtualrouter);
-  const activeRoutingPolicyGroup =
-    typeof virtualrouter.activeRoutingPolicyGroup === 'string'
-      ? virtualrouter.activeRoutingPolicyGroup
-      : undefined;
-  return {
-    ports: toArray(httpserver.ports).filter((item): item is Record<string, unknown> => isRecord(item)).map((item) => ({ ...item })),
-    routingPolicyGroups: toRecord(virtualrouter.routingPolicyGroups),
-    forwarders: toRecord(virtualrouter.forwarders),
-    ...(activeRoutingPolicyGroup ? { activeRoutingPolicyGroup } : {})
-  };
-}
-
-function cloneConfigEditorPorts(value: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(value)) {
-    const error = new Error('ports must be an array') as Error & { code?: string };
-    error.code = 'invalid_ports';
-    throw error;
-  }
-  return value.map((item, index) => {
-    if (!isRecord(item)) {
-      const error = new Error(`ports[${index}] must be an object`) as Error & { code?: string };
-      error.code = 'invalid_ports';
-      throw error;
-    }
-    const portNode = (item as Record<string, unknown>).port;
-    const portNumber = typeof portNode === 'number' ? portNode : Number(portNode);
-    if (!Number.isInteger(portNumber) || portNumber <= 0 || portNumber > 65535) {
-      const error = new Error(`ports[${index}].port must be a TCP port number`) as Error & { code?: string };
-      error.code = 'invalid_ports';
-      throw error;
-    }
-    return { ...item, port: portNumber };
-  });
-}
-
-function applyConfigEditorPorts(parsed: unknown, ports: Array<Record<string, unknown>>): Record<string, unknown> {
-  const root = toRecord(parsed);
-  const httpserver = toRecord(root.httpserver);
-  return {
-    ...root,
-    httpserver: {
-      ...httpserver,
-      ports: ports.map((port) => ({ ...port }))
-    }
-  };
-}
-
-function cloneConfigEditorForwarders(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) {
-    const error = new Error('forwarders must be an object') as Error & { code?: string };
-    error.code = 'invalid_forwarders';
-    throw error;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [id, node] of Object.entries(value)) {
-    if (!id.startsWith('fwd.')) {
-      const error = new Error(`forwarder key must start with fwd.: ${id}`) as Error & { code?: string };
-      error.code = 'invalid_forwarders';
-      throw error;
-    }
-    if (!isRecord(node)) {
-      const error = new Error(`forwarder ${id} must be an object`) as Error & { code?: string };
-      error.code = 'invalid_forwarders';
-      throw error;
-    }
-    out[id] = { ...node };
-  }
-  return out;
-}
-
-function applyConfigEditorForwarders(parsed: unknown, forwarders: Record<string, unknown>): Record<string, unknown> {
-  const root = toRecord(parsed);
-  const virtualrouter = toRecord(root.virtualrouter);
-  return {
-    ...root,
-    virtualrouter: {
-      ...virtualrouter,
-      forwarders: { ...forwarders }
-    }
-  };
 }
 
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
@@ -231,78 +134,6 @@ async function reloadActiveRuntimeFromDisk(
   return { ok: true, ...result };
 }
 
-function indexPortsByNumber(ports: Array<Record<string, unknown>> | PortConfig[]): Map<number, Record<string, unknown>> {
-  const out = new Map<number, Record<string, unknown>>();
-  for (const port of ports) {
-    if (!isRecord(port)) {
-      continue;
-    }
-    const portNumber = Number(port.port);
-    if (Number.isInteger(portNumber) && portNumber > 0 && portNumber <= 65535) {
-      out.set(portNumber, { ...port, port: portNumber });
-    }
-  }
-  return out;
-}
-
-function stableJson(value: unknown): string {
-  if (!isRecord(value)) {
-    return JSON.stringify(value);
-  }
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort((a, b) => a.localeCompare(b))) {
-    sorted[key] = value[key];
-  }
-  return JSON.stringify(sorted);
-}
-
-async function applyActivePortConfigDiff(args: {
-  before: PortConfig[];
-  after: Array<Record<string, unknown>>;
-  configPath: string;
-  options: DaemonAdminRouteOptions;
-}): Promise<Record<string, unknown>> {
-  if (!isActiveRuntimeConfigPath(args.configPath, args.options)) {
-    return {
-      ok: false,
-      skipped: true,
-      reason: 'edited_config_is_not_active_runtime_config'
-    };
-  }
-  if (typeof args.options.applyPortConfig !== 'function') {
-    throw new Error('active port config write requires applyPortConfig for live apply');
-  }
-
-  const beforeByPort = indexPortsByNumber(args.before);
-  const afterByPort = indexPortsByNumber(args.after);
-  const actions: Array<{ action: 'add' | 'update' | 'remove'; port: number }> = [];
-
-  for (const [port] of beforeByPort.entries()) {
-    if (!afterByPort.has(port)) {
-      const result = await args.options.applyPortConfig('remove', port);
-      if (!result.ok) {
-        throw new Error(`port live remove failed for ${port}: ${result.error || 'unknown_error'}`);
-      }
-      actions.push({ action: 'remove', port });
-    }
-  }
-
-  for (const [port, nextConfig] of afterByPort.entries()) {
-    const previousConfig = beforeByPort.get(port);
-    const action = previousConfig ? 'update' : 'add';
-    if (previousConfig && stableJson(previousConfig) === stableJson(nextConfig)) {
-      continue;
-    }
-    const result = await args.options.applyPortConfig(action, port, nextConfig as unknown as PortConfig);
-    if (!result.ok) {
-      throw new Error(`port live ${action} failed for ${port}: ${result.error || 'unknown_error'}`);
-    }
-    actions.push({ action, port });
-  }
-
-  return { ok: true, actions };
-}
-
 export function registerProviderRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res);
 
@@ -354,114 +185,6 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       }
       res.status(200).json(items);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    }
-  });
-
-  app.get('/config/editor', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    try {
-      const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
-      const decoded = await decodeUserConfigFile(configPath);
-      const snapshot = buildConfigEditorSnapshot(decoded.parsed);
-      res.status(200).json({
-        ok: true,
-        path: configPath,
-        format: decoded.format,
-        ...snapshot
-      });
-    } catch (error: unknown) {
-      const code = (error as { code?: string } | null)?.code;
-      if (code === 'forbidden_path') {
-        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    }
-  });
-
-  app.put('/config/editor/ports', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const body = req.body as Record<string, unknown>;
-    try {
-      const configPath = resolveAllowedAdminFilePath(
-        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
-      );
-      const decoded = await decodeUserConfigFile(configPath);
-      const ports = cloneConfigEditorPorts(body?.ports);
-      const next = applyConfigEditorPorts(decoded.parsed, ports);
-      const beforePorts =
-        typeof options.getPortConfigs === 'function'
-          ? options.getPortConfigs()
-          : buildConfigEditorSnapshot(decoded.parsed).ports as unknown as PortConfig[];
-      await backupFile(configPath);
-      await writeUserConfigFile(configPath, next);
-      const portApply = await applyActivePortConfigDiff({
-        before: beforePorts,
-        after: ports,
-        configPath,
-        options
-      });
-      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
-      const snapshot = buildConfigEditorSnapshot(next);
-      res.status(200).json({
-        ok: true,
-        path: configPath,
-        format: decoded.format,
-        portApply,
-        selfReload,
-        ...snapshot
-      });
-    } catch (error: unknown) {
-      const code = (error as { code?: string } | null)?.code;
-      if (code === 'forbidden_path') {
-        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
-        return;
-      }
-      if (code === 'invalid_ports') {
-        const message = error instanceof Error ? error.message : String(error);
-        res.status(400).json({ error: { message, code: 'bad_request' } });
-        return;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message, code: 'internal_error' } });
-    }
-  });
-
-  app.put('/config/editor/forwarders', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const body = req.body as Record<string, unknown>;
-    try {
-      const configPath = resolveAllowedAdminFilePath(
-        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
-      );
-      const decoded = await decodeUserConfigFile(configPath);
-      const forwarders = cloneConfigEditorForwarders(body?.forwarders);
-      const next = applyConfigEditorForwarders(decoded.parsed, forwarders);
-      await backupFile(configPath);
-      await writeUserConfigFile(configPath, next);
-      const selfReload = await reloadActiveRuntimeFromDisk(configPath, options);
-      const snapshot = buildConfigEditorSnapshot(next);
-      res.status(200).json({
-        ok: true,
-        path: configPath,
-        format: decoded.format,
-        selfReload,
-        ...snapshot
-      });
-    } catch (error: unknown) {
-      const code = (error as { code?: string } | null)?.code;
-      if (code === 'forbidden_path') {
-        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
-        return;
-      }
-      if (code === 'invalid_forwarders') {
-        const message = error instanceof Error ? error.message : String(error);
-        res.status(400).json({ error: { message, code: 'bad_request' } });
-        return;
-      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'internal_error' } });
     }

@@ -16,11 +16,7 @@ const PROVIDER_ROOT = path.join(HOME, '.routecodex', 'provider');
 const RUNTIME_SNAPSHOT_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
 const GOLDEN_ROOT = path.join(HOME, '.routecodex', 'golden_samples');
 const PROVIDER_GOLDEN_ROOT = path.join(GOLDEN_ROOT, 'provider_golden_samples');
-const CI_GOLDENS_ROOT = path.join(ROOT, 'samples', 'ci-goldens');
-const CUSTOM_SAMPLE_ROOTS = [
-  path.join(GOLDEN_ROOT, 'new'),
-  CI_GOLDENS_ROOT
-];
+const CUSTOM_SAMPLE_ROOTS = [path.join(GOLDEN_ROOT, 'new')];
 const TEMP_ROOT = path.join(process.cwd(), 'tmp', 'provider-captures');
 const STAGE_DIRS = {
   'openai-chat': path.join(RUNTIME_SNAPSHOT_ROOT, 'openai-chat'),
@@ -169,39 +165,6 @@ function listProviderConfigs() {
           doc
         });
       }
-    }
-  }
-  return entries;
-}
-
-function mapEntryTypeToProviderType(entryType) {
-  if (entryType === 'anthropic-messages') return 'anthropic-http-provider';
-  if (entryType === 'openai-responses') return 'responses-http-provider';
-  return 'openai-http-provider';
-}
-
-function listCiGoldenProviders() {
-  const entries = [];
-  if (!fs.existsSync(CI_GOLDENS_ROOT)) {
-    return entries;
-  }
-  for (const entryType of fs.readdirSync(CI_GOLDENS_ROOT)) {
-    const entryDir = path.join(CI_GOLDENS_ROOT, entryType);
-    if (!fs.statSync(entryDir).isDirectory()) continue;
-    for (const providerId of fs.readdirSync(entryDir)) {
-      const providerDir = path.join(entryDir, providerId);
-      if (!fs.statSync(providerDir).isDirectory()) continue;
-      entries.push({
-        dir: 'ci-goldens',
-        configFile: path.join(providerDir, 'request.sample.json'),
-        providerId,
-        providerConfig: {
-          id: providerId,
-          type: mapEntryTypeToProviderType(entryType)
-        },
-        doc: null,
-        entryTypeOverride: entryType
-      });
     }
   }
   return entries;
@@ -477,12 +440,9 @@ async function captureProvider(providerEntry, entryType, port, options, sanitize
 async function main() {
   const options = parseArgs();
   ensureDir(TEMP_ROOT);
-  const providers = [
-    ...listProviderConfigs(),
-    ...listCiGoldenProviders()
-  ];
+  const providers = listProviderConfigs();
   if (!providers.length) {
-    console.warn('[capture] no provider configs or ci goldens detected; exiting');
+    console.warn('[capture] no provider configs detected; exiting');
     return;
   }
   const captured = new Set();

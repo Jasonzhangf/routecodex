@@ -17,7 +17,7 @@ import { validateApplyPatchToolCallDirectNative } from './helpers/tool-validatio
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 
-const REG_ROOT = path.join(repoRoot, 'samples', 'ci-goldens', '_regressions', 'apply_patch');
+const REG_ROOT = path.join(repoRoot, 'tests', 'resources', 'apply-patch-regressions');
 
 async function fileExists(p) {
   try {
@@ -55,8 +55,7 @@ async function loadValidator() {
 
 async function main() {
   if (!(await fileExists(REG_ROOT))) {
-    console.log(`[verify:apply-patch-regressions] skip (missing: ${REG_ROOT})`);
-    return;
+    throw new Error(`required regression fixture root missing: ${REG_ROOT}`);
   }
 
   const { validateToolCall, source } = await loadValidator();
@@ -105,6 +104,10 @@ async function main() {
     if (actual !== expected) {
       mismatches.push({ filePath, reason: `reason_mismatch expected=${expected} actual=${actual}` });
     }
+  }
+
+  if (total === 0) {
+    throw new Error(`required regression fixtures missing under: ${REG_ROOT}`);
   }
 
   console.log(

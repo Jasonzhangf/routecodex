@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 
 /**
- * Scan apply_patch tool call shapes in:
- * 1) repo samples: samples/ci-goldens/** (including _regressions/apply_patch)
- * 2) user samples: ~/.routecodex/codex-samples/**
+ * Scan apply_patch tool call shapes in user samples under
+ * ~/.routecodex/codex-samples/**.
  *
  * Goal: identify remaining non-context shape failures (invalid_json/missing_changes/etc.)
- * and optionally capture failures into repo ci-goldens regressions.
+ * Failures can be captured into the user errorsamples directory.
  *
  * Usage:
  *   node scripts/scan-apply-patch-samples.mjs
  *   node scripts/scan-apply-patch-samples.mjs --user-all
- *   ROUTECODEX_APPLY_PATCH_REGRESSION_TO_REPO=1 node scripts/scan-apply-patch-samples.mjs --user-all
+ *   node scripts/scan-apply-patch-samples.mjs --user-all --capture
  */
 
 import fs from 'node:fs/promises';
@@ -28,7 +27,6 @@ const HOME = os.homedir();
 const USER_CODEX_ROOT = path.join(HOME, '.routecodex', 'codex-samples');
 const USER_CODEX_ROOT_ALT = path.join(HOME, '.routecodex', 'codex samples');
 const USER_CODEX_PENDING = path.join(USER_CODEX_ROOT, 'openai-chat', '__pending__');
-const REPO_GOLDENS_ROOT = path.join(repoRoot, 'samples', 'ci-goldens');
 const ERROR_SAMPLES_ROOT = path.join(HOME, '.routecodex', 'errorsamples', 'apply_patch');
 
 const DEFAULT_CAPTURE_TOTAL_LIMIT = 5000;
@@ -310,7 +308,6 @@ async function main() {
   const { validateToolCall } = await loadValidator();
 
   const captureEnabled = process.argv.slice(2).includes('--capture') || process.env.ROUTECODEX_SCAN_CAPTURE === '1';
-  const captureRepo = process.argv.slice(2).includes('--capture-repo') || process.env.ROUTECODEX_SCAN_CAPTURE_REPO === '1';
   const captureRoot = process.env.ROUTECODEX_ERRORSAMPLES_DIR || ERROR_SAMPLES_ROOT;
   const totalLimit = Number.parseInt(process.env.ROUTECODEX_CAPTURE_TOTAL_LIMIT || '', 10);
   const perReasonLimit = Number.parseInt(process.env.ROUTECODEX_CAPTURE_PER_REASON_LIMIT || '', 10);
@@ -335,13 +332,6 @@ async function main() {
     byReason: new Map(),
     reasonAllowList,
   };
-
-  const repo = await scanRoot('repo samples/ci-goldens', REPO_GOLDENS_ROOT, validateToolCall, {
-    enabled: captureEnabled && captureRepo,
-    destRoot: captureRoot,
-    state: captureState,
-  });
-  printReport(repo);
 
   const userAll = process.argv.slice(2).includes('--user-all');
   const userRoots = [];
@@ -368,8 +358,8 @@ async function main() {
     printReport(report);
   }
 
-  const totalCalls = repo.calls + userReports.reduce((sum, r) => sum + r.calls, 0);
-  const totalOk = repo.ok + userReports.reduce((sum, r) => sum + r.ok, 0);
+  const totalCalls = userReports.reduce((sum, r) => sum + r.calls, 0);
+  const totalOk = userReports.reduce((sum, r) => sum + r.ok, 0);
   console.log(`\n[scan] TOTAL apply_patch_calls=${totalCalls} ok=${totalOk} fail=${totalCalls - totalOk}`);
   if (captureEnabled) {
     console.log(

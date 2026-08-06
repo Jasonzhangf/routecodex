@@ -132,6 +132,42 @@ if (!serverIndex.includes("routeName: 'default'") || !serverIndex.includes('defa
 if (serverIndex.includes('decideDirectProviderRetry') || serverIndex.includes('defaultTierAvailable: false')) {
   failures.push('http-server provider-direct path must not restore removed TS policy or a false default-pool claim');
 }
+
+const handlerUtils = read('src/server/handlers/handler-utils.ts');
+if (/\?\s*mapErrorToHttp\s*\(/.test(handlerUtils)) {
+  failures.push('HTTP handlers must not use mapErrorToHttp as a fallback when ErrorErr05 is absent');
+}
+if (!handlerUtils.includes('Typed execution decision is required before client error projection')) {
+  failures.push('HTTP handlers must fail-fast when the unified ErrorErr05 decision carrier is absent');
+}
+
+const routeErrorHub = read('src/error-handling/route-error-hub.ts');
+if (/\bmapErrorToHttp\b|includeHttpResult|buildHttpPayload/.test(routeErrorHub)) {
+  failures.push('RouteErrorHub must report errors only and must not own ErrorErr06 HTTP projection');
+}
+
+const v3Server = read('v3/crates/routecodex-v3-server/src/lib.rs');
+const v3Error = read('v3/crates/routecodex-v3-error/src/lib.rs');
+for (const bypass of [
+  'json!({"error":{"message":"forbidden","code":"forbidden"}})',
+  'json!({"error":{"message":message,"code":"virtual_router_diagnostics_failed"}})',
+  'json!({"error":{"message":message,"code":"virtual_router_dry_run_failed"}})',
+]) {
+  if (v3Server.includes(bypass)) {
+    failures.push(`V3 Server must not bypass ErrorErr01-06 with direct error JSON: ${bypass}`);
+  }
+}
+if (!v3Server.includes('let projected = project_v3_server_websocket_error(')) {
+  failures.push('V3 WebSocket event projection must call the routecodex-v3-error owned helper');
+}
+if (
+  !v3Error.includes('pub fn project_v3_server_websocket_error(')
+  || !v3Error.includes('project_v3_server_invalid_request(')
+  || !v3Error.includes('project_v3_server_runtime_failure(')
+  || !v3Error.includes('V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {')
+) {
+  failures.push('V3 WebSocket errors must enter the shared ErrorErr01-06 center before event projection');
+}
 if (!serverIndex.includes('await processProviderSendFailure({')) {
   failures.push('http-server router-direct path must consume ErrorErr05 through processProviderSendFailure');
 }

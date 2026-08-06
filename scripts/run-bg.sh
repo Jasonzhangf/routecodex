@@ -60,7 +60,7 @@ is_routecodex_process() {
   local normalized
   normalized=$(echo "$cmd" | tr '[:upper:]' '[:lower:]')
 
-  if [[ "$normalized" == *"routecodex/dist/index.js"* ]]; then
+  if [[ "$normalized" == *"routecodex/dist/bin/rccv3"* || "$normalized" == *"/rccv3 server"* ]]; then
     return 0
   fi
   return 1
@@ -69,7 +69,7 @@ is_routecodex_process() {
 is_routecodex_server_command() {
   local normalized
   normalized=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
-  if [[ "$normalized" == *"dist/index.js"* ]]; then
+  if [[ "$normalized" == *"dist/bin/rccv3 server"* || "$normalized" == *"/rccv3 server"* ]]; then
     return 0
   fi
   return 1

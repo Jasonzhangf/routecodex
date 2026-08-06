@@ -75,7 +75,7 @@ export interface ProviderProfile {
   id: string;
   protocol: ProviderProtocol;
   /**
-   * Optional module implementation identifier (e.g. 'mock-provider').
+   * Optional module implementation identifier.
    * When present, host/runtime can override the default module selection while
    * keeping the logical provider protocol unchanged.
    */

@@ -2,7 +2,6 @@ import { GeminiHttpProvider } from './gemini-http-provider.js';
 import { HttpTransportProvider } from './http-transport-provider.js';
 import { ResponsesProvider } from './responses-provider.js';
 import { AnthropicProtocolClient } from '../../../client/anthropic/anthropic-protocol-client.js';
-import { MockProvider } from '../../mock/index.js';
 import { MimowebProvider } from './mimoweb/mimoweb-provider.js';
 import type { OpenAIStandardConfig, ApiKeyAuth } from '../api/provider-config.js';
 import type { IProviderV2, ProviderRuntimeAuth, ProviderRuntimeProfile, ProviderType } from '../api/provider-types.js';
@@ -179,7 +178,6 @@ export function resolveProviderModule(value?: string): OpenAIStandardConfig['typ
     case 'anthropic-http-provider':
     case 'gemini-http-provider':
     case 'mimoweb-provider':
-    case 'mock-provider':
      return trimmed as OpenAIStandardConfig['type'];
     case 'anthropic':
       return 'anthropic-http-provider';
@@ -206,9 +204,6 @@ export function mapProviderModule(providerType: ProviderType): OpenAIStandardCon
   if (providerType === 'gemini') {
     return 'gemini-http-provider';
   }
-  if (providerType === 'mock') {
-    return 'mock-provider';
-  }
   if (providerType === 'mimoweb') {
     return 'mimoweb-provider';
   }
@@ -223,9 +218,6 @@ export function instantiateProvider(
 ): IProviderV2 {
   if (moduleType === 'mimoweb-provider') {
     return new MimowebProvider(config, dependencies);
-  }
-  if (moduleType === 'mock-provider') {
-    return new MockProvider(config, dependencies);
   }
   if (moduleType === 'gemini-http-provider') {
     return new GeminiHttpProvider(config, dependencies);

@@ -1080,7 +1080,7 @@ resources:
     owner_node: ConfigLoad04UserConfigParsed
     allowed_readers: [ConfigLoad05RuntimeManifestCompiled, ConfigLoad06LoadedConfigReturned]
     allowed_writers: [ConfigLoad03RustLoader, ConfigLoad04UserConfigParsed]
-    forbidden_writers: [webui.config_edit_intent, runtime.pid_cache, route.selection]
+    forbidden_writers: [runtime.pid_cache, route.selection]
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
@@ -1093,7 +1093,7 @@ resources:
     owner_node: ConfigLoad05RuntimeManifestCompiled
     allowed_readers: [HubConfig01PipelineRuntimeArtifact, HubConfig02RuntimePolicyArtifacts, HubConfig03RuntimeRouteTierArtifacts]
     allowed_writers: [ConfigLoad05RuntimeManifestCompiled, ConfigLoad06LoadedConfigReturned]
-    forbidden_writers: [webui.config_edit_intent, ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic]
+    forbidden_writers: [ProviderReqOutbound06WirePayload, HubRespOutbound04ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
@@ -1106,7 +1106,7 @@ resources:
     owner_node: ConfigLoad05RuntimeManifestCompiled
     allowed_readers: [ConfigLoad06LoadedConfigReturned, HubConfig01PipelineRuntimeArtifact]
     allowed_writers: [ConfigLoad04UserConfigParsed, ConfigLoad05RuntimeManifestCompiled]
-    forbidden_writers: [webui.config_edit_intent, route.selection, provider_runtime.observation]
+    forbidden_writers: [route.selection, provider_runtime.observation]
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:function-map-compile-gate]
@@ -1123,45 +1123,6 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     required_gates: [npm run verify:resource-operation-map, npm run verify:architecture-mainline-call-map]
-
-  - resource_id: webui.config_edit_intent
-    resource_kind: config_authoring
-    lifecycle: webui.config_editor_surface.mainline
-    identity: [webuiSession, editorSurface, configSection]
-    owner_feature_id: webui.config_editor_surface
-    owner_node: WebuiConfigEditor01UserIntent
-    allowed_readers: [WebuiConfigEditor02AdminApiRequest]
-    allowed_writers: [WebuiConfigEditor01UserIntent]
-    forbidden_writers: [config.validated_manifest, route.selection, provider_runtime.observation]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run test:webui]
-
-  - resource_id: config.admin_mutation_request
-    resource_kind: config_authoring
-    lifecycle: webui.config_editor_surface.mainline
-    identity: [adminRequestId, configPath, configSection]
-    owner_feature_id: webui.config_editor_surface
-    owner_node: WebuiConfigEditor02AdminApiRequest
-    allowed_readers: [WebuiConfigEditor03SharedConfigMutation]
-    allowed_writers: [WebuiConfigEditor02AdminApiRequest]
-    forbidden_writers: [ProviderReqOutbound06WirePayload, route.selection, runtime.instance_record]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run verify:config-ssot]
-
-  - resource_id: config.shared_write_result
-    resource_kind: config_authoring
-    lifecycle: webui.config_editor_surface.mainline
-    identity: [configPath, writerOwner, mutationResult]
-    owner_feature_id: config.user_config_write_surface
-    owner_node: WebuiConfigEditor03SharedConfigMutation
-    allowed_readers: [WebuiConfigEditor02AdminApiRequest, webui.config_edit_intent]
-    allowed_writers: [WebuiConfigEditor03SharedConfigMutation]
-    forbidden_writers: [webui.config_edit_intent, route.selection, provider_runtime.observation]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    required_gates: [npm run verify:resource-operation-map, npm run verify:config-toml-codec-rust]
 
   - resource_id: config.path_resolution_plan
     resource_kind: config_path_resolution
@@ -2262,18 +2223,6 @@ mainline_resource_flows:
     produces: [config.routing_policy_projection]
     side_channel_reads: []
     side_channel_writes: []
-  - chain_id: webui.config_editor_surface.mainline
-    step_id: wce-01
-    consumes: [webui.config_edit_intent]
-    produces: [config.admin_mutation_request]
-    side_channel_reads: []
-    side_channel_writes: []
-  - chain_id: webui.config_editor_surface.mainline
-    step_id: wce-02
-    consumes: [config.admin_mutation_request]
-    produces: [config.shared_write_result]
-    side_channel_reads: []
-    side_channel_writes: []
   - chain_id: debug.unified_surface.mainline
     step_id: dbg-01
     consumes: [debug.artifact]
@@ -2432,12 +2381,6 @@ mainline_resource_flows:
     side_channel_writes: []
   - chain_id: runtime.lifecycle.mainline
     step_id: rtl-01
-    consumes: []
-    produces: [runtime.pid_cache]
-    side_channel_reads: []
-    side_channel_writes: []
-  - chain_id: runtime.lifecycle.mainline
-    step_id: rtl-02
     consumes: []
     produces: [runtime.pid_cache]
     side_channel_reads: []

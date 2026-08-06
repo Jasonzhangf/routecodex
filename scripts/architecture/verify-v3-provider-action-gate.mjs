@@ -1088,7 +1088,6 @@ for (const rel of Object.values(files)) {
 const text = Object.fromEntries(Object.entries(files).map(([key, rel]) => [key, read(rel)]));
 
 for (const token of [
-  'target_protocol_unmapped_field_fails_without_provider_switch_or_transport',
   '"ProviderReqCompat06ProviderCompat"',
   '"provider_request_compat_error"',
   '"V3ProviderReqOutbound08WirePayload"',
@@ -1104,7 +1103,7 @@ const responsesRelayRequestBody = findFunctionBody(
 for (const [label, pattern] of [
   [
     'ProviderReqCompat06ProviderCompat request-local fail-fast branch',
-    /let\s+req_compat\s*=\s*try_before_resp03!\s*\(\s*build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\)\s*;/u,
+    /let\s+req_compat\s*=\s*match\s+build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\{[\s\S]{0,900}?Err\s*\(error\)\s*=>\s*\{[\s\S]{0,500}?handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::ProviderCompat\s*\(\s*error\s*\)\s*\)\s*;/u,
   ],
   [
     'V3ProviderReqOutbound08WirePayload failure branch',
@@ -1297,6 +1296,14 @@ for (const testName of [
 }
 if (/pub\s+struct\s+V3Error05TerminalDecision\s*\{\s*pub/gu.test(text.error)) {
   failures.push(`${files.error}: terminal Error05 wrapper must not expose constructible fields`);
+}
+if (
+  !/pub\s+fn\s+build_v3_error_06_client_projected_from_v3_error_05\s*\(\s*terminal:\s*V3Error05TerminalDecision,?\s*\)/u
+    .test(text.error)
+) {
+  failures.push(
+    `${files.error}: Error06 builder must accept only V3Error05TerminalDecision`,
+  );
 }
 
 for (const [name, source, rel] of [

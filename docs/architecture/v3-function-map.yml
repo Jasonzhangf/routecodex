@@ -1994,6 +1994,7 @@ features:
       - v3.response.client_payload
       - v3.protocol_conversion.field_parity_contract
     mainline_bindings:
+      - v3-protocol-field-parity-responses-chat-inbound-order-01
       - v3-protocol-field-parity-responses-chat-req-01
       - v3-protocol-field-parity-responses-chat-malformed-arguments-project-01
       - v3-protocol-field-parity-responses-chat-resp-01
@@ -2025,6 +2026,8 @@ features:
       - responses_openai_chat_field_parity_response_matrix
       - responses_relay_reasoning_effort_projects_anthropic_output_config_effort
       - responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire
+      - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
+      - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
       - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
       - openai_chat_wire_projects_responses_web_search_tool_to_options
       - responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning
@@ -2806,6 +2809,7 @@ features:
       - commit_v3_hub_relay_response
       - resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook
       - resp04_reuses_resp03_repaired_payload_without_semantic_repair
+      - resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable
     allowed_paths:
       - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
@@ -3214,6 +3218,8 @@ features:
       - src/modules/llmswitch
       - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
       - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+    forbidden_mentions_allowlist:
+      - SseTransportError
     required_gates:
       - npm run verify:sse-transport-core-shared
       - npm run verify:sse-architecture-boundary
@@ -3777,6 +3783,31 @@ features:
       - v3-codex-sample-01
       - v3-codex-sample-02
 
+  - feature_id: v3.error.raw_wire_evidence
+    owner_crate: routecodex-v3-server
+    owner_file: v3/crates/routecodex-v3-server/src/lib.rs
+    resource_bindings:
+      - v3.error.raw_wire_evidence
+    entry_symbols:
+      - persist_v3_error_evidence_payload
+      - capture_v3_responses_relay_provider_snapshots
+      - finalize_v3_responses_relay_server_output
+    allowed_paths:
+      - v3/crates/routecodex-v3-server/src/lib.rs
+      - v3/crates/routecodex-v3-server/tests
+      - docs/architecture
+    forbidden_paths:
+      - v3/crates/routecodex-v3-runtime
+      - v3/crates/routecodex-v3-provider-responses
+      - MetadataCenter
+      - request.normal_payload
+      - provider.wire_payload
+      - response.client_payload
+    required_gates:
+      - npm run verify:v3-resource-map
+    mainline_bindings:
+      - v3-responses-relay-error-evidence-01
+
   - feature_id: v3.build_test_artifact_budget
     status: active
     owner_module: v3-build-test-artifact-budget
@@ -3813,3 +3844,38 @@ features:
       - v3-build-test-budget-01
       - v3-build-test-budget-02
       - v3-build-test-budget-03
+
+  - feature_id: v3.global_binary_install
+    status: source_active_live_verification_required
+    owner_crates: [routecodex-v3-config, routecodex-v3-cli]
+    owner_files:
+      - scripts/install-v3-cli.mjs
+      - scripts/ensure-cli-command-shim.mjs
+      - scripts/install-global.sh
+      - v3/crates/routecodex-v3-config/Cargo.toml
+      - v3/crates/routecodex-v3-config/build.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+    resource_bindings: [v3.global_binary_install]
+    entry_symbols: [buildV3CargoEnv, resolve_routecodex_package_version_from_executable, installDirectNativeCommand]
+    allowed_paths:
+      - scripts/install-v3-cli.mjs
+      - scripts/ensure-cli-command-shim.mjs
+      - scripts/install-global.sh
+      - tests/scripts/v3-cli-distribution.spec.ts
+      - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
+      - v3/crates/routecodex-v3-config/Cargo.toml
+      - v3/crates/routecodex-v3-config/build.rs
+      - v3/crates/routecodex-v3-config/src/lib.rs
+      - docs/architecture/v3-resource-operation-map.yml
+      - docs/architecture/v3-function-map.yml
+      - docs/architecture/v3-mainline-call-map.yml
+      - docs/architecture/v3-verification-map.yml
+      - docs/architecture/v3-build-tool-module-registry.yml
+    forbidden_paths: [src, sharedmodule, ~/.rcc/install]
+    required_gates:
+      - npm run test:v3-cli-distribution
+      - npm run test:install-v3-target-cleanup
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-module-boundaries
+    mainline_bindings: [v3-install-01, v3-install-02, v3-install-03]
+    runtime_status: direct_binary_install_live_verified_0_90_4127

@@ -732,7 +732,6 @@ flowchart LR
   ServerPidCacheRecord["ServerPidCacheRecord"]
   ServerStartCommand["ServerStartCommand"]
   ServerStartCommand -->|rtl-01| ServerPidCacheRecord
-  ServerStartCommand -->|rtl-02| ServerPidCacheRecord
   ServerStopCommand -->|rtl-03| StopIntentRecord
   ServerStartCommand -->|rtl-04| StopIntentRecord
   ServerRestartCommand -->|rtl-05| RestartProcessHttpRequest
@@ -769,7 +768,6 @@ flowchart LR
 | step | transition | status | caller -> callee | split binding | owner |
 | --- | --- | --- | --- | --- | --- |
 | rtl-01 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> planRuntimePidCacheWrite` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
-| rtl-02 | `ServerStartCommand -> ServerPidCacheRecord` | anchored | `writeServerPidCache -> planRuntimePidCacheWrite` |  | `runtime.lifecycle.pid_cache`<br/>server pid cache lives under <rccUserDir>/state/runtime-lifecycle/ports/<port>/pid.cache; pid is a transient cache, not the authoritative runtime state |
 | rtl-03 | `ServerStopCommand -> StopIntentRecord` | anchored | `writeDaemonStopIntent -> planRuntimeStopIntentWrite` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-04 | `ServerStartCommand -> StopIntentRecord` | anchored | `consumeDaemonStopIntent -> planRuntimeStopIntentConsume` |  | `runtime.lifecycle.stop_intent`<br/>stop-intent is a cross-process signal under <rccUserDir>/state/runtime-lifecycle/ports/<port>/stop-intent.json; it must be reaped when older than TTL |
 | rtl-05 | `ServerRestartCommand -> RestartProcessHttpRequest` | anchored | `planRestartTransport -> planRuntimeRestartRequest` |  | `runtime.lifecycle.restart_command`<br/>CLI restart locates one aggregate RouteCodex process and requests one in-session restart for all member ports |

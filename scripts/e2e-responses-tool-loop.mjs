@@ -79,7 +79,7 @@ async function startServer(){
     ROUTECODEX_STREAM_PRE_HEARTBEAT: '0',
     RCC_R2C_COALESCE_MS: '0'
   };
-  const child = spawn(process.execPath, ['dist/index.js'], { stdio: ['ignore','pipe','pipe'], env });
+  const child = spawn(path.join(root, 'dist', 'bin', 'rccv3'), ['server', 'start', '--foreground'], { stdio: ['ignore','pipe','pipe'], env });
   child.stdout.on('data', d => process.stdout.write(String(d)));
   child.stderr.on('data', d => process.stderr.write(String(d)));
   await sleep(1500);

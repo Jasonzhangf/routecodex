@@ -5,6 +5,14 @@ summary: Typed ErrorErr05 provider actions enter the Rust process-shared
   generation commit. ErrorErr05 -> ErrorErr06 remains the separate
   error.mainline#err-05 projection edge.
 owner_feature_id: error.provider_action_gate
+admission_ownership:
+  wall_clock_expiry_forbidden: true
+  abandon_increments_failure_count: false
+  max_admissions_per_generation: 1
+downstream_projection:
+  lifecycle_id: error.mainline
+  step_id: err-05
+  provider_action_gate_witness: none
 entrypoint:
   node_id: ErrorErr05ExecutionDecision
   wiki_page: null
@@ -179,14 +187,6 @@ edges:
         - error.provider_action_gate
       side_channel_writes:
         - error.provider_action_gate
-downstream_projection:
-  lifecycle_id: error.mainline
-  step_id: err-05
-  provider_action_gate_witness: none
-admission_ownership:
-  wall_clock_expiry_forbidden: true
-  abandon_increments_failure_count: false
-  max_admissions_per_generation: 1
 verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map

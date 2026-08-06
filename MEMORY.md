@@ -5191,3 +5191,53 @@ Verified on 5555 build 0.90.3996. With `[debug] snapshots = true`, V3 live clien
 - Codex historical Responses sessions may replay an internal stopless no-op CLI pair with a dynamic call id. This is control artifact cleanup only when the call and output are immediately adjacent, the exact call id matches, the call is `exec_command`, and its arguments are a single-field JSON object whose `cmd` is exactly `routecodex hook run reasoningStop`; raw command strings, extra state fields, and substring-only mentions must stay normal payload and must not be stripped.
 - The owner is Rust `servertool_hooks.rs` inside the stopless Req04 lifecycle. The fix must not accept arbitrary orphan tool outputs, must not repair in SSE/handler/outbound/provider runtime, and must not put stopless control state into normal payload or MetadataCenter payload reconstruction.
 - Verified baseline is `0.90.4114`, installed SHA256 `63d73a1991d9e94cfae8a53f669f999e8dabdabd8b81da12b70e8a7c9afcd6e1`, healthy aggregate ports 10000/5520/5555, live dynamic multi-pair replay HTTP 200 `RCC_STOPLESS_DYNAMIC_4114_OK`, and real `codex exec -p rcm` HTTP 200/SSE completion `RCC_CODEX_5520_4114_OK` on 5520.
+
+## 2026-08-04 - Local DeepSeek provider baseline
+- `~/.rcc/provider/routecodex/config.v2.toml` is the standalone local provider for DwarfStar DeepSeek V4 Flash: `type=openai`, `baseURL=http://127.0.0.1:8000/v1`, default model `deepseek-v4-flash`, `timeout=900000` (15 minutes), and `maxContext=262144`.
+- The local server ignores the Bearer value, but the Vercel AI SDK doctor requires one, so `provider.auth.apiKey` is the non-sensitive placeholder `routecodex-local`.
+- Verified `provider inspect`, `provider doctor` before and after RCC restart, and `rccv3 config check -c ~/.rcc/config.v3.toml` (`config ok: version=3 servers=3`).
+
+## 2026-08-04 - RAM-only KV benchmark and disk-cache boundary
+- Removed the six authorized legacy `.kv` files under `runtime/kv`; current lazy-proxy and legacy start script pass no `--kv-disk-*` flags, so active KV stays in RAM and the directory remains empty after inference.
+- Verified 38,316-token RAM-only request in `76.54s`; two simultaneous requests completed in `157s`, showing current no-`--batched-session` server behavior is effectively serialized rather than disk-cache-parallel.
+- Disk KV is a cross-session/server-restart prefix-resume store, not an expansion of live in-memory KV or a multi-request scheduler. Existing logs showed 2.4--3.3 GiB checkpoints taking `0.9--13.1s` to save and `disk-cache-full` evictions, so it is not appropriate for the current RAM-rich latency target.
+
+## 2026-08-04 - Four-session batching and no async KV persistence flag
+- Lazy DwarfStar now starts with `--batched-session 4`; the RouteCodex provider uses `maxInFlight=4`. This removes the previous provider-side serialization and enables resident-session decode batching.
+- Two concurrent 38k-token requests measured `175s` wall time with four-session batching, compared with the previous one-session RAM-only `157s`; this workload is prefill-dominated and does not prove a batching win. Short decode-heavy tests are required for throughput conclusions.
+- Source review confirms no background disk-KV option: `ds4_kvstore` writes synchronously with `fwrite`/`fflush`/`rename` while `inference_mu` and `kv_mu` are held. Continued/cold/evict/shutdown paths can block. Disk KV is useful for cross-session/restart resume, not for increasing live KV capacity or scheduler parallelism.
+
+## 2026-08-04 - RAM-first shutdown persistence is active
+- Lazy proxy now enables disk KV only as a persistence layer: `--kv-disk-dir runtime/kv`, `--kv-disk-space-mb 8192`, `--kv-cache-cold-max-tokens 0`, and `--kv-cache-continued-interval-tokens 0`, while retaining `--batched-session 4`.
+- Proxy SIGTERM waits for clean DwarfStar exit, so the server's shutdown KV persistence can complete before LaunchAgent restart. Normal short requests create no disk file below the built-in 512-token minimum; this was observed after the configuration change.
+
+## 2026-08-04 - V3 direct global binary installation baseline
+- Active global executable is `~/.local/bin/rccv3`; `~/.local/bin/routecodex` and `~/.local/bin/rcc` are command shims to the same V3 binary. Version discovery uses compile-time `ROUTECODEX_BUILD_VERSION`, so the installed binary does not depend on a neighboring `package.json`.
+- Verified production baseline: version `0.90.4118`, SHA256 `3d3739700c581b310f8649410ad0da88d3bb95e40c8df07d80e53e4d6224aac3`, managed child rooted at `~/.local/bin/rccv3`, and healthy V3 ports 10000/4444/5520/5555.
+- `~/.rcc/install`, legacy `config.toml`, and the V2 guardian runtime/state directory are retired and absent. Active `~/.rcc` retains only V3 config, provider and secret resources, runtime state, sessions, logs, and canonical samples.
+- The global installer now verifies `command -v` and matching embedded versions for `rccv3`, `routecodex`, and `rcc`, and runs the Cargo-target cleanup/interruption gate before publication. The mainline map records the real `buildV3Cli -> runInterruptibleCommand` build edge; the Rust resolver remains a runtime consumer of the embedded value.
+- Post-review baseline is version `0.90.4120`, SHA256 `55faafafb0d2546979e39dab1cdc7f060ddf3b2a9d4c8ae6da1bfa429ee453a5`, with all four V3 listeners healthy.
+
+## 2026-08-04 V3 全局 binary 迁移最终基线
+- 最终安装版本 `0.90.4127`；dist/global/aliases SHA256 均为 `faaee985b305815804354a606a00af2eff43382f84aa553dedbaa719d8a1cee8`，三个命令 realpath 均为 `~/.local/bin/rccv3`。
+- 版本真源仅为编译期 `ROUTECODEX_BUILD_VERSION`；`ROUTECODEX_VERSION=bogus` 不改变版本。默认 V3 安装清理并复查 `~/.rcc/install`。
+- 四端口 health 均为 V3/build `0.90.4127`；旧 install/config/guardian absent；定向测试、配置 crate、resource/module gates 通过；scoped review `VERDICT: PASS`。
+
+## 2026-08-05 - DeepSeek Chat cache miss owner correction
+- A local DeepSeek `usage_cache=0` line can be a real provider miss while still being caused by RouteCodex provider-bound transcript shape. For the 2026-08-05 slow continuation, DS4 trace showed `memory_miss_reason=token-mismatch`, but the byte mismatch came from RouteCodex splitting one assistant turn into `assistant content-only` followed by `assistant tool_calls`, which made DS4 insert an EOS before DSML tool calls.
+- The owning repair is V3 Resp04 local continuation canonical context in `hub_v1/resp_continuation_04_committed.rs`: coalesce assistant visible text with the following assistant tool-call message before saving local continuation, preserving text order and reasoning. Do not repair this class in usage projection, server console, SSE, provider transport, or DS4 cache policy.
+- Verified by source tests only so far: Resp04 owner tests `4/4`, local continuation integration `31/31`, `rustfmt --check`, and `git diff --check`. No live install/restart proof exists for this fix because the worktree had unrelated dirty runtime/config changes.
+- Responses ordered projection design truth: `input[]` is an ordered semantic stream; assistant `message`/`output_text`/`reasoning` plus following function/custom calls form one assistant turn, and paired tool results remain next by call id. A non-assistant message or tool result closes the group. Reviewer-invented sequences must be checked against this contract before changing runtime; do not add fake pending-call/message branches merely to obtain PASS.
+
+## 2026-08-05 V2 sample and orphan retirement truth
+- Repo `samples/` is not a V3 runtime or test truth source. Deterministic regression data belongs in tracked `tests/resources/`; required gates must fail when the resource root is missing or empty. User diagnostic scanners may read `~/.routecodex/codex-samples`, `errorsamples`, or `golden_samples`, but must not sync data back into repo `samples/`.
+- The apply_patch regression owner is `tests/resources/apply-patch-regressions/` with 11 samples. Verified positive result: fixed=4, stillFailing=7, mismatches=0. Verified negative result: missing resource root exits 2 instead of skipping.
+- When a retired mainline edge disappears from source, remove it from resource flows, binding budgets, gate matrices, manifests, wiki declarations, and generated artifacts. Chain-specific invariants must be emitted by the canonical generator owner; hand-editing only generated manifests is not durable.
+- `runtime.lifecycle.mainline` has 15 anchored edges after removing the dead `rtl-02` duplicate that referenced deleted `src/index.ts`. `render-mainline-manifests.mjs` owns preservation of `stopless_standalone_entrypoints: 0` and `servertool_semantic_nodes: 0` plus their servertool boundary gate.
+- Current verified installed V3 baseline is `0.90.4130`; repo and `~/.local/bin/rccv3` SHA256 are `9d857a4a4f2ca3669b691536fe262c04cddb38a9db252a8175e24f82464b2f87`. Aggregate restart and V3 health passed on 10000/4444/5520/5555.
+
+## 2026-08-05 - Responses history immutability and latest-suffix cache fix final truth
+- DS4 request 18 contained 294 messages; request 19 contained 297. The first 294 messages were JSON-equivalent, and the only appended suffix was assistant visible/reasoning content, assistant tool call, then its paired tool result. Historical turns are immutable and must never be globally scanned, merged, sorted, or rewritten by a later conversion.
+- The invalid whole-history Responses inbound ordered projector was physically removed. Req inbound retains its static adjacent protocol projection; Resp04 local continuation save is the unique owner that projects the finalized response delta separately and may coalesce only that newly appended assistant suffix before saving.
+- The regression lock uses a 294-message prefix and proves exact prefix equality, preserves an already-split historical assistant/tool sequence, and merges only the newest reasoning/text/tool-call suffix. Tool call ids and paired results retain source order and adjacency.
+- Verification: focused immutable-prefix test PASS; `responses_relay_local_continuation_integration` 31/31 PASS; protocol parity PASS; 109 forbidden mutations rejected; V3 architecture/resource/module gates PASS. Installed V3 is `0.90.4142`, SHA256 `f188324e61efbfd53175b19f0ba2ed7af2d67c37f7b40fb8554efc1240344462`; aggregate restart and health passed on 10000/4444/5520/5555. Jason's subsequent real cache test reported cache behavior normal.

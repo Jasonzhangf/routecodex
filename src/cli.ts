@@ -233,7 +233,7 @@ const launcherContext = {
   reportGuardianLifecycle,
   getModulesConfigPath,
   resolveCliEntryPath: () => path.resolve(__dirname, 'cli.js'),
-  resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
+  serverBin: path.resolve(__dirname, 'bin', process.platform === 'win32' ? 'rccv3.exe' : 'rccv3'),
   waitForever: () =>
     new Promise<void>(() => {
       return;
@@ -296,7 +296,7 @@ registerStartCommand(program, {
   killPidBestEffort,
   getModulesConfigPath,
   resolveCliEntryPath: () => path.resolve(__dirname, 'cli.js'),
-  resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
+  serverBin: path.resolve(__dirname, 'bin', process.platform === 'win32' ? 'rccv3.exe' : 'rccv3'),
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => spawn(cmd, args, opts),
   fetch,
   setupKeypress,

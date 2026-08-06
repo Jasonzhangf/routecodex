@@ -7,8 +7,7 @@ const TYPE_TO_PROTOCOL: Record<ProviderType, ProviderProtocol> = {
   responses: 'openai-responses',
   anthropic: 'anthropic-messages',
   gemini: 'gemini-chat',
-  mimoweb: 'anthropic-messages',
-  mock: 'openai-chat'
+  mimoweb: 'anthropic-messages'
 };
 
 const LEGACY_FAMILY_TO_TYPE: Record<string, ProviderType> = {
@@ -24,8 +23,7 @@ export function isProviderType(value: string): value is ProviderType {
     || value === 'responses'
     || value === 'anthropic'
     || value === 'gemini'
-    || value === 'mimoweb'
-    || value === 'mock';
+    || value === 'mimoweb';
 }
 
 export function normalizeProviderType(value?: string): ProviderType {

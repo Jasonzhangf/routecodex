@@ -28,8 +28,7 @@ export interface OpenAIStandardConfig extends ModuleConfig {
     | 'responses-http-provider'
     | 'anthropic-http-provider'
     | 'gemini-http-provider'
-    | 'mimoweb-provider'
-    | 'mock-provider';
+    | 'mimoweb-provider';
   config: {
     // 服务类型标识 (必需)
     providerType: ProviderType;
