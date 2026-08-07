@@ -1,8 +1,0 @@
-*
-!dist/
-!dist/**
-dist/test-output/
-dist/test-output/**
-!package.json
-!README.md
-!.npmignore
