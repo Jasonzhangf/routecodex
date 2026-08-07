@@ -10,7 +10,7 @@ describe('V3 CLI distribution surface', () => {
   const packageJson = JSON.parse(read('package.json'));
   const cargo = read('v3/crates/routecodex-v3-cli/Cargo.toml');
   const copyScript = read('scripts/copy-v3-cli-bin.mjs');
-  const packScript = read('scripts/pack-mode.mjs');
+  const packScript = read('scripts/pack-v3-release.mjs');
   const shimScript = read('scripts/ensure-cli-command-shim.mjs');
   const executableScript = read('scripts/ensure-cli-executable.mjs');
   const globalInstall = read('scripts/install-global.sh');
@@ -29,17 +29,14 @@ describe('V3 CLI distribution surface', () => {
     expect(copyScript).toContain("path.join(root, 'dist', 'bin'");
     expect(copyScript).toContain('legacyTargetBin');
     expect(copyScript).toContain('fs.rmSync(legacyTargetBin, { force: true })');
-    expect(packScript).toContain("const v3BinEntries = {");
+    expect(packScript).toContain('bin: {');
     expect(packScript).toContain("routecodex: 'dist/bin/rccv3'");
     expect(packScript).toContain("rcc: 'dist/bin/rccv3'");
     expect(packScript).toContain("rccv3: 'dist/bin/rccv3'");
-    expect(packScript).toContain("mutated.bin = { ...v3BinEntries }");
-    expect(packScript).toContain("args.name === 'routecodex' && args.bin === 'routecodex'");
-    expect(packScript).toContain("args.name === 'rcc' && args.bin === 'rcc'");
-    expect(packScript).toContain("args.v2 === true");
-    expect(packScript).toContain("mutated.bin = { rccv2: 'dist/cli.js' }");
-    expect(packScript).toContain('[pack-mode] unsupported release identity:');
-    expect(packScript).not.toContain("mutated.bin['routecodex-v3']");
+    expect(packScript).toContain('bash install.sh');
+    expect(packScript).toContain('Provides: rccv3, rcc, routecodex (all symlinked to the same V3 binary)');
+    expect(packScript).toContain('[pack-v3-release]');
+    expect(packScript).toContain("process.platform === 'win32' ? 'rccv3.exe' : 'rccv3'");
     expect(packageJson.scripts['test:v3-cli-distribution']).toContain(
       'tests/scripts/v3-cli-distribution.spec.ts',
     );
@@ -153,16 +150,16 @@ describe('V3 CLI distribution surface', () => {
     }
   });
 
-  it('rejects undeclared package/bin identities before mutating package metadata', () => {
+  it('rejects unsupported release mode before mutating package metadata', () => {
     const packageBefore = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
     const result = spawnSync(
       process.execPath,
-      ['scripts/pack-mode.mjs', '--name', 'custom-rcc', '--bin', 'custom-rcc'],
+      ['scripts/pack-v3-release.mjs', '--mode', 'custom-rcc'],
       { cwd: root, encoding: 'utf8' },
     );
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('[pack-mode] unsupported release identity:');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('[pack-v3-release] unknown mode:');
     expect(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).toBe(packageBefore);
     expect(fs.existsSync(path.join(root, 'package.json.bak.pack'))).toBe(false);
   });
