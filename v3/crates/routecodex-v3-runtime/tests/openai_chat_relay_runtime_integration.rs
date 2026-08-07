@@ -1293,6 +1293,40 @@ async fn request_side_channel_is_rejected_before_provider_transport() {
     assert!(error.to_string().contains("metadata_center"));
 }
 
+#[tokio::test]
+async fn openai_chat_unknown_direct_provider_model_returns_model_not_found() {
+    let manifest = manifest();
+    let runtime = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let error = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "controlled",
+                "controlled",
+                "session-openai-chat-404",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-openai-chat-404".into(),
+            payload: json!({
+                "model":"controlled.unknown-model",
+                "messages":[{"role":"user","content":"ping"}],
+                "stream":false
+            }),
+        },
+        &runtime,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("direct provider model controlled.unknown-model is not configured"),
+        "openai_chat provider.model absence must surface ModelNotFound: {error}"
+    );
+}
+
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(

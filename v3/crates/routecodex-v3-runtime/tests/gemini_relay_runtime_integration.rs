@@ -1622,3 +1622,38 @@ async fn gemini_thinking_budget_and_include_thoughts_produce_no_reasoning_effort
 }
 
 // E3: Gemini thinkingLevel -> reasoning.effort runtime integration.
+
+#[tokio::test]
+async fn gemini_unknown_direct_provider_model_returns_model_not_found() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let error = execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "session-gemini-404",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-gemini-404".into(),
+            endpoint_path: "/v1beta/models/controlled.unknown-model/generateContent".into(),
+            payload: json!({
+                "contents":[{"role":"user","parts":[{"text":"ping"}]}],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("direct provider model controlled.unknown-model is not configured"),
+        "gemini provider.model absence must surface ModelNotFound: {error}"
+    );
+}

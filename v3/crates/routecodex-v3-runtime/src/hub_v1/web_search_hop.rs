@@ -32,10 +32,11 @@ use super::{
     V3WebSearchCenterState,
 };
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target, v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderTargetResolutionInput,
+    resolve_v3_relay_target, resolve_v3_relay_target_outcome,
+    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
-use routecodex_v3_error::V3ProviderFailureSessionScope;
+use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderResponseBody,
 };
@@ -151,7 +152,7 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
         "stream": false
     });
     // 2. target 解析：body.model = backend binding -> direct model plan pin。
-    let selected = resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
+    let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
         manifest,
         server_id,
         entry_kind: "responses",
@@ -162,8 +163,29 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
         provider_health,
         now_ms: v3_relay_provider_policy_now_epoch_ms()?,
         deterministic_sample: 0,
-    })
-    .map_err(V3ResponsesRelayRuntimeError::Target)?;
+    }) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        V3RelayProviderTargetResolution::Failed(source)
+            if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
+        {
+            return Err(V3ResponsesRelayRuntimeError::ModelNotFound(
+                source.message.clone(),
+            ))
+        }
+        V3RelayProviderTargetResolution::Failed(source) => {
+            return Err(V3ResponsesRelayRuntimeError::Target(format!(
+                "{}: {}",
+                source.code, source.message
+            )))
+        }
+        V3RelayProviderTargetResolution::Exhausted {
+            attempted_candidates,
+        } => {
+            return Err(V3ResponsesRelayRuntimeError::Target(format!(
+                "selected target exhausted after {attempted_candidates:?}"
+            )))
+        }
+    };
     // 3. 搜索请求入站链（正常 Hub 链构造 req05，非 entry payload 重建）。
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         search_payload,
@@ -580,5 +602,174 @@ mod web_search_hop_tests {
         let error = project_web_search_result_into_finalized(&mut finalized, &captured)
             .expect_err("missing text_result must fail");
         assert!(error.to_string().contains("text_result missing"));
+    }
+}
+
+/// 本地 `websearch` / hosted `web_search` 工具调用（Resp03 拦截提取）。
+#[derive(Debug)]
+pub(crate) struct V3LocalWebSearchToolCall {
+    pub(crate) call_id: String,
+    pub(crate) query: String,
+    pub(crate) count: Option<u32>,
+    pub(crate) recency: Option<String>,
+    pub(crate) content_types: Vec<String>,
+}
+
+/// 提取 provider 响应中的第一个本地 `websearch` / hosted `web_search`
+/// function call 并做参数校验（query 必填非空；count/recency/content_types
+/// 可选）。Mode B 同轮激活校验由调用方用 profile.web_search_local_surface_active()
+/// 完成。
+pub(crate) fn first_local_websearch_tool_call(
+    payload: &Value,
+) -> Result<Option<V3LocalWebSearchToolCall>, V3HubRelayResponseError> {
+    let Some(output) = payload.get("output").and_then(Value::as_array) else {
+        return Ok(None);
+    };
+    for (index, item) in output.iter().enumerate() {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(item_type, "function_call" | "tool_call" | "custom_tool_call") {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| item.pointer("/function/name").and_then(Value::as_str));
+        if !name.is_some_and(|value| {
+            let value = value.trim();
+            value.eq_ignore_ascii_case("websearch") || value.eq_ignore_ascii_case("web_search")
+        }) {
+            continue;
+        }
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call missing call_id",
+            })?
+            .to_string();
+        let raw_arguments = item
+            .get("arguments")
+            .or_else(|| item.get("input"))
+            .or_else(|| item.pointer("/function/arguments"))
+            .and_then(Value::as_str)
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call missing arguments",
+            })?;
+        let arguments = raw_arguments.parse::<Value>().map_err(|_| {
+            V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call arguments must be valid JSON",
+            }
+        })?;
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(V3HubRelayResponseError::MalformedToolCall {
+                index,
+                reason: "websearch tool call requires a non-empty query",
+            })?
+            .to_string();
+        let count = arguments
+            .get("count")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok());
+        let recency = arguments
+            .get("recency")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let content_types = arguments
+            .get("content_types")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        return Ok(Some(V3LocalWebSearchToolCall {
+            call_id,
+            query,
+            count,
+            recency,
+            content_types,
+        }));
+    }
+    Ok(None)
+}
+
+/// 提取同响应 hosted `web_search_tool_result`（MiniMax hosted search）中
+/// 与 call_id 匹配的搜索结果文本；无匹配项返回 None（走本地搜索 hop）。
+pub(crate) fn hosted_web_search_result_text(payload: &Value, call_id: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for item in payload
+        .get("output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) != Some("web_search_tool_result") {
+            continue;
+        }
+        if item.get("tool_use_id").and_then(Value::as_str) != Some(call_id) {
+            continue;
+        }
+        for result in item
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if result.get("type").and_then(Value::as_str) != Some("web_search_result") {
+                continue;
+            }
+            let title = result
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let url = result
+                .get("url")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let text = result
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let mut part = String::new();
+            if let Some(title) = title {
+                part.push_str(title);
+            }
+            if let Some(url) = url {
+                if !part.is_empty() {
+                    part.push(' ');
+                }
+                part.push_str(url);
+            }
+            if let Some(text) = text {
+                if !part.is_empty() {
+                    part.push('\n');
+                }
+                part.push_str(text);
+            }
+            if !part.is_empty() {
+                parts.push(part);
+            }
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
     }
 }

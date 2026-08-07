@@ -871,3 +871,38 @@ targets = [
     )
     .unwrap()
 }
+
+#[tokio::test]
+async fn anthropic_unknown_direct_provider_model_returns_model_not_found() {
+    let scope = "anthropic_404";
+    let transport = JsonTransport {
+        captured: Mutex::new(None),
+    };
+    let error = execute_v3_anthropic_relay_runtime(
+        &manifest(scope),
+        V3AnthropicRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "session-anthropic-404",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-anthropic-404".into(),
+            payload: json!({
+                "model":"controlled.unknown-model",
+                "messages":[{"role":"user","content":"ping"}],
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("direct provider model controlled.unknown-model is not configured"),
+        "anthropic provider.model absence must surface ModelNotFound: {error}"
+    );
+}

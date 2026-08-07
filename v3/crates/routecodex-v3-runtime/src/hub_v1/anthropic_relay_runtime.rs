@@ -2,10 +2,12 @@ use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target,
-    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
+    resolve_v3_relay_target_outcome, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
+    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
+    V3RelayProviderTargetResolutionInput,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
@@ -163,6 +165,8 @@ pub enum V3AnthropicRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Relay target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Relay requested direct provider model not found: {0}")]
+    ModelNotFound(String),
     #[error("V3 Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Relay provider compat failed: {0}")]
@@ -539,7 +543,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let selected = if let Some(selected) = retry_selected.take() {
             selected
         } else {
-            match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
+            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
                 failure_session_scope: &input.failure_session_scope,
@@ -552,8 +556,27 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     .map_err(V3AnthropicRelayRuntimeError::Target)?,
                 deterministic_sample,
             }) {
-                Ok(selected) => selected,
-                Err(error) => return Err(V3AnthropicRelayRuntimeError::Target(error)),
+                V3RelayProviderTargetResolution::Selected(selected) => selected,
+                V3RelayProviderTargetResolution::Failed(source)
+                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
+                {
+                    return Err(V3AnthropicRelayRuntimeError::ModelNotFound(
+                        source.message.clone(),
+                    ))
+                }
+                V3RelayProviderTargetResolution::Failed(source) => {
+                    return Err(V3AnthropicRelayRuntimeError::Target(format!(
+                        "{}: {}",
+                        source.code, source.message
+                    )))
+                }
+                V3RelayProviderTargetResolution::Exhausted {
+                    attempted_candidates,
+                } => {
+                    return Err(V3AnthropicRelayRuntimeError::Target(format!(
+                        "selected target exhausted after {attempted_candidates:?}"
+                    )))
+                }
             }
         };
         let provider_wire_protocol = provider_wire_protocol_for_provider_type(
@@ -1200,16 +1223,27 @@ fn commit_or_release_local_continuation(
 pub fn project_v3_anthropic_relay_runtime_failure(
     error: V3AnthropicRelayRuntimeError,
 ) -> V3AnthropicRelayRuntimeOutput {
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3HubRuntime",
-        "anthropic_relay_runtime_error",
-        error.to_string(),
-    );
+    let display = error.to_string();
+    let source = match error {
+        V3AnthropicRelayRuntimeError::ModelNotFound(message) => {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ModelNotFound,
+                "V3Target10ConcreteProviderSelected",
+                "direct_model_not_found",
+                message,
+            )
+        }
+        error => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3HubRuntime",
+            "anthropic_relay_runtime_error",
+            error.to_string(),
+        ),
+    };
     error_output(
         source,
         500,
-        json!({"type":"error","error":{"type":"runtime_error","message":error.to_string()}}),
+        json!({"type":"error","error":{"type":"runtime_error","message":display}}),
         "none",
         Vec::new(),
     )
