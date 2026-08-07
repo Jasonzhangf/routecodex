@@ -471,31 +471,60 @@ fn strip_current_stopless_response_artifacts(
     payload: &Value,
     call_id: &str,
     evidence: Option<&str>,
-) -> Value {    let mut projected = payload.clone();
+) -> Value {
+    let mut projected = payload.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
-        output.retain(|item| {
+        for item in output.iter_mut() {
             let item_call_id = item
                 .get("call_id")
                 .or_else(|| item.get("id"))
                 .and_then(Value::as_str);
-            !(item_call_id == Some(call_id)
+            let is_stopless_call = item_call_id == Some(call_id)
                 && item
                     .get("type")
                     .and_then(Value::as_str)
                     .is_some_and(|kind| {
                         matches!(kind, "function_call" | "tool_call" | "custom_tool_call")
-                    }))
-        });
+                    });
+            if !is_stopless_call {
+                continue;
+            }
+            // reasoningStop 工具调用投影为 noop：无参数、无操作，文本承载在
+            // 客户端可见 message 中（不丢失响应内容）。
+            if let Some(object) = item.as_object_mut() {
+                object.insert("name".to_string(), Value::String("noop".to_string()));
+                object.remove("arguments");
+                if let Some(function) = object.get_mut("function") {
+                    if let Some(function) = function.as_object_mut() {
+                        function.insert("name".to_string(), Value::String("noop".to_string()));
+                        function.remove("arguments");
+                    }
+                }
+            }
+        }
         if let Some(evidence) = evidence {
-            let has_visible_message = output.iter().any(|item| {
+            let visible = collect_stopless_visible_text(output);
+            let completion = visible
+                .trim()
+                .is_empty()
+                .then_some(evidence.to_string())
+                .unwrap_or_else(|| {
+                    if visible.trim().ends_with('\n') {
+                        format!("{visible}{evidence}")
+                    } else {
+                        format!("{visible}\n\n{evidence}")
+                    }
+                });
+            if let Some(message) = output.iter_mut().find(|item| {
                 item.get("type").and_then(Value::as_str) == Some("message")
                     && item.get("content").is_some()
-            });
-            if !has_visible_message {
+            }) {
+                append_stopless_message_text(message, &completion);
+            } else {
                 output.push(json!({
                     "type": "message",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": evidence}]
+                    "content": [{"type": "output_text", "text": completion}]
                 }));
             }
         }
@@ -504,6 +533,43 @@ fn strip_current_stopless_response_artifacts(
     strip_current_stopless_control_text(&mut projected);
     finalize_current_stopless_response(&mut projected);
     projected
+}
+
+fn collect_stopless_visible_text(output: &[Value]) -> String {
+    let mut visible = String::new();
+    for item in output {
+        if item.get("type").and_then(Value::as_str) != Some("message") {
+            continue;
+        }
+        if let Some(parts) = item.get("content").and_then(Value::as_array) {
+            for part in parts {
+                if !matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("output_text" | "text")
+                ) {
+                    continue;
+                }
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    visible.push_str(text);
+                    visible.push('\n');
+                }
+            }
+        }
+    }
+    visible
+}
+
+fn append_stopless_message_text(message: &mut Value, text: &str) {
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
+    let mut parts = object
+        .get("content")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    parts.push(json!({"type": "output_text", "text": text}));
+    object.insert("content".to_string(), Value::Array(parts));
 }
 
 fn finalize_current_stopless_response(payload: &mut Value) {
@@ -1267,8 +1333,54 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_stopless_cli_pairs_are_exact_json_cmd_only() {
-        let call = response_call("call-dynamic", CMD_ARGS);
+    fn resp03_stopless_reasoning_stop_projects_to_noop_with_visible_text() {
+        let payload = json!({
+            "id": "resp_stopless_noop_1",
+            "status": "completed",
+            "finish_reason": "stop",
+            "output": [
+                {"type":"reasoning","summary":[{"type":"summary_text","text":"思考内容"}]},
+                {"type":"message","role":"assistant","content":[{"type":"output_text","text":"可见文字"}]},
+                {"type":"function_call","call_id":"call_stop_1","name":"exec_command","arguments":"{\"cmd\":\"routecodex hook run reasoningStop\",\"stopreason\":0,\"reason\":\"完成\",\"evidence\":\"证据内容\"}"}
+            ],
+            "output_text": "可见文字"
+        });
+        let projected = strip_current_stopless_response_artifacts(
+            &payload,
+            "call_stop_1",
+            Some("完成。\n证据：证据内容"),
+        );
+        let output = projected["output"].as_array().expect("output array");
+        let noop_calls = output
+            .iter()
+            .filter(|item| {
+                item.get("type").and_then(Value::as_str) == Some("function_call")
+                    && item.get("name").and_then(Value::as_str) == Some("noop")
+                    && item.get("arguments").is_none()
+            })
+            .count();
+        assert_eq!(noop_calls, 1, "reasoningStop must project to a parameterless noop call: {projected}");
+        let has_text = output.iter().any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("message")
+                && item
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            part.get("type").and_then(Value::as_str) == Some("output_text")
+                                && part.get("text").and_then(Value::as_str).is_some_and(|text| {
+                                    text.contains("可见文字") && text.contains("证据内容")
+                                })
+                        })
+                    })
+        });
+        assert!(has_text, "visible text and evidence must not be lost: {projected}");
+        assert_eq!(projected["finish_reason"], "stop");
+        assert_eq!(projected["status"], "completed");
+    }
+
+    #[test]
+    fn dynamic_stopless_cli_pairs_are_exact_json_cmd_only() {        let call = response_call("call-dynamic", CMD_ARGS);
         assert!(output_pairs_immediately_after_stopless_cli_call(
             &response_output("call-dynamic"),
             Some(&call)
