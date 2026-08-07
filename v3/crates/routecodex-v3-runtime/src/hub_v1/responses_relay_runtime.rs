@@ -11,7 +11,7 @@ use crate::local_continuation::{
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, resolve_v3_relay_target,
+    provider_runtime_failure_stage,
     resolve_v3_relay_target_outcome, run_v3_relay_provider_failure_policy,
     v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
     v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
@@ -1687,13 +1687,12 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
             }
         };
     }
-    let provider_semantic_body = request_outcome.payload().clone();
+    let provider_semantic_body = std::sync::Arc::clone(request_outcome.payload_arc());
     let anthropic_response_projection_context =
         V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
             .map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
             })?;
-    let local_continuation_request_body = provider_semantic_body.clone();
     let req04 = request_outcome.into_governed();
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
@@ -2297,20 +2296,30 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     manifest,
                     &input.server_id,
                     stopless_control.as_ref(),
-                    response_stopless_state,
+                    response_stopless_state.clone(),
                 )?;
                 if let Some(web_search_state) = response_web_search_state {
-                    let captured = execute_local_web_search_hop(
-                        manifest,
-                        &input.server_id,
-                        &input.failure_session_scope,
-                        &provider_failure_health,
-                        request_web_search_backend_binding.as_deref(),
-                        &web_search_state,
-                        transport,
-                        &input.request_id,
-                    )
-                    .await?;
+                    // MiniMax hosted search：结果已随同一响应返回
+                    // （SearchResultCaptured）→ 跳过本地搜索 hop；否则走
+                    // backend direct pin 的搜索 hop。
+                    let captured =
+                        if web_search_state.phase()
+                            == V3WebSearchCenterPhase::SearchResultCaptured
+                        {
+                            web_search_state
+                        } else {
+                            execute_local_web_search_hop(
+                                manifest,
+                                &input.server_id,
+                                &input.failure_session_scope,
+                                &provider_failure_health,
+                                request_web_search_backend_binding.as_deref(),
+                                &web_search_state,
+                                transport,
+                                &input.request_id,
+                            )
+                            .await?
+                        };
                     project_web_search_result_into_finalized(
                         &mut finalized_provider_value,
                         &captured,
@@ -2326,7 +2335,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
-                    &local_continuation_request_body,
+                    provider_semantic_body.as_ref(),
                     &finalized_provider_value,
                     action,
                 )?;
@@ -2356,7 +2365,10 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 observability.stopless_activation =
-                    response_has_stopless_activation(&finalized_provider_value);
+                    response_stopless_state
+                        .as_ref()
+                        .and_then(V3StoplessCenterState::last_provider_stopless_call_id)
+                        .is_some();
                 observability.timing = Some(handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming)));
@@ -2556,20 +2568,30 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     manifest,
                     &input.server_id,
                     stopless_control.as_ref(),
-                    response_stopless_state,
+                    response_stopless_state.clone(),
                 )?;
                 if let Some(web_search_state) = response_web_search_state {
-                    let captured = execute_local_web_search_hop(
-                        manifest,
-                        &input.server_id,
-                        &input.failure_session_scope,
-                        &provider_failure_health,
-                        request_web_search_backend_binding.as_deref(),
-                        &web_search_state,
-                        transport,
-                        &input.request_id,
-                    )
-                    .await?;
+                    // MiniMax hosted search：结果已随同一响应返回
+                    // （SearchResultCaptured）→ 跳过本地搜索 hop；否则走
+                    // backend direct pin 的搜索 hop。
+                    let captured =
+                        if web_search_state.phase()
+                            == V3WebSearchCenterPhase::SearchResultCaptured
+                        {
+                            web_search_state
+                        } else {
+                            execute_local_web_search_hop(
+                                manifest,
+                                &input.server_id,
+                                &input.failure_session_scope,
+                                &provider_failure_health,
+                                request_web_search_backend_binding.as_deref(),
+                                &web_search_state,
+                                transport,
+                                &input.request_id,
+                            )
+                            .await?
+                        };
                     project_web_search_result_into_finalized(
                         &mut finalized_provider_value,
                         &captured,
@@ -2585,7 +2607,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                 commit_or_release_responses_local_continuation(
                     local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
-                    &local_continuation_request_body,
+                    provider_semantic_body.as_ref(),
                     &finalized_provider_value,
                     action,
                 )?;
@@ -2639,7 +2661,10 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                             .and_then(|snapshot| snapshot.usage)
                     });
                 observability.stopless_activation =
-                    response_has_stopless_activation(&finalized_provider_value);
+                    response_stopless_state
+                        .as_ref()
+                        .and_then(V3StoplessCenterState::last_provider_stopless_call_id)
+                        .is_some();
                 let timing = handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -4502,23 +4527,6 @@ fn infer_v3_runtime_finish_reason(
             }
         }
     }
-}
-
-fn response_has_stopless_activation(value: &Value) -> bool {
-    value
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("call_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|call_id| call_id == "call_stopless_reasoning")
-                    && item
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .is_some_and(|name| name == "exec_command")
-            })
-        })
 }
 
 fn read_v3_runtime_string_path(value: &Value, path: &[&str]) -> Option<String> {

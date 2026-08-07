@@ -8,6 +8,7 @@ use super::{
     V3HubRespOutbound05ClientSemantic, V3HubTransportIntent,
 };
 use serde_json::Value;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum V3AnthropicRelayProtocolHookError {
@@ -118,6 +119,7 @@ pub fn run_v3_anthropic_relay_runtime_req_inbound(
         transport_intent,
     } = raw;
     let V3HubOpaquePayload(payload) = payload;
+    let payload = Arc::try_unwrap(payload).unwrap_or_else(|arc| (*arc).clone());
     let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;
     Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
         build_v3_hub_req_inbound_01_client_raw(
@@ -160,6 +162,7 @@ fn run_v3_anthropic_relay_req_inbound_hook(
         transport_intent,
     } = raw;
     let V3HubOpaquePayload(payload) = payload;
+    let payload = Arc::try_unwrap(payload).unwrap_or_else(|arc| (*arc).clone());
     let semantic = encode_v3_anthropic_request_as_responses_semantic(payload)?;
     let raw = build_v3_hub_req_inbound_01_client_raw(
         semantic,

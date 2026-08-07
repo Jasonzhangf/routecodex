@@ -10,6 +10,7 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderTargetResolutionInput,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
+use std::sync::Arc;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
@@ -208,6 +209,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         &req05.previous.previous.previous.previous.payload.0,
         &requested_model,
     );
+    let routing_payload_ref = routing_payload.as_ref();
     let mut failed_candidates = BTreeSet::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
@@ -231,7 +233,7 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
                 failure_session_scope: &input.failure_session_scope,
                 entry_kind: "gemini",
                 endpoint_path: &input.endpoint_path,
-                body: &routing_payload,
+                body: routing_payload_ref,
                 request_local_excluded_candidates: &failed_candidates,
                 provider_health: &provider_health,
                 now_ms: v3_relay_provider_policy_now_epoch_ms()
@@ -1101,9 +1103,12 @@ fn gemini_model_from_endpoint_path(
     Ok(model.to_string())
 }
 
-fn gemini_routing_payload(body: &Value, requested_model: &str) -> Value {
-    let mut routing_body = body.clone();
-    if let Some(object) = routing_body.as_object_mut() {
+fn gemini_routing_payload(
+    body: &std::sync::Arc<Value>,
+    requested_model: &str,
+) -> std::sync::Arc<Value> {
+    let mut routing_body = std::sync::Arc::clone(body);
+    if let Some(object) = Arc::make_mut(&mut routing_body).as_object_mut() {
         object.insert(
             "model".to_string(),
             Value::String(requested_model.to_string()),

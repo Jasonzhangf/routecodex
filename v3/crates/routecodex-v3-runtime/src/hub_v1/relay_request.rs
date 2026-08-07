@@ -355,6 +355,10 @@ pub struct V3HubRelayRequestOutcome {
 }
 impl V3HubRelayRequestOutcome {
     pub fn payload(&self) -> &Value {
+        self.payload_arc().as_ref()
+    }
+
+    pub fn payload_arc(&self) -> &std::sync::Arc<Value> {
         &self.governed.previous.previous.previous.payload.0
     }
     pub fn continuation(&self) -> V3HubContinuationOwnership {
@@ -458,7 +462,7 @@ impl V3HubRelayRequestHooks {
                 });
             }
             current_payload_start = merge_v3_relay_restored_local_context_at_req04(
-                &mut classified.previous.previous.payload.0,
+                Arc::make_mut(&mut classified.previous.previous.payload.0),
                 context,
             )
             .map_err(
@@ -472,7 +476,7 @@ impl V3HubRelayRequestHooks {
         }
         let stopless_state = if profile.stopless_reasoning_stop_enabled() {
             let stopless_state = apply_v3_stopless_request_hook_at_req04(
-                &mut classified.previous.previous.payload.0,
+                Arc::make_mut(&mut classified.previous.previous.payload.0),
                 current_payload_start,
                 &mut events,
                 profile.stopless_center_state(),
@@ -487,7 +491,7 @@ impl V3HubRelayRequestHooks {
             .web_search_execution_mode()
             .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search)
         {
-            apply_v3_web_search_request_hook_at_req04(&mut classified.previous.previous.payload.0)?
+            apply_v3_web_search_request_hook_at_req04(Arc::make_mut(&mut classified.previous.previous.payload.0))?
         } else {
             None
         };
@@ -503,7 +507,7 @@ impl V3HubRelayRequestHooks {
                 V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini
             );
         let tool_output_count = govern_tool_outputs_at_req04(
-            &mut classified.previous.previous.payload.0,
+            Arc::make_mut(&mut classified.previous.previous.payload.0),
             local_context.as_deref(),
             govern_chat_messages_tool_outputs,
             current_payload_start,

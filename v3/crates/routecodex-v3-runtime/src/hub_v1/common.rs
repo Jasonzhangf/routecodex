@@ -95,7 +95,7 @@ pub enum V3HubTransportIntent {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct V3HubOpaquePayload(pub(crate) Value);
+pub(crate) struct V3HubOpaquePayload(pub(crate) Arc<Value>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct V3HubResponsePayload(pub(crate) Arc<Value>);

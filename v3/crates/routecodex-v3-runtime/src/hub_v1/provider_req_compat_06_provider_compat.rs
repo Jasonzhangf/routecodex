@@ -36,7 +36,7 @@ pub fn build_provider_req_compat_06_from_v3_hub_req_outbound_07(
     Ok(ProviderReqCompat06ProviderCompat {
         previous: input,
         profile,
-        payload: V3HubOpaquePayload(payload),
+        payload: V3HubOpaquePayload(std::sync::Arc::new(payload)),
     })
 }
 
@@ -108,6 +108,10 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             build_v3_openai_chat_standard_request_for_selected_web_search_mode(
                 input.provider_semantic_payload(),
                 selected.web_search_execution_mode,
+                selected
+                    .model_capabilities
+                    .iter()
+                    .any(|capability| capability == "web_search"),
             )?
         }
         V3HubProviderWireProtocol::Responses => {

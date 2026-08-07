@@ -1,5 +1,6 @@
 use super::{V3HubEntryProtocol, V3HubInvocationSource, V3HubOpaquePayload, V3HubTransportIntent};
 use serde_json::Value;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubReqInbound01ClientRaw {
@@ -16,7 +17,7 @@ pub fn build_v3_hub_req_inbound_01_client_raw(
     transport_intent: V3HubTransportIntent,
 ) -> V3HubReqInbound01ClientRaw {
     V3HubReqInbound01ClientRaw {
-        payload: V3HubOpaquePayload(payload),
+        payload: V3HubOpaquePayload(Arc::new(payload)),
         entry_protocol,
         invocation_source,
         transport_intent,

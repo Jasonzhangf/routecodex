@@ -3,6 +3,8 @@ use super::{
     encode_v3_anthropic_request_as_responses_semantic, V3HubEntryProtocol,
     V3HubReqInbound01ClientRaw, V3HubRequestSemanticProtocol,
 };
+use serde_json::Value;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubReqInbound02Normalized {
@@ -30,10 +32,10 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             .is_none()
     {
         let canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
-            &input.payload.0,
+            input.payload.0.as_ref(),
         )
         .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
-        input.payload.0 = canonical;
+        input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
@@ -41,7 +43,8 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         });
     }
     if input.entry_protocol == V3HubEntryProtocol::Anthropic {
-        let source_payload = std::mem::take(&mut input.payload.0);
+        let source_payload = std::mem::replace(&mut input.payload.0, Arc::new(Value::Null));
+        let source_payload = Arc::try_unwrap(source_payload).unwrap_or_else(|arc| (*arc).clone());
         let mut responses_semantic = if source_payload
             .get("input")
             .and_then(serde_json::Value::as_array)
@@ -91,7 +94,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
                 canonical_object.insert("routecodex_chat_extension".to_string(), value);
             }
         }
-        input.payload.0 = canonical;
+        input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
@@ -128,9 +131,9 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
     }
     let mut input = input;
     let canonical =
-        build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(&input.payload.0)
+        build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(input.payload.0.as_ref())
             .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
-    input.payload.0 = canonical;
+    input.payload.0 = Arc::new(canonical);
     Ok(V3HubReqInbound02Normalized {
         previous: input,
         semantic_protocol: V3HubRequestSemanticProtocol::Chat,
