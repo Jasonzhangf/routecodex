@@ -34,7 +34,7 @@ fail() {
 }
 
 check_repo_root() {
-  if [ ! -f "package.json" ] || [ ! -d "src" ]; then
+  if [ ! -f "package.json" ] || [ ! -f "v3/Cargo.toml" ]; then
     fail "请在 routecodex 仓库根目录下执行：scripts/install-release.sh"
   fi
 }
@@ -239,81 +239,8 @@ build_release_project() {
   echo "✅ release 构建完成"
 }
 
-cleanup_old_global_package() {
-  echo "🧹 清理 release 侧 npm 全局 routecodex 历史残留（若存在）..."
-  local global_node_modules
-  global_node_modules="$(npm root -g 2>/dev/null || true)"
-  npm uninstall -g routecodex >/dev/null 2>&1 || true
-  if [ -n "${global_node_modules:-}" ] && [ -e "${global_node_modules}/routecodex" ]; then
-    echo "🧹 删除旧全局包: ${global_node_modules}/routecodex"
-    rm -rf "${global_node_modules}/routecodex"
-  fi
-}
 
-install_release_snapshot_for_rcc_home() {
-  local root="$1"
-  if [ -z "$root" ]; then
-    return
-  fi
-  case "$root" in
-    ~/*) root="$HOME/${root#~/}" ;;
-  esac
-  local parent
-  parent="$(dirname "$root")"
-  mkdir -p "$parent"
-  root="$(cd "$parent" && pwd)/$(basename "$root")"
-  mkdir -p "$root"
-  echo "   -> $root"
-  (
-    cd "$INSTALL_BUILD_ROOT"
-    RCC_HOME="$root" ROUTECODEX_HOME="$root" ROUTECODEX_USER_DIR="$root" ROUTECODEX_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" node scripts/install-release-snapshot.mjs
-    node scripts/ensure-cli-executable.mjs
-  )
-}
 
-install_release_snapshot() {
-  echo "📦 安装 release snapshot（不可变运行时）..."
-  local roots=()
-  if [ -n "${RCC_HOME:-}" ]; then
-    roots+=("$RCC_HOME")
-  fi
-  if [ -n "${ROUTECODEX_HOME:-}" ]; then
-    roots+=("$ROUTECODEX_HOME")
-  fi
-  if [ -n "${ROUTECODEX_USER_DIR:-}" ]; then
-    roots+=("$ROUTECODEX_USER_DIR")
-  fi
-  roots+=("$HOME/.rcc")
-  if [ -d "/Volumes/extension/.rcc" ]; then
-    roots+=("/Volumes/extension/.rcc")
-  fi
-
-  local seen=""
-  local refreshed=0
-  local root=""
-  for root in "${roots[@]}"; do
-    if [ -z "$root" ]; then
-      continue
-    fi
-    case "$root" in
-      ~/*) root="$HOME/${root#~/}" ;;
-    esac
-    local parent
-    parent="$(dirname "$root")"
-    mkdir -p "$parent"
-    root="$(cd "$parent" && pwd)/$(basename "$root")"
-    case " $seen " in
-      *" $root "*) continue ;;
-    esac
-    seen="$seen $root"
-    install_release_snapshot_for_rcc_home "$root"
-    refreshed=$((refreshed + 1))
-  done
-  if [ "$refreshed" -eq 0 ]; then
-    fail "未找到可刷新的 RCC home"
-  fi
-  ROUTECODEX_SHIM_PREFER_RELEASE_SNAPSHOT=1 node "$SOURCE_ROOT/scripts/ensure-cli-command-shim.mjs"
-}
 
 verify_cli_commands() {
   echo "🔍 验证 routecodex / rccv3 / rcc 安装..."
@@ -447,3 +374,4 @@ main() {
 }
 
 main "$@"
+

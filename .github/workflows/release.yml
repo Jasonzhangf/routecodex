@@ -45,11 +45,11 @@ jobs:
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run test:v3-workspace
 
-      - name: Pack rcc tarball
+      - name: Pack V3 npm tarball
         env:
           BUILD_MODE: release
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run pack:rcc
+        run: npm run pack:v3:npm
 
       - name: Resolve tag + asset name
         id: meta
@@ -62,10 +62,10 @@ jobs:
           else
             TAG="v${VERSION}"
           fi
-          TARBALL="jsonstudio-rcc-${VERSION}.tgz"
+          TARBALL="artifacts/pack/routecodex-v3-${VERSION}.tgz"
           if [[ ! -f "${TARBALL}" ]]; then
             echo "missing tarball: ${TARBALL}" >&2
-            ls -la jsonstudio-rcc-*.tgz || true
+            ls -la artifacts/pack/routecodex-v3-*.tgz || true
             exit 2
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
@@ -80,7 +80,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: ${{ steps.meta.outputs.tarball }}
           body: |
-            - CI: build/test using npm-installed `@jsonstudio/llms` (no local sharedmodule required)
+            - V3-only Rust binary (no V2 TS runtime)
             - Asset: `${{ steps.meta.outputs.tarball }}`
 
       - name: Publish to npm (optional)

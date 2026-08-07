@@ -199,14 +199,9 @@ function checkRootGeneratedResidue() {
 function checkRootWriteSources() {
   const checks = [
     {
-      path: 'scripts/pack-mode.mjs',
+      path: 'scripts/pack-v3-release.mjs',
       forbidden: /spawnSync\('npm',\s*\['pack'\]\)/,
-      message: 'scripts/pack-mode.mjs must use --pack-destination under artifacts/pack',
-    },
-    {
-      path: 'scripts/pack-rcc.mjs',
-      forbidden: /path\.join\(PROJECT_ROOT,\s*tarballName\)/,
-      message: 'scripts/pack-rcc.mjs must read tarballs from artifacts/pack',
+      message: 'scripts/pack-v3-release.mjs must use --pack-destination under artifacts/pack',
     },
     {
       path: 'scripts/install-global.sh',

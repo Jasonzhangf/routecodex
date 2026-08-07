@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4163",
+  "version": "0.90.4165",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -216,7 +216,6 @@
     "install:release": "./scripts/install-release.sh",
     "install:v3": "npm run test:install-v3-target-cleanup && node scripts/install-v3-cli.mjs",
     "test:install-v3-target-cleanup": "node --test tests/scripts/install-v3-cli-target-cleanup.spec.mjs",
-    "pack:rcc": "node scripts/pack-rcc.mjs",
     "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'dist/bin/rccv3 server start'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'dist/bin/rccv3 server start --foreground'",
@@ -233,7 +232,6 @@
     "debug:responses:lmstudio:text": "tsx scripts/tools-dev/responses-debug-client/src/index.ts --file scripts/tools-dev/responses-debug-client/payloads/text.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "debug:responses:lmstudio:tool": "tsx scripts/tools-dev/responses-debug-client/src/index.ts --file scripts/tools-dev/responses-debug-client/payloads/tool.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "capture:responses:lmstudio": "node scripts/capture-responses-sse.mjs --file scripts/tools-dev/responses-debug-client/payloads/tool.json",
-    "llmswitch:link:global": "node scripts/link-global-llms-local.mjs --require-target",
     "rc-config": "node scripts/rc-config.mjs",
     "config:validate:providers": "node scripts/validate-config-providers.mjs",
     "replay:codex-sample": "node scripts/replay-codex-sample.mjs",
@@ -285,7 +283,9 @@
     "test:agent-p0-payload-control-guard-red-fixtures": "node scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs",
     "verify:v3-architecture-ci": "node scripts/architecture/verify-v3-architecture-ci.mjs",
     "verify:agent-collab-protocol": "node scripts/architecture/verify-agent-collab-protocol.mjs",
-    "test:v3-provider-action-gate-red-fixtures": "node scripts/tests/v3-provider-action-gate-red-fixtures.mjs"
+    "test:v3-provider-action-gate-red-fixtures": "node scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "pack:v3:dev": "node scripts/pack-v3-release.mjs --mode dev",
+    "pack:v3:npm": "node scripts/pack-v3-release.mjs --mode npm"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
