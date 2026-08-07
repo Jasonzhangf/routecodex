@@ -323,7 +323,12 @@ const responseWrongOwnerAuditSource = stripStringLiterals(responseOwnerSource);
 forbid(requestWrongOwnerAuditSource, files.request, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in request governance');
 forbid(responseWrongOwnerAuditSource, responseSplitOwner, /handler|server_frame|provider_runtime|transport_socket|websocket/i, 'wrong owner repair vocabulary in response governance');
 forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /read_dir|libloading/i, 'dynamic filesystem hook');
-forbid(text.request + responseOwnerSource, 'V3 Relay tool parity Rust owner', /metadata_center(?!_local_search)[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center(?!_local_search)/i, 'MetadataCenter payload/control leakage');
+const metadataCenterLeakOwnerSource = text.request + responseOwnerSource;
+const metadataCenterLegalIdentifierStripped = metadataCenterLeakOwnerSource.replaceAll(
+  '::is_metadata_center_local_search',
+  '',
+);
+forbid(metadataCenterLegalIdentifierStripped, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
 forbid(text.tests, files.tests, /fallback/i, 'fallback in parity tests');
 forbid(text.responsesLocalTests, files.responsesLocalTests, /fallback/i, 'fallback in Responses Relay local continuation tests');
 

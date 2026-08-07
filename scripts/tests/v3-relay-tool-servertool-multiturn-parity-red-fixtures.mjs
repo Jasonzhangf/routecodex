@@ -98,6 +98,7 @@ const cases = [
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
     marker: 'apply_v3_tool_call_servertool_hook_at_resp03',
     mutation: 'apply_v3_tool_call_servertool_hook_removed_at_resp03',
+    all: true,
     diagnostic: /apply_v3_tool_call_servertool_hook_at_resp03/,
   },
   {
@@ -105,6 +106,7 @@ const cases = [
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
     marker: 'apply_v3_stop_servertool_hook_at_resp03',
     mutation: 'apply_v3_stop_servertool_hook_removed_at_resp03',
+    all: true,
     diagnostic: /apply_v3_stop_servertool_hook_at_resp03/,
   },
   {
@@ -232,6 +234,22 @@ const cases = [
     mutation: 'fn full_materialize_govern_tool_outputs_at_req04',
     diagnostic: /full payload materialization shortcut|full_materialize/,
   },
+  {
+    name: 'legal metadata_center method reference with nearby payload write',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+    marker: 'fn govern_tool_outputs_at_req04',
+    mutation:
+      'fn metadata_center_leak() { let mut payload = serde_json::Map::new(); payload.insert("metadata_center".to_string(), true.into()); }\nfn govern_tool_outputs_at_req04',
+    diagnostic: /MetadataCenter payload\/control leakage/,
+  },
+  {
+    name: 'metadata_center method-name string literal written into payload',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
+    marker: 'fn govern_tool_outputs_at_req04',
+    mutation:
+      'fn metadata_center_string_leak() { let mut payload = serde_json::Map::new(); payload.insert("is_metadata_center_local_search".to_string(), true.into()); }\nfn govern_tool_outputs_at_req04',
+    diagnostic: /MetadataCenter payload\/control leakage/,
+  },
 ];
 
 const failures = [];
@@ -249,7 +267,12 @@ for (const testCase of cases) {
       failures.push(`${testCase.name}: mutation marker missing`);
       continue;
     }
-    writeFileSync(target, source.replace(testCase.marker, testCase.mutation));
+    writeFileSync(
+      target,
+      testCase.all
+        ? source.split(testCase.marker).join(testCase.mutation)
+        : source.replace(testCase.marker, testCase.mutation),
+    );
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
