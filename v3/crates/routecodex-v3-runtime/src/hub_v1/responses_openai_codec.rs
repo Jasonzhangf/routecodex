@@ -61,16 +61,31 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 }
             }
             "message" => {
+                let is_assistant_message = item
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .unwrap_or("user")
+                    .trim()
+                    .eq_ignore_ascii_case("assistant");
+                let message = build_v3_openai_chat_message_from_responses_message(item)?;
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &pending_tool_call_ids,
-                    build_v3_openai_chat_message_from_responses_message(item)?,
-                    None,
+                    message,
+                    turn_assistant_tail_index,
                 )?;
-                // 显式 message item（含 role=assistant）是独立历史轮次：不参与
-                // 同轮 output_text/function_call 合并，避免改写历史消息边界。
-                turn_assistant_tail_index = None;
+                if is_assistant_message {
+                    // 前缀缓存硬约束：Codex relay 输入中同轮 assistant 输出以
+                    // message(role=assistant) item 呈现（文本 + 紧随的 function_call）。
+                    // 必须允许后续 function_call 合并进它，否则相邻 assistant 消息
+                    // 让 provider chat renderer 插入 EOS，破坏所有 relay provider 的
+                    // 前缀缓存（如 DwarfStar usage_cache 0%）。仅 user/tool 类 message
+                    // 清空 tail。
+                    turn_assistant_tail_index = Some(messages.len() - 1);
+                } else {
+                    turn_assistant_tail_index = None;
+                }
             }
             "output_text" => {
                 append_v3_openai_chat_message_preserving_tool_adjacency(
@@ -359,9 +374,14 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
         // 前缀缓存硬约束：同一 assistant 轮的内容（reasoning -> output_text ->
         // function_call 连续 items）必须合并为单条 assistant 消息，禁止相邻
         // assistant 消息（provider chat renderer 会插入 EOS 破坏前缀缓存）。
-        // 显式 assistant `message` item 属于独立历史轮次，turn_assistant_tail_index
-        // 在其分支被清空，不参与合并，历史边界保持原样。
-        if role.eq_ignore_ascii_case("assistant") && messages.len() == tail_index + 1 {
+        // 只允许合并进 content 为空的 reasoning 类前一条：显式 assistant message
+        // 或非空 output_text 历史保持原消息边界，不得改写用户历史或插入新换行。
+        if role.eq_ignore_ascii_case("assistant")
+            && messages.len() == tail_index + 1
+            && v3_openai_chat_content_is_empty(
+                messages[tail_index].get("content").unwrap_or(&Value::Null),
+            )
+        {
             merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
             return Ok(());
         }

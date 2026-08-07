@@ -75,7 +75,11 @@ fn responses_output_text_followed_by_function_call_stays_single_assistant_messag
 }
 
 #[test]
-fn responses_explicit_assistant_message_then_function_call_keeps_history_boundaries() {
+fn responses_explicit_assistant_message_then_function_call_coalesces_same_turn() {
+    // Codex relay 输入实证（713075 样本）：同轮 assistant 输出以
+    // message(role=assistant, content=[output_text]) + function_call 呈现。
+    // 合并保持单条 assistant（content + tool_calls），否则 provider chat
+    // renderer 插入 EOS 破坏前缀缓存。
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [
@@ -97,22 +101,50 @@ fn responses_explicit_assistant_message_then_function_call_keeps_history_boundar
             }
         ]
     }))
-    .expect("explicit assistant message must project to Chat");
+    .expect("assistant message + function_call must project to Chat");
 
     let messages = request["messages"].as_array().expect("messages");
     assert_eq!(
         messages.len(),
-        3,
-        "explicit assistant message is independent history, must not coalesce with function_call: {request}"
+        2,
+        "same-turn assistant text and tool_calls must coalesce: {request}"
     );
     assert_eq!(messages[0]["role"], json!("assistant"));
     assert_eq!(messages[0]["content"], json!("turn one"));
-    assert_eq!(messages[1]["role"], json!("assistant"));
     assert_eq!(
-        messages[1]["tool_calls"][0]["id"],
+        messages[0]["tool_calls"][0]["id"],
         json!("call_z"),
-        "function_call after explicit assistant message must stay its own assistant message"
+        "function_call after same-turn assistant message must merge into it"
     );
-    assert_eq!(messages[2]["role"], json!("tool"));
-    assert_eq!(messages[2]["tool_call_id"], json!("call_z"));
+    assert_eq!(messages[1]["role"], json!("tool"));
+    assert_eq!(messages[1]["tool_call_id"], json!("call_z"));
+}
+
+#[test]
+fn responses_two_nonempty_assistant_messages_keep_history_boundaries() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "turn one"}]
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "turn two"}]
+            }
+        ]
+    }))
+    .expect("two assistant messages must project to Chat");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(
+        messages.len(),
+        2,
+        "two non-empty assistant messages are independent history, must not coalesce: {request}"
+    );
+    assert_eq!(messages[0]["content"], json!("turn one"));
+    assert_eq!(messages[1]["content"], json!("turn two"));
 }
