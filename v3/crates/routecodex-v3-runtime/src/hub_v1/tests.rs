@@ -626,7 +626,7 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
     let messages = request["messages"]
         .as_array()
         .expect("OpenAI Chat request messages");
-    assert_eq!(messages.len(), 4);
+    assert_eq!(messages.len(), 3);
     assert_eq!(messages[0]["role"], "user");
     assert_eq!(messages[0]["content"], "inspect the cwd");
     assert_eq!(messages[1]["role"], "assistant");
@@ -634,11 +634,10 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
         messages[1]["reasoning_content"],
         "Need to inspect cwd first."
     );
-    assert_eq!(messages[2]["role"], "assistant");
-    assert_eq!(messages[2]["tool_calls"][0]["id"], "call-1");
-    assert_eq!(messages[3]["role"], "tool");
-    assert_eq!(messages[3]["tool_call_id"], "call-1");
-    assert_eq!(messages[3]["content"], "/tmp");
+    assert_eq!(messages[1]["tool_calls"][0]["id"], "call-1");
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "call-1");
+    assert_eq!(messages[2]["content"], "/tmp");
     let serialized = serde_json::to_string(&request).expect("OpenAI Chat request JSON");
     assert!(!serialized.contains("opaque-reasoning"));
     assert!(!serialized.contains("summary_text"));
@@ -834,13 +833,13 @@ fn resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_i
         .as_array()
         .expect("historical messages")
         .clone();
-    assert_eq!(historical_messages.len(), 294);
+    assert_eq!(historical_messages.len(), 293);
     assert_eq!(historical_messages[0]["content"], "historical visible text");
     assert_eq!(
-        historical_messages[1]["tool_calls"][0]["id"],
+        historical_messages[0]["tool_calls"][0]["id"],
         "call_historical"
     );
-    assert_eq!(historical_messages[2]["tool_call_id"], "call_historical");
+    assert_eq!(historical_messages[1]["tool_call_id"], "call_historical");
 
     let finalized_response = json!({
         "status":"requires_action",
@@ -865,12 +864,12 @@ fn resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_i
         .expect("continuation messages");
 
     assert_eq!(
-        &messages[..294],
+        &messages[..293],
         historical_messages.as_slice(),
         "the complete historical prefix must remain byte-for-byte JSON equivalent"
     );
-    assert!(messages.len() > 294);
-    let latest_suffix = &messages[294..];
+    assert!(messages.len() > 293);
+    let latest_suffix = &messages[293..];
     assert!(latest_suffix.iter().any(|item| {
         item.get("content") == Some(&json!("latest visible text"))
             || item

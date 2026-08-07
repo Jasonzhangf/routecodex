@@ -326,6 +326,29 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
                 pending_tool_call_ids.join(",")
             ));
         }
+    } else if let Some(adjacent_index) = v3_openai_chat_last_assistant_text_message_index(messages)
+    {
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("user")
+            .trim();
+        // 前缀缓存硬约束：assistant 轮内容必须合并为单条，禁止相邻 assistant 消息
+        // （provider chat renderer 会插入 EOS 破坏前缀缓存）。但只允许合并进
+        // reasoning 类前一条（content 为空）：显式 assistant message 或非空
+        // output_text 历史必须保持原消息边界，不得改写用户历史或插入新换行。
+        if role.eq_ignore_ascii_case("assistant")
+            && v3_openai_chat_content_is_empty(
+                messages[adjacent_index].get("content").unwrap_or(&Value::Null),
+            )
+        {
+            merge_v3_openai_chat_message_into_pending_tool_message(
+                messages,
+                adjacent_index,
+                &message,
+            )?;
+            return Ok(());
+        }
     }
     messages.push(message);
     Ok(())
@@ -344,6 +367,16 @@ fn append_v3_openai_chat_tool_call_message(
     }
     if let Some(index) = *pending_tool_message_index {
         merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
+    } else if let Some(adjacent_index) = v3_openai_chat_last_assistant_text_message_index(messages)
+    {
+        // 前缀缓存硬约束：Responses `output_text` item 先生成 assistant 文本消息，
+        // 后续同轮 `function_call` item 必须合并进同一条 assistant 消息（content +
+        // tool_calls 同存）。若拆成两条相邻 assistant 消息，provider chat renderer
+        // 会在 tool-call 标记前插入 EOS，使下一轮请求的前缀 token 与上一轮生成
+        // 输出分叉，导致所有 relay provider 的前缀缓存（如 DwarfStar usage_cache）
+        // 永久 miss、费用虚高。禁止把 tool_calls 单独 push 成新 assistant 消息。
+        merge_v3_openai_chat_message_into_pending_tool_message(messages, adjacent_index, &message)?;
+        *pending_tool_message_index = Some(adjacent_index);
     } else {
         messages.push(message);
         *pending_tool_message_index = Some(messages.len() - 1);
@@ -354,6 +387,26 @@ fn append_v3_openai_chat_tool_call_message(
         }
     }
     Ok(())
+}
+
+fn v3_openai_chat_last_assistant_text_message_index(messages: &[Value]) -> Option<usize> {
+    let last = messages.last()?;
+    let role = last
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("user")
+        .trim();
+    if !role.eq_ignore_ascii_case("assistant") {
+        return None;
+    }
+    if last
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some_and(|tool_calls| !tool_calls.is_empty())
+    {
+        return None;
+    }
+    Some(messages.len() - 1)
 }
 
 fn append_v3_openai_chat_tool_result_message(
