@@ -665,6 +665,14 @@ fn record_direct_sse_provider_event_json_frame(
             error.to_string(),
         )
     })?;
+    if let Some(field) = find_v3_routecodex_control_payload_key(&event) {
+        return Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3DirectSseProviderEventObservation",
+            "control_field_in_provider_sse_event",
+            format!("provider SSE event carries RouteCodex control payload key {field:?}"),
+        ));
+    }
     stream_observation
         .record_provider_event_json(&event)
         .map_err(|error| runtime_source("V3ProviderResp14Raw", error))
@@ -782,6 +790,11 @@ struct V3ExactPinAvailabilityExhaustion<'pin> {
 
 impl V3ExactPinAvailabilityExhaustion<'_> {
     fn decide_error_05(&self, hook_registry: &V3HookRegistry) -> V3Error05ExecutionDecision {
+        // 例外证明：`previous_response_id` exact-pin 的 continuation 必须续到
+        // 同一 provider/model（同 provider 才能续 remote continuation），因此
+        // pin 不可用时不存在任何可切候选（candidates_remaining=0、default 池
+        // 不可用、无同 provider retry 均是 pin 约束下的必然，而非路由决策）。
+        // 该决策仍须通过 `try_into_terminal` 的候选耗尽 gate 才能投影 Error06。
         let source = build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
             "V3HubReqTarget06Resolved",
@@ -895,6 +908,11 @@ fn error_output(
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
+    assert!(
+        source.source_kind != V3ErrorSourceKind::ProviderFailure,
+        "error_output must not project ProviderFailure with hardcoded exhaustion; \
+         provider failures require caller-owned route/default availability proof"
+    );
     let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
     let projected = V3ErrorHandlingCenter::project_terminal(decision);
     projected_error_output(projected, node_trace)

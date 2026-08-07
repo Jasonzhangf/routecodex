@@ -2,6 +2,7 @@
 //! web search）。捕获 anthropic wire 工具声明（确认 web_search 保留 hosted
 //! 工具、无 exec_command 注入），并验证 hosted 结果投影。
 
+use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
@@ -12,7 +13,6 @@ use routecodex_v3_runtime::hub_v1::{
     V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
     V3ResponsesRelayRuntimeInput,
 };
-use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
@@ -120,7 +120,10 @@ async fn anthropic_wire_keeps_hosted_web_search_without_exec_command_and_project
     assert!(!wires.is_empty(), "provider wire must be captured");
     let wire = &wires[0];
     // anthropic wire 工具：web_search 保留 hosted 工具，绝不注入 exec_command。
-    let tools = wire.get("tools").and_then(Value::as_array).expect("anthropic tools");
+    let tools = wire
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("anthropic tools");
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|t| t.get("name").and_then(Value::as_str))
@@ -152,10 +155,9 @@ async fn anthropic_wire_keeps_hosted_web_search_without_exec_command_and_project
                 .expect("paired function_call_output");
             assert_eq!(paired["call_id"], "call_h1");
             assert!(
-                out.iter().all(|item| item
-                    .get("type")
-                    .and_then(Value::as_str)
-                    != Some("web_search_tool_result")),
+                out.iter()
+                    .all(|item| item.get("type").and_then(Value::as_str)
+                        != Some("web_search_tool_result")),
                 "hosted web_search_tool_result must be stripped from client"
             );
         }
@@ -247,17 +249,19 @@ async fn search_hop_wire_is_clean_hosted_web_search_only() {
     // 客户端响应：hosted web_search_call 投影 + 原 call_id 配对。
     match output.client_body {
         V3ResponsesRelayClientBody::Json(value) => {
-            eprintln!("SEARCH_HOP_CLIENT={}", serde_json::to_string(&value).unwrap());
+            eprintln!(
+                "SEARCH_HOP_CLIENT={}",
+                serde_json::to_string(&value).unwrap()
+            );
             let out = value["output"].as_array().expect("client output array");
             let call = out
                 .iter()
                 .find(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
                 .expect("hosted web_search_call projected after local search hop");
             assert_eq!(call["action"]["query"], "rust latest version");
-            assert!(out.iter().any(|item| item
-                .get("type")
-                .and_then(Value::as_str)
-                == Some("function_call_output")));
+            assert!(out.iter().any(
+                |item| item.get("type").and_then(Value::as_str) == Some("function_call_output")
+            ));
         }
         _ => panic!("JSON client body expected"),
     }
@@ -266,11 +270,19 @@ async fn search_hop_wire_is_clean_hosted_web_search_only() {
     assert_eq!(wires.len(), 1, "exactly one search hop wire expected");
     let wire = &wires[0];
     let tools = wire.get("tools").and_then(Value::as_array).expect("tools");
-    assert_eq!(tools.len(), 1, "search hop must expose only web_search tool");
+    assert_eq!(
+        tools.len(),
+        1,
+        "search hop must expose only web_search tool"
+    );
     assert_eq!(tools[0]["type"], "web_search_20250305");
     assert_eq!(tools[0]["name"], "web_search");
     let input = wire["messages"].as_array().expect("anthropic messages");
-    assert_eq!(input.len(), 1, "search hop context must be clean (single message)");
+    assert_eq!(
+        input.len(),
+        1,
+        "search hop context must be clean (single message)"
+    );
     let text = input[0]["content"]
         .as_str()
         .or_else(|| input[0]["content"][0]["text"].as_str())

@@ -50,7 +50,7 @@ pub enum V3OpenAiChatCodecError {
     #[error("OpenAI Chat codec payload must be an object")]
     PayloadNotObject,
     #[error("OpenAI Chat codec payload leaked RouteCodex side-channel field: {field}")]
-    SideChannelLeaked { field: &'static str },
+    SideChannelLeaked { field: String },
     #[error("OpenAI Chat request messages must be an array")]
     MessagesNotArray,
     #[error("OpenAI Chat response choices must be an array")]
@@ -214,17 +214,10 @@ fn validate_provider_error(payload: &Value) -> Result<(), V3OpenAiChatCodecError
 
 fn reject_side_channel_fields(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {
     for key in require_object(payload)?.keys() {
-        let label = match key.as_str() {
-            "routecodex_internal" => Some("routecodex_internal"),
-            "metadata_center" => Some("metadata_center"),
-            "debug_snapshot" => Some("debug_snapshot"),
-            "provider_protocol" => Some("provider_protocol"),
-            "resource_handle" => Some("resource_handle"),
-            "continuation_owner" => Some("continuation_owner"),
-            _ => None,
-        };
-        if let Some(field) = label {
-            return Err(V3OpenAiChatCodecError::SideChannelLeaked { field });
+        if routecodex_v3_provider_responses::V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS
+            .contains(&key.as_str())
+        {
+            return Err(V3OpenAiChatCodecError::SideChannelLeaked { field: key.clone() });
         }
     }
     Ok(())

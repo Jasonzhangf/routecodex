@@ -1,16 +1,14 @@
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target,
-    resolve_v3_relay_target_outcome, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
+    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target_outcome,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
-use std::sync::Arc;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
@@ -25,6 +23,7 @@ use routecodex_v3_provider_responses::{
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub type V3GeminiRelayClientStream =
     Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -562,14 +561,12 @@ pub fn project_v3_gemini_relay_runtime_failure(
 ) -> V3GeminiRelayRuntimeOutput {
     let display = error.to_string();
     let source = match error {
-        V3GeminiRelayRuntimeError::ModelNotFound(message) => {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                "V3Target10ConcreteProviderSelected",
-                "direct_model_not_found",
-                message,
-            )
-        }
+        V3GeminiRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ModelNotFound,
+            "V3Target10ConcreteProviderSelected",
+            "direct_model_not_found",
+            message,
+        ),
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
@@ -617,8 +614,10 @@ fn project_json_response(
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
-    let client = resp04.finalized_payload().clone();
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
     trace.push("V3HubRespOutbound05ClientSemantic");
+    let client = resp05.client_payload().clone();
+    let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
     Ok(client)
 }

@@ -33,14 +33,6 @@ impl V3HubReqOutbound07ProviderSemantic {
     }
 
     pub(crate) fn provider_semantic_payload(&self) -> &Value {
-        &self
-            .previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .previous
-            .payload
-            .0
+        self.previous.previous.governed_payload()
     }
 }

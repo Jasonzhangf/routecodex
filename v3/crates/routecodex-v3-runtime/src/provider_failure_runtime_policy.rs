@@ -23,6 +23,9 @@ use crate::provider_action_gate::{
 };
 
 pub(crate) const V3_PROVIDER_FAILURE_MAX_CONSECUTIVE_FAILURES: usize = 3;
+/// 同 provider retry budget（policy 输入，非决策）：与
+/// `direct_runtime_helpers.rs` 的 direct 侧口径保持一致；两侧都只计算
+/// `remaining` 候选数交给 Error05 中心决策，不在这里做 reroute/cooldown 判定。
 pub(crate) const V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET: usize =
     V3_PROVIDER_FAILURE_MAX_CONSECUTIVE_FAILURES - 1;
 
@@ -1066,7 +1069,11 @@ pub(crate) fn resolve_v3_relay_target_outcome(
         Ok(plan) => plan,
         Err(error) => {
             return V3RelayProviderTargetResolution::Failed(
-                crate::shared::v3_route_plan_error_source("V3Router06RoutePoolResolved", "target_resolution_route_plan_failed", error),
+                crate::shared::v3_route_plan_error_source(
+                    "V3Router06RoutePoolResolved",
+                    "target_resolution_route_plan_failed",
+                    error,
+                ),
             )
         }
     };

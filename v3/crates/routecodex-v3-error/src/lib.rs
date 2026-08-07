@@ -1090,6 +1090,9 @@ pub fn project_v3_post_commit_sse_source(
     status: u16,
 ) -> V3Error06ClientProjected {
     if matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
+        // 例外证明：post-commit 阶段 SSE 事件已向客户端提交（200 + 已流出的
+        // 帧），物理上无法 reroute/reselect；此处硬编码 0/false/false 走完整
+        // Error01-06 链仅用于 console 观测投影，不进入 client body。
         let classified = build_v3_error_02_classified_from_v3_error_01(source);
         let action = build_v3_error_03_target_local_action_from_v3_error_02(
             classified,

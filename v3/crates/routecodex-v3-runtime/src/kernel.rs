@@ -38,9 +38,10 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw,
-    V3ProviderResponseBodyKind, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
+    find_v3_routecodex_control_payload_key, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
+    V3ProviderFailureRecord, V3ProviderResp14Raw, V3ProviderResponseBodyKind,
+    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
@@ -447,7 +448,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             Ok(value) => value,
             Err(error) => {
                 return error_output(
-                    crate::shared::v3_route_plan_error_source("V3Router06RoutePoolResolved", "v3_route_target_runtime_failure", error),
+                    crate::shared::v3_route_plan_error_source(
+                        "V3Router06RoutePoolResolved",
+                        "v3_route_target_runtime_failure",
+                        error,
+                    ),
                     trace,
                     &hook_registry,
                 )
@@ -1226,8 +1231,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
             };
         trace.push("V3DirectResp14ProviderProjectionPrepared");
         let mut direct_stopless_projected = false;
-        let direct_web_search_request_state = match (stopless_control, stopless_scope.as_ref())
-        {
+        let direct_web_search_request_state = match (stopless_control, stopless_scope.as_ref()) {
             (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
                 Ok(state) => state,
                 Err(error) => {
@@ -1324,8 +1328,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                             }
                         };
                         match crate::hub_v1::project_web_search_result_into_finalized(
-                            body,
-                            &captured,
+                            body, &captured,
                         ) {
                             Ok(()) => {}
                             Err(error) => {

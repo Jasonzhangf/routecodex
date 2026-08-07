@@ -130,9 +130,10 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
         });
     }
     let mut input = input;
-    let canonical =
-        build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(input.payload.0.as_ref())
-            .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
+    let canonical = build_v3_chat_canonical_request_from_responses_payload_for_req_inbound(
+        input.payload.0.as_ref(),
+    )
+    .map_err(|error| format!("Responses inbound canonicalization failed: {error}"))?;
     input.payload.0 = Arc::new(canonical);
     Ok(V3HubReqInbound02Normalized {
         previous: input,

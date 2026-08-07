@@ -13,11 +13,11 @@ pub use common::{
     V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayToolKind,
     V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind, V3HubResponseTerminality,
     V3HubServertoolResponseAction, V3HubTargetResolution, V3HubTransportIntent,
-    V3ProviderCompatError, V3ProviderCompatProfileId, V3ServerToolCenter,
-    V3ServerToolCenterKey, V3ServerToolCenterPoisoned, V3ServerToolInstanceState,
-    V3ServerToolName, V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase,
-    V3StoplessCenterState, V3StoplessCenterSteering, V3StoplessCenterStopKind,
-    V3WebSearchCenterPhase, V3WebSearchCenterState,
+    V3ProviderCompatError, V3ProviderCompatProfileId, V3ServerToolCenter, V3ServerToolCenterKey,
+    V3ServerToolCenterPoisoned, V3ServerToolInstanceState, V3ServerToolName,
+    V3StoplessCenterNextRequestPolicy, V3StoplessCenterPhase, V3StoplessCenterState,
+    V3StoplessCenterSteering, V3StoplessCenterStopKind, V3WebSearchCenterPhase,
+    V3WebSearchCenterState,
 };
 
 mod side_channel;
@@ -108,11 +108,11 @@ mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;
 mod web_search_hop;
+pub use responses_relay_runtime::*;
 pub(crate) use web_search_hop::{
     execute_local_web_search_hop, project_web_search_result_into_finalized,
     resolve_request_web_search_backend_binding, resolve_web_search_mode_and_backend,
 };
-pub use responses_relay_runtime::*;
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;
 mod anthropic_relay_runtime;

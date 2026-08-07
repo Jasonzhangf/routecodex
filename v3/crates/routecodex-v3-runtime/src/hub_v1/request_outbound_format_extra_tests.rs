@@ -1041,34 +1041,30 @@ fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_sear
             }
         ]
     });
-    let request =
-        build_v3_openai_chat_standard_request_for_selected_web_search_mode(
-            &payload,
-            V3WebSearchExecutionMode::MetadataCenterLocalSearch,
-            true,
-        )
-        .expect("Mode B local websearch projection must compile");
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+        true,
+    )
+    .expect("Mode B local websearch projection must compile");
     let tools = request["tools"].as_array().expect("tools array");
     assert_eq!(tools.len(), 2, "ordinary tools must remain unchanged");
     assert_eq!(tools[0]["function"]["name"], "read_file");
     assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
     assert_eq!(tools[1]["type"], "function");
     assert_eq!(
-        tools[1]["function"]["name"],
-        "websearch",
+        tools[1]["function"]["name"], "websearch",
         "Mode B must use the single local tool name websearch"
     );
     assert_eq!(
-        tools[1]["function"]["parameters"]["required"][0],
-        "query",
+        tools[1]["function"]["parameters"]["required"][0], "query",
         "local websearch must require the query argument"
     );
     let description = tools[1]["function"]["description"]
         .as_str()
         .expect("websearch tool description");
     assert_eq!(
-        description,
-        "Search the web for up-to-date information.",
+        description, "Search the web for up-to-date information.",
         "websearch description must match the standard web_search tool description: {description}"
     );
     let query_description = tools[1]["function"]["parameters"]["properties"]["query"]
@@ -1115,7 +1111,9 @@ fn openai_chat_wire_keeps_hosted_options_for_gpt_with_capability() {
         "web_search declaration must be consumed by options (no residual tools)"
     );
     assert!(
-        request.get("web_search_options").is_some_and(Value::is_object),
+        request
+            .get("web_search_options")
+            .is_some_and(Value::is_object),
         "gpt + capability must keep the hosted web_search_options projection"
     );
 }
@@ -1191,7 +1189,9 @@ fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
     let websearch = tools
         .iter()
         .find(|tool| {
-            tool.get("function").and_then(|f| f.get("name")).and_then(Value::as_str)
+            tool.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(Value::as_str)
                 == Some("websearch")
         })
         .expect("non-gpt provider must receive the local websearch tool");

@@ -84,26 +84,6 @@ impl V3HubRespOutbound05ClientSemantic {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct V3AnthropicRelayProtocolHooks {
-    req_inbound: fn(
-        V3HubReqInbound01ClientRaw,
-        V3HubExecutionMode,
-        V3HubProviderWireProtocol,
-    ) -> Result<V3HubReqInbound02Normalized, V3AnthropicRelayProtocolHookError>,
-    client_projection:
-        fn(
-            V3HubRespContinuation04Committed,
-        ) -> Result<V3HubRespOutbound05ClientSemantic, V3AnthropicRelayProtocolHookError>,
-}
-
-pub fn compile_v3_anthropic_relay_protocol_hooks() -> V3AnthropicRelayProtocolHooks {
-    V3AnthropicRelayProtocolHooks {
-        req_inbound: run_v3_anthropic_relay_req_inbound_hook,
-        client_projection: run_v3_anthropic_relay_client_projection_hook,
-    }
-}
-
 pub fn run_v3_anthropic_relay_runtime_req_inbound(
     raw: V3HubReqInbound01ClientRaw,
 ) -> Result<V3HubReqInbound02Normalized, V3AnthropicRelayProtocolHookError> {
@@ -131,49 +111,11 @@ pub fn run_v3_anthropic_relay_runtime_req_inbound(
     ))
 }
 
-impl V3AnthropicRelayProtocolHooks {
-    pub fn req_inbound(
-        &self,
-        raw: V3HubReqInbound01ClientRaw,
-        execution: V3HubExecutionMode,
-        provider_wire_protocol: V3HubProviderWireProtocol,
-    ) -> Result<V3HubReqInbound02Normalized, V3AnthropicRelayProtocolHookError> {
-        (self.req_inbound)(raw, execution, provider_wire_protocol)
-    }
-
-    pub fn client_projection(
-        &self,
-        committed: V3HubRespContinuation04Committed,
-    ) -> Result<V3HubRespOutbound05ClientSemantic, V3AnthropicRelayProtocolHookError> {
-        (self.client_projection)(committed)
-    }
-}
-
-fn run_v3_anthropic_relay_req_inbound_hook(
-    raw: V3HubReqInbound01ClientRaw,
-    execution: V3HubExecutionMode,
-    provider_wire_protocol: V3HubProviderWireProtocol,
-) -> Result<V3HubReqInbound02Normalized, V3AnthropicRelayProtocolHookError> {
-    assert_anthropic_relay_responses_axes(raw.entry_protocol, execution, provider_wire_protocol)?;
-    let V3HubReqInbound01ClientRaw {
-        payload,
-        entry_protocol,
-        invocation_source,
-        transport_intent,
-    } = raw;
-    let V3HubOpaquePayload(payload) = payload;
-    let payload = Arc::try_unwrap(payload).unwrap_or_else(|arc| (*arc).clone());
-    let semantic = encode_v3_anthropic_request_as_responses_semantic(payload)?;
-    let raw = build_v3_hub_req_inbound_01_client_raw(
-        semantic,
-        entry_protocol,
-        invocation_source,
-        transport_intent,
-    );
-    Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(raw))
-}
-
-fn run_v3_anthropic_relay_client_projection_hook(
+/// Anthropic relay 05 构建的受控路径：校验 Anthropic/Relay/Responses 轴 +
+/// 客户端投影 payload 校验后，以 resp04 finalized 构建 05（identity 投影）。
+/// runtime 侧 Anthropic 格式投影由相邻闭包经
+/// `build_v3_hub_resp_outbound_05_..._with_client_payload` 完成。
+pub fn run_v3_anthropic_relay_client_projection_hook(
     committed: V3HubRespContinuation04Committed,
 ) -> Result<V3HubRespOutbound05ClientSemantic, V3AnthropicRelayProtocolHookError> {
     let raw = committed.previous.previous.provider_raw();

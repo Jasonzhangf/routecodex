@@ -1627,9 +1627,7 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     // hosted web_search_call 等价结果（Codex 契约）。
     let call = output_arr
         .iter()
-        .find(|item| {
-            item.get("type").and_then(Value::as_str) == Some("web_search_call")
-        })
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
         .expect("hosted web_search_call projected");
     assert_eq!(call["status"], "completed");
     assert_eq!(call["action"]["type"], "search");
@@ -1638,9 +1636,7 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     // 原 call_id 配对 function_call_output。
     let paired = output_arr
         .iter()
-        .find(|item| {
-            item.get("type").and_then(Value::as_str) == Some("function_call_output")
-        })
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output"))
         .expect("paired function_call_output");
     assert_eq!(paired["call_id"], "call_ws_1");
     assert_eq!(paired["output"], "search result for routecodex");
@@ -1650,7 +1646,10 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
         .web_search_load_for_scope(&scope)
         .expect("center load")
         .expect("websearch state present");
-    assert_eq!(state.phase(), crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured);
+    assert_eq!(
+        state.phase(),
+        crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
+    );
     assert_eq!(state.query(), Some("routecodex"));
     assert_eq!(state.original_call_id(), Some("call_ws_1"));
 }
@@ -1697,7 +1696,9 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         .expect("seed captured")
         .with_original_call_id(Some("call_ws_1".to_string()))
         .with_query(Some("routecodex".to_string()))
-        .with_normalized_result(Some(json!({"query": "routecodex", "text_result": "search result"})));
+        .with_normalized_result(Some(
+            json!({"query": "routecodex", "text_result": "search result"}),
+        ));
     stopless_control
         .web_search_store_for_scope(&scope, captured)
         .expect("seed center");
@@ -1732,5 +1733,8 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         .web_search_load_for_scope(&scope)
         .expect("center load")
         .expect("websearch state present");
-    assert_eq!(state.phase(), crate::hub_v1::V3WebSearchCenterPhase::Completed);
+    assert_eq!(
+        state.phase(),
+        crate::hub_v1::V3WebSearchCenterPhase::Completed
+    );
 }

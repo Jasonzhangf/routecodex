@@ -44,14 +44,15 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                     tool,
                     &format!("$.tools[{index}]"),
                 )?;
-            } else if web_search_execution_mode.is_metadata_center_local_search()
-                || !is_gpt_model
-            {
+            } else if web_search_execution_mode.is_metadata_center_local_search() || !is_gpt_model {
                 // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
                 // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
                 // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
-                normalized_tools
-                    .push(build_local_web_search_function_tool(tool, index, "websearch")?);
+                normalized_tools.push(build_local_web_search_function_tool(
+                    tool,
+                    index,
+                    "websearch",
+                )?);
             } else if has_web_search_capability {
                 // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
                 // web_search_options 投影（与 HEAD 行为一致）。
@@ -151,7 +152,10 @@ fn build_local_web_search_function_tool(
     normalize_openai_chat_function_tool(
         &Map::from_iter([
             ("type".to_string(), Value::String("function".to_string())),
-            ("name".to_string(), Value::String(local_tool_name.to_string())),
+            (
+                "name".to_string(),
+                Value::String(local_tool_name.to_string()),
+            ),
             (
                 "description".to_string(),
                 Value::String("Search the web for up-to-date information.".to_string()),

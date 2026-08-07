@@ -131,7 +131,9 @@ impl V3HubRelayResponseHookProfile {
         self
     }
 
-    pub fn web_search_execution_mode(&self) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
+    pub fn web_search_execution_mode(
+        &self,
+    ) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
         self.web_search_execution_mode
     }
 
@@ -147,11 +149,12 @@ impl V3HubRelayResponseHookProfile {
     /// Mode B：本地 ServerToolCenter 治理的 web_search 需在 Resp03 拦截并
     /// 本地执行，而不是投影为客户端 exec_command。
     pub fn web_search_local_surface_active(&self) -> bool {
-        self.web_search_execution_mode
-            .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search)
-            && self.web_search_center_state.as_ref().is_some_and(|state| {
-                state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive
-            })
+        self.web_search_execution_mode.is_some_and(
+            routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
+        ) && self
+            .web_search_center_state
+            .as_ref()
+            .is_some_and(|state| state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive)
     }
 
     pub fn with_stopless_reasoning_stop(mut self) -> Self {

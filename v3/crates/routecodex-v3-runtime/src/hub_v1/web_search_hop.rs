@@ -9,13 +9,13 @@
 //! 控制状态只进 ServerToolCenter 控制资源；这里投影的是协议等价结果，
 //! 不重建 entry payload、不重入主模型、不做第二套 VR。
 
-use super::V3HubRelayResponseError;
 use super::responses_relay_runtime::{
     build_v3_provider_transport_request_for_protocol, find_responses_tool_output_ids,
-    provider_target, provider_wire_protocol_for_selected_candidate,
-    V3ResponsesRelayRuntimeError, V3ResponsesRelayStoplessControlExecution,
-    V3ResponsesRelayStoplessControlScope, V3ResponsesRelayStoplessControlState,
+    provider_target, provider_wire_protocol_for_selected_candidate, V3ResponsesRelayRuntimeError,
+    V3ResponsesRelayStoplessControlExecution, V3ResponsesRelayStoplessControlScope,
+    V3ResponsesRelayStoplessControlState,
 };
+use super::V3HubRelayResponseError;
 use super::{
     build_provider_req_compat_06_from_v3_hub_req_outbound_07,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
@@ -37,11 +37,11 @@ use crate::provider_failure_runtime_policy::{
     v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
     V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderResponseBody,
 };
-use routecodex_v3_config::V3Config05ManifestPublished;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
@@ -393,7 +393,10 @@ pub(crate) fn extract_web_search_text_result(provider_value: &Value) -> Option<S
 pub(crate) fn resolve_web_search_mode_and_backend(
     manifest: &V3Config05ManifestPublished,
     model: &str,
-) -> (routecodex_v3_config::V3WebSearchExecutionMode, Option<String>) {
+) -> (
+    routecodex_v3_config::V3WebSearchExecutionMode,
+    Option<String>,
+) {
     let model = model.trim();
     if let routecodex_v3_config::V3DirectModelResolution::Resolved {
         provider_id,
@@ -562,10 +565,7 @@ mod web_search_hop_tests {
             "status": "completed"
         });
         let captured = V3WebSearchCenterState::new()
-            .transition_to(
-                V3WebSearchCenterPhase::LocalToolSurfaceActive,
-                "req04",
-            )
+            .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
             .expect("active")
             .with_original_call_id(Some("call_ws_1"))
             .with_query(Some("routecodex v3"))
@@ -583,7 +583,11 @@ mod web_search_hop_tests {
             })));
         project_web_search_result_into_finalized(&mut finalized, &captured).expect("project");
         let output = finalized["output"].as_array().expect("output array");
-        assert_eq!(output.len(), 3, "original message + web_search_call + function_call_output");
+        assert_eq!(
+            output.len(),
+            3,
+            "original message + web_search_call + function_call_output"
+        );
         let call = &output[1];
         assert_eq!(call["type"], "web_search_call");
         assert_eq!(call["name"], "web_search");
@@ -643,7 +647,10 @@ pub(crate) fn first_local_websearch_tool_call(
     };
     for (index, item) in output.iter().enumerate() {
         let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
-        if !matches!(item_type, "function_call" | "tool_call" | "custom_tool_call") {
+        if !matches!(
+            item_type,
+            "function_call" | "tool_call" | "custom_tool_call"
+        ) {
             continue;
         }
         let name = item

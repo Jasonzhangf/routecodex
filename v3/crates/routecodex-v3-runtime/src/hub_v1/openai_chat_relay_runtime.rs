@@ -543,14 +543,12 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
 ) -> V3OpenAiChatRelayRuntimeOutput {
     let display = error.to_string();
     let source = match error {
-        V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                "V3Target10ConcreteProviderSelected",
-                "direct_model_not_found",
-                message,
-            )
-        }
+        V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ModelNotFound,
+            "V3Target10ConcreteProviderSelected",
+            "direct_model_not_found",
+            message,
+        ),
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
@@ -599,9 +597,9 @@ fn project_json_response(
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     trace.push("V3HubRespContinuation04Committed");
-    let client = resp04.finalized_payload().clone();
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
     trace.push("V3HubRespOutbound05ClientSemantic");
+    let client = resp05.client_payload().clone();
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     trace.push("V3ServerRespOutbound06ClientFrame");
     Ok(client)

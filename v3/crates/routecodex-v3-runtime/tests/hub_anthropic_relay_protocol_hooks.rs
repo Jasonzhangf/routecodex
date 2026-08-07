@@ -4,10 +4,11 @@ use routecodex_v3_runtime::{
     build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02,
     build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw, compile_v3_anthropic_relay_protocol_hooks,
-    V3AnthropicRelayProtocolHookError, V3HubContinuationCommit, V3HubContinuationOwnership,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRespContinuation04Committed, V3HubTransportIntent,
+    build_v3_provider_resp_inbound_01_raw, run_v3_anthropic_relay_client_projection_hook,
+    run_v3_anthropic_relay_runtime_req_inbound, V3AnthropicRelayProtocolHookError,
+    V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode,
+    V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRespContinuation04Committed,
+    V3HubTransportIntent,
 };
 use serde_json::json;
 
@@ -51,7 +52,6 @@ fn response04(
 
 #[test]
 fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() {
-    let hooks = compile_v3_anthropic_relay_protocol_hooks();
     let payload = anthropic_request();
     let raw = build_v3_hub_req_inbound_01_client_raw(
         payload.clone(),
@@ -60,13 +60,8 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
         V3HubTransportIntent::Json,
     );
 
-    let normalized = hooks
-        .req_inbound(
-            raw,
-            V3HubExecutionMode::Relay,
-            V3HubProviderWireProtocol::Responses,
-        )
-        .expect("Anthropic Relay req_inbound hook");
+    let normalized =
+        run_v3_anthropic_relay_runtime_req_inbound(raw).expect("Anthropic Relay req_inbound hook");
 
     assert_eq!(normalized.payload()["model"], payload["model"]);
     assert!(
@@ -109,7 +104,6 @@ fn anthropic_entry_req_inbound_hook_normalizes_to_chat_extension_before_req04() 
 
 #[test]
 fn anthropic_client_projection_hook_preserves_responses_wire_axis() {
-    let hooks = compile_v3_anthropic_relay_protocol_hooks();
     let hub_response = json!({
         "id": "msg_from_hub",
         "type": "message",
@@ -122,15 +116,14 @@ fn anthropic_client_projection_hook_preserves_responses_wire_axis() {
         ]
     });
 
-    let projection = hooks
-        .client_projection(response04(
-            hub_response.clone(),
-            V3HubEntryProtocol::Anthropic,
-            V3HubExecutionMode::Relay,
-            V3HubProviderWireProtocol::Responses,
-            V3HubTransportIntent::Json,
-        ))
-        .expect("Anthropic client projection hook");
+    let projection = run_v3_anthropic_relay_client_projection_hook(response04(
+        hub_response.clone(),
+        V3HubEntryProtocol::Anthropic,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Responses,
+        V3HubTransportIntent::Json,
+    ))
+    .expect("Anthropic client projection hook");
 
     assert_eq!(projection.payload(), &hub_response);
     assert_eq!(projection.entry_protocol(), V3HubEntryProtocol::Anthropic);
@@ -146,15 +139,14 @@ fn anthropic_client_projection_hook_preserves_responses_wire_axis() {
         "index":0,
         "delta":{"type":"text_delta","text":"streamed"}
     });
-    let sse_projection = hooks
-        .client_projection(response04(
-            sse_event.clone(),
-            V3HubEntryProtocol::Anthropic,
-            V3HubExecutionMode::Relay,
-            V3HubProviderWireProtocol::Responses,
-            V3HubTransportIntent::Sse,
-        ))
-        .expect("Anthropic SSE client projection hook");
+    let sse_projection = run_v3_anthropic_relay_client_projection_hook(response04(
+        sse_event.clone(),
+        V3HubEntryProtocol::Anthropic,
+        V3HubExecutionMode::Relay,
+        V3HubProviderWireProtocol::Responses,
+        V3HubTransportIntent::Sse,
+    ))
+    .expect("Anthropic SSE client projection hook");
     assert_eq!(sse_projection.payload(), &sse_event);
     assert_eq!(sse_projection.transport_intent(), V3HubTransportIntent::Sse);
     assert_eq!(
@@ -165,7 +157,6 @@ fn anthropic_client_projection_hook_preserves_responses_wire_axis() {
 
 #[test]
 fn wrong_entry_execution_and_provider_wire_combinations_fail_explicitly() {
-    let hooks = compile_v3_anthropic_relay_protocol_hooks();
     for (entry, execution, provider, expected) in [
         (
             V3HubEntryProtocol::Responses,
@@ -186,26 +177,29 @@ fn wrong_entry_execution_and_provider_wire_combinations_fail_explicitly() {
             V3AnthropicRelayProtocolHookError::ProviderWireProtocolNotResponses,
         ),
     ] {
-        let raw = build_v3_hub_req_inbound_01_client_raw(
-            anthropic_request(),
-            entry,
-            V3HubInvocationSource::Client,
-            V3HubTransportIntent::Json,
-        );
+        // req_inbound 固定 Relay/Responses 轴，仅 entry 协议可变化；错误轴由
+        // client_projection（读取 committed 携带的轴）统一覆盖。
+        if entry != V3HubEntryProtocol::Anthropic {
+            let raw = build_v3_hub_req_inbound_01_client_raw(
+                anthropic_request(),
+                entry,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            );
+            assert_eq!(
+                run_v3_anthropic_relay_runtime_req_inbound(raw).unwrap_err(),
+                expected
+            );
+        }
         assert_eq!(
-            hooks.req_inbound(raw, execution, provider).unwrap_err(),
-            expected
-        );
-        assert_eq!(
-            hooks
-                .client_projection(response04(
-                    json!({"type":"message","content":[]}),
-                    entry,
-                    execution,
-                    provider,
-                    V3HubTransportIntent::Json,
-                ))
-                .unwrap_err(),
+            run_v3_anthropic_relay_client_projection_hook(response04(
+                json!({"type":"message","content":[]}),
+                entry,
+                execution,
+                provider,
+                V3HubTransportIntent::Json,
+            ))
+            .unwrap_err(),
             expected
         );
     }
@@ -213,7 +207,6 @@ fn wrong_entry_execution_and_provider_wire_combinations_fail_explicitly() {
 
 #[test]
 fn side_channel_fields_fail_at_both_protocol_hook_boundaries() {
-    let hooks = compile_v3_anthropic_relay_protocol_hooks();
     for leaked in [
         "routecodex_internal",
         "metadata_center",
@@ -233,11 +226,7 @@ fn side_channel_fields_fail_at_both_protocol_hook_boundaries() {
             V3HubTransportIntent::Json,
         );
         assert!(matches!(
-            hooks.req_inbound(
-                raw,
-                V3HubExecutionMode::Relay,
-                V3HubProviderWireProtocol::Responses,
-            ),
+            run_v3_anthropic_relay_runtime_req_inbound(raw),
             Err(V3AnthropicRelayProtocolHookError::Codec(_))
         ));
 
@@ -247,7 +236,7 @@ fn side_channel_fields_fail_at_both_protocol_hook_boundaries() {
             .unwrap()
             .insert(leaked.to_string(), json!({"leak":true}));
         assert!(matches!(
-            hooks.client_projection(response04(
+            run_v3_anthropic_relay_client_projection_hook(response04(
                 response,
                 V3HubEntryProtocol::Anthropic,
                 V3HubExecutionMode::Relay,

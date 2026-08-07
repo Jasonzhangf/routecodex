@@ -106,7 +106,11 @@ impl V3HubRespContinuation04Outcome {
         Option<V3StoplessCenterState>,
         Option<V3WebSearchCenterState>,
     ) {
-        (self.data, self.control_transition, self.web_search_transition)
+        (
+            self.data,
+            self.control_transition,
+            self.web_search_transition,
+        )
     }
 
     pub fn into_data(self) -> V3HubRespContinuation04Committed {

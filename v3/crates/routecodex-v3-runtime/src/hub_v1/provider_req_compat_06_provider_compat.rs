@@ -609,8 +609,9 @@ mod tests {
         req07.previous.selected_target.web_search_execution_mode =
             V3WebSearchExecutionMode::MetadataCenterLocalSearch;
 
-        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("Mode B OpenAI Chat relay must project built-in web search to local websearch function");
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
+            "Mode B OpenAI Chat relay must project built-in web search to local websearch function",
+        );
         let payload = req_compat.provider_semantic_payload();
         assert!(payload.get("web_search_options").is_none(), "{payload}");
         let web_search = payload["tools"]

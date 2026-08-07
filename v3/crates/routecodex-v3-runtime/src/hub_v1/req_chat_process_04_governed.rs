@@ -7,6 +7,13 @@ pub struct V3HubReqChatProcess04Governed {
     pub(crate) previous: V3HubReqContinuation03Classified,
 }
 
+impl V3HubReqChatProcess04Governed {
+    /// 治理后的 Chat canonical payload（Req04 治理原地修改 Req02 payload）。
+    pub(crate) fn governed_payload(&self) -> &Value {
+        self.previous.previous.payload()
+    }
+}
+
 pub fn build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(
     input: V3HubReqContinuation03Classified,
 ) -> V3HubReqChatProcess04Governed {

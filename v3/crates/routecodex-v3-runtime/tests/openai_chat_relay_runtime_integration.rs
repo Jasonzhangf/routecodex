@@ -1322,7 +1322,9 @@ async fn openai_chat_unknown_direct_provider_model_returns_model_not_found() {
     .await
     .unwrap_err();
     assert!(
-        error.to_string().contains("direct provider model controlled.unknown-model is not configured"),
+        error
+            .to_string()
+            .contains("direct provider model controlled.unknown-model is not configured"),
         "openai_chat provider.model absence must surface ModelNotFound: {error}"
     );
 }

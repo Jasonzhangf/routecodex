@@ -1,11 +1,10 @@
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target,
-    resolve_v3_relay_target_outcome, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyEvent, V3RelayProviderFailurePolicyState,
+    project_v3_client_disconnect, provider_runtime_failure_stage, resolve_v3_relay_target_outcome,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolution,
     V3RelayProviderTargetResolutionInput,
 };
@@ -1225,14 +1224,12 @@ pub fn project_v3_anthropic_relay_runtime_failure(
 ) -> V3AnthropicRelayRuntimeOutput {
     let display = error.to_string();
     let source = match error {
-        V3AnthropicRelayRuntimeError::ModelNotFound(message) => {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                "V3Target10ConcreteProviderSelected",
-                "direct_model_not_found",
-                message,
-            )
-        }
+        V3AnthropicRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ModelNotFound,
+            "V3Target10ConcreteProviderSelected",
+            "direct_model_not_found",
+            message,
+        ),
         error => build_v3_error_01_source_raised(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",

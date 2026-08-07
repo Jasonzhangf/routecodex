@@ -740,8 +740,8 @@ fn stopless_request_hook_preserves_stopless_shaped_history_without_control_state
     let messages = governed.payload()["messages"].as_array().unwrap();
     assert_eq!(
         messages.len(),
-        4,
-        "payload-shaped Stopless pair must remain data without MetadataCenter provenance"
+        3,
+        "payload-shaped Stopless pair must remain data without MetadataCenter provenance (input->chat normalizes the assistant text and tool_calls into one standard message)"
     );
     assert_eq!(messages[0], json!({"role":"user","content":"完成当前目标"}));
     assert_eq!(
@@ -751,6 +751,20 @@ fn stopless_request_hook_preserves_stopless_shaped_history_without_control_state
     assert_eq!(
         messages[1].get("content").and_then(Value::as_str),
         Some("自然停下的可见文本")
+    );
+    assert_eq!(
+        messages[1]
+            .pointer("/tool_calls/0/id")
+            .and_then(Value::as_str),
+        Some("call_stopless_reasoning")
+    );
+    assert_eq!(
+        messages[2].get("role").and_then(Value::as_str),
+        Some("tool")
+    );
+    assert_eq!(
+        messages[2].get("tool_call_id").and_then(Value::as_str),
+        Some("call_stopless_reasoning")
     );
     let serialized = serde_json::to_string(governed.payload()).unwrap();
     assert!(serialized.contains("call_stopless_reasoning"));

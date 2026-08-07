@@ -837,9 +837,7 @@ impl V3WebSearchCenterState {
     ) -> Result<V3WebSearchCenterState, String> {
         let legal = match (self.phase, next) {
             (_, V3WebSearchCenterPhase::Failed) => !self.phase.is_terminal(),
-            (V3WebSearchCenterPhase::Idle, V3WebSearchCenterPhase::LocalToolSurfaceActive) => {
-                true
-            }
+            (V3WebSearchCenterPhase::Idle, V3WebSearchCenterPhase::LocalToolSurfaceActive) => true,
             (
                 V3WebSearchCenterPhase::LocalToolSurfaceActive,
                 V3WebSearchCenterPhase::ToolCallObserved,
@@ -852,9 +850,10 @@ impl V3WebSearchCenterState {
                 V3WebSearchCenterPhase::SearchDispatchPrepared,
                 V3WebSearchCenterPhase::SearchInFlight,
             ) => true,
-            (V3WebSearchCenterPhase::SearchInFlight, V3WebSearchCenterPhase::SearchResultCaptured) => {
-                true
-            }
+            (
+                V3WebSearchCenterPhase::SearchInFlight,
+                V3WebSearchCenterPhase::SearchResultCaptured,
+            ) => true,
             (
                 V3WebSearchCenterPhase::SearchResultCaptured,
                 V3WebSearchCenterPhase::HostedResultProjected,
@@ -951,9 +950,7 @@ impl V3ServerToolCenter {
                 instance.tool_name()
             ));
         }
-        let mut store = self
-            .lock_store()
-            .map_err(|error| error.to_string())?;
+        let mut store = self.lock_store().map_err(|error| error.to_string())?;
         if store.contains_key(&key) {
             return Err(format!(
                 "servertool instance already registered for tool_name={:?} scope={}",
@@ -1029,11 +1026,11 @@ impl V3ServerToolCenter {
 
     fn lock_store(
         &self,
-    ) -> Result<MutexGuard<'_, BTreeMap<V3ServerToolCenterKey, V3ServerToolInstanceState>>, V3ServerToolCenterPoisoned>
-    {
-        self.store
-            .lock()
-            .map_err(|_| V3ServerToolCenterPoisoned)
+    ) -> Result<
+        MutexGuard<'_, BTreeMap<V3ServerToolCenterKey, V3ServerToolInstanceState>>,
+        V3ServerToolCenterPoisoned,
+    > {
+        self.store.lock().map_err(|_| V3ServerToolCenterPoisoned)
     }
 }
 
@@ -1082,7 +1079,10 @@ mod server_tool_center_tests {
             .transition_to(V3WebSearchCenterPhase::HostedResultProjected, "resp03")
             .expect("search_result_captured -> hosted_result_projected");
         let continuation = projected
-            .transition_to(V3WebSearchCenterPhase::MainModelContinuationPrepared, "req04")
+            .transition_to(
+                V3WebSearchCenterPhase::MainModelContinuationPrepared,
+                "req04",
+            )
             .expect("hosted_result_projected -> main_model_continuation_prepared");
         let completed = continuation
             .transition_to(V3WebSearchCenterPhase::Completed, "req04")
@@ -1118,7 +1118,10 @@ mod server_tool_center_tests {
         let web_key = key(V3ServerToolName::WebSearch, "session-a");
         let stopless_key = key(V3ServerToolName::Stopless, "session-a");
         center
-            .register(web_key.clone(), V3ServerToolInstanceState::WebSearch(web_search_instance()))
+            .register(
+                web_key.clone(),
+                V3ServerToolInstanceState::WebSearch(web_search_instance()),
+            )
             .expect("register web_search");
         center
             .register(
@@ -1143,10 +1146,7 @@ mod server_tool_center_tests {
             .expect("load stopless")
             .expect("stopless present");
         assert!(matches!(web, V3ServerToolInstanceState::WebSearch(_)));
-        assert!(matches!(
-            stopless,
-            V3ServerToolInstanceState::Stopless(_)
-        ));
+        assert!(matches!(stopless, V3ServerToolInstanceState::Stopless(_)));
     }
 
     #[test]
@@ -1174,7 +1174,10 @@ mod server_tool_center_tests {
             .contains("cross-tool store rejected"));
         // transition 返回跨工具实例 -> reject
         center
-            .register(web_key.clone(), V3ServerToolInstanceState::WebSearch(web_search_instance()))
+            .register(
+                web_key.clone(),
+                V3ServerToolInstanceState::WebSearch(web_search_instance()),
+            )
             .expect("register web_search");
         let cross_transition = center.transition(&web_key, |_| {
             Ok(V3ServerToolInstanceState::Stopless(stopless_instance()))
@@ -1191,41 +1194,43 @@ mod server_tool_center_tests {
         let session_a = key(V3ServerToolName::WebSearch, "session-a");
         let session_b = key(V3ServerToolName::WebSearch, "session-b");
         center
-            .register(session_a.clone(), V3ServerToolInstanceState::WebSearch(web_search_instance()))
+            .register(
+                session_a.clone(),
+                V3ServerToolInstanceState::WebSearch(web_search_instance()),
+            )
             .expect("register session-a");
         center
-            .register(session_b.clone(), V3ServerToolInstanceState::WebSearch(web_search_instance()))
+            .register(
+                session_b.clone(),
+                V3ServerToolInstanceState::WebSearch(web_search_instance()),
+            )
             .expect("register session-b");
         // session-a 迁移不影响 session-b
         center
             .transition(&session_a, |instance| match instance {
-                V3ServerToolInstanceState::WebSearch(state) => Ok(
-                    V3ServerToolInstanceState::WebSearch(
+                V3ServerToolInstanceState::WebSearch(state) => {
+                    Ok(V3ServerToolInstanceState::WebSearch(
                         state
-                            .transition_to(
-                                V3WebSearchCenterPhase::LocalToolSurfaceActive,
-                                "req04",
-                            )
+                            .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
                             .expect("adjacent"),
-                    ),
-                ),
+                    ))
+                }
                 other => Err(format!("unexpected tool instance {:?}", other)),
             })
             .expect("transition session-a");
-        let a = center
-            .load(&session_a)
-            .expect("load a")
-            .expect("a present");
-        let b = center
-            .load(&session_b)
-            .expect("load b")
-            .expect("b present");
-        let (V3ServerToolInstanceState::WebSearch(state_a), V3ServerToolInstanceState::WebSearch(state_b)) =
-            (a, b)
+        let a = center.load(&session_a).expect("load a").expect("a present");
+        let b = center.load(&session_b).expect("load b").expect("b present");
+        let (
+            V3ServerToolInstanceState::WebSearch(state_a),
+            V3ServerToolInstanceState::WebSearch(state_b),
+        ) = (a, b)
         else {
             panic!("expected web_search instances");
         };
-        assert_eq!(state_a.phase(), V3WebSearchCenterPhase::LocalToolSurfaceActive);
+        assert_eq!(
+            state_a.phase(),
+            V3WebSearchCenterPhase::LocalToolSurfaceActive
+        );
         assert_eq!(state_b.phase(), V3WebSearchCenterPhase::Idle);
     }
 
@@ -1240,10 +1245,7 @@ mod server_tool_center_tests {
                 V3ServerToolInstanceState::Stopless(original.clone()),
             )
             .expect("register stopless");
-        let loaded = center
-            .load(&stopless_key)
-            .expect("load")
-            .expect("present");
+        let loaded = center.load(&stopless_key).expect("load").expect("present");
         let V3ServerToolInstanceState::Stopless(state) = loaded else {
             panic!("expected stopless instance");
         };
