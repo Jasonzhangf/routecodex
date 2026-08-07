@@ -303,6 +303,8 @@ fn govern_v3_hub_relay_response(
 ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
     let input = harvest_v3_think_blocks_at_resp03(input);
     let input = complete_or_repair_v3_resp03_tool_frames(input);
+    let _identified_servertool_tool =
+        super::servertool_hooks::inspect_v3_servertool_response_tool(input.provider_payload().as_ref());
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
     let mut stopless_center_state = None;

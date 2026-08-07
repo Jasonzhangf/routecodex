@@ -1,6 +1,6 @@
 use super::{
     apply_v3_stopless_request_hook_at_req04, apply_v3_web_search_request_hook_at_req04,
-    build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
+    build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03, govern_v3_servertool_request_at_req04,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
     merge_v3_relay_restored_local_context_at_req04, V3HubContinuationOwnership, V3HubEntryProtocol,
@@ -474,27 +474,18 @@ impl V3HubRelayRequestHooks {
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
-        let stopless_state = if profile.stopless_reasoning_stop_enabled() {
-            let stopless_state = apply_v3_stopless_request_hook_at_req04(
-                Arc::make_mut(&mut classified.previous.previous.payload.0),
-                current_payload_start,
-                &mut events,
-                profile.stopless_center_state(),
-                profile.stopless_transition_request_id(),
-                profile.stopless_transition_updated_at(),
-            )?;
-            stopless_state
-        } else {
-            None
-        };
-        let web_search_state = if profile
-            .web_search_execution_mode()
-            .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search)
-        {
-            apply_v3_web_search_request_hook_at_req04(Arc::make_mut(&mut classified.previous.previous.payload.0))?
-        } else {
-            None
-        };
+        let (stopless_state, web_search_state) = govern_v3_servertool_request_at_req04(
+            Arc::make_mut(&mut classified.previous.previous.payload.0),
+            current_payload_start,
+            &mut events,
+            profile.stopless_reasoning_stop_enabled(),
+            profile
+                .web_search_execution_mode()
+                .is_some_and(routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search),
+            profile.stopless_center_state(),
+            profile.stopless_transition_request_id(),
+            profile.stopless_transition_updated_at(),
+        )?;
         if govern_protocol_tool_identity_at_req04(
             classified.previous.previous.entry_protocol,
             &classified.previous.previous.payload.0,

@@ -118,12 +118,6 @@ flowchart TD
 | v3.entry_protocol_endpoint_binding.mainline | v3-entry-bind-01 | V3Config05ManifestPublished | V3EntryBind01EndpointPatternDeclared |
 | v3.entry_protocol_endpoint_binding.mainline | v3-entry-bind-02 | V3EntryBind01EndpointPatternDeclared | V3EntryBind02ProtocolResolved |
 | v3.entry_protocol_endpoint_binding.mainline | v3-entry-bind-03 | V3EntryBind02ProtocolResolved | V3EntryBind03ServerEnablementChecked |
-| v3.servertool_center.skeleton | v3-servertool-center-req-01 | V3HubReqContinuation03Classified | V3HubReqChatProcess04Governed |
-| v3.servertool_center.skeleton | v3-servertool-center-req-02 | V3HubReqChatProcess04Governed | V3ServertoolReq01ToolIdentified |
-| v3.servertool_center.skeleton | v3-servertool-center-req-03 | V3ServertoolReq01ToolIdentified | V3ServertoolReq02StateLoaded |
-| v3.servertool_center.skeleton | v3-servertool-center-resp-01 | V3HubRespChatProcess03Governed | V3ServertoolResp01ToolInspected |
-| v3.servertool_center.skeleton | v3-servertool-center-resp-02 | V3ServertoolResp01ToolInspected | V3ServertoolResp02StateTransitioned |
-| v3.servertool_center.skeleton | v3-servertool-center-resp-03 | V3ServertoolResp02StateTransitioned | V3ServertoolResp03Projected |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-01 | HubReqChatProcess03Governed | V3WebSearch01RouteEvidenceClassified |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-02 | V3WebSearch01RouteEvidenceClassified | VrRoute04SelectedTarget |
 | v3.web_search_servertool_state_machine | v3-web-search-sm-03 | HubRespChatProcess03Governed | V3ServerToolState01ControlScope |
@@ -1628,7 +1622,7 @@ flowchart TD
     c_38_v3_servertool_center_skeleton_6["v3-runtime::hub_v1<br/>inspect_v3_servertool_response_tool<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
     c_38_v3_servertool_center_skeleton_7["v3-runtime::hub_v1<br/>V3ServerToolCenter::transition<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small>"]
     c_38_v3_servertool_center_skeleton_8["v3-runtime::hub_v1<br/>V3ServerToolInstanceState<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small>"]
-    c_38_v3_servertool_center_skeleton_9["v3-runtime::hub_v1<br/>project_v3_servertool_response_hook<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_38_v3_servertool_center_skeleton_9["v3-runtime::hub_v1<br/>apply_v3_stop_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
     c_38_v3_servertool_center_skeleton_10["v3-runtime::hub_v1<br/>V3StoplessResponseHookOutcome<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
   end
   c_38_v3_servertool_center_skeleton_0 -->|v3-servertool-center-req-01<br/>V3HubReqContinuation03Classified → V3HubReqChatProcess04Governed| c_38_v3_servertool_center_skeleton_1
@@ -1641,12 +1635,12 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-servertool-center-req-01` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | binding_pending | V3HubRelayRequestHooks::run_from_normalized<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03<br/><small>routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</small> | `v3.servertool_center_skeleton` |
-| `v3-servertool-center-req-02` | `V3HubReqChatProcess04Governed` → `V3ServertoolReq01ToolIdentified` | binding_pending | identify_v3_servertool_request_tool<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3ServerToolName<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
-| `v3-servertool-center-req-03` | `V3ServertoolReq01ToolIdentified` → `V3ServertoolReq02StateLoaded` | binding_pending | V3ServerToolCenter::load<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | V3ServerToolCenterKey<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
-| `v3-servertool-center-resp-01` | `V3HubRespChatProcess03Governed` → `V3ServertoolResp01ToolInspected` | binding_pending | inspect_v3_servertool_response_tool<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3ServerToolName<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
-| `v3-servertool-center-resp-02` | `V3ServertoolResp01ToolInspected` → `V3ServertoolResp02StateTransitioned` | binding_pending | V3ServerToolCenter::transition<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | V3ServerToolInstanceState<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
-| `v3-servertool-center-resp-03` | `V3ServertoolResp02StateTransitioned` → `V3ServertoolResp03Projected` | binding_pending | project_v3_servertool_response_hook<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3StoplessResponseHookOutcome<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | `v3.servertool_center_skeleton` |
+| `v3-servertool-center-req-01` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | anchored | V3HubRelayRequestHooks::run_from_normalized<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03<br/><small>routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</small> | `v3.servertool_center_skeleton` |
+| `v3-servertool-center-req-02` | `V3HubReqChatProcess04Governed` → `V3ServertoolReq01ToolIdentified` | anchored | identify_v3_servertool_request_tool<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3ServerToolName<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
+| `v3-servertool-center-req-03` | `V3ServertoolReq01ToolIdentified` → `V3ServertoolReq02StateLoaded` | anchored | V3ServerToolCenter::load<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | V3ServerToolCenterKey<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
+| `v3-servertool-center-resp-01` | `V3HubRespChatProcess03Governed` → `V3ServertoolResp01ToolInspected` | anchored | inspect_v3_servertool_response_tool<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3ServerToolName<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
+| `v3-servertool-center-resp-02` | `V3ServertoolResp01ToolInspected` → `V3ServertoolResp02StateTransitioned` | anchored | V3ServerToolCenter::transition<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | V3ServerToolInstanceState<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.servertool_center_skeleton` |
+| `v3-servertool-center-resp-03` | `V3ServertoolResp02StateTransitioned` → `V3ServertoolResp03Projected` | anchored | apply_v3_stop_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3StoplessResponseHookOutcome<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | `v3.servertool_center_skeleton` |
 
 ## v3.direct_stopless_metadata_center
 

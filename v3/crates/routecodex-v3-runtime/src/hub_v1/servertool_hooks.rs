@@ -1,7 +1,8 @@
 use super::{
     V3HubRelayRequestError, V3HubRelayRequestHookEvent, V3HubRelayResponseError,
-    V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessCenterState,
-    V3StoplessCenterSteering, V3WebSearchCenterPhase, V3WebSearchCenterState,
+    V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3ServerToolName,
+    V3StoplessCenterState, V3StoplessCenterSteering, V3WebSearchCenterPhase,
+    V3WebSearchCenterState,
 };
 use super::web_search_hop::{first_local_websearch_tool_call, hosted_web_search_result_text};
 use serde_json::{json, Value};
@@ -23,6 +24,97 @@ pub(crate) fn is_v3_stopless_internal_call_id(call_id: &str) -> bool {
 /// `LocalToolSurfaceActive` 状态。状态由调用方存入 relay/direct 的
 /// ServerToolCenter websearch 桶；本钩子只做同轮工具面判定，不持久化、不
 /// 修改历史与 continuation 不可变区。
+
+/// ServertoolCenter 工具识别（请求侧）：当前工具是哪一个（stopless 优先，
+/// 否则 web_search Mode B 本地搜索）。识别结果驱动固定 hook 分发。
+pub(crate) fn identify_v3_servertool_request_tool(
+    payload: &Value,
+    stopless_enabled: bool,
+    web_search_mode_b: bool,
+) -> Option<V3ServerToolName> {
+    if stopless_enabled {
+        return Some(V3ServerToolName::Stopless);
+    }
+    if web_search_mode_b {
+        return Some(V3ServerToolName::WebSearch);
+    }
+    let _ = payload;
+    None
+}
+
+/// ServertoolCenter 响应侧工具识别：从 provider 响应识别当前工具调用
+/// （reasoningStop / web_search / 已注册 servertool CLI）。
+pub(crate) fn inspect_v3_servertool_response_tool(payload: &Value) -> Option<V3ServerToolName> {
+    let Some(output) = payload.get("output").and_then(Value::as_array) else {
+        return None;
+    };
+    for item in output {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(
+            item_type,
+            "function_call" | "tool_call" | "custom_tool_call"
+        ) {
+            continue;
+        }
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| item.pointer("/function/name").and_then(Value::as_str));
+        match name {
+            Some(name) if name.trim().eq_ignore_ascii_case("reasoningStop") => {
+                return Some(V3ServerToolName::Stopless)
+            }
+            Some(name)
+                if matches!(name.trim(), "web_search" | "web_search_preview") =>
+            {
+                return Some(V3ServerToolName::WebSearch)
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// ServertoolCenter 请求治理入口（固定 Req04 hook 挂载点）：工具识别 ->
+/// 状态判断（profile 条件）-> 固定 hook 分发（stopless / web_search）。
+pub(crate) fn govern_v3_servertool_request_at_req04(
+    payload: &mut Value,
+    current_payload_start: usize,
+    events: &mut Vec<V3HubRelayRequestHookEvent>,
+    stopless_enabled: bool,
+    web_search_mode_b: bool,
+    stopless_center_state: Option<&V3StoplessCenterState>,
+    transition_request_id: Option<&str>,
+    transition_updated_at: Option<u64>,
+) -> Result<
+    (Option<V3StoplessCenterState>, Option<V3WebSearchCenterState>),
+    V3HubRelayRequestError,
+> {
+    let identified = identify_v3_servertool_request_tool(
+        payload,
+        stopless_enabled,
+        web_search_mode_b,
+    );
+    let stopless_state = if identified == Some(V3ServerToolName::Stopless) {
+        apply_v3_stopless_request_hook_at_req04(
+            payload,
+            current_payload_start,
+            events,
+            stopless_center_state,
+            transition_request_id,
+            transition_updated_at,
+        )?
+    } else {
+        None
+    };
+    let web_search_state = if identified == Some(V3ServerToolName::WebSearch) {
+        apply_v3_web_search_request_hook_at_req04(payload)?
+    } else {
+        None
+    };
+    Ok((stopless_state, web_search_state))
+}
+
 pub fn apply_v3_web_search_request_hook_at_req04(
     payload: &mut Value,
 ) -> Result<Option<V3WebSearchCenterState>, V3HubRelayRequestError> {
