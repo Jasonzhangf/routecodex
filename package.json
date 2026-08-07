@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4171",
+  "version": "0.90.4183",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -269,6 +269,10 @@
     "render:mainline-manifests": "node scripts/architecture/render-mainline-manifests.mjs",
     "build:base": "node scripts/gen-build-info.mjs && node scripts/copy-v3-cli-bin.mjs && npm run fix:cli-permission",
     "verify-mainline-call-map-binding-state": "node scripts/architecture/verify-mainline-call-map-binding-state.mjs",
+    "verify:architecture-mainline-call-map": "node scripts/architecture/verify-architecture-mainline-call-map.mjs",
+    "verify:architecture-mainline-manifest-sync": "node scripts/architecture/verify-architecture-mainline-manifest-sync.mjs",
+    "verify:architecture-wiki-html-sync": "node scripts/architecture/verify-architecture-wiki-html-sync.mjs",
+    "verify:function-map-compile-gate": "node scripts/architecture/verify-function-map-compile-gate.mjs",
     "render:architecture-mainline-chain-manifests": "node scripts/architecture/generate-mainline-chain-manifests.mjs",
     "test:v3-sse-transport-core": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-sse -- --nocapture",
     "render:v3-mainline-caller-flow": "node scripts/architecture/render-v3-mainline-caller-flow.mjs",

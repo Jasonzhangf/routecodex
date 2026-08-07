@@ -68,6 +68,7 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
+  - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
@@ -821,9 +822,7 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
-  - npm run verify:architecture-wiki-sync
   - npm run verify:architecture-wiki-html-sync
-  - npm run verify:architecture-wiki-browser-smoke
   - git diff --check
   runtime_status: source_binding_registry_and_server_consumer_verified_gemini_runtime_implemented
   pending_runtime:
@@ -2273,7 +2272,6 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
-  - npm run verify:function-map-compile-gate
   - npm run verify:v3-cargo-fmt
   - git diff --check
   notes:
@@ -3008,7 +3006,6 @@ features:
   - npm run verify:v3-normalization-payload-logic-boundary
   - npm run verify:v3-architecture-docs
   - npm run verify:architecture-wiki-html-sync
-  - npm run verify:architecture-wiki-sync
   - node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs
   - git diff --check
   completion_rule:

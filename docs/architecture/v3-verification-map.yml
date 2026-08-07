@@ -267,9 +267,7 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
-  - npm run verify:architecture-wiki-sync
   - npm run verify:architecture-wiki-html-sync
-  - npm run verify:architecture-wiki-browser-smoke
   - git diff --check
   completion_rule:
     source: Complete when maps, manifest, wiki, verifier, red fixtures, Config registry
@@ -1152,6 +1150,10 @@ features:
   - Provider wire preserves the complete client history byte-for-byte, including historical
     tool-output images and reasoning encrypted content; only the selected wire model
     binding and current-turn validation may differ
+  - 'The Responses continuation save->restore interval is immutable: Resp04 commit
+    through next Req04 restore only projects, frames, transports, validates scope,
+    or releases; SSE transport, server handler, client body adapter, and store transport
+    must not clean, convert, reorder, patch, or restore history'
   - Provider wire rejects malformed current-turn data:image payloads before Provider
     transport and projects them as client input errors, while valid current images
     remain normal payload
@@ -2173,7 +2175,6 @@ features:
   required_gates:
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
     terminal_merge --lib -- --nocapture
-  - npm run test:v3-openai-chat-stream-tool-call-identity
   - npm run test:v3-5520-duplicate-tool-identity
   - npm run test:v3-hub-relay-runtime-closeout
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime
@@ -2490,6 +2491,10 @@ features:
     or tool frames
   - Resp04 preserves the complete historical message prefix and only coalesces the
     newly appended response suffix
+  - 'The Responses continuation save->restore interval is immutable: Resp04 commit
+    through next Req04 restore only projects, frames, transports, validates scope,
+    or releases; SSE transport, server handler, client body adapter, and store transport
+    must not clean, convert, reorder, patch, or restore history'
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics
     -- --nocapture
@@ -2501,10 +2506,11 @@ features:
     -- --nocapture
   - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
   - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
+  - npm run verify:responses-continuation-immutable-boundary
+  - npm run test:responses-continuation-immutable-boundary-red-fixtures
   - npm run verify:v3-normalization-payload-logic-boundary
   - npm run verify:v3-architecture-docs
   - npm run verify:architecture-wiki-html-sync
-  - npm run verify:architecture-wiki-sync
   - node scripts/architecture/verify-architecture-wiki-browser-smoke.mjs
   - git diff --check
   completion_rule:
