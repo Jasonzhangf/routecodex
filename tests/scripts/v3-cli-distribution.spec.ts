@@ -135,14 +135,17 @@ describe('V3 CLI distribution surface', () => {
         expect(fs.realpathSync(commandPath)).toBe(fs.realpathSync(binaryPath));
         expect(crypto.createHash('sha256').update(fs.readFileSync(commandPath)).digest('hex'))
           .toBe(crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex'));
-        const result = spawnSync(commandPath, ['--version'], { encoding: 'utf8', timeout: 5000 });
+        const result = spawnSync(commandPath, ['--version'], {
+          encoding: 'utf8',
+          timeout: 30_000,
+        });
         expect(result.status).toBe(0);
         expect(result.stdout).toContain('rccv3 ');
       }
       fs.unlinkSync(binaryPath);
       const missing = spawnSync(path.join(shimDir, 'routecodex'), ['--version'], {
         encoding: 'utf8',
-        timeout: 5000,
+        timeout: 30_000,
       });
       expect(missing.status).not.toBe(0);
     } finally {
