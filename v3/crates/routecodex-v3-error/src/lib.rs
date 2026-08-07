@@ -265,6 +265,7 @@ pub enum V3ErrorSourceKind {
     PayloadTooLarge,
     MethodNotAllowed,
     PathNotFound,
+    ModelNotFound,
     PendingEndpoint,
     ProviderFailure,
     TargetPoolExhausted,
@@ -606,6 +607,7 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
         | V3ErrorSourceKind::PathNotFound
+        | V3ErrorSourceKind::ModelNotFound
         | V3ErrorSourceKind::PendingEndpoint
         | V3ErrorSourceKind::TargetPoolExhausted
         | V3ErrorSourceKind::ClientDisconnect => {
@@ -638,7 +640,8 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         | V3ErrorSourceKind::UnsupportedMediaType
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
-        | V3ErrorSourceKind::PathNotFound => ("client_input", "already_terminal"),
+        | V3ErrorSourceKind::PathNotFound
+        | V3ErrorSourceKind::ModelNotFound => ("client_input", "already_terminal"),
         V3ErrorSourceKind::PendingEndpoint => ("pending_endpoint", "already_terminal"),
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
@@ -668,12 +671,18 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         classified.source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
+    let model_not_found = matches!(
+        classified.source.source_kind,
+        V3ErrorSourceKind::ModelNotFound
+    );
     let retry_eligible = provider_failure && candidates_remaining > 0;
     let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
     let exhaustion_effect = if retry_eligible {
         "target_local_reselect"
     } else if client_disconnect {
         "health_neutral_client_disconnect"
+    } else if model_not_found {
+        "project_client_error"
     } else if candidates_remaining == 0 {
         "target_pool_exhausted"
     } else {
@@ -719,6 +728,7 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
                 | V3ErrorSourceKind::PayloadTooLarge
                 | V3ErrorSourceKind::MethodNotAllowed
                 | V3ErrorSourceKind::PathNotFound
+                | V3ErrorSourceKind::ModelNotFound
                 | V3ErrorSourceKind::TargetPoolExhausted
                 | V3ErrorSourceKind::RuntimeFailure
                 | V3ErrorSourceKind::ClientDisconnect
@@ -772,6 +782,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         V3ErrorSourceKind::PayloadTooLarge => 413,
         V3ErrorSourceKind::MethodNotAllowed => 405,
         V3ErrorSourceKind::PathNotFound => 404,
+        V3ErrorSourceKind::ModelNotFound => 404,
         V3ErrorSourceKind::PendingEndpoint => 501,
         V3ErrorSourceKind::ProviderFailure => source
             .external_error

@@ -11,12 +11,14 @@ use crate::local_continuation::{
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, resolve_v3_relay_target, run_v3_relay_provider_failure_policy,
+    provider_runtime_failure_stage, resolve_v3_relay_target,
+    resolve_v3_relay_target_outcome, run_v3_relay_provider_failure_policy,
     v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
     v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolutionInput, V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
+    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
+    V3_PROVIDER_FAILURE_SAME_PROVIDER_RETRY_BUDGET,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{
@@ -1107,6 +1109,8 @@ pub enum V3ResponsesRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Responses Relay target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Responses Relay requested direct provider model not found: {0}")]
+    ModelNotFound(String),
     #[error("V3 Responses Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Responses Relay provider compat failed: {0}")]
@@ -1721,7 +1725,7 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
         } else if let Some(selected) = initial_selected_target.take() {
             selected
         } else {
-            match resolve_v3_relay_target(V3RelayProviderTargetResolutionInput {
+            match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id: &input.server_id,
                 failure_session_scope: &input.failure_session_scope,
@@ -1734,15 +1738,44 @@ async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTransport>(
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
             }) {
-                Ok(selected) => selected,
-                Err(error) => {
+                V3RelayProviderTargetResolution::Selected(selected) => selected,
+                V3RelayProviderTargetResolution::Failed(source)
+                    if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
+                {
                     clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
                         manifest,
                         &input.server_id,
                         stopless_control.as_ref(),
                         stopless_state.as_ref(),
                     )?;
-                    return Err(V3ResponsesRelayRuntimeError::Target(error));
+                    return Err(V3ResponsesRelayRuntimeError::ModelNotFound(
+                        source.message.clone(),
+                    ));
+                }
+                V3RelayProviderTargetResolution::Failed(source) => {
+                    clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                        manifest,
+                        &input.server_id,
+                        stopless_control.as_ref(),
+                        stopless_state.as_ref(),
+                    )?;
+                    return Err(V3ResponsesRelayRuntimeError::Target(format!(
+                        "{}: {}",
+                        source.code, source.message
+                    )));
+                }
+                V3RelayProviderTargetResolution::Exhausted {
+                    attempted_candidates,
+                } => {
+                    clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal(
+                        manifest,
+                        &input.server_id,
+                        stopless_control.as_ref(),
+                        stopless_state.as_ref(),
+                    )?;
+                    return Err(V3ResponsesRelayRuntimeError::Target(format!(
+                        "selected target exhausted after {attempted_candidates:?}"
+                    )));
                 }
             }
         };
@@ -3200,6 +3233,38 @@ pub fn project_v3_responses_relay_runtime_failure(
     error: V3ResponsesRelayRuntimeError,
 ) -> V3ResponsesRelayRuntimeOutput {
     match error {
+        V3ResponsesRelayRuntimeError::ModelNotFound(message) => {
+            let source = build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ModelNotFound,
+                "V3Target10ConcreteProviderSelected",
+                "direct_model_not_found",
+                message,
+            );
+            let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+                source: source.clone(),
+                action_scope: V3ErrorActionScope::None,
+                candidates_remaining: 0,
+                source_status: None,
+            });
+            return V3ResponsesRelayRuntimeOutput {
+                status: projected.status,
+                client_body: V3ResponsesRelayClientBody::Json(projected.body),
+                node_trace: vec!["V3Error06ClientProjected"],
+                error_chain: Some(vec![
+                    "V3Error01SourceRaised",
+                    "V3Error02Classified",
+                    "V3Error03TargetLocalAction",
+                    "V3Error04TargetExhaustionDecision",
+                    "V3Error05ExecutionDecision",
+                    "V3Error06ClientProjected",
+                ]),
+                observability: None,
+                stream_observation: None,
+                finalized_response: None,
+                provider_snapshots: None,
+                protocol_direct_handoff: None,
+            };
+        }
         V3ResponsesRelayRuntimeError::Target(_) => {
             let source = build_v3_error_01_source_raised(
                 V3ErrorSourceKind::TargetPoolExhausted,
@@ -5621,6 +5686,70 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         assert_eq!(output.body["providerRequest"]["providerId"], "glm");
         assert_eq!(output.body["providerRequest"]["body"]["model"], "glm-5.2");
         std::env::remove_var("GLM_TEST_KEY");
+        std::env::remove_var("MINIMAX_TEST_KEY");
+    }
+
+    #[tokio::test]
+    async fn responses_relay_unknown_direct_provider_model_projects_404() {
+        std::env::set_var("MINIMAX_TEST_KEY", "secret-key");
+        let authoring = parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "g"
+endpoints = ["responses"]
+[servers.s.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+
+[providers.minimax]
+type = "openai_chat"
+base_url = "https://minimax.example/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
+[providers.minimax.models."MiniMax-M3"]
+capabilities = ["text", "tools"]
+
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+        )
+        .expect("config authoring");
+        let manifest = compile_v3_config_05_manifest(authoring).expect("manifest");
+        let output = execute_v3_responses_relay_dry_run_runtime(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "s".to_string(),
+                failure_session_scope: V3ProviderFailureSessionScope::new(
+                    "s",
+                    "g",
+                    "session-responses-relay-404",
+                )
+                .expect("test failure session scope"),
+                request_id: "req_unknown_direct_provider_model".to_string(),
+                payload: json!({
+                    "model": "minimax.unknown-model",
+                    "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"ping"}]}],
+                    "stream": false
+                }),
+            },
+        )
+        .await;
+
+        assert_eq!(output.status, 404);
+        assert!(
+            output
+                .node_trace
+                .iter()
+                .any(|node| *node == "V3Error06ClientProjected"),
+            "404 must project through the Error chain: {:?}",
+            output.node_trace
+        );
         std::env::remove_var("MINIMAX_TEST_KEY");
     }
 

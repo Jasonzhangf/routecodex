@@ -1065,11 +1065,9 @@ pub(crate) fn resolve_v3_relay_target_outcome(
     let plan = match router.resolve_route_pool_plan(input.manifest, classified) {
         Ok(plan) => plan,
         Err(error) => {
-            return V3RelayProviderTargetResolution::Failed(target_resolution_source(
-                "V3Router06RoutePoolResolved",
-                "target_resolution_route_plan_failed",
-                error,
-            ))
+            return V3RelayProviderTargetResolution::Failed(
+                crate::shared::v3_route_plan_error_source("V3Router06RoutePoolResolved", "target_resolution_route_plan_failed", error),
+            )
         }
     };
     let hit = match router.hit_opaque_target_plan_once(plan, input.deterministic_sample) {

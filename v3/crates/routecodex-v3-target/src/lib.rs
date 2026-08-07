@@ -1,7 +1,8 @@
 use routecodex_v3_config::{
-    V3Config05ManifestPublished, V3ForwarderTargetManifest,
+    V3Config05ManifestPublished, V3ForwarderTargetManifest, V3ProviderModelManifest,
     V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3RouteGroupManifest,
-    V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy, V3WebSearchExecutionMode,
+    V3RoutePoolManifest, V3RoutePoolTargetManifest, V3RouteTargetKind, V3SelectionStrategy,
+    V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
@@ -156,7 +157,7 @@ impl V3TargetInterpreter {
         let route_required_capabilities =
             selected_route_required_capabilities(group, &classified.route);
         let requested_model_filter =
-            selected_route_requested_model_filter(group, &classified.route);
+            selected_route_requested_model_filter(manifest, group, &classified.route);
         for (plan_index, entry) in classified.route.target_plan.iter().enumerate() {
             // `provider.model` direct entries carry their own provider/model
             // pin and have no manifest pool to consult.
@@ -583,6 +584,7 @@ fn selected_route_required_capabilities(
 }
 
 fn selected_route_requested_model_filter(
+    manifest: &V3Config05ManifestPublished,
     group: &V3RouteGroupManifest,
     route: &V3Router07OpaqueTargetHitOnce,
 ) -> Option<String> {
@@ -594,17 +596,58 @@ fn selected_route_requested_model_filter(
     if requested == "gpt-5.5" {
         return None;
     }
-    let route_model_is_explicitly_mapped = route.pool_id != "default"
-        && group
-            .pools
-            .get(&route.pool_id)
+    let pool = group.pools.get(&route.pool_id);
+    let pool_is_explicit_model_pool = route.pool_id != "default"
+        && pool
             .and_then(|pool| pool.match_rule.as_ref())
             .is_some_and(|rule| rule.models.iter().any(|model| model.trim() == requested));
-    if route_model_is_explicitly_mapped {
-        None
-    } else {
-        Some(requested.to_string())
+    if pool_is_explicit_model_pool {
+        return None;
     }
+    if pool.is_some_and(|pool| pool_targets_route_model(manifest, pool, requested)) {
+        Some(requested.to_string())
+    } else {
+        None
+    }
+}
+
+fn pool_targets_route_model(
+    manifest: &V3Config05ManifestPublished,
+    pool: &V3RoutePoolManifest,
+    requested: &str,
+) -> bool {
+    pool.targets.iter().any(|target| match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            target.model.as_deref().is_some_and(|model| model.trim() == requested)
+                || target.provider.as_deref().is_some_and(|provider_id| {
+                    manifest.providers.get(provider_id).is_some_and(|provider| {
+                        provider
+                            .models
+                            .values()
+                            .any(|model| model_visible_name_matches(model, requested))
+                    })
+                })
+        }
+        V3RouteTargetKind::Forwarder => target
+            .id
+            .as_deref()
+            .and_then(|id| manifest.forwarders.get(id))
+            .is_some_and(|forwarder| {
+                forwarder.model.trim() == requested
+                    || forwarder
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.trim() == requested)
+                    || forwarder
+                        .targets
+                        .iter()
+                        .any(|target| target.model.as_deref().is_some_and(|model| model.trim() == requested))
+            }),
+    })
+}
+
+fn model_visible_name_matches(model: &V3ProviderModelManifest, requested: &str) -> bool {
+    model.id == requested || model.aliases.iter().any(|alias| alias == requested)
 }
 
 fn normalized_model_visible_ids(

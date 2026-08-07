@@ -95,6 +95,13 @@ Hard locks:
 - Direct may have its own lifecycle, but must declare Direct-only internal nodes; no provider/raw/Resp04 direct jump to client payload.
 - Stopless/servertool response governance lives only in Rust Resp03 Chat Process. Req04 may restore request-side continuation/control; Resp04 may only save/commit the governed continuation. Continuation must be documented as save + restore together; never mention only one side.
 
+## VR model routing flow (真源, Jason 2026-08-07)
+
+- `provider.model` explicit model: if the provider+model exists, VR resolves a direct plan, routes by control plane, and rewrites the payload model field to the bare model id; if absent, return 404 explicitly — never fallback to default pool, never replace the requested provider with another model.
+- Generic (dot-less) model: if the matched pool has explicit routing conditions for that model (pool `match.models` contains it, or pool targets resolve to a forwarder/provider whose model matches), execute those conditions with requested-model candidate filtering. Otherwise route by the normal routing conditions (entry protocol / capabilities / token thresholds), control plane decides the route, and the payload model field is rewritten to the selected target's model name.
+- Implementation anchor: requested-model candidate filtering lives in `selected_route_requested_model_filter` (v3/crates/routecodex-v3-target/src/lib.rs); it must return `None` (no filtering) when the selected route has no explicit model routing condition.
+- Anti-pattern: applying requested-model filtering when no explicit model routing condition exists filters out every candidate and produces a false `no candidate` 503; `provider.model` absence must surface as 404, never as default-floor fallback or model substitution.
+
 ## Debug/SOP workflow
 1. Open `docs/architecture/wiki/v3-mainline-skeleton-sop.md` first for the audited big skeleton.
 2. Open the generated HTML review surface.

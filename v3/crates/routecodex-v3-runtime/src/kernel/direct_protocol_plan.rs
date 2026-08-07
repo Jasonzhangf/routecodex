@@ -66,7 +66,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
         Ok(value) => value,
         Err(error) => {
             return Err(protocol_plan_failure(
-                runtime_source("V3Router06RoutePoolResolved", error),
+                crate::shared::v3_route_plan_error_source("V3Router06RoutePoolResolved", "v3_route_target_runtime_failure", error),
                 trace,
             ))
         }

@@ -458,7 +458,7 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
 }
 
 #[test]
-fn requested_forwarder_model_without_matching_target_fails_explicitly() {
+fn requested_forwarder_model_without_matching_target_falls_back_to_route_conditions() {
     let source = r#"
 version = 3
 [servers.s]
@@ -502,15 +502,15 @@ targets = [{ kind = "forwarder", id = "fwd_gpt", priority = 1 }]
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     let target = V3TargetInterpreter::default();
-    let error = target
+    let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
-        .unwrap_err();
-    assert_eq!(
-        error,
-        V3TargetError::RequestedModelUnavailable {
-            model_id: "MiniMax-M3".into()
-        }
-    );
+        .expect(
+            "no explicit model route condition must fall back to route conditions; \
+             the payload model is rewritten to the selected target model name",
+        );
+    assert_eq!(expanded.candidates.len(), 1);
+    assert_eq!(expanded.candidates[0].provider_id, "default_gpt");
+    assert_eq!(expanded.candidates[0].model_id, "gpt-5.5");
 }
 
 #[test]
@@ -1271,4 +1271,72 @@ fn malformed_internal_member_does_not_escape_while_a_sibling_remains() {
     assert_eq!(expanded.route.hit_count, 1);
     assert_eq!(expanded.candidates.len(), 1);
     assert_eq!(expanded.candidates[0].provider_id, "b");
+}
+
+#[test]
+fn requested_model_with_pool_forwarder_route_condition_filters_to_that_model() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.default_gpt]
+type = "responses"
+base_url = "http://gpt.invalid/v1"
+default_model = "gpt-5.6"
+auth = { type = "api_key", entries = [{ alias = "key", env = "GPT_KEY" }] }
+[providers.default_gpt.models."gpt-5.6"]
+capabilities = ["text"]
+[providers.minimax]
+type = "openai_chat"
+base_url = "http://minimax.invalid/v1"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key", env = "MINIMAX_KEY" }] }
+[providers.minimax.models."MiniMax-M3"]
+capabilities = ["text"]
+[forwarders.fwd_gpt]
+model = "gpt-5.6"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "default_gpt", model = "gpt-5.6", key = "key", priority = 1 }]
+[forwarders.fwd_minimax]
+model = "MiniMax-M3"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "forwarder", id = "fwd_gpt", priority = 1 },
+  { kind = "forwarder", id = "fwd_minimax", priority = 2 }
+]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("MiniMax-M3".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                route_classification: RouteClassification::default(),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "default");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    assert_eq!(expanded.candidates.len(), 1);
+    assert_eq!(expanded.candidates[0].provider_id, "minimax");
+    assert_eq!(expanded.candidates[0].model_id, "MiniMax-M3");
 }

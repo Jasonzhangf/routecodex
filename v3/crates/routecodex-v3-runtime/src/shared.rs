@@ -11,8 +11,32 @@ use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportError,
     SseTransportLimits,
 };
+use routecodex_v3_virtual_router::V3VirtualRouterError;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+
+pub(crate) fn v3_route_plan_error_source(
+    stage: &'static str,
+    code: &'static str,
+    error: V3VirtualRouterError,
+) -> V3Error01SourceRaised {
+    match error {
+        V3VirtualRouterError::DirectModelUnknown { provider, model } => {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ModelNotFound,
+                stage,
+                "direct_model_not_found",
+                format!("direct provider model {provider}.{model} is not configured"),
+            )
+        }
+        other => build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            stage,
+            code,
+            other.to_string(),
+        ),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum V3RemoteContinuationObservation {
