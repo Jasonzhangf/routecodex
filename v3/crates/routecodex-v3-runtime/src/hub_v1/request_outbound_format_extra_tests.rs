@@ -1045,6 +1045,7 @@ fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_sear
         build_v3_openai_chat_standard_request_for_selected_web_search_mode(
             &payload,
             V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+            true,
         )
         .expect("Mode B local websearch projection must compile");
     let tools = request["tools"].as_array().expect("tools array");
@@ -1084,6 +1085,7 @@ fn openai_chat_wire_keeps_hosted_options_for_unspecified_mode() {
     let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
         &payload,
         V3WebSearchExecutionMode::None,
+        true,
     )
     .expect("unspecified mode keeps the hosted options projection");
     assert!(
@@ -1093,5 +1095,45 @@ fn openai_chat_wire_keeps_hosted_options_for_unspecified_mode() {
     assert!(
         request.get("web_search_options").is_some_and(Value::is_object),
         "unspecified mode must keep the hosted web_search_options projection"
+    );
+}
+
+#[test]
+fn openai_chat_wire_removes_web_search_for_provider_without_capability() {
+    // 无 web_search 能力的 provider（如 deepseek，capabilities 不含 web_search）：
+    // None 模式 + 无能力 → web_search 工具声明与 web_search_options 完全移除，
+    // 避免把未知字段/工具发给无能力 provider。
+    let payload = json!({
+        "model": "plain-model",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "web_search",
+                "search_context_size": "medium"
+            },
+            {"type": "function", "function": {"name": "read_file"}}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::None,
+        false,
+    )
+    .expect("no-capability provider must strip web_search cleanly");
+    assert!(
+        request.get("web_search_options").is_none(),
+        "no-capability provider must not receive web_search_options: {:?}",
+        request.get("web_search_options")
+    );
+    // 普通 function 工具（read_file）保留，web_search 声明完全移除。
+    let tools = request["tools"].as_array().expect("tools retained");
+    assert_eq!(tools.len(), 1, "ordinary function tool must remain");
+    assert_eq!(tools[0]["function"]["name"], "read_file");
+    assert!(
+        !tools.iter().any(|tool| tool
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "web_search")),
+        "web_search tool declaration must be removed"
     );
 }

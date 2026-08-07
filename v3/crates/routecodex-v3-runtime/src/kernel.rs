@@ -1286,36 +1286,44 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                     &mut trace,
                 ) {
                     Ok(Some(state)) => {
-                        // Mode B 本地 websearch 拦截成功：执行异步搜索 hop
-                        // （backend direct pin 走正常 Hub 链 + VR 路由），结果
-                        // 投影为 hosted web_search_call + 原 call_id 配对，状态机
-                        // 迁移 ToolCallObserved -> SearchResultCaptured。
-                        let backend_binding = crate::hub_v1::resolve_request_web_search_backend_binding(
-                                manifest,
-                                &standardized.body,
-                            );
-                        let captured = match crate::hub_v1::execute_local_web_search_hop(
-                            manifest,
-                            &standardized.protocol_context.server_id,
-                            &direct_failure_session_scope,
-                            &provider_health,
-                            backend_binding.as_deref(),
-                            &state,
-                            transport,
-                            &standardized.protocol_context.request_id,
-                        )
-                        .await
+                        // Mode B 本地 websearch 拦截成功。MiniMax hosted
+                        // search：结果已随同一响应返回（SearchResultCaptured）
+                        // → 跳过搜索 hop；否则执行异步搜索 hop（backend
+                        // direct pin 走正常 Hub 链 + VR 路由）。结果投影为
+                        // hosted web_search_call + 原 call_id 配对。
+                        let captured = if state.phase()
+                            == crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
                         {
-                            Ok(captured) => captured,
-                            Err(error) => {
-                                return error_output(
-                                    runtime_source(
-                                        "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                        error,
-                                    ),
-                                    trace,
-                                    &hook_registry,
-                                )
+                            state
+                        } else {
+                            let backend_binding =
+                                crate::hub_v1::resolve_request_web_search_backend_binding(
+                                    manifest,
+                                    &standardized.body,
+                                );
+                            match crate::hub_v1::execute_local_web_search_hop(
+                                manifest,
+                                &standardized.protocol_context.server_id,
+                                &direct_failure_session_scope,
+                                &provider_health,
+                                backend_binding.as_deref(),
+                                &state,
+                                transport,
+                                &standardized.protocol_context.request_id,
+                            )
+                            .await
+                            {
+                                Ok(captured) => captured,
+                                Err(error) => {
+                                    return error_output(
+                                        runtime_source(
+                                            "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                            error,
+                                        ),
+                                        trace,
+                                        &hook_registry,
+                                    )
+                                }
                             }
                         };
                         match crate::hub_v1::project_web_search_result_into_finalized(

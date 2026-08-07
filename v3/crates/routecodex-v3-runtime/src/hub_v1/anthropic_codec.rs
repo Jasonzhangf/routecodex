@@ -835,6 +835,25 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             Some("tool_use") => {
                 output_items.push(anthropic_tool_use_as_responses_call(part, context)?);
             }
+            Some("web_search_tool_result") => {
+                // MiniMax hosted web search：搜索结果随同一响应返回
+                // （server_tool_use + web_search_tool_result）。保留为
+                // responses 内部项，由 Mode B Resp03 拦截提取结果后剥离；
+                // 未启用 Mode B 时该场景不会出现（无 web_search 工具声明）。
+                let tool_use_id = part
+                    .get("tool_use_id")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let content = part
+                    .get("content")
+                    .cloned()
+                    .unwrap_or(Value::Array(Vec::new()));
+                output_items.push(json!({
+                    "type":"web_search_tool_result",
+                    "tool_use_id":tool_use_id,
+                    "content":content
+                }));
+            }
             Some(other) => {
                 return Err(V3AnthropicCodecError::MalformedField {
                     field: match other {

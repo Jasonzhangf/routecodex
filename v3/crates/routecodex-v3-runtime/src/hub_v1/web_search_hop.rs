@@ -9,6 +9,7 @@
 //! 控制状态只进 ServerToolCenter 控制资源；这里投影的是协议等价结果，
 //! 不重建 entry payload、不重入主模型、不做第二套 VR。
 
+use super::V3HubRelayResponseError;
 use super::responses_relay_runtime::{
     build_v3_provider_transport_request_for_protocol, find_responses_tool_output_ids,
     provider_target, provider_wire_protocol_for_selected_candidate,
@@ -140,13 +141,16 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport>(
         )
         .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?;
     // 1. 搜索请求 payload：model = backend binding（direct pin 到搜索目标），
-    //    input = query，tools 带 hosted web_search 声明；走 JSON transport。
+    //    input = 简短引导 + query，tools 仅 hosted web_search 声明（干净工具
+    //    列表、干净上下文、引导提示简单——不携带主模型历史/其他工具），走
+    //    JSON transport。
+    let guided_text = format!("search the web: {query}");
     let search_payload = json!({
         "model": binding,
         "input": [{
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": query}]
+            "content": [{"type": "input_text", "text": guided_text}]
         }],
         "tools": [{"type": "web_search", "external_web_access": true}],
         "stream": false
@@ -335,6 +339,18 @@ pub(crate) fn project_web_search_result_into_finalized(
 /// 从搜索 provider 响应提取文本结果：优先 Responses `output[].message
 /// .content[].output_text.text`，其次 Chat `choices[].message.content`。
 pub(crate) fn extract_web_search_text_result(provider_value: &Value) -> Option<String> {
+    // Anthropic Messages 格式：content[].text（搜索后端为 anthropic 接口时）。
+    if let Some(content) = provider_value.get("content").and_then(Value::as_array) {
+        for part in content {
+            if part.get("type").and_then(Value::as_str) != Some("text") {
+                continue;
+            }
+            let text = part.get("text").and_then(Value::as_str)?.trim();
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
     if let Some(output) = provider_value.get("output").and_then(Value::as_array) {
         for item in output {
             if item.get("type").and_then(Value::as_str) != Some("message") {
@@ -743,6 +759,7 @@ pub(crate) fn hosted_web_search_result_text(payload: &Value, call_id: &str) -> O
                 .filter(|value| !value.is_empty());
             let text = result
                 .get("text")
+                .or_else(|| result.get("content"))
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|value| !value.is_empty());

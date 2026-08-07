@@ -7,12 +7,14 @@ pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<
     project_openai_chat_provider_tools_for_web_search_mode(
         payload,
         V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
     )
 }
 
 pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     payload: &mut Value,
     web_search_execution_mode: V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
 ) -> Result<(), String> {
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
@@ -41,9 +43,9 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                 //（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
                 normalized_tools
                     .push(build_local_web_search_function_tool(tool, index, "websearch")?);
-            } else {
-                // None / 未声明模式：保持既有 hosted web_search_options 投影
-                //（与 HEAD 行为一致，不改动普通目标的 options 透传）。
+            } else if has_web_search_capability {
+                // None / 未声明模式 + provider 具备 web_search 能力：保持既有
+                // hosted web_search_options 投影（与 HEAD 行为一致）。
                 has_web_search = true;
                 merge_openai_chat_web_search_options(
                     &mut web_search_options,
@@ -51,6 +53,9 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                     &format!("$.tools[{index}]"),
                 )?;
             }
+            // None + provider 无 web_search 能力：web_search 工具声明与
+            // web_search_options 完全移除（无能力 provider 不收到搜索工具，
+            // 避免未知字段/误调用）。
         } else {
             normalized_tools.push(normalize_openai_chat_provider_tool(tool, index)?);
         }

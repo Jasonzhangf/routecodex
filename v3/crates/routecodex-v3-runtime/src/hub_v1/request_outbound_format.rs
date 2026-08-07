@@ -22,17 +22,23 @@ pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     normalize_openai_chat_messages_payload(
         payload,
         routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        true,
     )
 }
 
 pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
     payload: &Value,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
 ) -> Result<Value, String> {
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
     }
-    normalize_openai_chat_messages_payload(payload, web_search_execution_mode)
+    normalize_openai_chat_messages_payload(
+        payload,
+        web_search_execution_mode,
+        has_web_search_capability,
+    )
 }
 
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
@@ -1329,6 +1335,7 @@ fn normalize_openai_chat_message_content_part(part: &Value) -> Result<Value, Str
 fn normalize_openai_chat_messages_payload(
     payload: &Value,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
 ) -> Result<Value, String> {
     let mut normalized = project_outbound_payload_for_target_protocol(
         payload,
@@ -1410,6 +1417,7 @@ fn normalize_openai_chat_messages_payload(
     project_openai_chat_provider_tools_for_web_search_mode(
         &mut normalized,
         web_search_execution_mode,
+        has_web_search_capability,
     )?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)

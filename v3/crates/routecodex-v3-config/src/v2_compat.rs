@@ -601,7 +601,7 @@ fn compile_v2_provider_models(
                     aliases: model.aliases,
                     capabilities: normalize_v2_capabilities(model.capabilities),
                     web_search_execution_mode,
-                    web_search_backend: None,
+                    web_search_backend: model.web_search_backend,
                     supports_streaming: model.supports_streaming.unwrap_or(false),
                     supports_thinking: model.supports_thinking.unwrap_or(false),
                     thinking: model.thinking,
@@ -824,20 +824,29 @@ struct V2ProviderModelConfig {
     max_context: Option<u64>,
     max_context_tokens: Option<u64>,
     context_window: Option<u64>,
+    /// Mode B 显式声明（v2 配置可选；缺省时按 `web_search_direct`
+    /// capability 兼容推断 Mode A）。生产 v2 配置通过此字段启用
+    /// `metadata_center_local_search` 与编译期 backend binding。
+    #[serde(default)]
+    web_search_execution_mode: Option<V3WebSearchExecutionMode>,
+    #[serde(default)]
+    web_search_backend: Option<String>,
     #[serde(default)]
     features: BTreeMap<String, bool>,
 }
 
 impl V2ProviderModelConfig {
     fn web_search_execution_mode(&self) -> V3WebSearchExecutionMode {
-        if self
-            .capabilities
-            .iter()
-            .any(|capability| capability == "web_search_direct")
-        {
-            V3WebSearchExecutionMode::NativeRemoteSearchToolMix
-        } else {
-            V3WebSearchExecutionMode::None
-        }
+        self.web_search_execution_mode.unwrap_or_else(|| {
+            if self
+                .capabilities
+                .iter()
+                .any(|capability| capability == "web_search_direct")
+            {
+                V3WebSearchExecutionMode::NativeRemoteSearchToolMix
+            } else {
+                V3WebSearchExecutionMode::None
+            }
+        })
     }
 }

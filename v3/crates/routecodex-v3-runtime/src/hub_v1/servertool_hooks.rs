@@ -3,6 +3,13 @@ use super::{
     V3HubRelayResponseHookProfile, V3HubRespInbound02Normalized, V3StoplessCenterState,
     V3StoplessCenterSteering, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
+use super::web_search_hop::{first_local_websearch_tool_call, hosted_web_search_result_text};
+use super::{
+    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
+    build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
+    build_v3_provider_resp_inbound_01_raw, V3HubContinuationOwnership, V3HubEntryProtocol,
+    V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol, V3HubTransportIntent,
+};
 use serde_json::{json, Value};
 use servertool_core::cli_contract::{
     build_client_exec_cli_projection_output, parse_servertool_cli_projection_tool_arguments,
@@ -256,104 +263,10 @@ struct V3ReasoningStopToolCall {
     evidence: Option<String>,
 }
 
-#[derive(Debug)]
-struct V3LocalWebSearchToolCall {
-    call_id: String,
-    query: String,
-    count: Option<u32>,
-    recency: Option<String>,
-    content_types: Vec<String>,
-}
 
-/// 提取 provider 响应中的第一个本地 `websearch` function call 并做参数校验
-/// （query 必填非空；count/recency/content_types 可选）。Mode B 同轮激活
-/// 校验由调用方用 profile.web_search_local_surface_active() 完成。
-fn first_local_websearch_tool_call(
-    payload: &Value,
-) -> Result<Option<V3LocalWebSearchToolCall>, V3HubRelayResponseError> {
-    let Some(output) = payload.get("output").and_then(Value::as_array) else {
-        return Ok(None);
-    };
-    for (index, item) in output.iter().enumerate() {
-        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
-        if !matches!(item_type, "function_call" | "tool_call" | "custom_tool_call") {
-            continue;
-        }
-        let name = item
-            .get("name")
-            .and_then(Value::as_str)
-            .or_else(|| item.pointer("/function/name").and_then(Value::as_str));
-        if !name.is_some_and(|value| value.trim().eq_ignore_ascii_case("websearch")) {
-            continue;
-        }
-        let call_id = item
-            .get("call_id")
-            .or_else(|| item.get("id"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "websearch tool call missing call_id",
-            })?
-            .to_string();
-        let raw_arguments = item
-            .get("arguments")
-            .or_else(|| item.get("input"))
-            .or_else(|| item.pointer("/function/arguments"))
-            .and_then(Value::as_str)
-            .ok_or(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "websearch tool call missing arguments",
-            })?;
-        let arguments = raw_arguments.parse::<Value>().map_err(|_| {
-            V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "websearch tool call arguments must be valid JSON",
-            }
-        })?;
-        let query = arguments
-            .get("query")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "websearch tool call requires a non-empty query",
-            })?
-            .to_string();
-        let count = arguments
-            .get("count")
-            .and_then(Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok());
-        let recency = arguments
-            .get("recency")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let content_types = arguments
-            .get("content_types")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        return Ok(Some(V3LocalWebSearchToolCall {
-            call_id,
-            query,
-            count,
-            recency,
-            content_types,
-        }));
-    }
-    Ok(None)
-}
-
-/// 从 provider 响应剥离已拦截的本地 websearch call（不移除相邻普通工具
-/// 与消息；websearch 结果由 ServerToolCenter 承载，不注入可见 payload）。
+/// 从 provider 响应剥离已拦截的本地 websearch call 与同轮 hosted
+/// `web_search_tool_result`（MiniMax hosted search 结果项；结果由
+/// ServerToolCenter 承载，不注入可见 payload）。
 fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
     let mut projected = payload.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
@@ -362,21 +275,34 @@ fn strip_local_websearch_tool_call(payload: &Value, call_id: &str) -> Value {
                 .get("call_id")
                 .or_else(|| item.get("id"))
                 .and_then(Value::as_str);
-            !(item_call_id == Some(call_id)
+            let is_web_search_call = item_call_id == Some(call_id)
                 && item
                     .get("type")
                     .and_then(Value::as_str)
                     .is_some_and(|kind| {
                         matches!(kind, "function_call" | "tool_call" | "custom_tool_call")
-                    }))
+                    });
+            let is_hosted_result = item
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind == "web_search_tool_result")
+                && item
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    == Some(call_id);
+            !(is_web_search_call || is_hosted_result)
         });
     }
     projected
 }
 
+
 /// Mode B Resp03 拦截：同轮激活校验 + 提取实际 websearch call + 参数校验 +
 /// 剥离 + 状态机迁移 LocalToolSurfaceActive -> ToolCallObserved（携带
 /// original call_id / query / count / recency / content_types）。
+/// MiniMax hosted search 场景：同一响应携带 `web_search_tool_result`，
+/// 结果已由搜索后端执行并返回 → 链式迁移至 SearchResultCaptured（调用方
+/// 据此跳过本地搜索 hop），携带归一化 text_result。
 fn intercept_local_web_search_call(
     mut input: V3HubRespInbound02Normalized,
     profile: &V3HubRelayResponseHookProfile,
@@ -384,6 +310,10 @@ fn intercept_local_web_search_call(
     let Some(call) = first_local_websearch_tool_call(input.provider_payload().as_ref())? else {
         return Ok(None);
     };
+    // 先提取 hosted 结果（web_search_tool_result 与 call_id 配对），再剥离
+    // web_search call 与 hosted tool result（均不进入客户端可见 payload）。
+    let hosted_text =
+        hosted_web_search_result_text(input.provider_payload().as_ref(), &call.call_id);
     let visible = strip_local_websearch_tool_call(input.provider_payload().as_ref(), &call.call_id);
     *input.provider_payload_mut() = Arc::new(visible);
     let center_state = profile
@@ -401,10 +331,43 @@ fn intercept_local_web_search_call(
         .with_count(call.count)
         .with_recency(call.recency)
         .with_content_types(call.content_types);
+    // MiniMax hosted search：搜索结果随同一响应返回（web_search_tool_result
+    // 与 call_id 配对）→ 链式迁移至 SearchResultCaptured 并携带结果，
+    // 调用方跳过本地搜索 hop。
+    let web_search_state = match hosted_text {
+        Some(text_result) => {
+            let normalized = json!({
+                "query": call.query,
+                "text_result": text_result
+            });
+            observed
+                .transition_to(
+                    V3WebSearchCenterPhase::SearchDispatchPrepared,
+                    "resp03_hosted_result_observed",
+                )
+                .and_then(|state| {
+                    state.transition_to(
+                        V3WebSearchCenterPhase::SearchInFlight,
+                        "resp03_hosted_result_observed",
+                    )
+                })
+                .and_then(|state| {
+                    state.transition_to(
+                        V3WebSearchCenterPhase::SearchResultCaptured,
+                        "resp03_hosted_result_observed",
+                    )
+                })
+                .map_err(|reason| {
+                    V3HubRelayResponseError::WebSearchStateTransitionFailed { reason }
+                })?
+                .with_normalized_result(Some(normalized))
+        }
+        None => observed,
+    };
     Ok(Some(V3StoplessResponseHookOutcome {
         input,
         center_state: None,
-        web_search_state: Some(observed),
+        web_search_state: Some(web_search_state),
         intercepted: true,
     }))
 }
