@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.4188",
+  "version": "0.90.4190",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "bin": {
@@ -273,6 +273,8 @@
     "verify:architecture-mainline-manifest-sync": "node scripts/architecture/verify-architecture-mainline-manifest-sync.mjs",
     "verify:architecture-wiki-html-sync": "node scripts/architecture/verify-architecture-wiki-html-sync.mjs",
     "verify:function-map-compile-gate": "node scripts/architecture/verify-function-map-compile-gate.mjs",
+    "verify:v3-servertool-center-skeleton": "node scripts/architecture/verify-v3-servertool-center-skeleton.mjs",
+    "test:v3-servertool-center-skeleton-red-fixtures": "node scripts/tests/v3-servertool-center-skeleton-red-fixtures.mjs",
     "render:architecture-mainline-chain-manifests": "node scripts/architecture/generate-mainline-chain-manifests.mjs",
     "test:v3-sse-transport-core": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-sse -- --nocapture",
     "render:v3-mainline-caller-flow": "node scripts/architecture/render-v3-mainline-caller-flow.mjs",

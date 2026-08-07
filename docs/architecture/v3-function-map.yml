@@ -3226,6 +3226,65 @@ features:
     must contain both the hook edge flowchart and StoplessCenter state transition
     diagram.
   runtime_status: controlled_runtime_slice_only
+- feature_id: v3.servertool_center_skeleton
+  status: design_locked_docs_and_maps
+  change_risk: critical
+  owner_kind: rust_project_v3_runtime_servertool_metadata_center
+  owner_scope: '统一 ServertoolCenter（MetadataCenter）：管理 stopless / web_search / servertool
+    CLI 的工具识别（当前是哪一个）、状态注册与状态机整体推进；hook 只在 Req04 请求治理与 Resp03
+    响应治理固定挂载点调用；数据面（SSE/payload）零控制逻辑。三段式：识别 -> 状态判断 -> 操作。'
+  owner_files:
+  - docs/design/v3-servertool-center-skeleton.md
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  resource_bindings:
+  - v3.servertool.state_machine_control
+  - v3.metadata.runtime_control_stopless
+  - v3.web_search.execution_mode
+  - v3.web_search.backend_binding
+  mainline_bindings:
+  - v3-servertool-center-req-01
+  - v3-servertool-center-req-02
+  - v3-servertool-center-req-03
+  - v3-servertool-center-resp-01
+  - v3-servertool-center-resp-02
+  - v3-servertool-center-resp-03
+  entry_symbols:
+  - V3ServerToolCenter
+  - V3ServerToolCenter::register
+  - V3ServerToolCenter::load
+  - V3ServerToolCenter::transition
+  - V3ServerToolCenter::store
+  - V3ServerToolCenterKey
+  - V3ServerToolInstanceState
+  - V3ServerToolName
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - docs/design/v3-servertool-center-skeleton.md
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-verification-map.yml
+  forbidden_paths:
+  - v3/crates/routecodex-v3-sse
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-provider-responses
+  - src
+  required_gates:
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-servertool-center-skeleton
+  - npm run test:v3-servertool-center-skeleton-red-fixtures
+  runtime_status: design_locked_docs_and_maps
 - feature_id: v3.direct_stopless_metadata_center
   status: controlled_runtime_slice_verified
   change_risk: critical
@@ -3268,7 +3327,6 @@ features:
   - apply_v3_responses_direct_stopless_control_request_transition
   - apply_v3_responses_direct_stopless_json_response_control
   - apply_v3_responses_direct_stopless_control_response_transition
-  - wrap_direct_sse_stopless_control_stream
   - execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control
   - direct_json_stopless_metadata_center_projects_noop_and_continues_on_remote_direct_locator
   - direct_sse_stopless_metadata_center_projects_terminal_frames_without_sse_owning_semantics
@@ -3321,8 +3379,8 @@ features:
     write and zero Relay Chat Process re-entry for stopless.
   - Direct no-op CLI projection may commit a Direct remote locator for the provider-native
     response id so next previous_response_id remains Direct-owned.
-  - SSE is transport projection only; wrap_direct_sse_stopless_control_stream reuses
-    the same Rust Direct response control helper and does not own StoplessCenter semantics.
+  - SSE is transport only and never parses or rewrites stopless control frames; the
+    legacy direct SSE stopless stream wrapper was physically removed.
   - StoplessCenter state never enters provider body, client body, CLI args/stdout,
     debug snapshot, or continuation payload/history; this does not prohibit registered
     Req04 current-turn Stopless protocol injection or matching Resp03 current-response

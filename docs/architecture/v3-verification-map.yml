@@ -3415,6 +3415,37 @@ features:
       maps, and diff check pass.
     runtime: No install or live request replay is required because this owner cannot
       enter runtime or payload paths.
+- feature_id: v3.servertool_center_skeleton
+  status: design_locked_docs_and_maps
+  change_risk: critical
+  owner_kind: rust_project_v3_runtime_servertool_metadata_center
+  owner_scope: 'Unified ServertoolCenter (MetadataCenter): tool identification,
+    state registration and machine transitions for stopless/web_search/servertool
+    CLI; hooks only at fixed Req04/Resp03 governance nodes; data plane logic-free.'
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  design:
+  - docs/design/v3-servertool-center-skeleton.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_unit:
+  - Servertool hooks are called only from Req04/Resp03 governance nodes and the
+    direct kernel; SSE stays transport-only with no control symbol references.
+  - ServertoolCenter manages tool identification, state registration and machine
+    transitions; data plane never parses or rewrites control semantics.
+  required_gates:
+  - npm run verify:v3-servertool-center-skeleton
+  - npm run test:v3-servertool-center-skeleton-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-architecture-docs
+  completion_rule:
+    source: Design doc, function/mainline/resource maps, red fixtures, and verify
+      gates pass; implementation pending next round.
+    runtime: No install or live replay is required for the design-locked skeleton.
 - feature_id: v3.route_classifier_local_owner
   status: source_controlled_runtime_boundary_verified
   change_risk: critical

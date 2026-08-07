@@ -225,10 +225,12 @@ function verifyResourceOwner() {
     'V3ResponsesDirectStoplessControlState::clear_for_scope',
     'prepare_v3_responses_direct_stopless_control_request',
     'apply_v3_responses_direct_stopless_json_response_control',
-    'wrap_direct_sse_stopless_control_stream',
     'V3DirectStoplessResp02RuntimeControlUpdated',
   ]) {
     requireArrayIncludes(resource.allowed_writers, writer, `${resourceId}.allowed_writers`);
+  }
+  if (resource.allowed_writers?.includes('wrap_direct_sse_stopless_control_stream')) {
+    fail(`${resourceId}.allowed_writers must not include removed SSE stream wrapper`);
   }
   for (const reader of [
     'V3ResponsesDirectStoplessControlState::load_for_scope',
@@ -453,10 +455,12 @@ function verifyFunctionAndVerificationMaps() {
     'V3ResponsesDirectStoplessControlState',
     'prepare_v3_responses_direct_stopless_control_request',
     'apply_v3_responses_direct_stopless_json_response_control',
-    'wrap_direct_sse_stopless_control_stream',
     'direct_json_stopless_metadata_center_projects_noop_and_continues_on_remote_direct_locator',
   ]) {
     requireArrayIncludes(directFunctionFeature?.entry_symbols, symbol, `${paths.functionMap} ${directFeatureId}.entry_symbols`);
+  }
+  if (directFunctionFeature?.entry_symbols?.includes('wrap_direct_sse_stopless_control_stream')) {
+    fail(`${paths.functionMap} ${directFeatureId}.entry_symbols must not include removed SSE stream wrapper`);
   }
   requireArrayIncludes(directFunctionFeature?.required_gates, verifyGate, `${paths.functionMap} ${directFeatureId}.required_gates`);
   requireArrayIncludes(directVerificationFeature?.required_gates, verifyGate, `${paths.verificationMap} ${directFeatureId}.required_gates`);
@@ -534,11 +538,9 @@ function verifyMainlineOwnership() {
     if (!directWriters.some((edge) => edge.step_id === 'v3-direct-stopless-resp-02')) {
       fail(`${directFeatureId}: StoplessCenter update must bind to v3-direct-stopless-resp-02`);
     }
-    requireTextIncludes(
-      JSON.stringify(directChain),
-      'wrap_direct_sse_stopless_control_stream',
-      `${directFeatureId} SSE transport projection edge`,
-    );
+    if (JSON.stringify(directChain).includes('wrap_direct_sse_stopless_control_stream')) {
+      fail(`${directFeatureId} must not declare the removed SSE stream wrapper`);
+    }
   }
 
   for (const chain of chains) {
@@ -659,14 +661,17 @@ function verifyDirectRuntimeSeparation() {
     'fn apply_v3_responses_direct_stopless_json_response_control(',
     'fn apply_v3_responses_direct_stopless_control_request_transition(',
     'fn apply_v3_responses_direct_stopless_control_response_transition(',
-    'fn wrap_direct_sse_stopless_control_stream(',
-    'fn commit_v3_direct_stopless_remote_locator_for_payload(',
     'V3DirectStoplessReq01RuntimeControlLoaded',
     'V3DirectStoplessResp02RuntimeControlUpdated',
     'has_client_session_scope',
     'session_id.starts_with("request:")',
   ]) {
     requireTextIncludes(directRuntimeSource, token, `${paths.directRuntime}`);
+  }
+  for (const removed of ['fn wrap_direct_sse_stopless_control_stream(', 'fn commit_v3_direct_stopless_remote_locator_for_payload(']) {
+    if (directRuntimeSource.includes(removed)) {
+      fail(`${paths.directRuntime} must not contain removed ${removed.trim()}`);
+    }
   }
   // Direct must not write Relay StoplessCenter handle.
   if (directRuntimeSource.includes('V3ResponsesRelayStoplessControlState')) {

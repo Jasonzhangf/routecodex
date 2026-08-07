@@ -1194,11 +1194,8 @@ if (/matches!\s*\(\s*[\w.]+\s*,\s*"response\.completed"\s*\|\s*"response\.done"/
     `${files.directSse}: provider response.done must not satisfy the response.completed terminal contract`,
   );
 }
-requireText(text.directHelpers, files.directHelpers, 'if semantic_event != "response.completed" {');
-if (/semantic_event[\s\S]{0,160}?"response\.completed"\s*\|\s*"response\.done"/u.test(text.directHelpers)) {
-  failures.push(
-    `${files.directHelpers}: Direct Stopless provider semantic hooks must not accept response.done before response.completed closeout`,
-  );
+if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {
+  failures.push(`${files.directHelpers}: removed SSE stopless stream wrapper must not reappear`);
 }
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
 if (text.policy.includes('if let Ok(alternative) = resolve_v3_relay_target')) {
