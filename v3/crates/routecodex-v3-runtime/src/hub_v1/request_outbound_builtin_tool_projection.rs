@@ -6,6 +6,7 @@ use routecodex_v3_config::V3WebSearchExecutionMode;
 pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<(), String> {
     project_openai_chat_provider_tools_for_web_search_mode(
         payload,
+        None,
         V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
         true,
     )
@@ -13,6 +14,7 @@ pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<
 
 pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     payload: &mut Value,
+    model_id: Option<&str>,
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<(), String> {
@@ -25,6 +27,10 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     let tools = tools.as_array().ok_or_else(|| {
         "MalformedOutboundField target_protocol=openai_chat path=$.tools".to_string()
     })?;
+    // gpt 系列模型保留标准 hosted web_search 语义（openai 官方支持）；其余
+    // 所有模型统一替换为内部 websearch 工具（RouteCodex 本地搜索 hop 执行，
+    // 不区分 provider、不依赖 provider 原生搜索能力）。
+    let is_gpt_model = model_id.is_some_and(|model| model.starts_with("gpt"));
     let mut normalized_tools = Vec::new();
     let mut web_search_options = Map::new();
     let mut has_web_search = false;
@@ -38,14 +44,17 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                     tool,
                     &format!("$.tools[{index}]"),
                 )?;
-            } else if web_search_execution_mode.is_metadata_center_local_search() {
-                // Mode B：标准 web_search 声明投影为本地 websearch function tool
-                //（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
+            } else if web_search_execution_mode.is_metadata_center_local_search()
+                || !is_gpt_model
+            {
+                // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
+                // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
+                // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
                 normalized_tools
                     .push(build_local_web_search_function_tool(tool, index, "websearch")?);
             } else if has_web_search_capability {
-                // None / 未声明模式 + provider 具备 web_search 能力：保持既有
-                // hosted web_search_options 投影（与 HEAD 行为一致）。
+                // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
+                // web_search_options 投影（与 HEAD 行为一致）。
                 has_web_search = true;
                 merge_openai_chat_web_search_options(
                     &mut web_search_options,
@@ -53,7 +62,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                     &format!("$.tools[{index}]"),
                 )?;
             }
-            // None + provider 无 web_search 能力：web_search 工具声明与
+            // gpt 模型 + provider 无 web_search 能力：web_search 工具声明与
             // web_search_options 完全移除（无能力 provider 不收到搜索工具，
             // 避免未知字段/误调用）。
         } else {
@@ -114,7 +123,10 @@ fn build_local_web_search_function_tool(
     let mut properties = Map::new();
     properties.insert(
         "query".to_string(),
-        serde_json::json!({"type":"string","description":"Search query"}),
+        serde_json::json!({
+            "type":"string",
+            "description":"The search query. Construct a concise query with the key terms for the information the user needs."
+        }),
     );
     properties.insert(
         "search_content_types".to_string(),
@@ -142,10 +154,7 @@ fn build_local_web_search_function_tool(
             ("name".to_string(), Value::String(local_tool_name.to_string())),
             (
                 "description".to_string(),
-                Value::String(
-                    "Search the web through the RouteCodex local Web Search ServerTool."
-                        .to_string(),
-                ),
+                Value::String("Search the web for up-to-date information.".to_string()),
             ),
             (
                 "parameters".to_string(),

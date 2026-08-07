@@ -21,6 +21,7 @@ pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     }
     normalize_openai_chat_messages_payload(
         payload,
+        None,
         routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
         true,
     )
@@ -34,8 +35,11 @@ pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode
     if payload.get("messages").and_then(Value::as_array).is_none() {
         return Err("OpenAI Chat provider wire requires Chat canonical messages".to_string());
     }
+    // gpt 系列判定基准是客户端请求的模型名（payload.model），与路由后的
+    // provider manifest 模型无关。
     normalize_openai_chat_messages_payload(
         payload,
+        payload.get("model").and_then(Value::as_str),
         web_search_execution_mode,
         has_web_search_capability,
     )
@@ -1334,6 +1338,7 @@ fn normalize_openai_chat_message_content_part(part: &Value) -> Result<Value, Str
 
 fn normalize_openai_chat_messages_payload(
     payload: &Value,
+    model_id: Option<&str>,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<Value, String> {
@@ -1416,6 +1421,7 @@ fn normalize_openai_chat_messages_payload(
     }
     project_openai_chat_provider_tools_for_web_search_mode(
         &mut normalized,
+        model_id,
         web_search_execution_mode,
         has_web_search_capability,
     )?;

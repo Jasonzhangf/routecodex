@@ -1063,6 +1063,26 @@ fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_sear
         "query",
         "local websearch must require the query argument"
     );
+    let description = tools[1]["function"]["description"]
+        .as_str()
+        .expect("websearch tool description");
+    assert_eq!(
+        description,
+        "Search the web for up-to-date information.",
+        "websearch description must match the standard web_search tool description: {description}"
+    );
+    let query_description = tools[1]["function"]["parameters"]["properties"]["query"]
+        ["description"]
+        .as_str()
+        .expect("websearch query description");
+    assert!(
+        query_description.contains("concise query"),
+        "websearch query description must guide the search query: {query_description}"
+    );
+    assert!(
+        !description.contains("RouteCodex") && !description.contains("ServerTool"),
+        "websearch description must not leak internal RouteCodex implementation: {description}"
+    );
     assert!(
         request.get("web_search_options").is_none(),
         "Mode B must not emit hosted web_search_options"
@@ -1070,9 +1090,11 @@ fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_sear
 }
 
 #[test]
-fn openai_chat_wire_keeps_hosted_options_for_unspecified_mode() {
+fn openai_chat_wire_keeps_hosted_options_for_gpt_with_capability() {
+    // gpt 系列模型 + provider 具备 web_search 能力：保留标准 hosted
+    // web_search_options 投影（与 HEAD 行为一致）。
     let payload = json!({
-        "model": "plain-model",
+        "model": "gpt-5.5",
         "messages": [{"role": "user", "content": "search"}],
         "tools": [
             {
@@ -1087,24 +1109,24 @@ fn openai_chat_wire_keeps_hosted_options_for_unspecified_mode() {
         V3WebSearchExecutionMode::None,
         true,
     )
-    .expect("unspecified mode keeps the hosted options projection");
+    .expect("gpt + capability keeps the hosted options projection");
     assert!(
         request.get("tools").is_none(),
         "web_search declaration must be consumed by options (no residual tools)"
     );
     assert!(
         request.get("web_search_options").is_some_and(Value::is_object),
-        "unspecified mode must keep the hosted web_search_options projection"
+        "gpt + capability must keep the hosted web_search_options projection"
     );
 }
 
 #[test]
-fn openai_chat_wire_removes_web_search_for_provider_without_capability() {
-    // 无 web_search 能力的 provider（如 deepseek，capabilities 不含 web_search）：
-    // None 模式 + 无能力 → web_search 工具声明与 web_search_options 完全移除，
+fn openai_chat_wire_removes_web_search_for_gpt_without_capability() {
+    // gpt 系列模型 + provider 无 web_search 能力（如 deepseek，capabilities
+    // 不含 web_search）：web_search 工具声明与 web_search_options 完全移除，
     // 避免把未知字段/工具发给无能力 provider。
     let payload = json!({
-        "model": "plain-model",
+        "model": "gpt-5.5",
         "messages": [{"role": "user", "content": "search"}],
         "tools": [
             {
@@ -1135,5 +1157,51 @@ fn openai_chat_wire_removes_web_search_for_provider_without_capability() {
             .and_then(Value::as_str)
             .is_some_and(|kind| kind == "web_search")),
         "web_search tool declaration must be removed"
+    );
+}
+
+#[test]
+fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
+    // 非 gpt 模型（deepseek/plain-model 等）即使未配 Mode B（None）：标准
+    // web_search 声明统一替换为内部 websearch 工具（不区分 provider、不依赖
+    // provider 原生搜索能力——搜索由 RouteCodex 本地 hop 执行）。
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "search"}],
+        "tools": [
+            {
+                "type": "web_search",
+                "external_web_access": true,
+                "search_content_types": ["text"]
+            },
+            {"type": "function", "function": {"name": "read_file"}}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::None,
+        false,
+    )
+    .expect("non-gpt provider must project the local websearch tool");
+    assert!(
+        request.get("web_search_options").is_none(),
+        "non-gpt provider must not receive hosted web_search_options"
+    );
+    let tools = request["tools"].as_array().expect("tools retained");
+    let websearch = tools
+        .iter()
+        .find(|tool| {
+            tool.get("function").and_then(|f| f.get("name")).and_then(Value::as_str)
+                == Some("websearch")
+        })
+        .expect("non-gpt provider must receive the local websearch tool");
+    assert_eq!(
+        websearch["function"]["description"],
+        "Search the web for up-to-date information."
+    );
+    assert_eq!(
+        tools.len(),
+        2,
+        "read_file + local websearch must both remain"
     );
 }
