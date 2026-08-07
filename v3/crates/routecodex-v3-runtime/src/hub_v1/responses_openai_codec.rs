@@ -23,6 +23,11 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     let mut messages = Vec::new();
     let mut pending_tool_message_index: Option<usize> = None;
     let mut pending_tool_call_ids: Vec<String> = Vec::new();
+    // 同轮 assistant 输出尾部 index：由 `output_text`/`reasoning` item 生成的
+    // assistant 文本消息，后续同轮 `function_call` 必须合并进它（前缀缓存硬约束，
+    // 拆分会让 provider chat renderer 插入 EOS 破坏前缀缓存）。显式 assistant
+    // `message` item 属于独立历史轮次，不进入该尾部，禁止改写历史边界。
+    let mut turn_assistant_tail_index: Option<usize> = None;
     if let Some(instructions) = root
         .get("instructions")
         .and_then(Value::as_str)
@@ -55,18 +60,28 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     tools.push(tool.clone());
                 }
             }
-            "message" => append_v3_openai_chat_message_preserving_tool_adjacency(
-                &mut messages,
-                &mut pending_tool_message_index,
-                &pending_tool_call_ids,
-                build_v3_openai_chat_message_from_responses_message(item)?,
-            )?,
-            "output_text" => append_v3_openai_chat_message_preserving_tool_adjacency(
-                &mut messages,
-                &mut pending_tool_message_index,
-                &pending_tool_call_ids,
-                build_v3_openai_chat_assistant_output_text_message(item),
-            )?,
+            "message" => {
+                append_v3_openai_chat_message_preserving_tool_adjacency(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &pending_tool_call_ids,
+                    build_v3_openai_chat_message_from_responses_message(item)?,
+                    None,
+                )?;
+                // 显式 message item（含 role=assistant）是独立历史轮次：不参与
+                // 同轮 output_text/function_call 合并，避免改写历史消息边界。
+                turn_assistant_tail_index = None;
+            }
+            "output_text" => {
+                append_v3_openai_chat_message_preserving_tool_adjacency(
+                    &mut messages,
+                    &mut pending_tool_message_index,
+                    &pending_tool_call_ids,
+                    build_v3_openai_chat_assistant_output_text_message(item),
+                    turn_assistant_tail_index,
+                )?;
+                turn_assistant_tail_index = Some(messages.len() - 1);
+            }
             "reasoning" => {
                 if let Some(message) = build_v3_openai_chat_assistant_reasoning_message(item) {
                     append_v3_openai_chat_message_preserving_tool_adjacency(
@@ -74,7 +89,9 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                         &mut pending_tool_message_index,
                         &pending_tool_call_ids,
                         message,
+                        turn_assistant_tail_index,
                     )?;
+                    turn_assistant_tail_index = Some(messages.len() - 1);
                 }
             }
             "function_call" | "tool_call" | "custom_tool_call" => {
@@ -83,7 +100,9 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     build_v3_openai_chat_assistant_tool_call_message(item)?,
+                    turn_assistant_tail_index,
                 )?;
+                turn_assistant_tail_index = None;
             }
             "function_call_output"
             | "tool_call_output"
@@ -96,6 +115,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut pending_tool_call_ids,
                     build_v3_openai_chat_tool_result_message(item)?,
                 )?;
+                turn_assistant_tail_index = None;
             }
             "web_search_call" => {
                 append_v3_openai_chat_hosted_tool_call_history_pair(
@@ -106,6 +126,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     input_index,
                     V3OpenAiChatHostedToolHistoryKind::WebSearch,
                 )?;
+                turn_assistant_tail_index = None;
             }
             "tool_search_call" => {
                 ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
@@ -125,7 +146,9 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
                     assistant,
+                    None,
                 )?;
+                turn_assistant_tail_index = None;
             }
             "tool_search_output" => {
                 ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(item)?;
@@ -309,6 +332,7 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &[String],
     message: Value,
+    turn_assistant_tail_index: Option<usize>,
 ) -> Result<(), String> {
     if let Some(index) = *pending_tool_message_index {
         let role = message
@@ -326,27 +350,19 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
                 pending_tool_call_ids.join(",")
             ));
         }
-    } else if let Some(adjacent_index) = v3_openai_chat_last_assistant_text_message_index(messages)
-    {
+    } else if let Some(tail_index) = turn_assistant_tail_index {
         let role = message
             .get("role")
             .and_then(Value::as_str)
             .unwrap_or("user")
             .trim();
-        // 前缀缓存硬约束：assistant 轮内容必须合并为单条，禁止相邻 assistant 消息
-        // （provider chat renderer 会插入 EOS 破坏前缀缓存）。但只允许合并进
-        // reasoning 类前一条（content 为空）：显式 assistant message 或非空
-        // output_text 历史必须保持原消息边界，不得改写用户历史或插入新换行。
-        if role.eq_ignore_ascii_case("assistant")
-            && v3_openai_chat_content_is_empty(
-                messages[adjacent_index].get("content").unwrap_or(&Value::Null),
-            )
-        {
-            merge_v3_openai_chat_message_into_pending_tool_message(
-                messages,
-                adjacent_index,
-                &message,
-            )?;
+        // 前缀缓存硬约束：同一 assistant 轮的内容（reasoning -> output_text ->
+        // function_call 连续 items）必须合并为单条 assistant 消息，禁止相邻
+        // assistant 消息（provider chat renderer 会插入 EOS 破坏前缀缓存）。
+        // 显式 assistant `message` item 属于独立历史轮次，turn_assistant_tail_index
+        // 在其分支被清空，不参与合并，历史边界保持原样。
+        if role.eq_ignore_ascii_case("assistant") && messages.len() == tail_index + 1 {
+            merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
             return Ok(());
         }
     }
@@ -359,6 +375,7 @@ fn append_v3_openai_chat_tool_call_message(
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
     message: Value,
+    turn_assistant_tail_index: Option<usize>,
 ) -> Result<(), String> {
     let call_ids = collect_v3_openai_chat_tool_call_ids(&message);
     if call_ids.is_empty() {
@@ -367,16 +384,21 @@ fn append_v3_openai_chat_tool_call_message(
     }
     if let Some(index) = *pending_tool_message_index {
         merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
-    } else if let Some(adjacent_index) = v3_openai_chat_last_assistant_text_message_index(messages)
-    {
-        // 前缀缓存硬约束：Responses `output_text` item 先生成 assistant 文本消息，
-        // 后续同轮 `function_call` item 必须合并进同一条 assistant 消息（content +
-        // tool_calls 同存）。若拆成两条相邻 assistant 消息，provider chat renderer
-        // 会在 tool-call 标记前插入 EOS，使下一轮请求的前缀 token 与上一轮生成
-        // 输出分叉，导致所有 relay provider 的前缀缓存（如 DwarfStar usage_cache）
-        // 永久 miss、费用虚高。禁止把 tool_calls 单独 push 成新 assistant 消息。
-        merge_v3_openai_chat_message_into_pending_tool_message(messages, adjacent_index, &message)?;
-        *pending_tool_message_index = Some(adjacent_index);
+    } else if let Some(tail_index) = turn_assistant_tail_index {
+        // 前缀缓存硬约束：Responses 同轮 `output_text`/`reasoning` item 生成的
+        // assistant 文本消息后紧邻的 `function_call` 必须合并进同一条 assistant
+        // 消息（content + tool_calls 同存）。若拆成两条相邻 assistant 消息，
+        // provider chat renderer 会在 tool-call 标记前插入 EOS，使下一轮请求的
+        // 前缀 token 与上一轮生成输出分叉，导致所有 relay provider 的前缀缓存
+        // （如 DwarfStar usage_cache）永久 miss、费用虚高。显式 assistant
+        // `message` item（历史轮次）不在此列，禁止改写历史边界。
+        if messages.len() == tail_index + 1 {
+            merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
+            *pending_tool_message_index = Some(tail_index);
+        } else {
+            messages.push(message);
+            *pending_tool_message_index = Some(messages.len() - 1);
+        }
     } else {
         messages.push(message);
         *pending_tool_message_index = Some(messages.len() - 1);
@@ -387,26 +409,6 @@ fn append_v3_openai_chat_tool_call_message(
         }
     }
     Ok(())
-}
-
-fn v3_openai_chat_last_assistant_text_message_index(messages: &[Value]) -> Option<usize> {
-    let last = messages.last()?;
-    let role = last
-        .get("role")
-        .and_then(Value::as_str)
-        .unwrap_or("user")
-        .trim();
-    if !role.eq_ignore_ascii_case("assistant") {
-        return None;
-    }
-    if last
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .is_some_and(|tool_calls| !tool_calls.is_empty())
-    {
-        return None;
-    }
-    Some(messages.len() - 1)
 }
 
 fn append_v3_openai_chat_tool_result_message(
@@ -831,6 +833,7 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
         pending_tool_message_index,
         pending_tool_call_ids,
         assistant,
+        None,
     )?;
     append_v3_openai_chat_tool_result_message(
         messages,

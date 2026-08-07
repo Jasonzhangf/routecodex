@@ -73,3 +73,46 @@ fn responses_output_text_followed_by_function_call_stays_single_assistant_messag
     assert_eq!(messages[2]["role"], json!("tool"));
     assert_eq!(messages[3]["role"], json!("user"));
 }
+
+#[test]
+fn responses_explicit_assistant_message_then_function_call_keeps_history_boundaries() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "turn one"}]
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_z",
+                "name": "z_tool",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_z",
+                "output": "result"
+            }
+        ]
+    }))
+    .expect("explicit assistant message must project to Chat");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(
+        messages.len(),
+        3,
+        "explicit assistant message is independent history, must not coalesce with function_call: {request}"
+    );
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(messages[0]["content"], json!("turn one"));
+    assert_eq!(messages[1]["role"], json!("assistant"));
+    assert_eq!(
+        messages[1]["tool_calls"][0]["id"],
+        json!("call_z"),
+        "function_call after explicit assistant message must stay its own assistant message"
+    );
+    assert_eq!(messages[2]["role"], json!("tool"));
+    assert_eq!(messages[2]["tool_call_id"], json!("call_z"));
+}
