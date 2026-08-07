@@ -2220,7 +2220,15 @@ function featureBlock(source, marker) {
     failures.push(`feature block missing ${marker}`);
     return '';
   }
-  const next = source.indexOf('\n  - feature_id:', start + marker.length);
+  // function map 的顶层 feature 项是 0 缩进（`- feature_id:`）；下一个
+  // feature 用 0 或 2 空格缩进都算作块边界。
+  let next = -1;
+  for (const candidate of ['\n- feature_id:', '\n  - feature_id:']) {
+    const found = source.indexOf(candidate, start + marker.length);
+    if (found >= 0 && (next < 0 || found < next)) {
+      next = found;
+    }
+  }
   return next < 0 ? source.slice(start) : source.slice(start, next);
 }
 function sectionSlice(source, startMarker, endMarker) {

@@ -7175,7 +7175,7 @@ fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
 fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
-    keepalive_interval: Duration,
+    _keepalive_interval: Duration,
 ) -> Response<Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -7194,9 +7194,9 @@ fn responses_direct_output_response_with_console(
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
             let stream = wrap_v3_direct_sse_console_stream(stream, stream_console_finalizer);
-            let keepalive_interval = frame.error_chain.is_empty().then_some(keepalive_interval);
+            // Direct SSE 投影保真传输 provider 字节，不注入 transport keepalive。
             return builder
-                .body(v3_client_sse_body(stream, keepalive_interval))
+                .body(v3_client_sse_body(stream, None))
                 .expect("typed response");
         }
     };

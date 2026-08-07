@@ -212,7 +212,7 @@ for (const phrase of [
   'run_json_response_hooks',
   'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
   'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
-  'let (action, finalized_provider_value, response_stopless_state) =',
+  'let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
@@ -259,13 +259,13 @@ for (const node of expectedNodes.slice(10)) {
 requireCount(
   responsesRuntime,
   responsesRuntimePath,
-  'let (action, finalized_provider_value, response_stopless_state) =',
+  'let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =',
   2,
 );
 requireOrderedSequence(responsesRuntime, responsesRuntimePath, [
   'V3ProviderResponseBody::Sse(stream) => {',
   'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
-  'let (action, finalized_provider_value, response_stopless_state) =',
+  'let (action, mut finalized_provider_value, response_stopless_state, response_web_search_state) =',
   'run_json_response_hooks(',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
@@ -509,7 +509,7 @@ function requireOrderedSequence(text, owner, phrases) {
 function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKind) {
   for (const phrase of [
     'run_v3_relay_provider_failure_policy(',
-    'resolve_v3_relay_target(',
+    'resolve_v3_relay_target_outcome(',
     'V3RelayProviderFailurePolicyContext',
     'V3RelayProviderFailurePolicyState',
     'V3Error05ExecutionAction::WaitThenReselect',
@@ -522,7 +522,7 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
   }
   requireOrderedSequence(text, owner, [
     'let failure_context = V3RelayProviderFailurePolicyContext {',
-    'match resolve_v3_relay_target(',
+    'match resolve_v3_relay_target_outcome(',
     `entry_kind: "${entryKind}"`,
   ]);
   const handleStart = text.indexOf('async fn handle_provider_failure(');

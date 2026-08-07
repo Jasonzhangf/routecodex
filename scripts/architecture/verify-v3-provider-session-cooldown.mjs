@@ -50,16 +50,29 @@ function extractBracedBlock(source, marker, label) {
 }
 
 function extractYamlItem(source, key, value, label) {
-  const marker = `  - ${key}: ${value}`;
   const lines = source.split(/\r?\n/u);
-  const start = lines.findIndex((line) => line.trimEnd() === marker.trimEnd());
+  // function map 的顶层 feature 项是 0 缩进（`- feature_id:`），mainline/resource
+  // map 的项是 2 空格缩进（`  - step_id:`）；统一按“数组项标记 + key/value”
+  // 匹配，块的结束取“同缩进的下一个顶层数组项”。
+  const start = lines.findIndex((line) => {
+    const trimmed = line.trimStart();
+    const marker = `- ${key}: ${value}`;
+    // 精确匹配项标记（允许尾随注释/空白，但拒绝更长 id 前缀，
+    // 例如 v3.provider.failure_session_scope_removed 不得匹配原资源）。
+    return (
+      /^-\s/u.test(trimmed) &&
+      (trimmed === marker || trimmed.startsWith(`${marker} `))
+    );
+  });
   if (start < 0) {
     failures.push(`missing ${label}`);
     return "";
   }
+  const indent = (lines[start].match(/^\s*/u) ?? [""])[0];
+  const nextTop = new RegExp(`^${indent}- \\S`);
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^  - \S/u.test(lines[index]) || /^- chain_id:/u.test(lines[index])) {
+    if (nextTop.test(lines[index])) {
       end = index;
       break;
     }

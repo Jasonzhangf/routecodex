@@ -139,6 +139,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     aliases: vec!["mx".into()],
                     capabilities: vec!["text".into()],
                     web_search_execution_mode: V3WebSearchExecutionMode::None,
+                    web_search_backend_binding: None,
                     supports_streaming: true,
                     supports_thinking: false,
                     thinking: None,

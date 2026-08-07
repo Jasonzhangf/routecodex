@@ -8,7 +8,9 @@
   ],
   "ratchet_whitelist": {
     "v3/crates/routecodex-v3-server/src/lib.rs": 7996,
-    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs": 7265,
-    "v3/crates/routecodex-v3-lifecycle/src/lib.rs": 2795
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs": 7328,
+    "v3/crates/routecodex-v3-lifecycle/src/lib.rs": 2795,
+    "v3/crates/routecodex-v3-runtime/src/kernel.rs": 1600,
+    "v3/crates/routecodex-v3-runtime/src/kernel/tests.rs": 1736
   }
 }

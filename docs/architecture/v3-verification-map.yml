@@ -250,16 +250,14 @@ features:
   - Fresh Responses orchestration may wrap implemented Direct or Relay bindings with
     the Relay shell, but Config-owned PendingNotImplemented remains pending for HTTP
     and WebSocket and cannot enter provider execution.
-  - Server route table config allowed protocols manifest endpoint declarations runtime
-    dispatch must stay consistent.
+  - Server route table config allowed protocols manifest endpoint declarations runtime dispatch must stay consistent.
   - Gemini relay implementation must be explicit and bound to v3.gemini_relay_runtime_integration.
   - No unbound endpoint can fall through to generic foundation pending.
   - Server must not duplicate the protocol registry or bypass binding with raw path
     dispatch.
   - Protocol binding must not depend on provider runtime state metadata debug side-channel
     or request payload.
-  - Do not claim live Gemini provider compatibility global install restart or production
-    cutover.
+  - Do not claim live Gemini provider compatibility global install restart or production cutover.
   required_gates:
   - npm run verify:v3-entry-protocol-endpoint-binding
   - npm run test:v3-entry-protocol-endpoint-binding-red-fixtures
@@ -1865,8 +1863,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_unit:
-  - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens
-    and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice,
+  - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice,
     user, sampling, response_format, token fields, and projects Responses reasoning
     config to `reasoning_effort` while rejecting non-standard client_metadata and
     the raw Responses `reasoning` object from provider wire.
@@ -1875,14 +1872,11 @@ features:
   - Anthropic Messages request to Responses provider semantic preserves system, image/text
     blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k,
     token, stop, stream, and thinking fields.
-  - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display
-    decode into separate registered Chat fields; no raw thinking object crosses Chat
+  - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat
     Process and none is compressed to effort.
-  - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the
-    exact shared value domain; none/minimal fail explicitly and no effort value invents
+  - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents
     `thinking.budget_tokens`.
-  - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate
-    Chat payload extensions and round-trip to Responses; OpenAI Chat and Gemini reject
+  - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat and Gemini reject
     them when the target has no equivalent request policy, while Anthropic consumes
     a valid summary policy only as a registered local response-shaping hint with no
     provider-wire field. A response reasoning field never authorizes reconstructing
@@ -1927,9 +1921,7 @@ features:
     before Stopless governance.
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use,
     usage, stop_reason, and rejects malformed function arguments.
-  - Paired and unpaired malformed Responses function-call argument text is preserved
-    exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping,
-    MetadataCenter reconstruction, provider failure, or reselect.
+  - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
   - OpenAI Chat same-protocol Relay preserves request and response field families
     without cross-protocol repair.
@@ -1939,8 +1931,7 @@ features:
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history
     through production Direct provider wire while applying selected provider model
     binding and never synthesizing Chat messages.
-  - Direct parity test is a verification binding over existing Direct mainline edges
-    `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity
+  - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity
     owner edge for those production nodes.
   required_blackbox:
   - Source-level controlled runtime tests capture provider wire and client projection

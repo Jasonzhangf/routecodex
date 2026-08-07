@@ -2129,8 +2129,7 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   owner_crates:
   - routecodex-v3-runtime
-  owner_scope: All inbound protocols decode into Chat canonical plus registered payload
-    extensions; all Relay outbound protocols project only from governed Chat semantics.
+  owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics.
     Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
     display policy, client metadata, arguments, and other protocol fields remain payload
     data-plane semantics owned by adjacent codecs. Routing, switching, retry, continuation,
