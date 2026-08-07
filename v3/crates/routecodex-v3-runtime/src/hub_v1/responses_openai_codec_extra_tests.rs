@@ -148,3 +148,63 @@ fn responses_two_nonempty_assistant_messages_keep_history_boundaries() {
     assert_eq!(messages[0]["content"], json!("turn one"));
     assert_eq!(messages[1]["content"], json!("turn two"));
 }
+
+#[test]
+fn responses_assistant_message_reasoning_function_call_coalesces_single_turn() {
+    // Codex relay 真实形态（样本 713075）：同一 assistant 轮 = message(文本) +
+    // reasoning + function_call 连续 items。三者必须合并为单条 assistant
+    // （content + reasoning_content + tool_calls），否则相邻 assistant 消息
+    // 让 provider chat renderer 插入 EOS，破坏前缀缓存（usage_cache 0%）。
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "These three untracked entries aren't code — they're local tool artifacts:"}]
+            },
+            {
+                "type": "reasoning",
+                "id": "reasoning-1",
+                "summary": [{"type": "summary_text", "text": "Need to inspect."}]
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"git status\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": "On branch main"
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "继续"}]
+            }
+        ]
+    }))
+    .expect("message+reasoning+function_call must project to Chat");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(
+        messages.len(),
+        3,
+        "single coalesced assistant + tool + user: {request}"
+    );
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(
+        messages[0]["content"],
+        json!("These three untracked entries aren't code — they're local tool artifacts:")
+    );
+    assert_eq!(messages[0]["reasoning_content"], json!("Need to inspect."));
+    assert_eq!(
+        messages[0]["tool_calls"][0]["id"],
+        json!("call_1"),
+        "function_call must merge into same-turn assistant message"
+    );
+    assert_eq!(messages[1]["role"], json!("tool"));
+    assert_eq!(messages[2]["role"], json!("user"));
+}

@@ -371,16 +371,19 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
             .and_then(Value::as_str)
             .unwrap_or("user")
             .trim();
-        // 前缀缓存硬约束：同一 assistant 轮的内容（reasoning -> output_text ->
-        // function_call 连续 items）必须合并为单条 assistant 消息，禁止相邻
-        // assistant 消息（provider chat renderer 会插入 EOS 破坏前缀缓存）。
-        // 只允许合并进 content 为空的 reasoning 类前一条：显式 assistant message
-        // 或非空 output_text 历史保持原消息边界，不得改写用户历史或插入新换行。
+        // 前缀缓存硬约束：同一 assistant 轮的内容（message(assistant 文本) ->
+        // reasoning -> output_text -> function_call 连续 items，Codex relay 真实
+        // 形态）必须合并为单条 assistant 消息，禁止相邻 assistant 消息（provider
+        // chat renderer 会插入 EOS 破坏前缀缓存）。前一条或新消息任一 content
+        // 为空时合并是安全的（reasoning 类 content=""），不会改写历史或插入
+        // 新换行；两个非空文本 assistant 保持原消息边界。
         if role.eq_ignore_ascii_case("assistant")
             && messages.len() == tail_index + 1
-            && v3_openai_chat_content_is_empty(
+            && (v3_openai_chat_content_is_empty(
                 messages[tail_index].get("content").unwrap_or(&Value::Null),
-            )
+            ) || v3_openai_chat_content_is_empty(
+                message.get("content").unwrap_or(&Value::Null),
+            ))
         {
             merge_v3_openai_chat_message_into_pending_tool_message(messages, tail_index, &message)?;
             return Ok(());
