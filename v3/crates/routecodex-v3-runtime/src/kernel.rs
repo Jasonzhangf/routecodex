@@ -43,10 +43,7 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseBodyKind, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
-    build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
-    build_v3_sse_transport_in_03_from_v3_sse_transport_in_02,
-    build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseField, SseIncrementalDecoder,
-    SseTransportLimits,
+    build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
 };
 use routecodex_v3_target::{V3TargetCandidate, V3TargetInterpreter};
 use routecodex_v3_virtual_router::V3VirtualRouter;
@@ -1379,26 +1376,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport>(
                         stream,
                         stream_observation.clone(),
                         runtime_timing.clone(),
-                    );
-                    let stream = wrap_direct_sse_stopless_control_stream(
-                        stream,
-                        V3DirectSseStoplessControlPolicy {
-                            stopless_center_enabled:
-                                v3_responses_direct_stopless_center_enabled_for_server(
-                                    manifest,
-                                    &standardized.protocol_context.server_id,
-                                ),
-                            stopless_control: stopless_control.cloned(),
-                            stopless_scope: stopless_scope.clone(),
-                            request_stopless_state: direct_stopless_request_state.clone(),
-                            transition_request_id: standardized.protocol_context.request_id.clone(),
-                            transition_updated_at: now_epoch_ms,
-                            previous_response_id: previous_response_id.clone(),
-                            continuation_state: continuation_state.cloned(),
-                            continuation_scope: continuation_scope.clone(),
-                            selected_pin: selected_pin.clone(),
-                            selected_capability_revision: selected_capability_revision.clone(),
-                        },
                     );
                     V3ClientBody::Sse(stream)
                 }

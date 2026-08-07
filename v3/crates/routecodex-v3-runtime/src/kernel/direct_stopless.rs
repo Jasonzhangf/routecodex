@@ -380,48 +380,6 @@ fn clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
     )
 }
 
-fn commit_v3_direct_stopless_remote_locator_for_payload(
-    payload: &Value,
-    previous_response_id: Option<&str>,
-    continuation_state: Option<&V3ResponsesDirectContinuationState>,
-    continuation_scope: Option<&V3ResponsesDirectContinuationScope>,
-    selected_pin: &V3RemoteContinuationPin,
-    selected_capability_revision: &str,
-    now_epoch_ms: u64,
-) -> Result<(), V3Error01SourceRaised> {
-    let Some(response_id) = direct_response_id(payload) else {
-        return Err(runtime_source(
-            "V3HubRespContinuation04Committed",
-            "Direct stopless no-op projection requires native response id for remote continuation",
-        ));
-    };
-    let (Some(continuation_state), Some(continuation_scope)) =
-        (continuation_state, continuation_scope)
-    else {
-        return Err(runtime_source(
-            "V3HubRespContinuation04Committed",
-            "Direct stopless no-op projection requires direct continuation state/scope",
-        ));
-    };
-    let locator = V3RemoteContinuationLocator::new_direct(
-        response_id,
-        continuation_scope.key.clone(),
-        selected_pin.clone(),
-        selected_capability_revision.to_string(),
-        now_epoch_ms,
-        now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
-    );
-    let input = V3RemoteContinuationCommitInput::locator_only(locator);
-    let mut store = continuation_state
-        .store
-        .lock()
-        .map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))?;
-    let commit = match previous_response_id {
-        Some(previous_response_id) => store.rebind_for_resp04(previous_response_id, input),
-        None => store.commit(input),
-    };
-    commit.map_err(|error| runtime_source("V3HubRespContinuation04Committed", error))
-}
 
 fn direct_response_id(payload: &Value) -> Option<String> {
     payload

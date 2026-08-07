@@ -257,15 +257,17 @@ fn stopless_live_shape_reasoning_stop_tool_call_is_the_only_state_source() {
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     assert_eq!(
         resp04.control_transition().unwrap().steering(),
         V3StoplessCenterSteering::Continue
     );
     let payload = resp04.finalized_payload();
     let serialized = serde_json::to_string(payload).unwrap();
-    assert!(!serialized.contains("call_model_reasoning_stop_live"));
+    assert!(serialized.contains("call_model_reasoning_stop_live"));
     assert!(!serialized.contains("\"name\":\"reasoningStop\""));
+    assert!(serialized.contains("\"name\":\"noop\""));
+    assert!(!serialized.contains("\"arguments\""));
 }
 
 #[test]
@@ -307,6 +309,7 @@ fn stopless_live_shape_guard_reasoning_continue_tool_does_not_project_noop_or_di
     for forbidden in [
         "call_model_reasoning_stop_live_guard",
         "\"name\":\"reasoningStop\"",
+        "\"name\":\"noop\"",
         "call_stopless_reasoning",
         "routecodex hook run reasoningStop",
         "Stopless 已达到连续自动续轮上限",
@@ -315,7 +318,7 @@ fn stopless_live_shape_guard_reasoning_continue_tool_does_not_project_noop_or_di
     ] {
         assert!(
             !serialized.contains(forbidden),
-            "guard must not project no-op/internal diagnostic/tool artifact {forbidden}: {serialized}"
+            "guard must strip noop and internal diagnostic/tool artifact {forbidden}: {serialized}"
         );
     }
 }

@@ -4,12 +4,6 @@ use super::{
     V3StoplessCenterSteering, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
 use super::web_search_hop::{first_local_websearch_tool_call, hosted_web_search_result_text};
-use super::{
-    build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
-    build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
-    build_v3_provider_resp_inbound_01_raw, V3HubContinuationOwnership, V3HubEntryProtocol,
-    V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol, V3HubTransportIntent,
-};
 use serde_json::{json, Value};
 use servertool_core::cli_contract::{
     build_client_exec_cli_projection_output, parse_servertool_cli_projection_tool_arguments,
@@ -96,10 +90,15 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
             intercepted: false,
         });
     };
+    let keep_noop = matches!(
+        stop_call.decision,
+        StoplessResponseDecision::Continue | StoplessResponseDecision::NeedsEvidence
+    );
     let visible = strip_current_stopless_response_artifacts(
         input.provider_payload().as_ref(),
         &stop_call.call_id,
         stop_call.evidence.as_deref(),
+        keep_noop,
     );
     *input.provider_payload_mut() = Arc::new(visible);
     let state = match stop_call.decision {
@@ -124,7 +123,7 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
             .with_last_request_id(profile.stopless_transition_request_id())
             .with_last_response_id(stopless_response_id(input.provider_payload()))
             .with_last_transition_reason(transition_reason)
-            .with_last_provider_stopless_call_id(Some(stop_call.call_id))
+            .with_last_provider_stopless_call_id(Some(stop_call.call_id.clone()))
             .with_updated_at(profile.stopless_transition_updated_at().unwrap_or(0));
             (!state.guard_exhausted()).then_some(state)
         }
@@ -135,8 +134,13 @@ pub fn apply_v3_tool_call_servertool_hook_at_resp03(
             StoplessResponseDecision::Continue | StoplessResponseDecision::NeedsEvidence
         )
     {
-        let mut visible = input.provider_payload().as_ref().clone();
-        finalize_current_stopless_response(&mut visible);
+        // guard 终止：续杯被保护机制终止，回滚为剥离 noop 的纯文本 stop 响应。
+        let visible = strip_current_stopless_response_artifacts(
+            input.provider_payload().as_ref(),
+            &stop_call.call_id,
+            stop_call.evidence.as_deref(),
+            false,
+        );
         *input.provider_payload_mut() = Arc::new(visible);
     }
     Ok(V3StoplessResponseHookOutcome {
@@ -471,10 +475,12 @@ fn strip_current_stopless_response_artifacts(
     payload: &Value,
     call_id: &str,
     evidence: Option<&str>,
+    keep_noop: bool,
 ) -> Value {
     let mut projected = payload.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
-        for item in output.iter_mut() {
+        let mut retained = Vec::with_capacity(output.len());
+        for item in output.drain(..) {
             let item_call_id = item
                 .get("call_id")
                 .or_else(|| item.get("id"))
@@ -487,10 +493,16 @@ fn strip_current_stopless_response_artifacts(
                         matches!(kind, "function_call" | "tool_call" | "custom_tool_call")
                     });
             if !is_stopless_call {
+                retained.push(item);
                 continue;
             }
-            // reasoningStop 工具调用投影为 noop：无参数、无操作，文本承载在
+            if !keep_noop {
+                // Terminal/Blocked：剥离工具调用，返回纯文本 stop 响应。
+                continue;
+            }
+            // 续杯：reasoningStop 投影为 noop（无参数、无返回），文本承载在
             // 客户端可见 message 中（不丢失响应内容）。
+            let mut item = item;
             if let Some(object) = item.as_object_mut() {
                 object.insert("name".to_string(), Value::String("noop".to_string()));
                 object.remove("arguments");
@@ -501,7 +513,9 @@ fn strip_current_stopless_response_artifacts(
                     }
                 }
             }
+            retained.push(item);
         }
+        *output = retained;
         if let Some(evidence) = evidence {
             let visible = collect_stopless_visible_text(output);
             let completion = visible
@@ -531,7 +545,7 @@ fn strip_current_stopless_response_artifacts(
     }
     strip_current_stopless_instruction_echo(&mut projected);
     strip_current_stopless_control_text(&mut projected);
-    finalize_current_stopless_response(&mut projected);
+    finalize_current_stopless_response(&mut projected, keep_noop);
     projected
 }
 
@@ -572,14 +586,29 @@ fn append_stopless_message_text(message: &mut Value, text: &str) {
     object.insert("content".to_string(), Value::Array(parts));
 }
 
-fn finalize_current_stopless_response(payload: &mut Value) {
+fn finalize_current_stopless_response(payload: &mut Value, keep_noop: bool) {
     let Some(object) = payload.as_object_mut() else {
         return;
     };
-    object.insert("status".to_string(), Value::String("completed".to_string()));
-    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
-        if object.contains_key(key) {
-            object.insert(key.to_string(), Value::String("stop".to_string()));
+    if keep_noop {
+        // 续杯：finish_reason 归一化为 tool_calls，客户端返回空 noop 结果后，
+        // 下一轮 MetadataCenter 按 session/port 识别 noop 并续杯。
+        object.insert(
+            "status".to_string(),
+            Value::String("requires_action".to_string()),
+        );
+        for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
+            if object.contains_key(key) {
+                object.insert(key.to_string(), Value::String("tool_calls".to_string()));
+            }
+        }
+    } else {
+        // Terminal/Blocked：剥离工具调用，返回纯文本 stop 响应。
+        object.insert("status".to_string(), Value::String("completed".to_string()));
+        for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
+            if object.contains_key(key) {
+                object.insert(key.to_string(), Value::String("stop".to_string()));
+            }
         }
     }
 }
@@ -1349,6 +1378,7 @@ mod tests {
             &payload,
             "call_stop_1",
             Some("完成。\n证据：证据内容"),
+            true,
         );
         let output = projected["output"].as_array().expect("output array");
         let noop_calls = output
@@ -1375,8 +1405,8 @@ mod tests {
                     })
         });
         assert!(has_text, "visible text and evidence must not be lost: {projected}");
-        assert_eq!(projected["finish_reason"], "stop");
-        assert_eq!(projected["status"], "completed");
+        assert_eq!(projected["finish_reason"], "tool_calls");
+        assert_eq!(projected["status"], "requires_action");
     }
 
     #[test]

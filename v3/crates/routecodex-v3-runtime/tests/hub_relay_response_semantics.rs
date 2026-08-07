@@ -505,15 +505,26 @@ fn stopless_response_hook_reasoning_stop_continue_projects_noop_and_center_state
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
+    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     assert_eq!(
         resp04.control_transition().unwrap().steering(),
         V3StoplessCenterSteering::Continue
     );
     let payload = resp04.finalized_payload();
     let serialized = serde_json::to_string(payload).unwrap();
-    assert!(!serialized.contains("call_model_reasoning_stop"));
+    assert!(
+        serialized.contains("call_model_reasoning_stop"),
+        "continuation stopless must keep the noop call id: {serialized}"
+    );
     assert!(!serialized.contains("\"name\":\"reasoningStop\""));
+    assert!(
+        serialized.contains("\"name\":\"noop\""),
+        "continuation stopless must project a noop call: {serialized}"
+    );
+    assert!(
+        !serialized.contains("\"arguments\""),
+        "noop call must be parameterless: {serialized}"
+    );
 }
 
 #[test]
@@ -584,12 +595,12 @@ fn stopless_response_hook_blocked_reasoning_stop_requires_reason_and_evidence() 
         )
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    assert_eq!(resp03.tool_call_count(), 0);
+    assert_eq!(resp03.tool_call_count(), 1);
     let resp04 = hooks.commit(resp03).unwrap();
     assert!(resp04.control_transition().is_some());
-    assert!(!serde_json::to_string(resp04.finalized_payload())
-        .unwrap()
-        .contains("reasoningStop"));
+    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    assert!(!serialized.contains("reasoningStop"));
+    assert!(serialized.contains("\"name\":\"noop\""));
 
     let with_evidence = hooks
         .normalize(relay_raw(
